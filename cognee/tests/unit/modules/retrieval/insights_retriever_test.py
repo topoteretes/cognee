@@ -227,11 +227,11 @@ class TestInsightsRetriever:
     @pytest.mark.asyncio
     async def test_insights_context_on_empty_graph(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context_empty"
+            pathlib.Path(__file__).parent, ".cognee_system/test_insights_context_on_empty_graph"
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_graph_completion_context_empty"
+            pathlib.Path(__file__).parent, ".data_storage/test_insights_context_on_empty_graph"
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -249,13 +249,3 @@ class TestInsightsRetriever:
 
         context = await retriever.get_context("Christina Mayer")
         assert context == [], "Returned context should be empty on an empty graph"
-
-
-if __name__ == "__main__":
-    from asyncio import run
-
-    test = TestInsightsRetriever()
-
-    run(test.test_insights_context_simple())
-    run(test.test_insights_context_complex())
-    run(test.test_insights_context_on_empty_graph())

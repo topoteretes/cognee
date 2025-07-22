@@ -16,7 +16,29 @@ def get_visualize_router() -> APIRouter:
 
     @router.get("", response_model=None)
     async def visualize(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
-        """This endpoint is responsible for adding data to the graph."""
+        """
+        Generate an HTML visualization of the dataset's knowledge graph.
+
+        This endpoint creates an interactive HTML visualization of the knowledge graph
+        for a specific dataset. The visualization displays nodes and edges representing
+        entities and their relationships, allowing users to explore the graph structure
+        visually.
+
+        ## Query Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset to visualize
+
+        ## Response
+        Returns an HTML page containing the interactive graph visualization.
+
+        ## Error Codes
+        - **404 Not Found**: Dataset doesn't exist
+        - **403 Forbidden**: User doesn't have permission to read the dataset
+        - **500 Internal Server Error**: Error generating visualization
+
+        ## Notes
+        - User must have read permissions on the dataset
+        - Visualization is interactive and allows graph exploration
+        """
         from cognee.api.v1.visualize import visualize_graph
 
         try:

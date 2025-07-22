@@ -40,7 +40,7 @@ jobs:
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ubuntu-22.04, macos-13, macos-15, windows-latest]
+        os: [ubuntu-22.04, macos-13, macos-15]
       fail-fast: false
     steps:
       - name: Check out

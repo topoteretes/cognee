@@ -25,7 +25,40 @@ def get_add_router() -> APIRouter:
         datasetId: Optional[UUID] = Form(default=None),
         user: User = Depends(get_authenticated_user),
     ):
-        """This endpoint is responsible for adding data to the graph."""
+        """
+        Add data to a dataset for processing and knowledge graph construction.
+
+        This endpoint accepts various types of data (files, URLs, GitHub repositories)
+        and adds them to a specified dataset for processing. The data is ingested,
+        analyzed, and integrated into the knowledge graph.
+
+        ## Request Parameters
+        - **data** (List[UploadFile]): List of files to upload. Can also include:
+          - HTTP URLs (if ALLOW_HTTP_REQUESTS is enabled)
+          - GitHub repository URLs (will be cloned and processed)
+          - Regular file uploads
+        - **datasetName** (Optional[str]): Name of the dataset to add data to
+        - **datasetId** (Optional[UUID]): UUID of the dataset to add data to
+
+        Either datasetName or datasetId must be provided.
+
+        ## Response
+        Returns information about the add operation containing:
+        - Status of the operation
+        - Details about the processed data
+        - Any relevant metadata from the ingestion process
+
+        ## Error Codes
+        - **400 Bad Request**: Neither datasetId nor datasetName provided
+        - **409 Conflict**: Error during add operation
+        - **403 Forbidden**: User doesn't have permission to add to dataset
+
+        ## Notes
+        - To add data to datasets not owned by the user, use dataset_id (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)
+        - GitHub repositories are cloned and all files are processed
+        - HTTP URLs are fetched and their content is processed
+        - The ALLOW_HTTP_REQUESTS environment variable controls URL processing
+        """
         from cognee.api.v1.add import add as cognee_add
 
         if not datasetId and not datasetName:

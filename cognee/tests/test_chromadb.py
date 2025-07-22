@@ -1,8 +1,9 @@
 import os
-from cognee.shared.logging_utils import get_logger
 import pathlib
-import cognee
 
+import cognee
+from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.files.storage import get_storage_config
 from cognee.modules.data.models import Data
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.types import SearchType
@@ -24,12 +25,12 @@ async def test_local_file_deletion(data_text, file_location):
         data_hash = hashlib.md5(encoded_text).hexdigest()
         # Get data entry from database based on hash contents
         data = (await session.scalars(select(Data).where(Data.content_hash == data_hash))).one()
-        assert os.path.isfile(data.raw_data_location), (
+        assert os.path.isfile(data.raw_data_location.replace("file://", "")), (
             f"Data location doesn't exist: {data.raw_data_location}"
         )
         # Test deletion of data along with local files created by cognee
         await engine.delete_data_entity(data.id)
-        assert not os.path.exists(data.raw_data_location), (
+        assert not os.path.exists(data.raw_data_location.replace("file://", "")), (
             f"Data location still exists after deletion: {data.raw_data_location}"
         )
 
@@ -38,12 +39,12 @@ async def test_local_file_deletion(data_text, file_location):
         data = (
             await session.scalars(select(Data).where(Data.raw_data_location == file_location))
         ).one()
-        assert os.path.isfile(data.raw_data_location), (
+        assert os.path.isfile(data.raw_data_location.replace("file://", "")), (
             f"Data location doesn't exist: {data.raw_data_location}"
         )
         # Test local files not created by cognee won't get deleted
         await engine.delete_data_entity(data.id)
-        assert os.path.exists(data.raw_data_location), (
+        assert os.path.exists(data.raw_data_location.replace("file://", "")), (
             f"Data location doesn't exists: {data.raw_data_location}"
         )
 
@@ -157,7 +158,8 @@ async def main():
     assert len(history) == 8, "Search history is not correct."
 
     await cognee.prune.prune_data()
-    assert not os.path.isdir(data_directory_path), "Local data files are not deleted"
+    data_root_directory = get_storage_config()["data_root_directory"]
+    assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
     await cognee.prune.prune_system(metadata=True)
     tables_in_database = await vector_engine.get_collection_names()

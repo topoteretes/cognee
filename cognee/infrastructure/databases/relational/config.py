@@ -1,8 +1,10 @@
 import os
+import pydantic
 from typing import Union
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from cognee.root_dir import get_absolute_path
+
+from cognee.base_config import get_base_config
 
 
 class RelationalConfig(BaseSettings):
@@ -10,7 +12,7 @@ class RelationalConfig(BaseSettings):
     Configure database connection settings.
     """
 
-    db_path: str = os.path.join(get_absolute_path(".cognee_system"), "databases")
+    db_path: str = ""
     db_name: str = "cognee_db"
     db_host: Union[str, None] = None  # "localhost"
     db_port: Union[str, None] = None  # "5432"
@@ -19,6 +21,16 @@ class RelationalConfig(BaseSettings):
     db_provider: str = "sqlite"
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
+
+    @pydantic.model_validator(mode="after")
+    def fill_derived(cls, values):
+        # Set file path based on graph database provider if no file path is provided
+        if not values.db_path:
+            base_config = get_base_config()
+            databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
+            values.db_path = databases_directory_path
+
+        return values
 
     def to_dict(self) -> dict:
         """

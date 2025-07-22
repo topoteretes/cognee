@@ -3,7 +3,7 @@ FROM python:3.11-slim
 # Define Poetry extras to install
 ARG POETRY_EXTRAS="\
 # Storage & Databases \
-postgres weaviate qdrant neo4j falkordb milvus kuzu \
+postgres weaviate qdrant neo4j falkordb kuzu \
 # Notebooks & Interactive Environments \
 notebook \
 # LLM & AI Frameworks \

@@ -2,7 +2,9 @@ import handleServerErrors from "./handleServerErrors";
 
 let numberOfRetries = 0;
 
-const isAuth0Enabled = process.env.USE_AUTH0_AUTHORIZATION?.toLowerCase() === "true"
+const isAuth0Enabled = process.env.USE_AUTH0_AUTHORIZATION?.toLowerCase() === "true";
+
+const backendApiUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL;
 
 export default async function fetch(url: string, options: RequestInit = {}): Promise<Response> {
   function retry(lastError: Response) {
@@ -22,7 +24,7 @@ export default async function fetch(url: string, options: RequestInit = {}): Pro
       });
   }
 
-  return global.fetch("http://localhost:8000/api" + url, {
+  return global.fetch(backendApiUrl + url, {
     ...options,
     credentials: "include",
   })
