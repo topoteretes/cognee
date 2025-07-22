@@ -12,6 +12,7 @@ This guide will help you get started and ensure your contributions can be effici
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Discord Community](https://discord.gg/bcy8xFAtfd)  
 - [Issue Tracker](https://github.com/topoteretes/cognee/issues)
+- [Cognee Docs](https://docs.cognee.ai)
 
 ## 1. 🚀 Ways to Contribute
 
@@ -68,6 +69,13 @@ Looking for a place to start? Try filtering for [good first issues](https://gith
 ```shell
 git clone https://github.com/<your-github-username>/cognee.git
 cd cognee
+```
+In case you are working on Vector and Graph Adapters
+1. Fork the [**cognee**](https://github.com/topoteretes/cognee-community) repository
+2. Clone your fork:
+```shell
+git clone https://github.com/<your-github-username>/cognee-community.git
+cd cognee-community
 ```
 
 ### Create a Branch

@@ -14,7 +14,7 @@ async def add(
     node_set: Optional[List[str]] = None,
     vector_db_config: dict = None,
     graph_db_config: dict = None,
-    dataset_id: UUID = None,
+    dataset_id: Optional[UUID] = None,
     incremental_loading: bool = True,
 ):
     """
