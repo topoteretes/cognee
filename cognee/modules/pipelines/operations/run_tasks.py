@@ -242,7 +242,7 @@ async def run_tasks(
     incremental_loading: bool = True,
 ):
     if not user:
-        user = get_default_user()
+        user = await get_default_user()
 
     # Get Dataset object
     db_engine = get_relational_engine()
