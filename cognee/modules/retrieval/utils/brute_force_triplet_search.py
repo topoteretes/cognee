@@ -177,8 +177,12 @@ async def brute_force_search(
 
         node_distances = {collection: result for collection, result in zip(collections, results)}
 
+        edge_distances = node_distances.get("EdgeType_relationship_name", None)
+
         await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)
-        await memory_fragment.map_vector_distances_to_graph_edges(vector_engine, query)
+        await memory_fragment.map_vector_distances_to_graph_edges(
+            vector_engine=vector_engine, query_vector=query_vector, edge_distances=edge_distances
+        )
 
         results = await memory_fragment.calculate_top_triplet_importances(k=top_k)
 
