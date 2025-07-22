@@ -1050,8 +1050,8 @@ class Neo4jAdapter(GraphDBInterface):
 
         edges = [
             (
-                record["source"],
-                record["target"],
+                record["properties"]["source_node_id"],
+                record["properties"]["target_node_id"],
                 record["type"],
                 record["properties"],
             )

@@ -35,7 +35,6 @@ class CodeRetriever(BaseRetriever):
             "ClassDefinition_source_code",
             "FunctionDefinition_source_code",
         ]
-        logger.info(f"Initialized CodeRetriever with top_k={self.top_k}")
 
     async def _process_query(self, query: str) -> "CodeRetriever.CodeQueryInfo":
         """Process the query using LLM to extract file names and source code parts."""

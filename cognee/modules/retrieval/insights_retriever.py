@@ -68,9 +68,6 @@ class InsightsRetriever(BaseRetriever):
             except CollectionNotFoundError as error:
                 logger.error("Entity collections not found")
                 raise NoDataError("No data found in the system, please add data first.") from error
-            except Exception as e:
-                logger.error(f"Error during vector search: {str(e)}")
-                raise
 
             results = [*results[0], *results[1]]
             relevant_results = [result for result in results if result.score < 0.5][: self.top_k]

@@ -30,7 +30,6 @@ class NaturalLanguageRetriever(BaseRetriever):
         """Initialize retriever with optional custom prompt paths."""
         self.system_prompt_path = system_prompt_path
         self.max_attempts = max_attempts
-        logger.info(f"Initialized NaturalLanguageRetriever with max_attempts={self.max_attempts}")
 
     async def _get_graph_schema(self, graph_engine) -> tuple:
         """Retrieve the node and edge schemas from the graph database."""
@@ -124,16 +123,12 @@ class NaturalLanguageRetriever(BaseRetriever):
             - Optional[Any]: Returns the context retrieved from the graph database based on the
               query.
         """
-        try:
-            graph_engine = await get_graph_engine()
+        graph_engine = await get_graph_engine()
 
-            if isinstance(graph_engine, (NetworkXAdapter)):
-                raise SearchTypeNotSupported("Natural language search type not supported.")
+        if isinstance(graph_engine, (NetworkXAdapter)):
+            raise SearchTypeNotSupported("Natural language search type not supported.")
 
-            return await self._execute_cypher_query(query, graph_engine)
-        except Exception as e:
-            logger.error("Failed to execute natural language search retrieval: %s", str(e))
-            raise e
+        return await self._execute_cypher_query(query, graph_engine)
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         """

@@ -64,9 +64,6 @@ class CompletionRetriever(BaseRetriever):
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
-        except Exception as e:
-            logger.error(f"Error during context retrieval: {str(e)}")
-            raise
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         """
@@ -90,11 +87,7 @@ class CompletionRetriever(BaseRetriever):
         if context is None:
             context = await self.get_context(query)
 
-        try:
-            completion = await generate_completion(
-                query, context, self.user_prompt_path, self.system_prompt_path
-            )
-            return completion
-        except Exception as e:
-            logger.error(f"Error during completion generation: {str(e)}")
-            raise
+        completion = await generate_completion(
+            query, context, self.user_prompt_path, self.system_prompt_path
+        )
+        return completion

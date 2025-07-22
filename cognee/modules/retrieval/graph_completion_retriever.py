@@ -40,9 +40,6 @@ class GraphCompletionRetriever(BaseRetriever):
         self.top_k = top_k if top_k is not None else 5
         self.node_type = node_type
         self.node_name = node_name
-        logger.info(
-            f"Initialized GraphCompletionRetriever with top_k={self.top_k}, node_type={self.node_type}, node_name={self.node_name}"
-        )
 
     async def resolve_edges_to_text(self, edges) -> str:
         """
@@ -206,18 +203,13 @@ class GraphCompletionRetriever(BaseRetriever):
             f"Generating completion with context length: {len(str(context)) if context else 0} characters"
         )
 
-        try:
-            completion = await generate_completion(
-                query=query,
-                context=context,
-                user_prompt_path=self.user_prompt_path,
-                system_prompt_path=self.system_prompt_path,
-            )
-            logger.info("Graph completion generation successful")
-            return [completion]
-        except Exception as e:
-            logger.error(f"Error during graph completion generation: {str(e)}")
-            raise
+        completion = await generate_completion(
+            query=query,
+            context=context,
+            user_prompt_path=self.user_prompt_path,
+            system_prompt_path=self.system_prompt_path,
+        )
+        return [completion]
 
     def _top_n_words(self, text, stop_words=None, top_n=3, separator=", "):
         """Concatenates the top N frequent words in text."""

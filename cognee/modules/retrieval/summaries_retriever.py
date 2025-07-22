@@ -25,7 +25,6 @@ class SummariesRetriever(BaseRetriever):
     def __init__(self, top_k: int = 5):
         """Initialize retriever with search parameters."""
         self.top_k = top_k
-        logger.info(f"Initialized SummariesRetriever with top_k={self.top_k}")
 
     async def get_context(self, query: str) -> Any:
         """
@@ -58,9 +57,6 @@ class SummariesRetriever(BaseRetriever):
         except CollectionNotFoundError as error:
             logger.error("TextSummary_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error
-        except Exception as e:
-            logger.error(f"Unexpected error during summary retrieval: {str(e)}")
-            raise
 
         summary_payloads = [summary.payload for summary in summaries_results]
         logger.info(f"Returning {len(summary_payloads)} summary payloads")

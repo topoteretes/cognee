@@ -26,7 +26,6 @@ class ChunksRetriever(BaseRetriever):
         top_k: Optional[int] = 5,
     ):
         self.top_k = top_k
-        logger.info(f"Initialized ChunksRetriever with top_k={self.top_k}")
 
     async def get_context(self, query: str) -> Any:
         """
@@ -57,9 +56,6 @@ class ChunksRetriever(BaseRetriever):
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error
-        except Exception as e:
-            logger.error(f"Unexpected error during chunk retrieval: {str(e)}")
-            raise
 
         chunk_payloads = [result.payload for result in found_chunks]
         logger.info(f"Returning {len(chunk_payloads)} chunk payloads")

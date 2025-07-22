@@ -59,26 +59,12 @@ async def get_memory_fragment(
     node_name: Optional[List[str]] = None,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
-    logger.info("Creating memory fragment from graph database")
-
     if properties_to_project is None:
         properties_to_project = ["id", "description", "name", "type", "text"]
 
-    logger.debug(f"Memory fragment parameters: properties_to_project={properties_to_project}")
-    logger.debug(
-        f"Node filtering: node_type={node_type.__name__ if node_type else None}, node_names={node_name}"
-    )
-
     try:
         graph_engine = await get_graph_engine()
-        logger.debug("Successfully obtained graph engine")
-
         memory_fragment = CogneeGraph()
-        logger.debug("Initialized empty CogneeGraph memory fragment")
-
-        import time
-
-        start_time = time.time()
 
         await memory_fragment.project_graph_from_db(
             graph_engine,
@@ -88,34 +74,13 @@ async def get_memory_fragment(
             node_name=node_name,
         )
 
-        projection_time = time.time() - start_time
-        node_count = len(memory_fragment.nodes)
-        edge_count = len(memory_fragment.edges)
-
-        logger.info(f"Memory fragment projection completed in {projection_time:.2f} seconds")
-        logger.info(f"Memory fragment contains {node_count} nodes and {edge_count} edges")
-
-        if node_count == 0:
-            logger.warning("Memory fragment projection resulted in empty graph - no nodes found")
-        if edge_count == 0 and node_count > 0:
-            logger.warning(f"Memory fragment has {node_count} nodes but no edges - isolated nodes")
-
-    except EntityNotFoundError as e:
-        logger.warning(f"EntityNotFoundError during memory fragment creation: {str(e)}")
-        logger.info("Continuing with empty memory fragment due to EntityNotFoundError")
+    except EntityNotFoundError:
         # This is expected behavior - continue with empty fragment
         pass
     except Exception as e:
-        logger.error(f"Unexpected error during memory fragment creation: {str(e)}")
-        logger.debug(f"Error type: {type(e).__name__}")
+        logger.error(f"Error during memory fragment creation: {str(e)}")
         # Still return the fragment even if projection failed
         pass
-
-    final_node_count = len(memory_fragment.nodes)
-    final_edge_count = len(memory_fragment.edges)
-    logger.debug(
-        f"Returning memory fragment with {final_node_count} nodes and {final_edge_count} edges"
-    )
 
     return memory_fragment
 
