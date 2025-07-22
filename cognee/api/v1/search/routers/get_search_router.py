@@ -98,7 +98,7 @@ def get_search_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "POST /v1/search",
-                "search_type": payload.search_type,
+                "search_type": str(payload.search_type),
                 "datasets": payload.datasets,
                 "dataset_ids": [str(dataset_id) for dataset_id in payload.dataset_ids or []],
                 "query": payload.query,
