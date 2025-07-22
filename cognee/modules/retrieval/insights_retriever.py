@@ -28,9 +28,6 @@ class InsightsRetriever(BaseRetriever):
         """Initialize retriever with exploration levels and search parameters."""
         self.exploration_levels = exploration_levels
         self.top_k = top_k
-        logger.info(
-            f"Initialized InsightsRetriever with exploration_levels={self.exploration_levels}, top_k={self.top_k}"
-        )
 
     async def get_context(self, query: str) -> list:
         """
@@ -51,70 +48,49 @@ class InsightsRetriever(BaseRetriever):
 
             - list: A list of unique connections found for the queried node.
         """
-        logger.info(
-            f"Starting insights retrieval for query: '{query[:100] if query else 'None'}{'...' if query and len(query) > 100 else ''}'"
-        )
-
         if query is None:
-            logger.warning("Query is None, returning empty list")
             return []
 
         node_id = query
-        logger.debug(f"Looking for exact node with id: {node_id}")
-
         graph_engine = await get_graph_engine()
         exact_node = await graph_engine.extract_node(node_id)
 
         if exact_node is not None and "id" in exact_node:
-            logger.info(f"Found exact node with id: {exact_node['id']}")
             node_connections = await graph_engine.get_connections(str(exact_node["id"]))
-            logger.info(f"Retrieved {len(node_connections)} direct connections for exact node")
         else:
-            logger.info("Exact node not found, performing vector search for similar entities")
             vector_engine = get_vector_engine()
 
             try:
-                logger.debug("Searching Entity_name and EntityType_name collections")
                 results = await asyncio.gather(
                     vector_engine.search("Entity_name", query_text=query, limit=self.top_k),
                     vector_engine.search("EntityType_name", query_text=query, limit=self.top_k),
                 )
-                logger.info(
-                    f"Vector search returned {len(results[0])} Entity_name results and {len(results[1])} EntityType_name results"
-                )
             except CollectionNotFoundError as error:
-                logger.error("Entity collections not found in vector database")
+                logger.error("Entity collections not found")
                 raise NoDataError("No data found in the system, please add data first.") from error
             except Exception as e:
-                logger.error(f"Unexpected error during vector search: {str(e)}")
+                logger.error(f"Error during vector search: {str(e)}")
                 raise
 
             results = [*results[0], *results[1]]
             relevant_results = [result for result in results if result.score < 0.5][: self.top_k]
-            logger.info(f"Filtered to {len(relevant_results)} relevant results (score < 0.5)")
 
             if len(relevant_results) == 0:
-                logger.warning("No relevant results found, returning empty list")
                 return []
 
-            logger.debug(f"Getting connections for {len(relevant_results)} relevant nodes")
             node_connections_results = await asyncio.gather(
                 *[graph_engine.get_connections(result.id) for result in relevant_results]
             )
 
             node_connections = []
-            for i, neighbours in enumerate(node_connections_results):
-                logger.debug(f"Node {i}: found {len(neighbours)} connections")
+            for neighbours in node_connections_results:
                 node_connections.extend(neighbours)
-
-            logger.info(f"Total connections found: {len(node_connections)}")
 
         unique_node_connections_map = {}
         unique_node_connections = []
 
         for node_connection in node_connections:
             if "id" not in node_connection[0] or "id" not in node_connection[2]:
-                logger.debug("Skipping connection with missing node IDs")
                 continue
 
             unique_id = f"{node_connection[0]['id']} {node_connection[1]['relationship_name']} {node_connection[2]['id']}"
@@ -122,9 +98,6 @@ class InsightsRetriever(BaseRetriever):
                 unique_node_connections_map[unique_id] = True
                 unique_node_connections.append(node_connection)
 
-        logger.info(
-            f"Returning {len(unique_node_connections)} unique connections after deduplication"
-        )
         return unique_node_connections
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
@@ -146,17 +119,6 @@ class InsightsRetriever(BaseRetriever):
             - Any: The context used for the completion, which is either provided or fetched
               based on the query.
         """
-        logger.info(
-            f"Starting completion generation for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
-        )
-
         if context is None:
-            logger.debug("No context provided, retrieving context from graph")
             context = await self.get_context(query)
-        else:
-            logger.debug("Using provided context")
-
-        logger.info(
-            f"Returning context with {len(context) if isinstance(context, list) else 1} item(s)"
-        )
         return context

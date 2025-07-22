@@ -29,7 +29,6 @@ class CompletionRetriever(BaseRetriever):
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 1
-        logger.info(f"Initialized CompletionRetriever with top_k={self.top_k}")
 
     async def get_context(self, query: str) -> str:
         """
@@ -50,32 +49,23 @@ class CompletionRetriever(BaseRetriever):
             - str: A string containing the combined text of the retrieved document chunks, or an
               empty string if none are found.
         """
-        logger.info(
-            f"Starting context retrieval for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
-        )
-
         vector_engine = get_vector_engine()
 
         try:
             found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
-            logger.info(f"Found {len(found_chunks)} chunks from vector search")
 
             if len(found_chunks) == 0:
-                logger.warning("No chunks found for the query")
                 return ""
 
             # Combine all chunks text returned from vector search (number of chunks is determined by top_k
             chunks_payload = [found_chunk.payload["text"] for found_chunk in found_chunks]
             combined_context = "\n".join(chunks_payload)
-            logger.info(
-                f"Combined context from {len(chunks_payload)} chunks, total length: {len(combined_context)} characters"
-            )
             return combined_context
         except CollectionNotFoundError as error:
-            logger.error("DocumentChunk_text collection not found in vector database")
+            logger.error("DocumentChunk_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
         except Exception as e:
-            logger.error(f"Unexpected error during context retrieval: {str(e)}")
+            logger.error(f"Error during context retrieval: {str(e)}")
             raise
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
@@ -97,25 +87,13 @@ class CompletionRetriever(BaseRetriever):
 
             - Any: The generated completion based on the provided query and context.
         """
-        logger.info(
-            f"Starting completion generation for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
-        )
-
         if context is None:
-            logger.debug("No context provided, retrieving context from vector database")
             context = await self.get_context(query)
-        else:
-            logger.debug("Using provided context")
-
-        logger.info(
-            f"Generating completion with context length: {len(str(context)) if context else 0} characters"
-        )
 
         try:
             completion = await generate_completion(
                 query, context, self.user_prompt_path, self.system_prompt_path
             )
-            logger.info("Completion generation successful")
             return completion
         except Exception as e:
             logger.error(f"Error during completion generation: {str(e)}")

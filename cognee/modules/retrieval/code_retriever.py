@@ -203,17 +203,6 @@ class CodeRetriever(BaseRetriever):
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         """Returns the code files context."""
-        logger.info(
-            f"Starting completion generation for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
-        )
-
         if context is None:
-            logger.debug("No context provided, retrieving context from code search")
             context = await self.get_context(query)
-        else:
-            logger.debug("Using provided context")
-
-        logger.info(
-            f"Returning context with {len(context) if isinstance(context, list) else 1} item(s)"
-        )
         return context
