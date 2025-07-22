@@ -8,10 +8,6 @@ on:
         type: string
         default: '["3.10.x", "3.11.x", "3.12.x"]'
     secrets:
-      GRAPHISTRY_USERNAME:
-        required: true
-      GRAPHISTRY_PASSWORD:
-        required: true
       LLM_PROVIDER:
         required: true
       LLM_MODEL:
@@ -44,7 +40,7 @@ jobs:
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ubuntu-22.04, macos-13, macos-15, windows-latest]
+        os: [ubuntu-22.04, macos-13, macos-15]
       fail-fast: false
     steps:
       - name: Check out
@@ -96,9 +92,6 @@ jobs:
         shell: bash
         env:
           PYTHONUTF8: 1
-          GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-          GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}

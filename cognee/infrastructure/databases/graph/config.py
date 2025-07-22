@@ -5,8 +5,8 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import pydantic
 from pydantic import Field
+from cognee.base_config import get_base_config
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.root_dir import get_absolute_path
 
 
 class GraphConfig(BaseSettings):
@@ -50,13 +50,18 @@ class GraphConfig(BaseSettings):
     @pydantic.model_validator(mode="after")
     def fill_derived(cls, values):
         provider = values.graph_database_provider.lower()
-        # Set filename based on graph database provider if no filename is provided
+
+        # Set default filename if no filename is provided
         if not values.graph_filename:
             values.graph_filename = f"cognee_graph_{provider}"
+
         # Set file path based on graph database provider if no file path is provided
         if not values.graph_file_path:
-            base = os.path.join(get_absolute_path(".cognee_system"), "databases")
-            values.graph_file_path = os.path.join(base, values.graph_filename)
+            base_config = get_base_config()
+
+            databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
+            values.graph_file_path = os.path.join(databases_directory_path, values.graph_filename)
+
         return values
 
     def to_dict(self) -> dict:

@@ -1,6 +1,6 @@
 import pickle
 from uuid import UUID, uuid4
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timezone
 from typing_extensions import TypedDict
 from typing import Optional, Any, Dict, List
@@ -33,6 +33,8 @@ class DataPoint(BaseModel):
     - to_dict
     - from_dict
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     id: UUID = Field(default_factory=uuid4)
     created_at: int = Field(
@@ -175,43 +177,6 @@ class DataPoint(BaseModel):
             A new DataPoint instance created from the JSON data.
         """
         return self.model_validate_json(json_str)
-
-    # Pickle Serialization
-    def to_pickle(self) -> bytes:
-        """
-        Serialize the DataPoint instance to a byte format for pickling.
-
-        This method uses the built-in Python pickle module to convert the instance into a byte
-        stream for persistence or transmission.
-
-        Returns:
-        --------
-
-            - bytes: The pickled byte representation of the DataPoint instance.
-        """
-        return pickle.dumps(self.dict())
-
-    @classmethod
-    def from_pickle(self, pickled_data: bytes):
-        """
-        Deserialize a DataPoint instance from a pickled byte stream.
-
-        The method converts the byte stream back into a DataPoint instance by loading the data
-        and validating it through the model's constructor.
-
-        Parameters:
-        -----------
-
-            - pickled_data (bytes): The bytes representation of a pickled DataPoint instance to
-              be deserialized.
-
-        Returns:
-        --------
-
-            A new DataPoint instance created from the pickled data.
-        """
-        data = pickle.loads(pickled_data)
-        return self(**data)
 
     def to_dict(self, **kwargs) -> Dict[str, Any]:
         """

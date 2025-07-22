@@ -1,8 +1,12 @@
-import json
+import os
+from uuid import UUID
 from typing import Any
-from uuid import UUID, uuid4
+from functools import wraps
 
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.pipelines.operations.run_tasks_distributed import run_tasks_distributed
+from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.pipelines.utils import generate_pipeline_id
@@ -18,64 +22,33 @@ from cognee.modules.pipelines.operations import (
     log_pipeline_run_complete,
     log_pipeline_run_error,
 )
-from cognee.modules.settings import get_current_settings
-from cognee.modules.users.models import User
-from cognee.shared.utils import send_telemetry
-
-from .run_tasks_base import run_tasks_base
+from .run_tasks_with_telemetry import run_tasks_with_telemetry
 from ..tasks.task import Task
+
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
 
 
-async def run_tasks_with_telemetry(
-    tasks: list[Task], data, user: User, pipeline_name: str, context: dict = None
-):
-    config = get_current_settings()
+def override_run_tasks(new_gen):
+    def decorator(original_gen):
+        @wraps(original_gen)
+        async def wrapper(*args, distributed=None, **kwargs):
+            default_distributed_value = os.getenv("COGNEE_DISTRIBUTED", "False").lower() == "true"
+            distributed = default_distributed_value if distributed is None else distributed
 
-    logger.debug("\nRunning pipeline with configuration:\n%s\n", json.dumps(config, indent=1))
+            if distributed:
+                async for run_info in new_gen(*args, **kwargs):
+                    yield run_info
+            else:
+                async for run_info in original_gen(*args, **kwargs):
+                    yield run_info
 
-    try:
-        logger.info("Pipeline run started: `%s`", pipeline_name)
-        send_telemetry(
-            "Pipeline Run Started",
-            user.id,
-            additional_properties={
-                "pipeline_name": str(pipeline_name),
-            }
-            | config,
-        )
+        return wrapper
 
-        async for result in run_tasks_base(tasks, data, user, context):
-            yield result
-
-        logger.info("Pipeline run completed: `%s`", pipeline_name)
-        send_telemetry(
-            "Pipeline Run Completed",
-            user.id,
-            additional_properties={
-                "pipeline_name": str(pipeline_name),
-            },
-        )
-    except Exception as error:
-        logger.error(
-            "Pipeline run errored: `%s`\n%s\n",
-            pipeline_name,
-            str(error),
-            exc_info=True,
-        )
-        send_telemetry(
-            "Pipeline Run Errored",
-            user.id,
-            additional_properties={
-                "pipeline_name": str(pipeline_name),
-            }
-            | config,
-        )
-
-        raise error
+    return decorator
 
 
+@override_run_tasks(run_tasks_distributed)
 async def run_tasks(
     tasks: list[Task],
     dataset_id: UUID,
@@ -131,6 +104,14 @@ async def run_tasks(
             dataset_id=dataset.id,
             dataset_name=dataset.name,
         )
+
+        graph_engine = await get_graph_engine()
+        if hasattr(graph_engine, "push_to_s3"):
+            await graph_engine.push_to_s3()
+
+        relational_engine = get_relational_engine()
+        if hasattr(relational_engine, "push_to_s3"):
+            await relational_engine.push_to_s3()
 
     except Exception as error:
         await log_pipeline_run_error(

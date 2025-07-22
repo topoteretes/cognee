@@ -9,17 +9,18 @@ from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.databases.relational import get_relational_config, get_migration_config
-from cognee.infrastructure.files.storage import LocalStorage
 
 
 class config:
     @staticmethod
     def system_root_directory(system_root_directory: str):
-        databases_directory_path = os.path.join(system_root_directory, "databases")
+        base_config = get_base_config()
+        base_config.system_root_directory = system_root_directory
+
+        databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
 
         relational_config = get_relational_config()
         relational_config.db_path = databases_directory_path
-        LocalStorage.ensure_directory_exists(databases_directory_path)
 
         graph_config = get_graph_config()
         graph_file_name = graph_config.graph_filename
@@ -181,15 +182,3 @@ class config:
     def set_vector_db_url(db_url: str):
         vector_db_config = get_vectordb_config()
         vector_db_config.vector_db_url = db_url
-
-    @staticmethod
-    def set_graphistry_config(graphistry_config: dict[str, str]):
-        base_config = get_base_config()
-
-        if "username" not in graphistry_config or "password" not in graphistry_config:
-            raise InvalidValueError(
-                message="graphistry_config dictionary must contain 'username' and 'password' keys."
-            )
-
-        base_config.graphistry_username = graphistry_config.get("username")
-        base_config.graphistry_password = graphistry_config.get("password")
