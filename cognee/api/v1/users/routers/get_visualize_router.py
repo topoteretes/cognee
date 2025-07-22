@@ -7,6 +7,7 @@ from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.models import User
 
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
 
@@ -39,6 +40,15 @@ def get_visualize_router() -> APIRouter:
         - User must have read permissions on the dataset
         - Visualization is interactive and allows graph exploration
         """
+        send_telemetry(
+            "Visualize API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "GET /v1/visualize",
+                "dataset_id": dataset_id,
+            },
+        )
+
         from cognee.api.v1.visualize import visualize_graph
 
         try:

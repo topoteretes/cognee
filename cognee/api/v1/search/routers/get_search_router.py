@@ -10,6 +10,7 @@ from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
 from cognee.modules.users.models import User
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.shared.utils import send_telemetry
 
 
 # Note: Datasets sent by name will only map to datasets owned by the request sender
@@ -49,6 +50,14 @@ def get_search_router() -> APIRouter:
         ## Error Codes
         - **500 Internal Server Error**: Error retrieving search history
         """
+        send_telemetry(
+            "Search API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "GET /v1/search",
+            },
+        )
+
         try:
             history = await get_history(user.id, limit=0)
 
@@ -84,6 +93,19 @@ def get_search_router() -> APIRouter:
         - To search datasets not owned by the request sender, dataset UUID is needed
         - If permission is denied, returns empty list instead of error
         """
+        send_telemetry(
+            "Search API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/search",
+                "search_type": payload.search_type,
+                "datasets": payload.datasets,
+                "dataset_ids": payload.dataset_ids,
+                "query": payload.query,
+                "top_k": payload.top_k,
+            },
+        )
+
         from cognee.api.v1.search import search as cognee_search
 
         try:

@@ -5,6 +5,7 @@ from uuid import UUID
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
 
@@ -31,6 +32,16 @@ def get_delete_router() -> APIRouter:
             JSON response indicating success or failure
 
         """
+        send_telemetry(
+            "Delete API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "DELETE /v1/delete",
+                "dataset_id": dataset_id,
+                "data_id": data_id,
+            },
+        )
+
         from cognee.api.v1.delete import delete as cognee_delete
 
         try:

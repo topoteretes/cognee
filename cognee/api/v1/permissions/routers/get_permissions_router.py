@@ -6,12 +6,13 @@ from fastapi.responses import JSONResponse
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.shared.utils import send_telemetry
 
 
 def get_permissions_router() -> APIRouter:
     permissions_router = APIRouter()
 
-    @permissions_router.post("/datasets/{principal_id}/")
+    @permissions_router.post("/datasets/{principal_id}")
     async def give_datasets_permission_to_principal(
         permission_name: str,
         dataset_ids: List[UUID],
@@ -40,6 +41,16 @@ def get_permissions_router() -> APIRouter:
         - **403 Forbidden**: User doesn't have permission to grant access
         - **500 Internal Server Error**: Error granting permission
         """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"POST /v1/permissions/datasets/{principal_id}",
+                "dataset_ids": dataset_ids,
+                "principal_id": principal_id,
+            },
+        )
+
         from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
 
         await authorized_give_permission_on_datasets(
@@ -72,6 +83,15 @@ def get_permissions_router() -> APIRouter:
         - **400 Bad Request**: Invalid role name or role already exists
         - **500 Internal Server Error**: Error creating the role
         """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/permissions/roles",
+                "role_name": role_name,
+            },
+        )
+
         from cognee.modules.users.roles.methods import create_role as create_role_method
 
         await create_role_method(role_name=role_name, owner_id=user.id)
@@ -104,6 +124,16 @@ def get_permissions_router() -> APIRouter:
         - **404 Not Found**: User or role doesn't exist
         - **500 Internal Server Error**: Error adding user to role
         """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"POST /v1/permissions/users/{user_id}/roles",
+                "user_id": user_id,
+                "role_id": role_id,
+            },
+        )
+
         from cognee.modules.users.roles.methods import add_user_to_role as add_user_to_role_method
 
         await add_user_to_role_method(user_id=user_id, role_id=role_id, owner_id=user.id)
@@ -136,6 +166,16 @@ def get_permissions_router() -> APIRouter:
         - **404 Not Found**: User or tenant doesn't exist
         - **500 Internal Server Error**: Error adding user to tenant
         """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"POST /v1/permissions/users/{user_id}/tenants",
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+            },
+        )
+
         from cognee.modules.users.tenants.methods import add_user_to_tenant
 
         await add_user_to_tenant(user_id=user_id, tenant_id=tenant_id, owner_id=user.id)
@@ -161,6 +201,15 @@ def get_permissions_router() -> APIRouter:
         - **400 Bad Request**: Invalid tenant name or tenant already exists
         - **500 Internal Server Error**: Error creating the tenant
         """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/permissions/tenants",
+                "tenant_name": tenant_name,
+            },
+        )
+
         from cognee.modules.users.tenants.methods import create_tenant as create_tenant_method
 
         await create_tenant_method(tenant_name=tenant_name, user_id=user.id)
