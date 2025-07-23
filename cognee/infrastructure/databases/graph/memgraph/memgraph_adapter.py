@@ -155,7 +155,7 @@ class MemgraphAdapter(GraphDBInterface):
         MERGE (node {id: $node_id})
         ON CREATE SET node:$node_label, node += $properties, node.updated_at = timestamp()
         ON MATCH SET node:$node_label, node += $properties, node.updated_at = timestamp()
-        RETURN ID(node) AS internal_id,node.id AS nodeId
+        RETURN ID(node) AS internal_id, node.id AS nodeId
         """
 
         params = {
@@ -381,12 +381,19 @@ class MemgraphAdapter(GraphDBInterface):
 
             The result of the edge addition operation, including relationship details.
         """
+
+        exists = await asyncio.gather(self.has_node(str(from_node)), self.has_node(str(to_node)))
+
+        if not all(exists):
+            return None
+
         serialized_properties = self.serialize_properties(edge_properties or {})
 
         query = dedent(
             f"""\
             MATCH (from_node {{id: $from_node}}),
                   (to_node {{id: $to_node}})
+            WHERE from_node IS NOT NULL AND to_node IS NOT NULL
             MERGE (from_node)-[r:{relationship_name}]->(to_node)
             ON CREATE SET r += $properties, r.updated_at = timestamp()
             ON MATCH SET r += $properties, r.updated_at = timestamp()
@@ -845,8 +852,8 @@ class MemgraphAdapter(GraphDBInterface):
         result = await self.query(query)
         edges = [
             (
-                record["properties"]["source_node_id"],
-                record["properties"]["target_node_id"],
+                record["source"],
+                record["target"],
                 record["type"],
                 record["properties"],
             )

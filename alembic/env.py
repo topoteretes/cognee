@@ -1,12 +1,11 @@
 import asyncio
+from alembic import context
 from logging.config import fileConfig
-
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
-from cognee.infrastructure.databases.relational import Base
-from alembic import context
-from cognee.infrastructure.databases.relational import get_relational_engine, get_relational_config
+
+from cognee.infrastructure.databases.relational import get_relational_engine, Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -86,13 +85,12 @@ def run_migrations_online() -> None:
 
 db_engine = get_relational_engine()
 
-if db_engine.engine.dialect.name == "sqlite":
-    from cognee.infrastructure.files.storage import LocalStorage
-
-    db_config = get_relational_config()
-    LocalStorage.ensure_directory_exists(db_config.db_path)
-
 print("Using database:", db_engine.db_uri)
+
+if "sqlite" in db_engine.db_uri:
+    from cognee.infrastructure.utils.run_sync import run_sync
+
+    run_sync(db_engine.create_database())
 
 config.set_section_option(
     config.config_ini_section,

@@ -6,6 +6,7 @@ from cognee.modules.data.models import Dataset
 from cognee.modules.data.methods import create_dataset
 from cognee.modules.data.methods import get_unique_dataset_id
 from cognee.modules.data.exceptions import DatasetNotFoundError
+from cognee.modules.users.permissions.methods import give_permission_on_dataset
 
 
 async def load_or_create_datasets(
@@ -44,6 +45,11 @@ async def load_or_create_datasets(
         db_engine = get_relational_engine()
         async with db_engine.get_async_session() as session:
             await create_dataset(identifier, user, session)
+
+        await give_permission_on_dataset(user, new_dataset.id, "read")
+        await give_permission_on_dataset(user, new_dataset.id, "write")
+        await give_permission_on_dataset(user, new_dataset.id, "delete")
+        await give_permission_on_dataset(user, new_dataset.id, "share")
 
         result.append(new_dataset)
 

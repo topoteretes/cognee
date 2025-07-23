@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, FileResponse
 
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods import create_dataset, get_datasets_by_name
 from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.delete.exceptions import DataNotFoundError, DatasetNotFoundError
@@ -21,6 +22,7 @@ from cognee.modules.users.permissions.methods import (
 )
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.pipelines.models import PipelineRunStatus
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
 
@@ -73,6 +75,32 @@ def get_datasets_router() -> APIRouter:
 
     @router.get("", response_model=list[DatasetDTO])
     async def get_datasets(user: User = Depends(get_authenticated_user)):
+        """
+        Get all datasets accessible to the authenticated user.
+
+        This endpoint retrieves all datasets that the authenticated user has
+        read permissions for. The datasets are returned with their metadata
+        including ID, name, creation time, and owner information.
+
+        ## Response
+        Returns a list of dataset objects containing:
+        - **id**: Unique dataset identifier
+        - **name**: Dataset name
+        - **created_at**: When the dataset was created
+        - **updated_at**: When the dataset was last updated
+        - **owner_id**: ID of the dataset owner
+
+        ## Error Codes
+        - **418 I'm a teapot**: Error retrieving datasets
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "GET /v1/datasets",
+            },
+        )
+
         try:
             datasets = await get_all_user_permission_datasets(user, "read")
 
@@ -88,6 +116,37 @@ def get_datasets_router() -> APIRouter:
     async def create_new_dataset(
         dataset_data: DatasetCreationPayload, user: User = Depends(get_authenticated_user)
     ):
+        """
+        Create a new dataset or return existing dataset with the same name.
+
+        This endpoint creates a new dataset with the specified name. If a dataset
+        with the same name already exists for the user, it returns the existing
+        dataset instead of creating a duplicate. The user is automatically granted
+        all permissions (read, write, share, delete) on the created dataset.
+
+        ## Request Parameters
+        - **dataset_data** (DatasetCreationPayload): Dataset creation parameters containing:
+          - **name**: The name for the new dataset
+
+        ## Response
+        Returns the created or existing dataset object containing:
+        - **id**: Unique dataset identifier
+        - **name**: Dataset name
+        - **created_at**: When the dataset was created
+        - **updated_at**: When the dataset was last updated
+        - **owner_id**: ID of the dataset owner
+
+        ## Error Codes
+        - **418 I'm a teapot**: Error creating dataset
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/datasets",
+            },
+        )
+
         try:
             datasets = await get_datasets_by_name([dataset_data.name], user.id)
 
@@ -117,6 +176,31 @@ def get_datasets_router() -> APIRouter:
         "/{dataset_id}", response_model=None, responses={404: {"model": ErrorResponseDTO}}
     )
     async def delete_dataset(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
+        """
+        Delete a dataset by its ID.
+
+        This endpoint permanently deletes a dataset and all its associated data.
+        The user must have delete permissions on the dataset to perform this operation.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset to delete
+
+        ## Response
+        No content returned on successful deletion.
+
+        ## Error Codes
+        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **500 Internal Server Error**: Error during deletion
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}",
+                "dataset_id": str(dataset_id),
+            },
+        )
+
         from cognee.modules.data.methods import get_dataset, delete_dataset
 
         dataset = await get_dataset(user.id, dataset_id)
@@ -134,6 +218,34 @@ def get_datasets_router() -> APIRouter:
     async def delete_data(
         dataset_id: UUID, data_id: UUID, user: User = Depends(get_authenticated_user)
     ):
+        """
+        Delete a specific data item from a dataset.
+
+        This endpoint removes a specific data item from a dataset while keeping
+        the dataset itself intact. The user must have delete permissions on the
+        dataset to perform this operation.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset containing the data
+        - **data_id** (UUID): The unique identifier of the data item to delete
+
+        ## Response
+        No content returned on successful deletion.
+
+        ## Error Codes
+        - **404 Not Found**: Dataset or data item doesn't exist, or user doesn't have access
+        - **500 Internal Server Error**: Error during deletion
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}/data/{str(data_id)}",
+                "dataset_id": str(dataset_id),
+                "data_id": str(data_id),
+            },
+        )
+
         from cognee.modules.data.methods import get_data, delete_data
         from cognee.modules.data.methods import get_dataset
 
@@ -152,22 +264,35 @@ def get_datasets_router() -> APIRouter:
 
     @router.get("/{dataset_id}/graph", response_model=GraphDTO)
     async def get_dataset_graph(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
-        try:
-            from cognee.modules.data.methods import get_dataset
+        """
+        Get the knowledge graph visualization for a dataset.
 
-            dataset = await get_dataset(user.id, dataset_id)
+        This endpoint retrieves the knowledge graph data for a specific dataset,
+        including nodes and edges that represent the relationships between entities
+        in the dataset. The graph data is formatted for visualization purposes.
 
-            formatted_graph_data = await get_formatted_graph_data(dataset.id, user.id)
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset
 
-            return JSONResponse(
-                status_code=200,
-                content=formatted_graph_data,
-            )
-        except Exception:
-            return JSONResponse(
-                status_code=409,
-                content="Error retrieving dataset graph data.",
-            )
+        ## Response
+        Returns the graph data containing:
+        - **nodes**: List of graph nodes with id, label, and properties
+        - **edges**: List of graph edges with source, target, and label
+
+        ## Error Codes
+        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **500 Internal Server Error**: Error retrieving graph data
+        """
+        from cognee.modules.data.methods import get_dataset
+
+        dataset = await get_dataset(user.id, dataset_id)
+
+        if dataset is None:
+            raise DatasetNotFoundError(message=f"Dataset ({str(dataset_id)}) not found.")
+
+        graph_data = await get_formatted_graph_data(dataset.id, user.id)
+
+        return graph_data
 
     @router.get(
         "/{dataset_id}/data",
@@ -175,9 +300,43 @@ def get_datasets_router() -> APIRouter:
         responses={404: {"model": ErrorResponseDTO}},
     )
     async def get_dataset_data(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
+        """
+        Get all data items in a dataset.
+
+        This endpoint retrieves all data items (documents, files, etc.) that belong
+        to a specific dataset. Each data item includes metadata such as name, type,
+        creation time, and storage location.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset
+
+        ## Response
+        Returns a list of data objects containing:
+        - **id**: Unique data item identifier
+        - **name**: Data item name
+        - **created_at**: When the data was added
+        - **updated_at**: When the data was last updated
+        - **extension**: File extension
+        - **mime_type**: MIME type of the data
+        - **raw_data_location**: Storage location of the raw data
+
+        ## Error Codes
+        - **404 Not Found**: Dataset doesn't exist or user doesn't have access
+        - **500 Internal Server Error**: Error retrieving data
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data",
+                "dataset_id": str(dataset_id),
+            },
+        )
+
         from cognee.modules.data.methods import get_dataset_data, get_dataset
 
-        dataset = await get_dataset(user.id, dataset_id)
+        # Verify user has permission to read dataset
+        dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
         if dataset is None:
             return JSONResponse(
@@ -185,7 +344,7 @@ def get_datasets_router() -> APIRouter:
                 content=ErrorResponseDTO(f"Dataset ({str(dataset_id)}) not found."),
             )
 
-        dataset_data = await get_dataset_data(dataset_id=dataset.id)
+        dataset_data = await get_dataset_data(dataset_id=dataset[0].id)
 
         if dataset_data is None:
             return []
@@ -197,10 +356,44 @@ def get_datasets_router() -> APIRouter:
         datasets: Annotated[List[UUID], Query(alias="dataset")] = None,
         user: User = Depends(get_authenticated_user),
     ):
+        """
+        Get the processing status of datasets.
+
+        This endpoint retrieves the current processing status of one or more datasets,
+        indicating whether they are being processed, have completed processing, or
+        encountered errors during pipeline execution.
+
+        ## Query Parameters
+        - **dataset** (List[UUID]): List of dataset UUIDs to check status for
+
+        ## Response
+        Returns a dictionary mapping dataset IDs to their processing status:
+        - **pending**: Dataset is queued for processing
+        - **running**: Dataset is currently being processed
+        - **completed**: Dataset processing completed successfully
+        - **failed**: Dataset processing encountered an error
+
+        ## Error Codes
+        - **500 Internal Server Error**: Error retrieving status information
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "GET /v1/datasets/status",
+                "datasets": [str(dataset_id) for dataset_id in datasets],
+            },
+        )
+
         from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
 
         try:
-            datasets_statuses = await cognee_datasets.get_status(datasets)
+            # Verify user has permission to read dataset
+            authorized_datasets = await get_authorized_existing_datasets(datasets, "read", user)
+
+            datasets_statuses = await cognee_datasets.get_status(
+                [dataset.id for dataset in authorized_datasets]
+            )
 
             return datasets_statuses
         except Exception as error:
@@ -210,17 +403,46 @@ def get_datasets_router() -> APIRouter:
     async def get_raw_data(
         dataset_id: UUID, data_id: UUID, user: User = Depends(get_authenticated_user)
     ):
-        from cognee.modules.data.methods import get_data
-        from cognee.modules.data.methods import get_dataset, get_dataset_data
+        """
+        Download the raw data file for a specific data item.
 
-        dataset = await get_dataset(user.id, dataset_id)
+        This endpoint allows users to download the original, unprocessed data file
+        for a specific data item within a dataset. The file is returned as a direct
+        download with appropriate headers.
+
+        ## Path Parameters
+        - **dataset_id** (UUID): The unique identifier of the dataset containing the data
+        - **data_id** (UUID): The unique identifier of the data item to download
+
+        ## Response
+        Returns the raw data file as a downloadable response.
+
+        ## Error Codes
+        - **404 Not Found**: Dataset or data item doesn't exist, or user doesn't have access
+        - **500 Internal Server Error**: Error accessing the raw data file
+        """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data/{str(data_id)}/raw",
+                "dataset_id": str(dataset_id),
+                "data_id": str(data_id),
+            },
+        )
+
+        from cognee.modules.data.methods import get_data
+        from cognee.modules.data.methods import get_dataset_data
+
+        # Verify user has permission to read dataset
+        dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
 
         if dataset is None:
             return JSONResponse(
                 status_code=404, content={"detail": f"Dataset ({dataset_id}) not found."}
             )
 
-        dataset_data = await get_dataset_data(dataset.id)
+        dataset_data = await get_dataset_data(dataset[0].id)
 
         if dataset_data is None:
             raise DataNotFoundError(message=f"No data found in dataset ({dataset_id}).")
