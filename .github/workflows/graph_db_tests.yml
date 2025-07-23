@@ -11,11 +11,6 @@ on:
         type: string
         default: "all"
         description: "Which vector databases to test (comma-separated list or 'all')"
-    secrets:
-      WEAVIATE_API_URL:
-        required: false
-      WEAVIATE_API_KEY:
-        required: false
 
 jobs:
   run-kuzu-tests:
