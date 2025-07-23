@@ -22,6 +22,7 @@ from cognee.modules.users.permissions.methods import (
 )
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.pipelines.models import PipelineRunStatus
+from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
 
@@ -92,6 +93,14 @@ def get_datasets_router() -> APIRouter:
         ## Error Codes
         - **418 I'm a teapot**: Error retrieving datasets
         """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "GET /v1/datasets",
+            },
+        )
+
         try:
             datasets = await get_all_user_permission_datasets(user, "read")
 
@@ -130,6 +139,14 @@ def get_datasets_router() -> APIRouter:
         ## Error Codes
         - **418 I'm a teapot**: Error creating dataset
         """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/datasets",
+            },
+        )
+
         try:
             datasets = await get_datasets_by_name([dataset_data.name], user.id)
 
@@ -175,6 +192,15 @@ def get_datasets_router() -> APIRouter:
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access
         - **500 Internal Server Error**: Error during deletion
         """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}",
+                "dataset_id": str(dataset_id),
+            },
+        )
+
         from cognee.modules.data.methods import get_dataset, delete_dataset
 
         dataset = await get_dataset(user.id, dataset_id)
@@ -210,6 +236,16 @@ def get_datasets_router() -> APIRouter:
         - **404 Not Found**: Dataset or data item doesn't exist, or user doesn't have access
         - **500 Internal Server Error**: Error during deletion
         """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}/data/{str(data_id)}",
+                "dataset_id": str(dataset_id),
+                "data_id": str(data_id),
+            },
+        )
+
         from cognee.modules.data.methods import get_data, delete_data
         from cognee.modules.data.methods import get_dataset
 
@@ -288,6 +324,15 @@ def get_datasets_router() -> APIRouter:
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access
         - **500 Internal Server Error**: Error retrieving data
         """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data",
+                "dataset_id": str(dataset_id),
+            },
+        )
+
         from cognee.modules.data.methods import get_dataset_data, get_dataset
 
         # Verify user has permission to read dataset
@@ -331,6 +376,15 @@ def get_datasets_router() -> APIRouter:
         ## Error Codes
         - **500 Internal Server Error**: Error retrieving status information
         """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "GET /v1/datasets/status",
+                "datasets": [str(dataset_id) for dataset_id in datasets],
+            },
+        )
+
         from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
 
         try:
@@ -367,6 +421,16 @@ def get_datasets_router() -> APIRouter:
         - **404 Not Found**: Dataset or data item doesn't exist, or user doesn't have access
         - **500 Internal Server Error**: Error accessing the raw data file
         """
+        send_telemetry(
+            "Datasets API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data/{str(data_id)}/raw",
+                "dataset_id": str(dataset_id),
+                "data_id": str(data_id),
+            },
+        )
+
         from cognee.modules.data.methods import get_data
         from cognee.modules.data.methods import get_dataset_data
 
