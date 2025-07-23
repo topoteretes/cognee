@@ -7,6 +7,7 @@ This script migrates Kuzu databases between different versions by:
 2. Exporting data from the source database using the old version
 3. Importing data into the target database using the new version
 4. If overwrite is enabled target database will replace source database and source database will have the prefix _old
+5. If delete-old is enabled target database will be renamed to source database and source database will be deleted
 
 The script automatically handles:
 - Environment setup (creates virtual environments as needed)
@@ -15,8 +16,7 @@ The script automatically handles:
 
 Usage Examples:
     # Basic migration from 0.9.0 to 0.11.0
-    python kuzu_migrate.py --old-version 0.9.0 --new-version 0.11.0 \\
-        --old-db /path/to/old/database --new-db /path/to/new/database
+    python kuzu_migrate.py --old-version 0.9.0 --new-version 0.11.0 --old-db /path/to/old/database --new-db /path/to/new/database
 
 Requirements:
 - Python 3.7+
@@ -118,6 +118,8 @@ def rename_databases(old_db: str, new_db: str, delete_old: bool):
     """
     When overwrite is enabled, back up the original old_db (file with .lock and .wal or directory)
     by renaming it to *_old, and replace it with the newly imported new_db files.
+
+    When delete_old is enabled replace the old database with the new one and delete old database
     """
     base_dir = os.path.dirname(old_db)
     name = os.path.basename(old_db.rstrip(os.sep))
@@ -202,7 +204,7 @@ to isolate different Kuzu versions.
 
     migrate(args.old_version, args.new_version, args.old_db, args.new_db)
 
-    if args.overwrite:
+    if args.overwrite or args.delete_old:
         rename_databases(args.old_db, args.new_db, args.delete_old)
 
     # migrate("0.9.0", "0.11.0", "/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph_kuzu", "/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph")
