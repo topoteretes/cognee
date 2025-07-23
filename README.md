@@ -43,7 +43,7 @@
 
 
 
-**🚀 We are launching Cognee SaaS: Sign up [here](https://www.cognee.ai/waitlist) for the hosted beta!**
+**🚀 We launched Cogwit beta (Fully-hosted AI Memory): Sign up [here](https://platform.cognee.ai/)! 🚀** 
 
 Build dynamic memory for Agents and replace RAG using scalable, modular ECL (Extract, Cognify, Load) pipelines.
 
