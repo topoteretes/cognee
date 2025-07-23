@@ -29,9 +29,13 @@ Notes:
 
 import tempfile
 import sys
+import shutil
 import subprocess
 import argparse
 import os
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+kuzu_envs_dir = os.path.join(script_dir, ".kuzu_envs")
 
 
 def ensure_env(version: str) -> str:
@@ -39,10 +43,8 @@ def ensure_env(version: str) -> str:
     Create (if needed) a venv at .kuzu_envs/{version} and install kuzu=={version}.
     Returns the path to the venv's python executable.
     """
-    # directory where this script lives
-    script_dir = os.path.dirname(os.path.abspath(__file__))
     # venv base under the script directory
-    base = os.path.join(script_dir, ".kuzu_envs", version)
+    base = os.path.join(kuzu_envs_dir, version)
     py_bin = os.path.join(base, "bin", "python")
     if not os.path.isfile(py_bin):
         print(f"→ Setting up venv for Kùzu {version}...", file=sys.stderr)
@@ -140,8 +142,6 @@ def rename_databases(old_db: str, new_db: str, delete_old: bool):
         # Directory-based Kuzu database
         backup_dir = backup_base
         if delete_old:
-            import shutil
-
             shutil.rmtree(old_db)
         else:
             os.rename(old_db, backup_dir)
@@ -159,17 +159,29 @@ def rename_databases(old_db: str, new_db: str, delete_old: bool):
             print(f"Renamed '{src_new}' to '{dst_new}'", file=sys.stderr)
 
 
+def cleanup_environments():
+    """
+    Clean up the .kuzu_envs directory after migration is complete.
+    This removes the temporary virtual environments to save disk space.
+    """
+
+    if os.path.exists(kuzu_envs_dir):
+        try:
+            shutil.rmtree(kuzu_envs_dir)
+            print(f"🧹 Cleaned up virtual environments directory: {kuzu_envs_dir}", file=sys.stderr)
+        except Exception as e:
+            print(f"⚠️  Warning: Could not clean up {kuzu_envs_dir}: {e}", file=sys.stderr)
+    else:
+        print(f"📁 Virtual environments directory not found: {kuzu_envs_dir}", file=sys.stderr)
+
+
 def main():
     p = argparse.ArgumentParser(
         description="Migrate Kùzu DB via PyPI versions",
         epilog="""
 Examples:
   %(prog)s --old-version 0.9.0 --new-version 0.11.0 \\
-    --old-db /path/to/old/db --new-db /path/to/new/db
-
-  %(prog)s --old-version 0.9.0 --new-version 0.11.0 \\
-    --old-db ~/.cognee_system/databases/cognee_graph_kuzu \\
-    --new-db ~/.cognee_system/databases/cognee_graph
+    --old-db /path/to/old/db --new-db /path/to/new/db --overwrite
 
 Note: This script will create virtual environments in .kuzu_envs/ directory
 to isolate different Kuzu versions.
@@ -179,7 +191,11 @@ to isolate different Kuzu versions.
     p.add_argument("--old-version", required=True, help="Source Kuzu version (e.g., 0.9.0)")
     p.add_argument("--new-version", required=True, help="Target Kuzu version (e.g., 0.11.0)")
     p.add_argument("--old-db", required=True, help="Path to source database directory")
-    p.add_argument("--new-db", required=True, help="Path to target database directory")
+    p.add_argument(
+        "--new-db",
+        required=True,
+        help="Path to target database directory, it can't be the same path as the old database. Use the overwrite flag if you want to replace the old database with the new one.",
+    )
     p.add_argument(
         "--overwrite",
         action="store_true",
@@ -204,11 +220,12 @@ to isolate different Kuzu versions.
 
     migrate(args.old_version, args.new_version, args.old_db, args.new_db)
 
+    # Rename new kuzu database to old kuzu database name if enabled
     if args.overwrite or args.delete_old:
         rename_databases(args.old_db, args.new_db, args.delete_old)
 
-    # migrate("0.9.0", "0.11.0", "/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph_kuzu", "/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph")
-    # rename_databases("/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph_kuzu", "/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph")
+    # Clean up virtual environments after successful migration
+    cleanup_environments()
 
 
 if __name__ == "__main__":
