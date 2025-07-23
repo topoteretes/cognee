@@ -70,7 +70,7 @@ api = [
 distributed = [
     "modal>=1.0.5,<2.0.0",
 ]
-weaviate = ["weaviate-client>=4.9.6,<5.0.0"]
+
 qdrant = ["qdrant-client>=1.14.2,<2"]
 neo4j = ["neo4j>=5.28.0,<6"]
 postgres = [
