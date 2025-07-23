@@ -74,7 +74,9 @@ if CORS_ALLOWED_ORIGINS:
         origin.strip() for origin in CORS_ALLOWED_ORIGINS.split(",") if origin.strip()
     ]
 else:
-    allowed_origins = []  # Block all except explicitly set origins
+    allowed_origins = [
+        "http://localhost:3000",
+    ]  # Block all except explicitly set origins
 
 app.add_middleware(
     CORSMiddleware,

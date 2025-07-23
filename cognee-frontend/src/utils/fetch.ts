@@ -4,7 +4,7 @@ let numberOfRetries = 0;
 
 const isAuth0Enabled = process.env.USE_AUTH0_AUTHORIZATION?.toLowerCase() === "true";
 
-const backendApiUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL;
+const backendApiUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:8000/api";
 
 export default async function fetch(url: string, options: RequestInit = {}): Promise<Response> {
   function retry(lastError: Response) {
@@ -18,7 +18,7 @@ export default async function fetch(url: string, options: RequestInit = {}): Pro
 
     numberOfRetries += 1;
 
-    return window.fetch("/auth/token")
+    return global.fetch("/auth/token")
       .then(() => {
         return fetch(url, options);
       });
