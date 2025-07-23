@@ -50,7 +50,10 @@ class SQLAlchemyAdapter:
                 run_sync(self.pull_from_s3())
 
         self.engine = create_async_engine(
-            connection_string, poolclass=NullPool if "sqlite" in connection_string else None
+            connection_string,
+            pool_size=12,
+            max_overflow=12,
+            poolclass=NullPool if "sqlite" in connection_string else None,
         )
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
