@@ -6,10 +6,9 @@ This script migrates Kuzu databases between different versions by:
 1. Setting up isolated Python environments for each Kuzu version
 2. Exporting data from the source database using the old version
 3. Importing data into the target database using the new version
-4. Handling edge cases like empty databases gracefully
+4. If overwrite is enabled target database will replace source database and source database will have the prefix _old
 
 The script automatically handles:
-- Empty databases (creates new database with standard Cognee schema)
 - Environment setup (creates virtual environments as needed)
 - Export/import validation
 - Error handling and reporting
@@ -19,17 +18,13 @@ Usage Examples:
     python kuzu_migrate.py --old-version 0.9.0 --new-version 0.11.0 \\
         --old-db /path/to/old/database --new-db /path/to/new/database
 
-    # Migrate Cognee's default Kuzu database
-    python kuzu_migrate.py --old-version 0.9.0 --new-version 0.11.0 \\
-        --old-db ~/.cognee_system/databases/cognee_graph_kuzu \\
-        --new-db ~/.cognee_system/databases/cognee_graph
-
 Requirements:
 - Python 3.7+
 - Internet connection (to download Kuzu packages)
 - Sufficient disk space for virtual environments and temporary exports
 
-Author: Cognee Team
+Notes:
+- Can only be used to migrate to newer Kuzu versions, from 0.11.0 onwards
 """
 
 import tempfile
@@ -44,7 +39,10 @@ def ensure_env(version: str) -> str:
     Create (if needed) a venv at .kuzu_envs/{version} and install kuzu=={version}.
     Returns the path to the venv's python executable.
     """
-    base = os.path.join(".kuzu_envs", version)
+    # directory where this script lives
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # venv base under the script directory
+    base = os.path.join(script_dir, ".kuzu_envs", version)
     py_bin = os.path.join(base, "bin", "python")
     if not os.path.isfile(py_bin):
         print(f"→ Setting up venv for Kùzu {version}...", file=sys.stderr)
@@ -87,16 +85,10 @@ def migrate(old_ver, new_ver, old_db, new_db):
     if parent_dir:
         os.makedirs(parent_dir, exist_ok=True)
 
-    # Remove target database if it exists (Kuzu 0.11.0 requires clean slate)
     if os.path.exists(new_db):
-        if os.path.isdir(new_db):
-            import shutil
-
-            shutil.rmtree(new_db)
-            print(f"Removed existing target directory: {new_db}", file=sys.stderr)
-        else:
-            os.remove(new_db)
-            print(f"Removed existing target file: {new_db}", file=sys.stderr)
+        raise FileExistsError(
+            "File already exists at new database location, remove file or change new database file path to continue"
+        )
 
     # Set up environments
     print(f"Setting up Kuzu {old_ver} environment...", file=sys.stderr)
@@ -122,7 +114,7 @@ def migrate(old_ver, new_ver, old_db, new_db):
     print("✅ Migration finished successfully!")
 
 
-def rename_databases(old_db: str, new_db: str):
+def rename_databases(old_db: str, new_db: str, delete_old: bool):
     """
     When overwrite is enabled, back up the original old_db (file with .lock and .wal or directory)
     by renaming it to *_old, and replace it with the newly imported new_db files.
@@ -137,30 +129,32 @@ def rename_databases(old_db: str, new_db: str):
             src = old_db + ext
             dst = backup_base + ext
             if os.path.exists(src):
-                os.rename(src, dst)
-                print(f"Renamed '{src}' to '{dst}'", file=sys.stderr)
-
-        # Now move new files into place
-        for ext in ["", ".lock", ".wal"]:
-            src_new = new_db + ext
-            dst_new = os.path.join(base_dir, name + ext)
-            if os.path.exists(src_new):
-                os.rename(src_new, dst_new)
-                print(f"Renamed '{src_new}' to '{dst_new}'", file=sys.stderr)
-
+                if delete_old:
+                    os.remove(src)
+                else:
+                    os.rename(src, dst)
+                    print(f"Renamed '{src}' to '{dst}'", file=sys.stderr)
     elif os.path.isdir(old_db):
-        # Directory-based database
+        # Directory-based Kuzu database
         backup_dir = backup_base
-        os.rename(old_db, backup_dir)
-        print(f"Renamed directory '{old_db}' to '{backup_dir}'", file=sys.stderr)
+        if delete_old:
+            import shutil
 
-        # Move new directory into original location
-        os.rename(new_db, old_db)
-        print(f"Renamed new directory '{new_db}' to '{old_db}'", file=sys.stderr)
-
+            shutil.rmtree(old_db)
+        else:
+            os.rename(old_db, backup_dir)
+            print(f"Renamed directory '{old_db}' to '{backup_dir}'", file=sys.stderr)
     else:
         print(f"Original database path '{old_db}' not found for renaming.", file=sys.stderr)
         sys.exit(1)
+
+    # Now move new files into place
+    for ext in ["", ".lock", ".wal"]:
+        src_new = new_db + ext
+        dst_new = os.path.join(base_dir, name + ext)
+        if os.path.exists(src_new):
+            os.rename(src_new, dst_new)
+            print(f"Renamed '{src_new}' to '{dst_new}'", file=sys.stderr)
 
 
 def main():
@@ -184,7 +178,18 @@ to isolate different Kuzu versions.
     p.add_argument("--new-version", required=True, help="Target Kuzu version (e.g., 0.11.0)")
     p.add_argument("--old-db", required=True, help="Path to source database directory")
     p.add_argument("--new-db", required=True, help="Path to target database directory")
-    p.add_argument("--overwrite", required=True, help="Path to target database directory")
+    p.add_argument(
+        "--overwrite",
+        action="store_true",
+        default=False,
+        help="Rename new-db to the old-db name and location, keeps old-db as backup if delete-old is not True",
+    )
+    p.add_argument(
+        "--delete-old",
+        action="store_true",
+        default=False,
+        help="When overwrite and delete-old is True old-db will not be stored as backup",
+    )
 
     args = p.parse_args()
 
@@ -198,11 +203,10 @@ to isolate different Kuzu versions.
     migrate(args.old_version, args.new_version, args.old_db, args.new_db)
 
     if args.overwrite:
-        rename_databases(args.old_db, args.new_db)
+        rename_databases(args.old_db, args.new_db, args.delete_old)
 
-
-#     migrate("0.11.0", "0.11.0", "/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph_kuzu", "/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph")
-#     rename_databases("/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph_kuzu", "/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph")
+    # migrate("0.9.0", "0.11.0", "/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph_kuzu", "/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph")
+    # rename_databases("/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph_kuzu", "/Users/igorilic/Desktop/cognee/cognee/.cognee_system/databases/cognee_graph")
 
 
 if __name__ == "__main__":
