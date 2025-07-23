@@ -44,7 +44,7 @@ if modal:
 
 async def run_tasks_distributed(tasks, dataset_id, data, user, pipeline_name, context):
     if not user:
-        user = get_default_user()
+        user = await get_default_user()
 
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
