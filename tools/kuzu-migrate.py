@@ -29,6 +29,7 @@ Notes:
 
 import tempfile
 import sys
+import struct
 import shutil
 import subprocess
 import argparse
@@ -36,6 +37,39 @@ import os
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 kuzu_envs_dir = os.path.join(script_dir, ".kuzu_envs")
+
+kuzu_version_mapping = {37: "0.9.0", 38: "0.10.0", 39: "0.11.0"}
+
+
+def read_kuzu_storage_version(kuzu_db_path: str) -> int:
+    """
+    Reads the Kùzu storage version code from the first catalog.bin file bytes.
+
+    :param kuzu_db_path: Path to the Kuzu database file/directory.
+    :return: Storage version code as an integer.
+    """
+    if os.path.isdir(kuzu_db_path):
+        kuzu_version_file_path = os.path.join(kuzu_db_path, "catalog.kz")
+        if not os.path.isfile(kuzu_version_file_path):
+            raise FileExistsError("Kuzu catalog.kz file does not exist")
+    else:
+        kuzu_version_file_path = kuzu_db_path
+
+    with open(kuzu_version_file_path, "rb") as f:
+        # Skip the 3-byte magic "KUZ" and one byte of padding
+        f.seek(4)
+        # Read the next 8 bytes as a little-endian unsigned 64-bit integer
+        data = f.read(8)
+        if len(data) < 8:
+            raise ValueError(
+                f"File '{kuzu_version_file_path}' does not contain a storage version code."
+            )
+        version_code = struct.unpack("<Q", data)[0]
+
+    if kuzu_version_mapping.get(version_code):
+        return kuzu_version_mapping[version_code]
+    else:
+        ValueError("Could not map version_code to proper Kuzu version.")
 
 
 def ensure_env(version: str) -> str:
@@ -188,7 +222,11 @@ to isolate different Kuzu versions.
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--old-version", required=True, help="Source Kuzu version (e.g., 0.9.0)")
+    p.add_argument(
+        "--old-version",
+        required=False,
+        help="Source Kuzu version (e.g., 0.9.0). If not provided automatic kuzu version detection will be attempted.",
+    )
     p.add_argument("--new-version", required=True, help="Target Kuzu version (e.g., 0.11.0)")
     p.add_argument("--old-db", required=True, help="Path to source database directory")
     p.add_argument(
@@ -218,7 +256,11 @@ to isolate different Kuzu versions.
     print(f"📂 Target: {args.new_db}", file=sys.stderr)
     print("", file=sys.stderr)
 
-    migrate(args.old_version, args.new_version, args.old_db, args.new_db)
+    if args.old_version:
+        migrate(args.old_version, args.new_version, args.old_db, args.new_db)
+    else:
+        old_version = read_kuzu_storage_version(args.old_db)
+        migrate(old_version, args.new_version, args.old_db, args.new_db)
 
     # Rename new kuzu database to old kuzu database name if enabled
     if args.overwrite or args.delete_old:
