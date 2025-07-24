@@ -1,9 +1,12 @@
 from typing import Any, Optional
 
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+
+logger = get_logger("ChunksRetriever")
 
 
 class ChunksRetriever(BaseRetriever):
@@ -41,14 +44,22 @@ class ChunksRetriever(BaseRetriever):
 
             - Any: A list of document chunk payloads retrieved from the search.
         """
+        logger.info(
+            f"Starting chunk retrieval for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
+        )
+
         vector_engine = get_vector_engine()
 
         try:
             found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
+            logger.info(f"Found {len(found_chunks)} chunks from vector search")
         except CollectionNotFoundError as error:
+            logger.error("DocumentChunk_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error
 
-        return [result.payload for result in found_chunks]
+        chunk_payloads = [result.payload for result in found_chunks]
+        logger.info(f"Returning {len(chunk_payloads)} chunk payloads")
+        return chunk_payloads
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         """
@@ -70,6 +81,17 @@ class ChunksRetriever(BaseRetriever):
             - Any: The context used for the completion or the retrieved context if none was
               provided.
         """
+        logger.info(
+            f"Starting completion generation for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
+        )
+
         if context is None:
+            logger.debug("No context provided, retrieving context from vector database")
             context = await self.get_context(query)
+        else:
+            logger.debug("Using provided context")
+
+        logger.info(
+            f"Returning context with {len(context) if isinstance(context, list) else 1} item(s)"
+        )
         return context

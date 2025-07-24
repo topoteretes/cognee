@@ -18,11 +18,8 @@ class UnstructuredDocument(Document):
             except ModuleNotFoundError:
                 raise UnstructuredLibraryImportError
 
-            if self.raw_data_location.startswith("s3://"):
-                async with open_data_file(self.raw_data_location, mode="rb") as f:
-                    elements = partition(file=f, content_type=self.mime_type)
-            else:
-                elements = partition(self.raw_data_location, content_type=self.mime_type)
+            async with open_data_file(self.raw_data_location, mode="rb") as f:
+                elements = partition(file=f, content_type=self.mime_type)
 
             in_memory_file = StringIO("\n\n".join([str(el) for el in elements]))
             in_memory_file.seek(0)

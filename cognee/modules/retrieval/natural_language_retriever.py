@@ -1,5 +1,5 @@
 from typing import Any, Optional
-import logging
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.networkx.adapter import NetworkXAdapter
 from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
@@ -12,7 +12,7 @@ from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 
-logger = logging.getLogger("NaturalLanguageRetriever")
+logger = get_logger("NaturalLanguageRetriever")
 
 
 class NaturalLanguageRetriever(BaseRetriever):
@@ -127,16 +127,12 @@ class NaturalLanguageRetriever(BaseRetriever):
             - Optional[Any]: Returns the context retrieved from the graph database based on the
               query.
         """
-        try:
-            graph_engine = await get_graph_engine()
+        graph_engine = await get_graph_engine()
 
-            if isinstance(graph_engine, (NetworkXAdapter)):
-                raise SearchTypeNotSupported("Natural language search type not supported.")
+        if isinstance(graph_engine, (NetworkXAdapter)):
+            raise SearchTypeNotSupported("Natural language search type not supported.")
 
-            return await self._execute_cypher_query(query, graph_engine)
-        except Exception as e:
-            logger.error("Failed to execute natural language search retrieval: %s", str(e))
-            raise e
+        return await self._execute_cypher_query(query, graph_engine)
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         """
