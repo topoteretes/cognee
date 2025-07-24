@@ -491,7 +491,6 @@ async def list_data(dataset_id: str = None) -> list:
                         output_lines.append(f"   📄 Data item #{i}:")
                         output_lines.append(f"      Data ID: {data_item.id}")
                         output_lines.append(f"      Name: {data_item.name or 'Unnamed'}")
-                        output_lines.append(f"      Type: {data_item.data_type or 'Unknown'}")
                         output_lines.append(f"      Created: {data_item.created_at}")
                         output_lines.append("")
                 else:
@@ -810,11 +809,10 @@ async def main():
 
     logger.info(f"Starting MCP server with transport: {args.transport}")
     if args.transport == "stdio":
-        await mcp.run_async(transport="stdio")
+        await mcp.run_stdio_async()
     elif args.transport == "sse":
         logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
-        await mcp.run_async(
-            transport="sse",
+        await mcp.run_sse_async(
             host=args.host,
             port=args.port,
             path=args.path,
@@ -824,7 +822,7 @@ async def main():
         logger.info(
             f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
         )
-        await mcp.run_async(
+        await mcp.run_http_async(
             transport="http",
             host=args.host,
             port=args.port,
