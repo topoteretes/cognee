@@ -83,7 +83,9 @@ class KuzuAdapter(GraphDBInterface):
                     import kuzu
 
                     kuzu_db_version = read_kuzu_storage_version(self.db_path)
-                    if kuzu_db_version == "0.9.0" and kuzu_db_version != kuzu.__version__:
+                    if (
+                        kuzu_db_version == "0.9.0" or kuzu_db_version == "0.8.2"
+                    ) and kuzu_db_version != kuzu.__version__:
                         # TODO: Write migration script that will handle all user graph databases in multi-user mode
                         # Try to migrate kuzu database to latest version
                         from .kuzu_migrate import kuzu_migration
@@ -95,11 +97,12 @@ class KuzuAdapter(GraphDBInterface):
                             old_version=kuzu_db_version,
                             overwrite=True,
                         )
-                        self.db = Database(
-                            self.db_path,
-                            buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                            max_db_size=4096 * 1024 * 1024,
-                        )
+
+                    self.db = Database(
+                        self.db_path,
+                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
+                        max_db_size=4096 * 1024 * 1024,
+                    )
 
             self.db.init_database()
             self.connection = Connection(self.db)
