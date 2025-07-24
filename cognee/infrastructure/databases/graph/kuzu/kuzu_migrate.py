@@ -111,6 +111,8 @@ import kuzu
 db = kuzu.Database(r"{db_path}")
 conn = kuzu.Connection(db)
 conn.execute(r\"\"\"{cypher}\"\"\")
+del conn
+del db
 """
     proc = subprocess.run([python_exe, "-c", snippet], capture_output=True, text=True)
     if proc.returncode != 0:
