@@ -118,10 +118,14 @@ conn.execute(r\"\"\"{cypher}\"\"\")
         sys.exit(proc.returncode)
 
 
-def kuzu_migration(new_db, old_db, overwrite, delete_old, new_version, old_version=None):
+def kuzu_migration(new_db, old_db, new_version, old_version=None, overwrite=None, delete_old=None):
     """
     Main migration function that handles the complete migration process.
     """
+    print(f"🔄 Migrating Kuzu database from {old_version} to {new_version}", file=sys.stderr)
+    print(f"📂 Source: {old_db}", file=sys.stderr)
+    print("", file=sys.stderr)
+
     # If version of old kuzu db is not provided try to determine it based on file info
     if not old_version:
         old_version = read_kuzu_storage_version(old_db)
@@ -167,7 +171,7 @@ def kuzu_migration(new_db, old_db, overwrite, delete_old, new_version, old_versi
     if overwrite or delete_old:
         rename_databases(old_db, old_version, new_db, delete_old)
 
-    print("✅ Migration finished successfully!")
+    print("✅ Kuzu graph database migration finished successfully!")
 
 
 def rename_databases(old_db: str, old_version: str, new_db: str, delete_old: bool):
@@ -243,12 +247,14 @@ to isolate different Kuzu versions.
     )
     p.add_argument(
         "--overwrite",
+        required=False,
         action="store_true",
         default=False,
         help="Rename new-db to the old-db name and location, keeps old-db as backup if delete-old is not True",
     )
     p.add_argument(
         "--delete-old",
+        required=False,
         action="store_true",
         default=False,
         help="When overwrite and delete-old is True old-db will not be stored as backup",
@@ -256,20 +262,13 @@ to isolate different Kuzu versions.
 
     args = p.parse_args()
 
-    print(
-        f"🔄 Migrating Kuzu database from {args.old_version} to {args.new_version}", file=sys.stderr
-    )
-    print(f"📂 Source: {args.old_db}", file=sys.stderr)
-    print(f"📂 Target: {args.new_db}", file=sys.stderr)
-    print("", file=sys.stderr)
-
     kuzu_migration(
         new_db=args.new_db,
         old_db=args.old_db,
-        overwrite=args.overwrite,
-        delete_old=args.delete_old,
         new_version=args.new_version,
         old_version=args.old_version,
+        overwrite=args.overwrite,
+        delete_old=args.delete_old,
     )
 
 

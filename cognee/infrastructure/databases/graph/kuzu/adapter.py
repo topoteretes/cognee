@@ -91,9 +91,9 @@ class KuzuAdapter(GraphDBInterface):
                         kuzu_migration(
                             new_db=self.db_path + "new",
                             old_db=self.db_path,
-                            overwrite=True,
                             new_version=kuzu.__version__,
                             old_version=kuzu_db_version,
+                            overwrite=True,
                         )
                         self.db = Database(
                             self.db_path,
