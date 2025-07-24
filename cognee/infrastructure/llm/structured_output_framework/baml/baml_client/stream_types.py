@@ -18,28 +18,37 @@ import baml_py
 
 from . import types
 
-StreamStateValueT = typing.TypeVar('StreamStateValueT')
+StreamStateValueT = typing.TypeVar("StreamStateValueT")
+
+
 class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
+
+
 # #########################################################################
 # Generated classes (17)
 # #########################################################################
 
+
 class AudioContent(BaseModel):
     type: typing.Optional[str] = None
     subclass: typing.List[str]
+
 
 class ContentLabel(BaseModel):
     content_type: typing.Optional[typing.Union[str, str, str, str, str, str, str]] = None
     type: typing.Optional[str] = None
     subclass: typing.List[str]
 
+
 class DefaultContentPrediction(BaseModel):
     label: typing.Optional["ContentLabel"] = None
 
+
 class DynamicKnowledgeGraph(BaseModel):
-    model_config = ConfigDict(extra='allow')
+    model_config = ConfigDict(extra="allow")
+
 
 class Edge(BaseModel):
     # doc string for edge
@@ -49,38 +58,46 @@ class Edge(BaseModel):
     target_node_id: typing.Optional[str] = None
     relationship_name: typing.Optional[str] = None
 
+
 class ImageContent(BaseModel):
     type: typing.Optional[str] = None
     subclass: typing.List[str]
+
 
 class KnowledgeGraph(BaseModel):
     nodes: typing.List["types.Node"]
     edges: typing.List["Edge"]
 
+
 class Model3DContent(BaseModel):
     type: typing.Optional[str] = None
     subclass: typing.List[str]
+
 
 class MultimediaContent(BaseModel):
     type: typing.Optional[str] = None
     subclass: typing.List[str]
 
+
 class Node(BaseModel):
-    model_config = ConfigDict(extra='allow')
+    model_config = ConfigDict(extra="allow")
     id: typing.Optional[str] = None
     name: typing.Optional[str] = None
     type: typing.Optional[str] = None
     description: typing.Optional[str] = None
 
+
 class ProceduralContent(BaseModel):
     type: typing.Optional[str] = None
     subclass: typing.List[str]
+
 
 class SummarizedClass(BaseModel):
     name: typing.Optional[str] = None
     description: typing.Optional[str] = None
     methods: typing.Optional[typing.List["SummarizedFunction"]] = None
     decorators: typing.Optional[typing.List[str]] = None
+
 
 class SummarizedCode(BaseModel):
     high_level_summary: typing.Optional[str] = None
@@ -91,9 +108,11 @@ class SummarizedCode(BaseModel):
     functions: typing.List["SummarizedFunction"]
     workflow_description: typing.Optional[str] = None
 
+
 class SummarizedContent(BaseModel):
     summary: typing.Optional[str] = None
     description: typing.Optional[str] = None
+
 
 class SummarizedFunction(BaseModel):
     name: typing.Optional[str] = None
@@ -102,13 +121,16 @@ class SummarizedFunction(BaseModel):
     outputs: typing.Optional[typing.List[str]] = None
     decorators: typing.Optional[typing.List[str]] = None
 
+
 class TextContent(BaseModel):
     type: typing.Optional[str] = None
     subclass: typing.List[str]
 
+
 class VideoContent(BaseModel):
     type: typing.Optional[str] = None
     subclass: typing.List[str]
+
 
 # #########################################################################
 # Generated type aliases (0)

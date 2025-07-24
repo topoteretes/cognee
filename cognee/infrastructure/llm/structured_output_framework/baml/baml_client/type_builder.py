@@ -15,18 +15,38 @@ from baml_py import type_builder
 from baml_py import baml_py
 from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME
 
+
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
-        super().__init__(classes=set(
-          ["AudioContent","ContentLabel","DefaultContentPrediction","DynamicKnowledgeGraph","Edge","ImageContent","KnowledgeGraph","Model3DContent","MultimediaContent","Node","ProceduralContent","SummarizedClass","SummarizedCode","SummarizedContent","SummarizedFunction","TextContent","VideoContent",]
-        ), enums=set(
-          []
-        ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
+        super().__init__(
+            classes=set(
+                [
+                    "AudioContent",
+                    "ContentLabel",
+                    "DefaultContentPrediction",
+                    "DynamicKnowledgeGraph",
+                    "Edge",
+                    "ImageContent",
+                    "KnowledgeGraph",
+                    "Model3DContent",
+                    "MultimediaContent",
+                    "Node",
+                    "ProceduralContent",
+                    "SummarizedClass",
+                    "SummarizedCode",
+                    "SummarizedContent",
+                    "SummarizedFunction",
+                    "TextContent",
+                    "VideoContent",
+                ]
+            ),
+            enums=set([]),
+            runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME,
+        )
 
     # #########################################################################
     # Generated enums 0
     # #########################################################################
-
 
     # #########################################################################
     # Generated classes 17
@@ -101,7 +121,6 @@ class TypeBuilder(type_builder.TypeBuilder):
         return VideoContentViewer(self)
 
 
-
 # #########################################################################
 # Generated enums 0
 # #########################################################################
@@ -111,11 +130,17 @@ class TypeBuilder(type_builder.TypeBuilder):
 # Generated classes 17
 # #########################################################################
 
+
 class AudioContentAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("AudioContent")
-        self._properties: typing.Set[str] = set([  "type",  "subclass",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "type",
+                "subclass",
+            ]
+        )
         self._props = AudioContentProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -130,35 +155,38 @@ class AudioContentViewer(AudioContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class AudioContentProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def type(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("type"))
-    
+
     @property
     def subclass(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("subclass"))
-    
-    
 
 
 class ContentLabelAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("ContentLabel")
-        self._properties: typing.Set[str] = set([  "content_type",  "type",  "subclass",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "content_type",
+                "type",
+                "subclass",
+            ]
+        )
         self._props = ContentLabelProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -173,39 +201,40 @@ class ContentLabelViewer(ContentLabelAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class ContentLabelProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def content_type(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("content_type"))
-    
+
     @property
     def type(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("type"))
-    
+
     @property
     def subclass(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("subclass"))
-    
-    
 
 
 class DefaultContentPredictionAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("DefaultContentPrediction")
-        self._properties: typing.Set[str] = set([  "label",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "label",
+            ]
+        )
         self._props = DefaultContentPredictionProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -220,31 +249,28 @@ class DefaultContentPredictionViewer(DefaultContentPredictionAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class DefaultContentPredictionProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def label(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("label"))
-    
-    
 
 
 class DynamicKnowledgeGraphAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("DynamicKnowledgeGraph")
-        self._properties: typing.Set[str] = set([  ])
+        self._properties: typing.Set[str] = set([])
         self._props = DynamicKnowledgeGraphProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -259,7 +285,6 @@ class DynamicKnowledgeGraphBuilder(DynamicKnowledgeGraphAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def add_property(self, name: str, type: baml_py.FieldType) -> baml_py.ClassPropertyBuilder:
         if name in self._properties:
             raise ValueError(f"Property {name} already exists.")
@@ -268,29 +293,29 @@ class DynamicKnowledgeGraphBuilder(DynamicKnowledgeGraphAst):
     def list_properties(self) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
         return [(name, self._bldr.property(name)) for name in self._properties]
 
-    
-
 
 class DynamicKnowledgeGraphProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
     def __getattr__(self, name: str) -> baml_py.ClassPropertyBuilder:
         if name not in self.__properties:
             raise AttributeError(f"Property {name} not found.")
         return self.__bldr.property(name)
 
-    
-    
-
 
 class EdgeAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("Edge")
-        self._properties: typing.Set[str] = set([  "source_node_id",  "target_node_id",  "relationship_name",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "source_node_id",
+                "target_node_id",
+                "relationship_name",
+            ]
+        )
         self._props = EdgeProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -305,39 +330,41 @@ class EdgeViewer(EdgeAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class EdgeProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def source_node_id(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("source_node_id"))
-    
+
     @property
     def target_node_id(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("target_node_id"))
-    
+
     @property
     def relationship_name(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("relationship_name"))
-    
-    
 
 
 class ImageContentAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("ImageContent")
-        self._properties: typing.Set[str] = set([  "type",  "subclass",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "type",
+                "subclass",
+            ]
+        )
         self._props = ImageContentProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -352,35 +379,37 @@ class ImageContentViewer(ImageContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class ImageContentProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def type(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("type"))
-    
+
     @property
     def subclass(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("subclass"))
-    
-    
 
 
 class KnowledgeGraphAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("KnowledgeGraph")
-        self._properties: typing.Set[str] = set([  "nodes",  "edges",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "nodes",
+                "edges",
+            ]
+        )
         self._props = KnowledgeGraphProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -395,35 +424,37 @@ class KnowledgeGraphViewer(KnowledgeGraphAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class KnowledgeGraphProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def nodes(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("nodes"))
-    
+
     @property
     def edges(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("edges"))
-    
-    
 
 
 class Model3DContentAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("Model3DContent")
-        self._properties: typing.Set[str] = set([  "type",  "subclass",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "type",
+                "subclass",
+            ]
+        )
         self._props = Model3DContentProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -438,35 +469,37 @@ class Model3DContentViewer(Model3DContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class Model3DContentProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def type(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("type"))
-    
+
     @property
     def subclass(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("subclass"))
-    
-    
 
 
 class MultimediaContentAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("MultimediaContent")
-        self._properties: typing.Set[str] = set([  "type",  "subclass",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "type",
+                "subclass",
+            ]
+        )
         self._props = MultimediaContentProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -481,35 +514,39 @@ class MultimediaContentViewer(MultimediaContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class MultimediaContentProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def type(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("type"))
-    
+
     @property
     def subclass(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("subclass"))
-    
-    
 
 
 class NodeAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("Node")
-        self._properties: typing.Set[str] = set([  "id",  "name",  "type",  "description",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "id",
+                "name",
+                "type",
+                "description",
+            ]
+        )
         self._props = NodeProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -524,7 +561,6 @@ class NodeBuilder(NodeAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def add_property(self, name: str, type: baml_py.FieldType) -> baml_py.ClassPropertyBuilder:
         if name in self._properties:
             raise ValueError(f"Property {name} already exists.")
@@ -533,45 +569,44 @@ class NodeBuilder(NodeAst):
     def list_properties(self) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
         return [(name, self._bldr.property(name)) for name in self._properties]
 
-    
-
 
 class NodeProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
     def __getattr__(self, name: str) -> baml_py.ClassPropertyBuilder:
         if name not in self.__properties:
             raise AttributeError(f"Property {name} not found.")
         return self.__bldr.property(name)
 
-    
     @property
     def id(self) -> baml_py.ClassPropertyBuilder:
         return self.__bldr.property("id")
-    
+
     @property
     def name(self) -> baml_py.ClassPropertyBuilder:
         return self.__bldr.property("name")
-    
+
     @property
     def type(self) -> baml_py.ClassPropertyBuilder:
         return self.__bldr.property("type")
-    
+
     @property
     def description(self) -> baml_py.ClassPropertyBuilder:
         return self.__bldr.property("description")
-    
-    
 
 
 class ProceduralContentAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("ProceduralContent")
-        self._properties: typing.Set[str] = set([  "type",  "subclass",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "type",
+                "subclass",
+            ]
+        )
         self._props = ProceduralContentProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -586,35 +621,39 @@ class ProceduralContentViewer(ProceduralContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class ProceduralContentProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def type(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("type"))
-    
+
     @property
     def subclass(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("subclass"))
-    
-    
 
 
 class SummarizedClassAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("SummarizedClass")
-        self._properties: typing.Set[str] = set([  "name",  "description",  "methods",  "decorators",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "name",
+                "description",
+                "methods",
+                "decorators",
+            ]
+        )
         self._props = SummarizedClassProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -629,43 +668,50 @@ class SummarizedClassViewer(SummarizedClassAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class SummarizedClassProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def name(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("name"))
-    
+
     @property
     def description(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("description"))
-    
+
     @property
     def methods(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("methods"))
-    
+
     @property
     def decorators(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("decorators"))
-    
-    
 
 
 class SummarizedCodeAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("SummarizedCode")
-        self._properties: typing.Set[str] = set([  "high_level_summary",  "key_features",  "imports",  "constants",  "classes",  "functions",  "workflow_description",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "high_level_summary",
+                "key_features",
+                "imports",
+                "constants",
+                "classes",
+                "functions",
+                "workflow_description",
+            ]
+        )
         self._props = SummarizedCodeProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -680,55 +726,57 @@ class SummarizedCodeViewer(SummarizedCodeAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class SummarizedCodeProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def high_level_summary(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("high_level_summary"))
-    
+
     @property
     def key_features(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("key_features"))
-    
+
     @property
     def imports(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("imports"))
-    
+
     @property
     def constants(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("constants"))
-    
+
     @property
     def classes(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("classes"))
-    
+
     @property
     def functions(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("functions"))
-    
+
     @property
     def workflow_description(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("workflow_description"))
-    
-    
 
 
 class SummarizedContentAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("SummarizedContent")
-        self._properties: typing.Set[str] = set([  "summary",  "description",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "summary",
+                "description",
+            ]
+        )
         self._props = SummarizedContentProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -743,35 +791,40 @@ class SummarizedContentViewer(SummarizedContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class SummarizedContentProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def summary(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("summary"))
-    
+
     @property
     def description(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("description"))
-    
-    
 
 
 class SummarizedFunctionAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("SummarizedFunction")
-        self._properties: typing.Set[str] = set([  "name",  "description",  "inputs",  "outputs",  "decorators",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "name",
+                "description",
+                "inputs",
+                "outputs",
+                "decorators",
+            ]
+        )
         self._props = SummarizedFunctionProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -786,47 +839,49 @@ class SummarizedFunctionViewer(SummarizedFunctionAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class SummarizedFunctionProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def name(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("name"))
-    
+
     @property
     def description(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("description"))
-    
+
     @property
     def inputs(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("inputs"))
-    
+
     @property
     def outputs(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("outputs"))
-    
+
     @property
     def decorators(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("decorators"))
-    
-    
 
 
 class TextContentAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("TextContent")
-        self._properties: typing.Set[str] = set([  "type",  "subclass",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "type",
+                "subclass",
+            ]
+        )
         self._props = TextContentProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -841,35 +896,37 @@ class TextContentViewer(TextContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class TextContentProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def type(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("type"))
-    
+
     @property
     def subclass(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("subclass"))
-    
-    
 
 
 class VideoContentAst:
     def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
         self._bldr = _tb.class_("VideoContent")
-        self._properties: typing.Set[str] = set([  "type",  "subclass",  ])
+        self._properties: typing.Set[str] = set(
+            [
+                "type",
+                "subclass",
+            ]
+        )
         self._props = VideoContentProperties(self._bldr, self._properties)
 
     def type(self) -> baml_py.FieldType:
@@ -884,26 +941,22 @@ class VideoContentViewer(VideoContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    
     def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
-        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
-    
+        return [
+            (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
+            for name in self._properties
+        ]
 
 
 class VideoContentProperties:
     def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
         self.__bldr = bldr
-        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
 
-    
-    
     @property
     def type(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("type"))
-    
+
     @property
     def subclass(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("subclass"))
-    
-    
-
