@@ -429,6 +429,209 @@ async def get_developer_rules() -> list:
 
 
 @mcp.tool()
+async def list_data(dataset_id: str = None) -> list:
+    """
+    List all datasets and their data items with IDs for deletion operations.
+
+    This function helps users identify data IDs and dataset IDs that can be used
+    with the delete tool. It provides a comprehensive view of available data.
+
+    Parameters
+    ----------
+    dataset_id : str, optional
+        If provided, only list data items from this specific dataset.
+        If None, lists all datasets and their data items.
+        Should be a valid UUID string.
+
+    Returns
+    -------
+    list
+        A list containing a single TextContent object with formatted information
+        about datasets and data items, including their IDs for deletion.
+
+    Notes
+    -----
+    - Use this tool to identify data_id and dataset_id values for the delete tool
+    - The output includes both dataset information and individual data items
+    - UUIDs are displayed in a format ready for use with other tools
+    """
+    from uuid import UUID
+
+    with redirect_stdout(sys.stderr):
+        try:
+            user = await get_default_user()
+            output_lines = []
+
+            if dataset_id:
+                # List data for specific dataset
+                logger.info(f"Listing data for dataset: {dataset_id}")
+                dataset_uuid = UUID(dataset_id)
+
+                # Get the dataset information
+                from cognee.modules.data.methods import get_dataset, get_dataset_data
+
+                dataset = await get_dataset(user.id, dataset_uuid)
+
+                if not dataset:
+                    return [
+                        types.TextContent(type="text", text=f"❌ Dataset not found: {dataset_id}")
+                    ]
+
+                # Get data items in the dataset
+                data_items = await get_dataset_data(dataset.id)
+
+                output_lines.append(f"📁 Dataset: {dataset.name}")
+                output_lines.append(f"   ID: {dataset.id}")
+                output_lines.append(f"   Created: {dataset.created_at}")
+                output_lines.append(f"   Data items: {len(data_items)}")
+                output_lines.append("")
+
+                if data_items:
+                    for i, data_item in enumerate(data_items, 1):
+                        output_lines.append(f"   📄 Data item #{i}:")
+                        output_lines.append(f"      Data ID: {data_item.id}")
+                        output_lines.append(f"      Name: {data_item.name or 'Unnamed'}")
+                        output_lines.append(f"      Created: {data_item.created_at}")
+                        output_lines.append("")
+                else:
+                    output_lines.append("   (No data items in this dataset)")
+
+            else:
+                # List all datasets
+                logger.info("Listing all datasets")
+                from cognee.modules.data.methods import get_datasets
+
+                datasets = await get_datasets(user.id)
+
+                if not datasets:
+                    return [
+                        types.TextContent(
+                            type="text",
+                            text="📂 No datasets found.\nUse the cognify tool to create your first dataset!",
+                        )
+                    ]
+
+                output_lines.append("📂 Available Datasets:")
+                output_lines.append("=" * 50)
+                output_lines.append("")
+
+                for i, dataset in enumerate(datasets, 1):
+                    # Get data count for each dataset
+                    from cognee.modules.data.methods import get_dataset_data
+
+                    data_items = await get_dataset_data(dataset.id)
+
+                    output_lines.append(f"{i}. 📁 {dataset.name}")
+                    output_lines.append(f"   Dataset ID: {dataset.id}")
+                    output_lines.append(f"   Created: {dataset.created_at}")
+                    output_lines.append(f"   Data items: {len(data_items)}")
+                    output_lines.append("")
+
+                output_lines.append("💡 To see data items in a specific dataset, use:")
+                output_lines.append('   list_data(dataset_id="your-dataset-id-here")')
+                output_lines.append("")
+                output_lines.append("🗑️  To delete specific data, use:")
+                output_lines.append('   delete(data_id="data-id", dataset_id="dataset-id")')
+
+            result_text = "\n".join(output_lines)
+            logger.info("List data operation completed successfully")
+
+            return [types.TextContent(type="text", text=result_text)]
+
+        except ValueError as e:
+            error_msg = f"❌ Invalid UUID format: {str(e)}"
+            logger.error(error_msg)
+            return [types.TextContent(type="text", text=error_msg)]
+
+        except Exception as e:
+            error_msg = f"❌ Failed to list data: {str(e)}"
+            logger.error(f"List data error: {str(e)}")
+            return [types.TextContent(type="text", text=error_msg)]
+
+
+@mcp.tool()
+async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
+    """
+    Delete specific data from a dataset in the Cognee knowledge graph.
+
+    This function removes a specific data item from a dataset while keeping the
+    dataset itself intact. It supports both soft and hard deletion modes.
+
+    Parameters
+    ----------
+    data_id : str
+        The UUID of the data item to delete from the knowledge graph.
+        This should be a valid UUID string identifying the specific data item.
+
+    dataset_id : str
+        The UUID of the dataset containing the data to be deleted.
+        This should be a valid UUID string identifying the dataset.
+
+    mode : str, optional
+        The deletion mode to use. Options are:
+        - "soft" (default): Removes the data but keeps related entities that might be shared
+        - "hard": Also removes degree-one entity nodes that become orphaned after deletion
+        Default is "soft" for safer deletion that preserves shared knowledge.
+
+    Returns
+    -------
+    list
+        A list containing a single TextContent object with the deletion results,
+        including status, deleted node counts, and confirmation details.
+
+    Notes
+    -----
+    - This operation cannot be undone. The specified data will be permanently removed.
+    - Hard mode may remove additional entity nodes that become orphaned
+    - The function provides detailed feedback about what was deleted
+    - Use this for targeted deletion instead of the prune tool which removes everything
+    """
+    from uuid import UUID
+
+    with redirect_stdout(sys.stderr):
+        try:
+            logger.info(
+                f"Starting delete operation for data_id: {data_id}, dataset_id: {dataset_id}, mode: {mode}"
+            )
+
+            # Convert string UUIDs to UUID objects
+            data_uuid = UUID(data_id)
+            dataset_uuid = UUID(dataset_id)
+
+            # Get default user for the operation
+            user = await get_default_user()
+
+            # Call the cognee delete function
+            result = await cognee.delete(
+                data_id=data_uuid, dataset_id=dataset_uuid, mode=mode, user=user
+            )
+
+            logger.info(f"Delete operation completed successfully: {result}")
+
+            # Format the result for MCP response
+            formatted_result = json.dumps(result, indent=2, cls=JSONEncoder)
+
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"✅ Delete operation completed successfully!\n\n{formatted_result}",
+                )
+            ]
+
+        except ValueError as e:
+            # Handle UUID parsing errors
+            error_msg = f"❌ Invalid UUID format: {str(e)}"
+            logger.error(error_msg)
+            return [types.TextContent(type="text", text=error_msg)]
+
+        except Exception as e:
+            # Handle all other errors (DocumentNotFoundError, DatasetNotFoundError, etc.)
+            error_msg = f"❌ Delete operation failed: {str(e)}"
+            logger.error(f"Delete operation error: {str(e)}")
+            return [types.TextContent(type="text", text=error_msg)]
+
+
+@mcp.tool()
 async def prune():
     """
     Reset the Cognee knowledge graph by removing all stored information.
@@ -547,9 +750,36 @@ async def main():
 
     parser.add_argument(
         "--transport",
-        choices=["sse", "stdio"],
+        choices=["sse", "stdio", "http"],
         default="stdio",
         help="Transport to use for communication with the client. (default: stdio)",
+    )
+
+    # HTTP transport options
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host to bind the HTTP server to (default: 127.0.0.1)",
+    )
+
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port to bind the HTTP server to (default: 8000)",
+    )
+
+    parser.add_argument(
+        "--path",
+        default="/mcp",
+        help="Path for the MCP HTTP endpoint (default: /mcp)",
+    )
+
+    parser.add_argument(
+        "--log-level",
+        default="info",
+        choices=["debug", "info", "warning", "error"],
+        help="Log level for the HTTP server (default: info)",
     )
 
     args = parser.parse_args()
@@ -581,10 +811,13 @@ async def main():
     if args.transport == "stdio":
         await mcp.run_stdio_async()
     elif args.transport == "sse":
-        logger.info(
-            f"Running MCP server with SSE transport on {mcp.settings.host}:{mcp.settings.port}"
-        )
+        logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
         await mcp.run_sse_async()
+    elif args.transport == "http":
+        logger.info(
+            f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
+        )
+        await mcp.run_streamable_http_async()
 
 
 if __name__ == "__main__":
