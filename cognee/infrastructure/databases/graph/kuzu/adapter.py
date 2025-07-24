@@ -104,6 +104,7 @@ class KuzuAdapter(GraphDBInterface):
                         max_db_size=4096 * 1024 * 1024,
                     )
 
+
             self.db.init_database()
             self.connection = Connection(self.db)
             # Create node table with essential fields and timestamp
