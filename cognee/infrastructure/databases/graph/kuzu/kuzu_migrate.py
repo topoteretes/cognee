@@ -35,10 +35,15 @@ import subprocess
 import argparse
 import os
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
-kuzu_envs_dir = os.path.join(script_dir, ".kuzu_envs")
 
-kuzu_version_mapping = {37: "0.9.0", 38: "0.10.0", 39: "0.11.0"}
+kuzu_version_mapping = {
+    34: "0.7.0",
+    35: "0.7.1",
+    36: "0.8.2",
+    37: "0.9.0",
+    38: "0.10.1",
+    39: "0.11.0",
+}
 
 
 def read_kuzu_storage_version(kuzu_db_path: str) -> int:
@@ -72,11 +77,14 @@ def read_kuzu_storage_version(kuzu_db_path: str) -> int:
         ValueError("Could not map version_code to proper Kuzu version.")
 
 
-def ensure_env(version: str) -> str:
+def ensure_env(version: str, export_dir) -> str:
     """
     Create (if needed) a venv at .kuzu_envs/{version} and install kuzu=={version}.
     Returns the path to the venv's python executable.
     """
+    # Use temp directory to create venv
+    kuzu_envs_dir = os.path.join(export_dir, ".kuzu_envs")
+
     # venv base under the script directory
     base = os.path.join(kuzu_envs_dir, version)
     py_bin = os.path.join(base, "bin", "python")
@@ -133,13 +141,14 @@ def kuzu_migration(new_db, old_db, overwrite, delete_old, new_version, old_versi
             "File already exists at new database location, remove file or change new database file path to continue"
         )
 
-    # Set up environments
-    print(f"Setting up Kuzu {old_version} environment...", file=sys.stderr)
-    old_py = ensure_env(old_version)
-    print(f"Setting up Kuzu {new_version} environment...", file=sys.stderr)
-    new_py = ensure_env(new_version)
-
+    # Use temp directory for all processing, it will be cleaned up after with statement
     with tempfile.TemporaryDirectory() as export_dir:
+        # Set up environments
+        print(f"Setting up Kuzu {old_version} environment...", file=sys.stderr)
+        old_py = ensure_env(old_version, export_dir)
+        print(f"Setting up Kuzu {new_version} environment...", file=sys.stderr)
+        new_py = ensure_env(new_version, export_dir)
+
         export_file = os.path.join(export_dir, "kuzu_export")
         print(f"Exporting old DB → {export_dir}", file=sys.stderr)
         run_migration_step(old_py, old_db, f"EXPORT DATABASE '{export_file}'")
@@ -156,14 +165,12 @@ def kuzu_migration(new_db, old_db, overwrite, delete_old, new_version, old_versi
 
     # Rename new kuzu database to old kuzu database name if enabled
     if overwrite or delete_old:
-        rename_databases(old_db, new_db, delete_old)
+        rename_databases(old_db, old_version, new_db, delete_old)
 
-    # Clean up virtual environments after successful migration
-    cleanup_environments()
     print("✅ Migration finished successfully!")
 
 
-def rename_databases(old_db: str, new_db: str, delete_old: bool):
+def rename_databases(old_db: str, old_version: str, new_db: str, delete_old: bool):
     """
     When overwrite is enabled, back up the original old_db (file with .lock and .wal or directory)
     by renaming it to *_old, and replace it with the newly imported new_db files.
@@ -172,7 +179,8 @@ def rename_databases(old_db: str, new_db: str, delete_old: bool):
     """
     base_dir = os.path.dirname(old_db)
     name = os.path.basename(old_db.rstrip(os.sep))
-    backup_base = os.path.join(base_dir, f"{name}_old")
+    backup_database_name = f"{name}_old" + old_version.replace(".", "_")
+    backup_base = os.path.join(base_dir, backup_database_name)
 
     if os.path.isfile(old_db):
         # File-based database: handle main file and accompanying lock/WAL
@@ -204,22 +212,6 @@ def rename_databases(old_db: str, new_db: str, delete_old: bool):
         if os.path.exists(src_new):
             os.rename(src_new, dst_new)
             print(f"Renamed '{src_new}' to '{dst_new}'", file=sys.stderr)
-
-
-def cleanup_environments():
-    """
-    Clean up the .kuzu_envs directory after migration is complete.
-    This removes the temporary virtual environments to save disk space.
-    """
-
-    if os.path.exists(kuzu_envs_dir):
-        try:
-            shutil.rmtree(kuzu_envs_dir)
-            print(f"🧹 Cleaned up virtual environments directory: {kuzu_envs_dir}", file=sys.stderr)
-        except Exception as e:
-            print(f"⚠️  Warning: Could not clean up {kuzu_envs_dir}: {e}", file=sys.stderr)
-    else:
-        print(f"📁 Virtual environments directory not found: {kuzu_envs_dir}", file=sys.stderr)
 
 
 def main():
