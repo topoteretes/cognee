@@ -111,8 +111,6 @@ import kuzu
 db = kuzu.Database(r"{db_path}")
 conn = kuzu.Connection(db)
 conn.execute(r\"\"\"{cypher}\"\"\")
-del conn
-del db
 """
     proc = subprocess.run([python_exe, "-c", snippet], capture_output=True, text=True)
     if proc.returncode != 0:
@@ -171,6 +169,8 @@ def kuzu_migration(new_db, old_db, new_version, old_version=None, overwrite=None
 
     # Rename new kuzu database to old kuzu database name if enabled
     if overwrite or delete_old:
+        # Remove kuzu lock from migrated DB
+        os.remove(new_db + ".lock")
         rename_databases(old_db, old_version, new_db, delete_old)
 
     print("✅ Kuzu graph database migration finished successfully!")
@@ -191,7 +191,7 @@ def rename_databases(old_db: str, old_version: str, new_db: str, delete_old: boo
 
     if os.path.isfile(old_db):
         # File-based database: handle main file and accompanying lock/WAL
-        for ext in ["", ".lock", ".wal"]:
+        for ext in ["", ".wal"]:
             src = old_db + ext
             dst = backup_base + ext
             if os.path.exists(src):
@@ -213,7 +213,7 @@ def rename_databases(old_db: str, old_version: str, new_db: str, delete_old: boo
         sys.exit(1)
 
     # Now move new files into place
-    for ext in ["", ".lock", ".wal"]:
+    for ext in ["", ".wal"]:
         src_new = new_db + ext
         dst_new = os.path.join(base_dir, name + ext)
         if os.path.exists(src_new):
