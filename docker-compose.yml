@@ -19,13 +19,7 @@
 # - Main Cognee API: http://localhost:8000
 # - MCP Server (SSE mode): http://localhost:8001 
 # - Frontend (UI): http://localhost:3000 (with --profile ui)
-#
-# DATABASE SERVICES:
-# Enable database services with profiles:
-#   docker-compose --profile postgres --profile mcp up  # PostgreSQL + MCP
-#   docker-compose --profile neo4j --profile mcp up     # Neo4j + MCP  
-#   docker-compose --profile falkordb --profile mcp up  # FalkorDB + MCP
-#   docker-compose --profile chromadb --profile mcp up  # ChromaDB + MCP
+
 #
 # DEBUGGING:
 # Enable debug mode by setting DEBUG=true in your .env file or:
