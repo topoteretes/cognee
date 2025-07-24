@@ -179,7 +179,8 @@ def rename_databases(old_db: str, old_version: str, new_db: str, delete_old: boo
     """
     base_dir = os.path.dirname(old_db)
     name = os.path.basename(old_db.rstrip(os.sep))
-    backup_database_name = f"{name}_old" + old_version.replace(".", "_")
+    # Add _old_ and version info to backup graph database
+    backup_database_name = f"{name}_old_" + old_version.replace(".", "_")
     backup_base = os.path.join(base_dir, backup_database_name)
 
     if os.path.isfile(old_db):
