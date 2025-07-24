@@ -1,7 +1,7 @@
 import os
 import asyncio
 from uuid import UUID
-from pydantic import BaseModel
+from pydantic import Field
 from typing import List, Optional
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect
@@ -10,7 +10,6 @@ from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
 from cognee.api.DTO import InDTO
 from cognee.modules.pipelines.methods import get_pipeline_run
 from cognee.modules.users.models import User
-from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.get_user_db import get_user_db_context
 from cognee.modules.graph.methods import get_formatted_graph_data
@@ -24,15 +23,16 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     remove_queue,
 )
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
 
 
 logger = get_logger("api.cognify")
 
 
 class CognifyPayloadDTO(InDTO):
-    datasets: Optional[List[str]] = None
-    dataset_ids: Optional[List[UUID]] = None
-    run_in_background: Optional[bool] = False
+    datasets: Optional[List[str]] = Field(default=None)
+    dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
+    run_in_background: Optional[bool] = Field(default=False)
 
 
 def get_cognify_router() -> APIRouter:
@@ -57,8 +57,7 @@ def get_cognify_router() -> APIRouter:
 
         ## Request Parameters
         - **datasets** (Optional[List[str]]): List of dataset names to process. Dataset names are resolved to datasets owned by the authenticated user.
-        - **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to process. UUIDs allow processing of datasets not owned by the user (if permitted).
-        - **graph_model** (Optional[BaseModel]): Custom Pydantic model defining the knowledge graph schema. Defaults to KnowledgeGraph for general-purpose processing.
+        - **dataset_ids** (Optional[List[UUID]]): List of existing dataset UUIDs to process. UUIDs allow processing of datasets not owned by the user (if permitted).
         - **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).
 
         ## Response
@@ -84,6 +83,14 @@ def get_cognify_router() -> APIRouter:
         ## Next Steps
         After successful processing, use the search endpoints to query the generated knowledge graph for insights, relationships, and semantic search.
         """
+        send_telemetry(
+            "Cognify API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/cognify",
+            },
+        )
+
         if not payload.datasets and not payload.dataset_ids:
             return JSONResponse(
                 status_code=400, content={"error": "No datasets or dataset_ids provided"}

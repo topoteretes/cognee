@@ -146,18 +146,19 @@ class CogneeGraph(CogneeAbstractGraph):
                     node.add_attribute("vector_distance", score)
                     mapped_nodes += 1
 
-    async def map_vector_distances_to_graph_edges(self, vector_engine, query) -> None:
+    async def map_vector_distances_to_graph_edges(
+        self, vector_engine, query_vector, edge_distances
+    ) -> None:
         try:
-            query_vector = await vector_engine.embed_data([query])
-            query_vector = query_vector[0]
             if query_vector is None or len(query_vector) == 0:
                 raise ValueError("Failed to generate query embedding.")
 
-            edge_distances = await vector_engine.search(
-                collection_name="EdgeType_relationship_name",
-                query_text=query,
-                limit=0,
-            )
+            if edge_distances is None:
+                edge_distances = await vector_engine.search(
+                    collection_name="EdgeType_relationship_name",
+                    query_vector=query_vector,
+                    limit=0,
+                )
 
             embedding_map = {result.payload["text"]: result.score for result in edge_distances}
 

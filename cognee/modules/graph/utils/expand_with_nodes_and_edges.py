@@ -351,7 +351,7 @@ def expand_with_nodes_and_edges(
         _process_graph_edges(graph, name_mapping, existing_edges_map, relationships)
 
     # Return combined results
-    graph_nodes = list(added_ontology_nodes_map.values())
+    graph_nodes = data_chunks + list(added_ontology_nodes_map.values())
     graph_edges = relationships + ontology_relationships
 
     return graph_nodes, graph_edges
