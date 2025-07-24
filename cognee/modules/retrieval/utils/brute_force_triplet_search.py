@@ -59,13 +59,13 @@ async def get_memory_fragment(
     node_name: Optional[List[str]] = None,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
-    graph_engine = await get_graph_engine()
-    memory_fragment = CogneeGraph()
-
     if properties_to_project is None:
         properties_to_project = ["id", "description", "name", "type", "text"]
 
     try:
+        graph_engine = await get_graph_engine()
+        memory_fragment = CogneeGraph()
+
         await memory_fragment.project_graph_from_db(
             graph_engine,
             node_properties_to_project=properties_to_project,
@@ -73,7 +73,13 @@ async def get_memory_fragment(
             node_type=node_type,
             node_name=node_name,
         )
+
     except EntityNotFoundError:
+        # This is expected behavior - continue with empty fragment
+        pass
+    except Exception as e:
+        logger.error(f"Error during memory fragment creation: {str(e)}")
+        # Still return the fragment even if projection failed
         pass
 
     return memory_fragment
