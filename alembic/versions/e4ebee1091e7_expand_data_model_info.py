@@ -19,14 +19,72 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _get_column(inspector, table, name, schema=None):
+    for col in inspector.get_columns(table, schema=schema):
+        if col["name"] == name:
+            return col
+    return None
+
+
+def _index_exists(inspector, table, name, schema=None):
+    return any(ix["name"] == name for ix in inspector.get_indexes(table, schema=schema))
+
+
 def upgrade() -> None:
-    op.drop_table("file_metadata")
-    op.drop_table("_dlt_loads")
-    op.drop_table("_dlt_version")
-    op.drop_table("_dlt_pipeline_state")
-    op.add_column("data", sa.Column("tenant_id", sa.UUID(), nullable=True))
-    op.add_column("data", sa.Column("data_size", sa.Integer(), nullable=True))
-    op.create_index(op.f("ix_data_tenant_id"), "data", ["tenant_id"], unique=False)
+    TABLES_TO_DROP = [
+        "file_metadata",
+        "_dlt_loads",
+        "_dlt_version",
+        "_dlt_pipeline_state",
+    ]
+
+    conn = op.get_bind()
+    insp = sa.inspect(conn)
+    existing = set(insp.get_table_names())
+
+    for tbl in TABLES_TO_DROP:
+        if tbl in existing:
+            op.drop_table(tbl)
+
+    DATA_TABLE = "data"
+    DATA_TENANT_COL = "tenant_id"
+    DATA_SIZE_COL = "data_size"
+    DATA_TENANT_IDX = "ix_data_tenant_id"
+
+    # --- tenant_id ---
+    col = _get_column(insp, DATA_TABLE, DATA_TENANT_COL)
+    if col is None:
+        op.add_column(
+            DATA_TABLE,
+            sa.Column(DATA_TENANT_COL, postgresql.UUID(as_uuid=True), nullable=True),
+        )
+    else:
+        # Column exists – fix nullability if needed
+        if col.get("nullable", True) is False:
+            op.alter_column(
+                DATA_TABLE,
+                DATA_TENANT_COL,
+                existing_type=postgresql.UUID(as_uuid=True),
+                nullable=True,
+            )
+
+    # --- data_size ---
+    col = _get_column(insp, DATA_TABLE, DATA_SIZE_COL)
+    if col is None:
+        op.add_column(DATA_TABLE, sa.Column(DATA_SIZE_COL, sa.Integer(), nullable=True))
+    else:
+        # If you also need to change nullability for data_size, do it here
+        if col.get("nullable", True) is False:
+            op.alter_column(
+                DATA_TABLE,
+                DATA_SIZE_COL,
+                existing_type=sa.Integer(),
+                nullable=True,
+            )
+
+    # --- index on tenant_id ---
+    if not _index_exists(insp, DATA_TABLE, DATA_TENANT_IDX):
+        op.create_index(DATA_TENANT_IDX, DATA_TABLE, [DATA_TENANT_COL], unique=False)
 
 
 def downgrade() -> None:
