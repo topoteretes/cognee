@@ -813,21 +813,13 @@ async def main():
     elif args.transport == "sse":
         logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
         await mcp.run_sse_async(
-            host=args.host,
-            port=args.port,
-            path=args.path,
-            log_level=args.log_level,
+
         )
     elif args.transport == "http":
         logger.info(
             f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
         )
-        await mcp.run_http_async(
-            transport="http",
-            host=args.host,
-            port=args.port,
-            path=args.path,
-            log_level=args.log_level,
+        await mcp.run_streamable_http_async(
         )
 
 
