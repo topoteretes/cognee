@@ -4,6 +4,8 @@ import sys
 import argparse
 import cognee
 import asyncio
+import subprocess
+from pathlib import Path
 
 from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
 import importlib.util
@@ -551,6 +553,29 @@ async def main():
     )
 
     args = parser.parse_args()
+
+    # Run Alembic migrations from the main cognee directory where alembic.ini is located
+    print("Running database migrations...")
+    migration_result = subprocess.run(
+        ["alembic", "upgrade", "head"],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).resolve().parent.parent.parent,
+    )
+
+    if migration_result.returncode != 0:
+        migration_output = migration_result.stderr + migration_result.stdout
+        # Check for the expected UserAlreadyExists error (which is not critical)
+        if (
+            "UserAlreadyExists" in migration_output
+            or "User default_user@example.com already exists" in migration_output
+        ):
+            print("Warning: Default user already exists, continuing startup...")
+        else:
+            print(f"Migration failed with unexpected error: {migration_output}")
+            sys.exit(1)
+
+    print("Database migrations done.")
 
     logger.info(f"Starting MCP server with transport: {args.transport}")
     if args.transport == "stdio":
