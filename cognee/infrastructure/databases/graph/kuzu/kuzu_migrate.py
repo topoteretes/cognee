@@ -170,7 +170,9 @@ def kuzu_migration(new_db, old_db, new_version, old_version=None, overwrite=None
     # Rename new kuzu database to old kuzu database name if enabled
     if overwrite or delete_old:
         # Remove kuzu lock from migrated DB
-        os.remove(new_db + ".lock")
+        lock_file = new_db + ".lock"
+        if os.path.exists(lock_file):
+            os.remove(lock_file)
         rename_databases(old_db, old_version, new_db, delete_old)
 
     print("✅ Kuzu graph database migration finished successfully!")
@@ -229,7 +231,7 @@ Examples:
   %(prog)s --old-version 0.9.0 --new-version 0.11.0 \\
     --old-db /path/to/old/db --new-db /path/to/new/db --overwrite
 
-Note: This script will create virtual environments in .kuzu_envs/ directory
+Note: This script will create temporary virtual environments in .kuzu_envs/ directory
 to isolate different Kuzu versions.
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
