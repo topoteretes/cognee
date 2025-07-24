@@ -1,6 +1,5 @@
 import asyncio
 from typing import Type, List
-
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -12,7 +11,6 @@ from cognee.modules.graph.utils import (
     retrieve_existing_edges,
 )
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.tasks.storage import add_data_points
 
 # Framework selection
 base = get_base_config()
