@@ -80,15 +80,6 @@ cognee provides a visualize_graph function that will render the graph for you.
     )
     await visualize_graph(graph_file_path)
 ```
-If you want to use tools like Graphistry for graph visualization:
-- create an account and API key from https://www.graphistry.com
-- add the following environment variables to `.env` file:
-```
-GRAPHISTRY_USERNAME=""
-GRAPHISTRY_PASSWORD=""
-```
-Note: `GRAPHISTRY_PASSWORD` is API key.
-
 
 # What will you build with cognee?
 

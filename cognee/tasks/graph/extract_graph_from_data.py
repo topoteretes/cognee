@@ -11,6 +11,7 @@ from cognee.modules.graph.utils import (
     retrieve_existing_edges,
 )
 from cognee.shared.data_models import KnowledgeGraph
+from cognee.tasks.storage.add_data_points import add_data_points
 
 
 async def integrate_chunk_graphs(
@@ -38,8 +39,7 @@ async def integrate_chunk_graphs(
     )
 
     if len(graph_nodes) > 0:
-        await graph_engine.add_nodes(graph_nodes)
-
+        await add_data_points(graph_nodes)
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
 

@@ -58,7 +58,7 @@ async def run_tasks(
     context: dict = None,
 ):
     if not user:
-        user = get_default_user()
+        user = await get_default_user()
 
     # Get Dataset object
     db_engine = get_relational_engine()

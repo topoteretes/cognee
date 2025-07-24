@@ -10,7 +10,7 @@ from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
 from cognee.shared.logging_utils import get_logger
 
-logger = get_logger()
+logger = get_logger("GraphCompletionRetriever")
 
 
 class GraphCompletionRetriever(BaseRetriever):

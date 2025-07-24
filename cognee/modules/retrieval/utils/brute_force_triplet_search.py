@@ -59,13 +59,13 @@ async def get_memory_fragment(
     node_name: Optional[List[str]] = None,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
-    graph_engine = await get_graph_engine()
-    memory_fragment = CogneeGraph()
-
     if properties_to_project is None:
         properties_to_project = ["id", "description", "name", "type", "text"]
 
     try:
+        graph_engine = await get_graph_engine()
+        memory_fragment = CogneeGraph()
+
         await memory_fragment.project_graph_from_db(
             graph_engine,
             node_properties_to_project=properties_to_project,
@@ -73,7 +73,13 @@ async def get_memory_fragment(
             node_type=node_type,
             node_name=node_name,
         )
+
     except EntityNotFoundError:
+        # This is expected behavior - continue with empty fragment
+        pass
+    except Exception as e:
+        logger.error(f"Error during memory fragment creation: {str(e)}")
+        # Still return the fragment even if projection failed
         pass
 
     return memory_fragment
@@ -155,12 +161,14 @@ async def brute_force_search(
         logger.error("Failed to initialize vector engine: %s", e)
         raise RuntimeError("Initialization error") from e
 
+    query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
+
     send_telemetry("cognee.brute_force_triplet_search EXECUTION STARTED", user.id)
 
     async def search_in_collection(collection_name: str):
         try:
             return await vector_engine.search(
-                collection_name=collection_name, query_text=query, limit=0
+                collection_name=collection_name, query_vector=query_vector, limit=0
             )
         except CollectionNotFoundError:
             return []
@@ -175,8 +183,12 @@ async def brute_force_search(
 
         node_distances = {collection: result for collection, result in zip(collections, results)}
 
+        edge_distances = node_distances.get("EdgeType_relationship_name", None)
+
         await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)
-        await memory_fragment.map_vector_distances_to_graph_edges(vector_engine, query)
+        await memory_fragment.map_vector_distances_to_graph_edges(
+            vector_engine=vector_engine, query_vector=query_vector, edge_distances=edge_distances
+        )
 
         results = await memory_fragment.calculate_top_triplet_importances(k=top_k)
 
