@@ -164,8 +164,9 @@ class CogneeGraph(CogneeAbstractGraph):
 
             for edge in self.edges:
                 relationship_type = edge.attributes.get("relationship_type")
-                if relationship_type and relationship_type in embedding_map:
-                    edge.attributes["vector_distance"] = embedding_map[relationship_type]
+                distance = embedding_map.get(relationship_type, None)
+                if distance is not None:
+                    edge.attributes["vector_distance"] = distance
 
         except Exception as ex:
             logger.error(f"Error mapping vector distances to edges: {str(ex)}")
