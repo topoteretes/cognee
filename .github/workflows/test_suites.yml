@@ -97,6 +97,12 @@ jobs:
     uses: ./.github/workflows/db_examples_tests.yml
     secrets: inherit
 
+  s3-file-storage-test:
+    name: S3 File Storage Test
+    needs: [basic-tests, e2e-tests]
+    uses: ./.github/workflows/test_s3_file_storage.yml
+    secrets: inherit
+
   # Additional LLM tests
   gemini-tests:
     name: Gemini Tests

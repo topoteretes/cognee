@@ -1,7 +1,7 @@
 import os
 import asyncio
 from uuid import UUID
-from pydantic import BaseModel
+from pydantic import Field
 from typing import List, Optional
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect
@@ -10,7 +10,6 @@ from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
 from cognee.api.DTO import InDTO
 from cognee.modules.pipelines.methods import get_pipeline_run
 from cognee.modules.users.models import User
-from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.get_user_db import get_user_db_context
 from cognee.modules.graph.methods import get_formatted_graph_data
@@ -24,16 +23,16 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     remove_queue,
 )
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.utils import send_telemetry
 
 
 logger = get_logger("api.cognify")
 
 
 class CognifyPayloadDTO(InDTO):
-    datasets: Optional[List[str]] = None
-    dataset_ids: Optional[List[UUID]] = None
-    graph_model: Optional[BaseModel] = KnowledgeGraph
-    run_in_background: Optional[bool] = False
+    datasets: Optional[List[str]] = Field(default=None)
+    dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
+    run_in_background: Optional[bool] = Field(default=False)
 
 
 def get_cognify_router() -> APIRouter:
@@ -41,7 +40,57 @@ def get_cognify_router() -> APIRouter:
 
     @router.post("", response_model=dict)
     async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
-        """This endpoint is responsible for the cognitive processing of the content."""
+        """
+        Transform datasets into structured knowledge graphs through cognitive processing.
+
+        This endpoint is the core of Cognee's intelligence layer, responsible for converting
+        raw text, documents, and data added through the add endpoint into semantic knowledge graphs.
+        It performs deep analysis to extract entities, relationships, and insights from ingested content.
+
+        ## Processing Pipeline
+        1. Document classification and permission validation
+        2. Text chunking and semantic segmentation
+        3. Entity extraction using LLM-powered analysis
+        4. Relationship detection and graph construction
+        5. Vector embeddings generation for semantic search
+        6. Content summarization and indexing
+
+        ## Request Parameters
+        - **datasets** (Optional[List[str]]): List of dataset names to process. Dataset names are resolved to datasets owned by the authenticated user.
+        - **dataset_ids** (Optional[List[UUID]]): List of existing dataset UUIDs to process. UUIDs allow processing of datasets not owned by the user (if permitted).
+        - **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).
+
+        ## Response
+        - **Blocking execution**: Complete pipeline run information with entity counts, processing duration, and success/failure status
+        - **Background execution**: Pipeline run metadata including pipeline_run_id for status monitoring via WebSocket subscription
+
+        ## Error Codes
+        - **400 Bad Request**: When neither datasets nor dataset_ids are provided, or when specified datasets don't exist
+        - **409 Conflict**: When processing fails due to system errors, missing LLM API keys, database connection failures, or corrupted content
+
+        ## Example Request
+        ```json
+        {
+            "datasets": ["research_papers", "documentation"],
+            "run_in_background": false
+        }
+        ```
+
+        ## Notes
+        To cognify data in datasets not owned by the user and for which the current user has write permission,
+        the dataset_id must be used (when ENABLE_BACKEND_ACCESS_CONTROL is set to True).
+
+        ## Next Steps
+        After successful processing, use the search endpoints to query the generated knowledge graph for insights, relationships, and semantic search.
+        """
+        send_telemetry(
+            "Cognify API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/cognify",
+            },
+        )
+
         if not payload.datasets and not payload.dataset_ids:
             return JSONResponse(
                 status_code=400, content={"error": "No datasets or dataset_ids provided"}
@@ -53,7 +102,7 @@ def get_cognify_router() -> APIRouter:
             datasets = payload.dataset_ids if payload.dataset_ids else payload.datasets
 
             cognify_run = await cognee_cognify(
-                datasets, user, payload.graph_model, run_in_background=payload.run_in_background
+                datasets, user, run_in_background=payload.run_in_background
             )
 
             return cognify_run

@@ -44,10 +44,6 @@ def get_settings() -> SettingsDict:
 
     vector_dbs = [
         {
-            "value": "weaviate",
-            "label": "Weaviate",
-        },
-        {
             "value": "qdrant",
             "label": "Qdrant",
         },

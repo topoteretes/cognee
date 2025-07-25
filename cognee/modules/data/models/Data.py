@@ -18,10 +18,12 @@ class Data(Base):
     mime_type = Column(String)
     raw_data_location = Column(String)
     owner_id = Column(UUID, index=True)
+    tenant_id = Column(UUID, index=True, nullable=True)
     content_hash = Column(String)
     external_metadata = Column(JSON)
     node_set = Column(JSON, nullable=True)  # Store NodeSet as JSON list of strings
     token_count = Column(Integer)
+    data_size = Column(Integer, nullable=True)  # File size in bytes
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 

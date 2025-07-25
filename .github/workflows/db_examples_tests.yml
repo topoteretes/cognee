@@ -33,10 +33,7 @@ on:
         required: false
       QDRANT_API_KEY:
         required: false
-      WEAVIATE_API_URL:
-        required: false
-      WEAVIATE_API_KEY:
-        required: false
+
       POSTGRES_PASSWORD:
         required: false
       NEO4J_API_URL:
@@ -116,70 +113,7 @@ jobs:
         run: |
           poetry run python examples/database_examples/kuzu_example.py
 
-  run-db-example-milvus:
-    name: "Milvus DB Example Test"
-    runs-on: ubuntu-22.04
-    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'milvus') }}
 
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: ${{ inputs.python-version }}
-
-      - name: Install Milvus extra
-        run: |
-          poetry install -E milvus
-
-      - name: Run Milvus Example
-        env:
-          ENV: dev
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: |
-          poetry run python examples/database_examples/milvus_example.py
-
-  run-db-example-weaviate:
-    name: "Weaviate DB Example Test"
-    runs-on: ubuntu-22.04
-    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'weaviate') }}
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: ${{ inputs.python-version }}
-
-      - name: Install Weaviate extra
-        run: |
-          poetry install -E weaviate
-
-      - name: Run Weaviate Example
-        env:
-          ENV: dev
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          VECTOR_DB_URL: ${{ secrets.WEAVIATE_API_URL }}
-          VECTOR_DB_KEY: ${{ secrets.WEAVIATE_API_KEY }}
-        run: |
-          poetry run python examples/database_examples/weaviate_example.py
 
   run-db-example-qdrant:
     name: "Qdrant DB Example Test"

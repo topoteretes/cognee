@@ -1,22 +1,24 @@
 [project]
 name = "cognee-mcp"
-version = "0.3.0"
-description = "A MCP server project"
+version = "0.4.0"
+description = "Cognee MCP server"
 readme = "README.md"
 requires-python = ">=3.10"
 
 dependencies = [
     # For local cognee repo usage remove comment bellow and add absolute path to cognee. Then run `uv sync --reinstall` in the mcp folder on local cognee changes.
-    #"cognee[postgres,codegraph,gemini,huggingface,docs,neo4j] @ file:/Users/<username>/Desktop/cognee",
-    "cognee[postgres,codegraph,gemini,huggingface,docs,neo4j,kuzu]==0.2.0.dev0",
-    "fastmcp>=1.0",
-    "mcp==1.5.0",
-    "uv>=0.6.3",
+#    "cognee[postgres,codegraph,gemini,huggingface,docs,neo4j] @ file:/Users/vasilije/Projects/tiktok/cognee",
+    "cognee[postgres,codegraph,gemini,huggingface,docs,neo4j]>=0.2.0,<1.0.0",
+    "fastmcp>=2.10.0,<3.0.0",
+    "mcp>=1.12.0,<2.0.0",
+    "uv>=0.6.3,<1.0.0",
 ]
 
-[[project.authors]]
-name = "Boris Arzentar"
-email = "boris@topoteretes.com"
+authors = [
+    { name = "Boris Arzentar", email = "boris@topoteretes.com" },
+    { name = "Igor Ilic", email = "igor@topoteretes.com" },
+    { name = "Laszlo Hajdu", email = "laszlo@topoteretes.com" },
+]
 
 [build-system]
 requires = [ "hatchling", ]
@@ -27,7 +29,7 @@ packages = ["src"]
 
 [dependency-groups]
 dev = [
-    "debugpy>=1.8.12",
+    "debugpy>=1.8.12,<2.0.0",
 ]
 
 [tool.hatch.metadata]

@@ -6,7 +6,6 @@ from cognee import visualize_graph
 from cognee.low_level import setup, DataPoint
 from cognee.pipelines import run_tasks, Task
 from cognee.tasks.storage import add_data_points
-from cognee.shared.utils import render_graph
 
 
 class Person(DataPoint):
@@ -79,9 +78,6 @@ async def main():
 
     async for status in pipeline:
         print(status)
-
-    # Get a graphistry url (Register for a free account at https://www.graphistry.com)
-    await render_graph()
 
     # Or use our simple graph preview
     graph_file_path = str(

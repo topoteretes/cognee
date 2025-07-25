@@ -8,6 +8,12 @@ echo "Environment: $ENVIRONMENT"
 TRANSPORT_MODE=${TRANSPORT_MODE:-"stdio"}
 echo "Transport mode: $TRANSPORT_MODE"
 
+# Set default ports if not specified
+DEBUG_PORT=${DEBUG_PORT:-5678}
+HTTP_PORT=${HTTP_PORT:-8000}
+echo "Debug port: $DEBUG_PORT"
+echo "HTTP port: $HTTP_PORT"
+
 # Run Alembic migrations with proper error handling.
 # Note on UserAlreadyExists error handling:
 # During database migrations, we attempt to create a default user. If this user
@@ -42,13 +48,17 @@ if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
     if [ "$DEBUG" = "true" ]; then
         echo "Waiting for the debugger to attach..."
         if [ "$TRANSPORT_MODE" = "sse" ]; then
-            exec python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m cognee --transport sse
+            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee --transport sse
+        elif [ "$TRANSPORT_MODE" = "http" ]; then
+            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee --transport http --host 0.0.0.0 --port $HTTP_PORT
         else
-            exec python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m cognee --transport stdio
+            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee --transport stdio
         fi
     else
         if [ "$TRANSPORT_MODE" = "sse" ]; then
             exec cognee --transport sse
+        elif [ "$TRANSPORT_MODE" = "http" ]; then
+            exec cognee --transport http --host 0.0.0.0 --port $HTTP_PORT
         else
             exec cognee --transport stdio
         fi
@@ -56,6 +66,8 @@ if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
 else
     if [ "$TRANSPORT_MODE" = "sse" ]; then
         exec cognee --transport sse
+    elif [ "$TRANSPORT_MODE" = "http" ]; then
+        exec cognee --transport http --host 0.0.0.0 --port $HTTP_PORT
     else
         exec cognee --transport stdio
     fi

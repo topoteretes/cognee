@@ -19,7 +19,7 @@ def create_vector_engine(
     for each provider, raising an EnvironmentError if any are missing, or ImportError if the
     ChromaDB package is not installed.
 
-    Supported providers include: Weaviate, Qdrant, Milvus, pgvector, FalkorDB, ChromaDB, and
+    Supported providers include: Qdrant, pgvector, FalkorDB, ChromaDB, and
     LanceDB.
 
     Parameters:
@@ -30,7 +30,7 @@ def create_vector_engine(
           providers.
         - vector_db_key (str): The API key or access token for the vector database instance.
         - vector_db_provider (str): The name of the vector database provider to use (e.g.,
-          'weaviate', 'qdrant').
+          'qdrant', 'pgvector').
 
     Returns:
     --------
@@ -48,33 +48,13 @@ def create_vector_engine(
             embedding_engine=embedding_engine,
         )
 
-    if vector_db_provider == "weaviate":
-        from .weaviate_db import WeaviateAdapter
-
-        if not (vector_db_url and vector_db_key):
-            raise EnvironmentError("Missing requred Weaviate credentials!")
-
-        return WeaviateAdapter(vector_db_url, vector_db_key, embedding_engine=embedding_engine)
-
-    elif vector_db_provider == "qdrant":
+    if vector_db_provider == "qdrant":
         if not (vector_db_url and vector_db_key):
             raise EnvironmentError("Missing requred Qdrant credentials!")
 
         from .qdrant.QDrantAdapter import QDrantAdapter
 
         return QDrantAdapter(
-            url=vector_db_url,
-            api_key=vector_db_key,
-            embedding_engine=embedding_engine,
-        )
-
-    elif vector_db_provider == "milvus":
-        from .milvus.MilvusAdapter import MilvusAdapter
-
-        if not vector_db_url:
-            raise EnvironmentError("Missing required Milvus credentials!")
-
-        return MilvusAdapter(
             url=vector_db_url,
             api_key=vector_db_key,
             embedding_engine=embedding_engine,
