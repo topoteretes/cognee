@@ -38,7 +38,7 @@ def get_current_settings() -> SettingsDict:
     vector_config = get_vectordb_config()
     relational_config = get_relational_config()
 
-    return dict(
+    return SettingsDict(
         llm={
             "provider": llm_config.llm_provider,
             "model": llm_config.llm_model,

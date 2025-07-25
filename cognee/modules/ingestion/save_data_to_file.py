@@ -7,7 +7,7 @@ from .classify import classify
 async def save_data_to_file(data: Union[str, BinaryIO], filename: str = None):
     storage_config = get_storage_config()
 
-    data_root_directory = storage_config["data_root_directory"]
+    data_root_directory = storage_config.data_root_directory
 
     classified_data = classify(data, filename)
 

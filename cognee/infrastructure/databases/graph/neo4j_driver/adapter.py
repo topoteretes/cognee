@@ -8,9 +8,10 @@ from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
 from contextlib import asynccontextmanager
-from typing import Optional, Any, List, Dict, Type, Tuple
+from typing import AsyncGenerator, Optional, Any, List, Dict, Type, Tuple
 
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
@@ -67,16 +68,17 @@ class Neo4jAdapter(GraphDBInterface):
             notifications_min_severity="OFF",
         )
 
-    async def initialize(self) -> None:
         """
         Initializes the database: adds uniqueness constraint on id and performs indexing
         """
-        await self.query(
-            (f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:`{BASE_LABEL}`) REQUIRE n.id IS UNIQUE;")
+        run_sync(
+            self.query(
+                (f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:`{BASE_LABEL}`) REQUIRE n.id IS UNIQUE;")
+            )
         )
 
     @asynccontextmanager
-    async def get_session(self) -> AsyncSession:
+    async def get_session(self) -> AsyncGenerator[AsyncSession]:
         """
         Get a session for database operations.
         """

@@ -27,14 +27,3 @@ class GraphRelationshipLedger(Base):
         Index("idx_graph_relationship_ledger_source_node_id", "source_node_id"),
         Index("idx_graph_relationship_ledger_destination_node_id", "destination_node_id"),
     )
-
-    def to_json(self) -> dict:
-        return {
-            "id": str(self.id),
-            "source_node_id": str(self.parent_id),
-            "destination_node_id": str(self.child_id),
-            "creator_function": self.creator_function,
-            "created_at": self.created_at.isoformat(),
-            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
-            "user_id": str(self.user_id),
-        }

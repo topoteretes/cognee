@@ -121,7 +121,7 @@ async def main():
 
     # Assert local data files are cleaned properly
     await cognee.prune.prune_data()
-    data_root_directory = get_storage_config()["data_root_directory"]
+    data_root_directory = get_storage_config().data_root_directory
     assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
     # Assert relational, vector and graph databases have been cleaned properly
