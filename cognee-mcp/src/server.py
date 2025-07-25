@@ -380,7 +380,7 @@ async def search(search_query: str, search_type: str) -> list:
             elif (
                 search_type.upper() == "GRAPH_COMPLETION" or search_type.upper() == "RAG_COMPLETION"
             ):
-                return search_results[0]
+                return str(search_results[0])
             elif search_type.upper() == "CHUNKS":
                 return str(search_results)
             elif search_type.upper() == "INSIGHTS":
@@ -787,7 +787,7 @@ async def main():
     # Run Alembic migrations from the main cognee directory where alembic.ini is located
     print("Running database migrations...")
     migration_result = subprocess.run(
-        ["alembic", "upgrade", "head"],
+        ["python", "-m", "alembic", "upgrade", "head"],
         capture_output=True,
         text=True,
         cwd=Path(__file__).resolve().parent.parent.parent,
