@@ -104,7 +104,6 @@ class KuzuAdapter(GraphDBInterface):
                         max_db_size=4096 * 1024 * 1024,
                     )
 
-
             self.db.init_database()
             self.connection = Connection(self.db)
             # Create node table with essential fields and timestamp
@@ -1465,11 +1464,8 @@ class KuzuAdapter(GraphDBInterface):
         It raises exceptions for failures occurring during deletion processes.
         """
         try:
-            # Use DETACH DELETE to remove both nodes and their relationships in one operation
-            await self.query("MATCH (n:Node) DETACH DELETE n")
-            logger.info("Cleared all data from graph while preserving structure")
-
             if self.connection:
+                self.connection.close()
                 self.connection = None
             if self.db:
                 self.db.close()

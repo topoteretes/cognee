@@ -1,4 +1,5 @@
 from functools import lru_cache
+from deprecated import deprecated
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional
 
@@ -45,6 +46,7 @@ class EvalConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
+    @deprecated(reason="Call model_dump() instead of calling to_dict() method.")
     def to_dict(self) -> dict:
         return {
             "building_corpus_from_scratch": self.building_corpus_from_scratch,

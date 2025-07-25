@@ -7,13 +7,13 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm import get_max_chunk_tokens
 
-from cognee.modules.pipelines import cognee_pipeline
-from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.users.models import User
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.pipelines import cognee_pipeline
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
-from cognee.modules.users.models import User
 
 from cognee.tasks.documents import (
     check_permissions_on_dataset,
@@ -30,14 +30,14 @@ update_status_lock = asyncio.Lock()
 
 
 async def cognify(
-    datasets: Union[str, list[str], list[UUID]] = None,
-    user: User = None,
-    graph_model: BaseModel = KnowledgeGraph,
+    datasets: Optional[Union[str, list[str], list[UUID]]] = None,
+    user: Optional[User] = None,
+    graph_model: Optional[BaseModel] = KnowledgeGraph,
     chunker=TextChunker,
-    chunk_size: int = None,
+    chunk_size: Optional[int] = None,
     ontology_file_path: Optional[str] = None,
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
+    vector_db_config: Optional[dict] = None,
+    graph_db_config: Optional[dict] = None,
     run_in_background: bool = False,
 ):
     """
@@ -209,8 +209,8 @@ async def run_cognify_blocking(
     tasks,
     user,
     datasets,
-    graph_db_config: dict = None,
-    vector_db_config: dict = False,
+    graph_db_config=None,
+    vector_db_config=None,
 ):
     total_run_info = {}
 
@@ -234,8 +234,8 @@ async def run_cognify_as_background_process(
     tasks,
     user,
     datasets,
-    graph_db_config: dict = None,
-    vector_db_config: dict = False,
+    graph_db_config=None,
+    vector_db_config=None,
 ):
     # Convert dataset to list if it's a string
     if isinstance(datasets, str):

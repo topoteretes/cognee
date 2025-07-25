@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Union, Type, Tuple
 
 from cognee.infrastructure.databases.exceptions.exceptions import NodesetFilterNotSupportedError
 from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
@@ -41,6 +42,8 @@ class NetworkXAdapter(GraphDBInterface):
 
     def __init__(self, filename="cognee_graph.pkl"):
         self.filename = filename
+
+        run_sync(self.load_graph_from_file())
 
     async def get_graph_data(self):
         """
@@ -576,7 +579,7 @@ class NetworkXAdapter(GraphDBInterface):
 
         await file_storage.store(file_path, json_data, overwrite=True)
 
-    async def load_graph_from_file(self, file_path: str = None):
+    async def load_graph_from_file(self):
         """
         Load graph data asynchronously from a specified file in JSON format.
 
@@ -586,8 +589,8 @@ class NetworkXAdapter(GraphDBInterface):
             - file_path (str): The file path from which to load the graph data; if None, loads
               from the default filename. (default None)
         """
-        if not file_path:
-            file_path = self.filename
+        file_path = self.filename
+
         try:
             file_dir_path = os.path.dirname(file_path)
             file_name = os.path.basename(file_path)

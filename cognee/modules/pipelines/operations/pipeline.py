@@ -1,7 +1,9 @@
 import asyncio
 from uuid import UUID
-from typing import Union
+from typing import Optional, Union
 
+from cognee.infrastructure.databases.graph.config import GraphConfig
+from cognee.infrastructure.databases.vector.config import VectorConfig
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
@@ -50,8 +52,8 @@ async def cognee_pipeline(
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
     pipeline_name: str = "custom_pipeline",
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
+    vector_db_config: Optional[VectorConfig] = None,
+    graph_db_config: Optional[GraphConfig] = None,
 ):
     # Note: These context variables allow different value assignment for databases in Cognee
     #       per async task, thread, process and etc.

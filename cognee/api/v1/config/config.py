@@ -2,7 +2,7 @@
 
 import os
 from cognee.base_config import get_base_config
-from cognee.exceptions import InvalidValueError, InvalidAttributeError
+from cognee.exceptions import InvalidAttributeError
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.databases.vector import get_vectordb_config
@@ -105,12 +105,12 @@ class config:
         chunk_config.chunk_engine = chunk_engine
 
     @staticmethod
-    def set_chunk_overlap(chunk_overlap: object):
+    def set_chunk_overlap(chunk_overlap: int):
         chunk_config = get_chunk_config()
         chunk_config.chunk_overlap = chunk_overlap
 
     @staticmethod
-    def set_chunk_size(chunk_size: object):
+    def set_chunk_size(chunk_size: int):
         chunk_config = get_chunk_config()
         chunk_config.chunk_size = chunk_size
 

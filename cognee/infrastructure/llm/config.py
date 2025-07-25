@@ -29,7 +29,6 @@ class LLMConfig(BaseSettings):
 
     Public methods include:
     - ensure_env_vars_for_ollama
-    - to_dict
     """
 
     llm_provider: str = "openai"
@@ -124,38 +123,6 @@ class LLMConfig(BaseSettings):
             )
 
         return self
-
-    def to_dict(self) -> dict:
-        """
-        Convert the LLMConfig instance into a dictionary representation.
-
-        Returns:
-        --------
-
-            - dict: A dictionary containing the configuration settings of the LLMConfig
-              instance.
-        """
-        return {
-            "provider": self.llm_provider,
-            "model": self.llm_model,
-            "endpoint": self.llm_endpoint,
-            "api_key": self.llm_api_key,
-            "api_version": self.llm_api_version,
-            "temperature": self.llm_temperature,
-            "streaming": self.llm_streaming,
-            "max_tokens": self.llm_max_tokens,
-            "transcription_model": self.transcription_model,
-            "graph_prompt_path": self.graph_prompt_path,
-            "rate_limit_enabled": self.llm_rate_limit_enabled,
-            "rate_limit_requests": self.llm_rate_limit_requests,
-            "rate_limit_interval": self.llm_rate_limit_interval,
-            "embedding_rate_limit_enabled": self.embedding_rate_limit_enabled,
-            "embedding_rate_limit_requests": self.embedding_rate_limit_requests,
-            "embedding_rate_limit_interval": self.embedding_rate_limit_interval,
-            "fallback_api_key": self.fallback_api_key,
-            "fallback_endpoint": self.fallback_endpoint,
-            "fallback_model": self.fallback_model,
-        }
 
 
 @lru_cache

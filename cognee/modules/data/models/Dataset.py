@@ -28,13 +28,3 @@ class Dataset(Base):
         lazy="noload",
         cascade="all, delete",
     )
-
-    def to_json(self) -> dict:
-        return {
-            "id": str(self.id),
-            "name": self.name,
-            "createdAt": self.created_at.isoformat(),
-            "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
-            "ownerId": str(self.owner_id),
-            "data": [data.to_json() for data in self.data],
-        }

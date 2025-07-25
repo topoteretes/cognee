@@ -1,10 +1,11 @@
 """This module contains the configuration for the graph database."""
 
 import os
+import pydantic
+from typing import Optional
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import pydantic
-from pydantic import Field
+
 from cognee.base_config import get_base_config
 from cognee.shared.data_models import KnowledgeGraph
 
@@ -13,10 +14,6 @@ class GraphConfig(BaseSettings):
     """
     Represents the configuration for a graph system, including parameters for graph file
     storage and database connections.
-
-    Public methods:
-    - to_dict
-    - to_hashable_dict
 
     Instance variables:
     - graph_filename
@@ -31,10 +28,7 @@ class GraphConfig(BaseSettings):
     - model_config
     """
 
-    # Using Field we are able to dynamically load current GRAPH_DATABASE_PROVIDER value in the model validator part
-    # and determine default graph db file and path based on this parameter if no values are provided
-    graph_database_provider: str = Field("kuzu", env="GRAPH_DATABASE_PROVIDER")
-
+    graph_database_provider: str = "kuzu"
     graph_database_url: str = ""
     graph_database_username: str = ""
     graph_database_password: str = ""
@@ -64,53 +58,6 @@ class GraphConfig(BaseSettings):
 
         return values
 
-    def to_dict(self) -> dict:
-        """
-        Return the configuration as a dictionary.
-
-        This dictionary contains all the configurations related to the graph, which includes
-        details for file storage and database connectivity.
-
-        Returns:
-        --------
-
-            - dict: A dictionary representation of the configuration settings.
-        """
-        return {
-            "graph_filename": self.graph_filename,
-            "graph_database_provider": self.graph_database_provider,
-            "graph_database_url": self.graph_database_url,
-            "graph_database_username": self.graph_database_username,
-            "graph_database_password": self.graph_database_password,
-            "graph_database_port": self.graph_database_port,
-            "graph_file_path": self.graph_file_path,
-            "graph_model": self.graph_model,
-            "graph_topology": self.graph_topology,
-            "model_config": self.model_config,
-        }
-
-    def to_hashable_dict(self) -> dict:
-        """
-        Return a hashable dictionary with essential database configuration parameters.
-
-        This dictionary excludes certain non-hashable objects and focuses on unique identifiers
-        for database configurations.
-
-        Returns:
-        --------
-
-            - dict: A dictionary representation of the essential database configuration
-              settings.
-        """
-        return {
-            "graph_database_provider": self.graph_database_provider,
-            "graph_database_url": self.graph_database_url,
-            "graph_database_username": self.graph_database_username,
-            "graph_database_password": self.graph_database_password,
-            "graph_database_port": self.graph_database_port,
-            "graph_file_path": self.graph_file_path,
-        }
-
 
 @lru_cache
 def get_graph_config():
@@ -126,15 +73,18 @@ def get_graph_config():
 
         - GraphConfig: A GraphConfig instance containing the graph configuration settings.
     """
+    context_config = get_graph_context_config()
+
+    if context_config:
+        return context_config
+
     return GraphConfig()
 
 
-def get_graph_context_config():
+def get_graph_context_config() -> Optional[GraphConfig]:
     """This function will get the appropriate graph db config based on async context.
     This allows the use of multiple graph databases for different threads, async tasks and parallelization
     """
     from cognee.context_global_variables import graph_db_config
 
-    if graph_db_config.get():
-        return graph_db_config.get()
-    return get_graph_config().to_hashable_dict()
+    return graph_db_config.get()

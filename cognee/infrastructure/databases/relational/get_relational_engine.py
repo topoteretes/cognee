@@ -18,4 +18,12 @@ def get_relational_engine():
     """
     relational_config = get_relational_config()
 
-    return create_relational_engine(**relational_config.to_dict())
+    return create_relational_engine(
+        db_path=relational_config.db_path,
+        db_name=relational_config.db_name,
+        db_host=relational_config.db_host,
+        db_port=relational_config.db_port,
+        db_username=relational_config.db_username,
+        db_password=relational_config.db_password,
+        db_provider=relational_config.db_provider,
+    )
