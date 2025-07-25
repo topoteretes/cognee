@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import List, Optional, Type
 
 from cognee.shared.logging_utils import get_logger, ERROR
@@ -174,12 +175,20 @@ async def brute_force_search(
             return []
 
     try:
+        start_time = time.time()
+
         results = await asyncio.gather(
             *[search_in_collection(collection_name) for collection_name in collections]
         )
 
         if all(not item for item in results):
             return []
+
+        # Final statistics
+        projection_time = time.time() - start_time
+        logger.info(
+            f"Vector collection retrieval completed: Retrieved distances from {sum(1 for res in results if res)} collections in {projection_time:.2f}s"
+        )
 
         node_distances = {collection: result for collection, result in zip(collections, results)}
 
