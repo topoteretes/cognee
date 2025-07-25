@@ -17,6 +17,7 @@ secret-scan:
   # Ignore by commit (if needed)
   excluded-commits:
     - '782bbb4'
+    - 'f857e07'
 
   # Custom rules for template files
   paths-ignore:
@@ -24,3 +25,7 @@ secret-scan:
       comment: 'Template file with placeholder values'
     - path: '.github/workflows/search_db_tests.yml'
       comment: 'Test workflow with test credentials'
+    - path: 'docker-compose.yml'
+      comment: 'Development docker compose with test credentials (neo4j/pleaseletmein, postgres cognee/cognee)'
+    - path: 'deployment/helm/docker-compose-helm.yml'
+      comment: 'Helm deployment docker compose with test postgres credentials (cognee/cognee)'

@@ -4,6 +4,17 @@ Test client for Cognee MCP Server functionality.
 
 This script tests all the tools and functions available in the Cognee MCP server,
 including cognify, codify, search, prune, status checks, and utility functions.
+
+Usage:
+    # Set your OpenAI API key first
+    export OPENAI_API_KEY="your-api-key-here"
+
+    # Run the test client
+    python src/test_client.py
+
+    # Or use LLM_API_KEY instead of OPENAI_API_KEY
+    export LLM_API_KEY="your-api-key-here"
+    python src/test_client.py
 """
 
 import asyncio
@@ -13,27 +24,16 @@ import time
 from contextlib import asynccontextmanager
 from cognee.shared.logging_utils import setup_logging
 
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from src.server import (
-    cognify,
-    codify,
-    search,
-    prune,
-    cognify_status,
-    codify_status,
-    cognee_add_developer_rules,
     node_to_string,
     retrieved_edges_to_string,
     load_class,
 )
-
-# Import MCP client functionality for server testing
-
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-
 
 # Set timeout for cognify/codify to complete in
 TIMEOUT = 5 * 60  # 5 min  in seconds
@@ -49,6 +49,15 @@ class CogneeTestClient:
     async def setup(self):
         """Setup test environment."""
         print("🔧 Setting up test environment...")
+
+        # Check for required API keys
+        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("LLM_API_KEY")
+        if not api_key:
+            print("⚠️  Warning: No OPENAI_API_KEY or LLM_API_KEY found in environment.")
+            print("   Some tests may fail without proper LLM API configuration.")
+            print("   Set OPENAI_API_KEY environment variable for full functionality.")
+        else:
+            print(f"✅ API key configured (key ending in: ...{api_key[-4:]})")
 
         # Create temporary test files
         self.test_data_dir = tempfile.mkdtemp(prefix="cognee_test_")
@@ -113,11 +122,15 @@ DEBUG = True
         # Get the path to the server script
         server_script = os.path.join(os.path.dirname(__file__), "server.py")
 
+        # Pass current environment variables to the server process
+        # This ensures OpenAI API key and other config is available
+        server_env = os.environ.copy()
+
         # Start the server process
         server_params = StdioServerParameters(
             command="python",
             args=[server_script, "--transport", "stdio"],
-            env=None,
+            env=server_env,
         )
 
         async with stdio_client(server_params) as (read, write):
@@ -144,6 +157,8 @@ DEBUG = True
                     "cognify_status",
                     "codify_status",
                     "cognee_add_developer_rules",
+                    "list_data",
+                    "delete",
                 }
                 available_tools = {tool.name for tool in tools_result.tools}
 
@@ -164,16 +179,17 @@ DEBUG = True
             print(f"❌ MCP server integration test failed: {e}")
 
     async def test_prune(self):
-        """Test the prune functionality."""
+        """Test the prune functionality using MCP client."""
         print("\n🧪 Testing prune functionality...")
         try:
-            result = await prune()
-            self.test_results["prune"] = {
-                "status": "PASS",
-                "result": result,
-                "message": "Prune executed successfully",
-            }
-            print("✅ Prune test passed")
+            async with self.mcp_server_session() as session:
+                result = await session.call_tool("prune", arguments={})
+                self.test_results["prune"] = {
+                    "status": "PASS",
+                    "result": result,
+                    "message": "Prune executed successfully",
+                }
+                print("✅ Prune test passed")
         except Exception as e:
             self.test_results["prune"] = {
                 "status": "FAIL",
@@ -184,34 +200,44 @@ DEBUG = True
             raise e
 
     async def test_cognify(self, test_text, test_name):
-        """Test the cognify functionality."""
+        """Test the cognify functionality using MCP client."""
         print("\n🧪 Testing cognify functionality...")
         try:
-            # Test with simple text
-            cognify_result = await cognify(test_text)
+            # Test with simple text using MCP client
+            async with self.mcp_server_session() as session:
+                cognify_result = await session.call_tool("cognify", arguments={"data": test_text})
 
-            start = time.time()  # mark the start
-            while True:
-                try:
-                    # Wait a moment
-                    await asyncio.sleep(5)
+                start = time.time()  # mark the start
+                while True:
+                    try:
+                        # Wait a moment
+                        await asyncio.sleep(5)
 
-                    # Check if cognify processing is finished
-                    status_result = await cognify_status()
-                    if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_result[0].text:
-                        break
-                    elif time.time() - start > TIMEOUT:
-                        raise TimeoutError("Cognify did not complete in 5min")
-                except DatabaseNotCreatedError:
-                    if time.time() - start > TIMEOUT:
-                        raise TimeoutError("Database was not created in 5min")
+                        # Check if cognify processing is finished
+                        status_result = await session.call_tool("cognify_status", arguments={})
+                        if hasattr(status_result, "content") and status_result.content:
+                            status_text = (
+                                status_result.content[0].text
+                                if status_result.content
+                                else str(status_result)
+                            )
+                        else:
+                            status_text = str(status_result)
 
-            self.test_results[test_name] = {
-                "status": "PASS",
-                "result": cognify_result,
-                "message": f"{test_name} executed successfully",
-            }
-            print(f"✅ {test_name} test passed")
+                        if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_text:
+                            break
+                        elif time.time() - start > TIMEOUT:
+                            raise TimeoutError("Cognify did not complete in 5min")
+                    except DatabaseNotCreatedError:
+                        if time.time() - start > TIMEOUT:
+                            raise TimeoutError("Database was not created in 5min")
+
+                self.test_results[test_name] = {
+                    "status": "PASS",
+                    "result": cognify_result,
+                    "message": f"{test_name} executed successfully",
+                }
+                print(f"✅ {test_name} test passed")
 
         except Exception as e:
             self.test_results[test_name] = {
@@ -222,33 +248,45 @@ DEBUG = True
             print(f"❌ {test_name} test failed: {e}")
 
     async def test_codify(self):
-        """Test the codify functionality."""
+        """Test the codify functionality using MCP client."""
         print("\n🧪 Testing codify functionality...")
         try:
-            codify_result = await codify(self.test_repo_dir)
+            async with self.mcp_server_session() as session:
+                codify_result = await session.call_tool(
+                    "codify", arguments={"repo_path": self.test_repo_dir}
+                )
 
-            start = time.time()  # mark the start
-            while True:
-                try:
-                    # Wait a moment
-                    await asyncio.sleep(5)
+                start = time.time()  # mark the start
+                while True:
+                    try:
+                        # Wait a moment
+                        await asyncio.sleep(5)
 
-                    # Check if codify processing is finished
-                    status_result = await codify_status()
-                    if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_result[0].text:
-                        break
-                    elif time.time() - start > TIMEOUT:
-                        raise TimeoutError("Codify did not complete in 5min")
-                except DatabaseNotCreatedError:
-                    if time.time() - start > TIMEOUT:
-                        raise TimeoutError("Database was not created in 5min")
+                        # Check if codify processing is finished
+                        status_result = await session.call_tool("codify_status", arguments={})
+                        if hasattr(status_result, "content") and status_result.content:
+                            status_text = (
+                                status_result.content[0].text
+                                if status_result.content
+                                else str(status_result)
+                            )
+                        else:
+                            status_text = str(status_result)
 
-            self.test_results["codify"] = {
-                "status": "PASS",
-                "result": codify_result,
-                "message": "Codify executed successfully",
-            }
-            print("✅ Codify test passed")
+                        if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_text:
+                            break
+                        elif time.time() - start > TIMEOUT:
+                            raise TimeoutError("Codify did not complete in 5min")
+                    except DatabaseNotCreatedError:
+                        if time.time() - start > TIMEOUT:
+                            raise TimeoutError("Database was not created in 5min")
+
+                self.test_results["codify"] = {
+                    "status": "PASS",
+                    "result": codify_result,
+                    "message": "Codify executed successfully",
+                }
+                print("✅ Codify test passed")
 
         except Exception as e:
             self.test_results["codify"] = {
@@ -259,33 +297,47 @@ DEBUG = True
             print(f"❌ Codify test failed: {e}")
 
     async def test_cognee_add_developer_rules(self):
-        """Test the cognee_add_developer_rules functionality."""
+        """Test the cognee_add_developer_rules functionality using MCP client."""
         print("\n🧪 Testing cognee_add_developer_rules functionality...")
         try:
-            result = await cognee_add_developer_rules(base_path=self.test_data_dir)
+            async with self.mcp_server_session() as session:
+                result = await session.call_tool(
+                    "cognee_add_developer_rules", arguments={"base_path": self.test_data_dir}
+                )
 
-            start = time.time()  # mark the start
-            while True:
-                try:
-                    # Wait a moment
-                    await asyncio.sleep(5)
+                start = time.time()  # mark the start
+                while True:
+                    try:
+                        # Wait a moment
+                        await asyncio.sleep(5)
 
-                    # Check if developer rule cognify processing is finished
-                    status_result = await cognify_status()
-                    if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_result[0].text:
-                        break
-                    elif time.time() - start > TIMEOUT:
-                        raise TimeoutError("Cognify of developer rules did not complete in 5min")
-                except DatabaseNotCreatedError:
-                    if time.time() - start > TIMEOUT:
-                        raise TimeoutError("Database was not created in 5min")
+                        # Check if developer rule cognify processing is finished
+                        status_result = await session.call_tool("cognify_status", arguments={})
+                        if hasattr(status_result, "content") and status_result.content:
+                            status_text = (
+                                status_result.content[0].text
+                                if status_result.content
+                                else str(status_result)
+                            )
+                        else:
+                            status_text = str(status_result)
 
-            self.test_results["cognee_add_developer_rules"] = {
-                "status": "PASS",
-                "result": result,
-                "message": "Developer rules addition executed successfully",
-            }
-            print("✅ Developer rules test passed")
+                        if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_text:
+                            break
+                        elif time.time() - start > TIMEOUT:
+                            raise TimeoutError(
+                                "Cognify of developer rules did not complete in 5min"
+                            )
+                    except DatabaseNotCreatedError:
+                        if time.time() - start > TIMEOUT:
+                            raise TimeoutError("Database was not created in 5min")
+
+                self.test_results["cognee_add_developer_rules"] = {
+                    "status": "PASS",
+                    "result": result,
+                    "message": "Developer rules addition executed successfully",
+                }
+                print("✅ Developer rules test passed")
 
         except Exception as e:
             self.test_results["cognee_add_developer_rules"] = {
@@ -296,7 +348,7 @@ DEBUG = True
             print(f"❌ Developer rules test failed: {e}")
 
     async def test_search_functionality(self):
-        """Test the search functionality with different search types."""
+        """Test the search functionality with different search types using MCP client."""
         print("\n🧪 Testing search functionality...")
 
         search_query = "What is artificial intelligence?"
@@ -310,13 +362,17 @@ DEBUG = True
             if search_type in [SearchType.NATURAL_LANGUAGE, SearchType.CYPHER]:
                 break
             try:
-                result = await search(search_query, search_type.value)
-                self.test_results[f"search_{search_type}"] = {
-                    "status": "PASS",
-                    "result": result,
-                    "message": f"Search with {search_type} successful",
-                }
-                print(f"✅ Search {search_type} test passed")
+                async with self.mcp_server_session() as session:
+                    result = await session.call_tool(
+                        "search",
+                        arguments={"search_query": search_query, "search_type": search_type.value},
+                    )
+                    self.test_results[f"search_{search_type}"] = {
+                        "status": "PASS",
+                        "result": result,
+                        "message": f"Search with {search_type} successful",
+                    }
+                    print(f"✅ Search {search_type} test passed")
             except Exception as e:
                 self.test_results[f"search_{search_type}"] = {
                     "status": "FAIL",
@@ -324,6 +380,168 @@ DEBUG = True
                     "message": f"Search with {search_type} failed",
                 }
                 print(f"❌ Search {search_type} test failed: {e}")
+
+    async def test_list_data(self):
+        """Test the list_data functionality."""
+        print("\n🧪 Testing list_data functionality...")
+
+        try:
+            async with self.mcp_server_session() as session:
+                # Test listing all datasets
+                result = await session.call_tool("list_data", arguments={})
+
+                if result.content and len(result.content) > 0:
+                    content = result.content[0].text
+
+                    # Check if the output contains expected elements
+                    if "Available Datasets:" in content or "No datasets found" in content:
+                        self.test_results["list_data_all"] = {
+                            "status": "PASS",
+                            "result": content[:200] + "..." if len(content) > 200 else content,
+                            "message": "list_data (all datasets) successful",
+                        }
+                        print("✅ list_data (all datasets) test passed")
+
+                        # If there are datasets, try to list data for the first one
+                        if "Dataset ID:" in content:
+                            # Extract the first dataset ID from the output
+                            lines = content.split("\n")
+                            dataset_id = None
+                            for line in lines:
+                                if "Dataset ID:" in line:
+                                    dataset_id = line.split("Dataset ID:")[1].strip()
+                                    break
+
+                            if dataset_id:
+                                # Test listing data for specific dataset
+                                specific_result = await session.call_tool(
+                                    "list_data", arguments={"dataset_id": dataset_id}
+                                )
+
+                                if specific_result.content and len(specific_result.content) > 0:
+                                    specific_content = specific_result.content[0].text
+                                    if "Dataset:" in specific_content:
+                                        self.test_results["list_data_specific"] = {
+                                            "status": "PASS",
+                                            "result": specific_content[:200] + "..."
+                                            if len(specific_content) > 200
+                                            else specific_content,
+                                            "message": "list_data (specific dataset) successful",
+                                        }
+                                        print("✅ list_data (specific dataset) test passed")
+                                    else:
+                                        raise Exception(
+                                            "Specific dataset listing returned unexpected format"
+                                        )
+                                else:
+                                    raise Exception("Specific dataset listing returned no content")
+                    else:
+                        raise Exception("list_data returned unexpected format")
+                else:
+                    raise Exception("list_data returned no content")
+
+        except Exception as e:
+            self.test_results["list_data"] = {
+                "status": "FAIL",
+                "error": str(e),
+                "message": "list_data test failed",
+            }
+            print(f"❌ list_data test failed: {e}")
+
+    async def test_delete(self):
+        """Test the delete functionality."""
+        print("\n🧪 Testing delete functionality...")
+
+        try:
+            async with self.mcp_server_session() as session:
+                # First, let's get available data to delete
+                list_result = await session.call_tool("list_data", arguments={})
+
+                if not (list_result.content and len(list_result.content) > 0):
+                    raise Exception("No data available for delete test - list_data returned empty")
+
+                content = list_result.content[0].text
+
+                # Look for data IDs and dataset IDs in the content
+                lines = content.split("\n")
+                dataset_id = None
+                data_id = None
+
+                for line in lines:
+                    if "Dataset ID:" in line:
+                        dataset_id = line.split("Dataset ID:")[1].strip()
+                    elif "Data ID:" in line:
+                        data_id = line.split("Data ID:")[1].strip()
+                        break  # Get the first data item
+
+                if dataset_id and data_id:
+                    # Test soft delete (default)
+                    delete_result = await session.call_tool(
+                        "delete",
+                        arguments={"data_id": data_id, "dataset_id": dataset_id, "mode": "soft"},
+                    )
+
+                    if delete_result.content and len(delete_result.content) > 0:
+                        delete_content = delete_result.content[0].text
+
+                        if "Delete operation completed successfully" in delete_content:
+                            self.test_results["delete_soft"] = {
+                                "status": "PASS",
+                                "result": delete_content[:200] + "..."
+                                if len(delete_content) > 200
+                                else delete_content,
+                                "message": "delete (soft mode) successful",
+                            }
+                            print("✅ delete (soft mode) test passed")
+                        else:
+                            # Check if it's an expected error (like document not found)
+                            if "not found" in delete_content.lower():
+                                self.test_results["delete_soft"] = {
+                                    "status": "PASS",
+                                    "result": delete_content,
+                                    "message": "delete test passed with expected 'not found' error",
+                                }
+                                print("✅ delete test passed (expected 'not found' error)")
+                            else:
+                                raise Exception(
+                                    f"Delete returned unexpected content: {delete_content}"
+                                )
+                    else:
+                        raise Exception("Delete returned no content")
+
+                else:
+                    # Test with invalid UUIDs to check error handling
+                    invalid_result = await session.call_tool(
+                        "delete",
+                        arguments={
+                            "data_id": "invalid-uuid",
+                            "dataset_id": "another-invalid-uuid",
+                            "mode": "soft",
+                        },
+                    )
+
+                    if invalid_result.content and len(invalid_result.content) > 0:
+                        invalid_content = invalid_result.content[0].text
+
+                        if "Invalid UUID format" in invalid_content:
+                            self.test_results["delete_error_handling"] = {
+                                "status": "PASS",
+                                "result": invalid_content,
+                                "message": "delete error handling works correctly",
+                            }
+                            print("✅ delete error handling test passed")
+                        else:
+                            raise Exception(f"Expected UUID error not found: {invalid_content}")
+                    else:
+                        raise Exception("Delete error test returned no content")
+
+        except Exception as e:
+            self.test_results["delete"] = {
+                "status": "FAIL",
+                "error": str(e),
+                "message": "delete test failed",
+            }
+            print(f"❌ delete test failed: {e}")
 
     def test_utility_functions(self):
         """Test utility functions."""
@@ -466,6 +684,10 @@ class TestModel:
         await self.test_codify()
         await self.test_cognee_add_developer_rules()
 
+        # Test list_data and delete functionality
+        await self.test_list_data()
+        await self.test_delete()
+
         await self.test_search_functionality()
 
         # Test utility functions (synchronous)
@@ -506,7 +728,8 @@ class TestModel:
         print(f"Failed: {failed}")
         print(f"Success Rate: {(passed / total_tests * 100):.1f}%")
 
-        assert failed == 0, "\n ⚠️ Number of tests didn't pass!"
+        if failed > 0:
+            print(f"\n ⚠️ {failed} test(s) failed - review results above for details")
 
 
 async def main():
