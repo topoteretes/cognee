@@ -1,3 +1,4 @@
+import time
 from cognee.shared.logging_utils import get_logger
 from typing import List, Dict, Union, Optional, Type
 
@@ -154,10 +155,15 @@ class CogneeGraph(CogneeAbstractGraph):
                 raise ValueError("Failed to generate query embedding.")
 
             if edge_distances is None:
+                start_time = time.time()
                 edge_distances = await vector_engine.search(
                     collection_name="EdgeType_relationship_name",
                     query_vector=query_vector,
                     limit=0,
+                )
+                projection_time = time.time() - start_time
+                logger.info(
+                    f"Edge collection distances were calculated separately from nodes in {projection_time:.2f}s"
                 )
 
             embedding_map = {result.payload["text"]: result.score for result in edge_distances}
