@@ -86,7 +86,6 @@ class KuzuAdapter(GraphDBInterface):
                     if (
                         kuzu_db_version == "0.9.0" or kuzu_db_version == "0.8.2"
                     ) and kuzu_db_version != kuzu.__version__:
-                        # TODO: Write migration script that will handle all user graph databases in multi-user mode
                         # Try to migrate kuzu database to latest version
                         from .kuzu_migrate import kuzu_migration
 
