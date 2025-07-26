@@ -4,6 +4,9 @@ set -e  # Exit on error
 echo "Debug mode: $DEBUG"
 echo "Environment: $ENVIRONMENT"
 
+# Start SSH service
+service ssh start
+
 # Set default ports if not specified
 DEBUG_PORT=${DEBUG_PORT:-5678}
 HTTP_PORT=${HTTP_PORT:-8000}

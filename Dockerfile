@@ -49,6 +49,17 @@ RUN apt-get update && apt-get install -y \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
+# Install SSH Server
+RUN apt-get install -y --no-install-recommends dialog \
+    && apt-get install -y --no-install-recommends openssh-server
+
+# Setup SSH
+RUN mkdir -p /run/sshd && echo "root:Docker!" | chpasswd
+COPY sshd_config /etc/ssh/
+
+# Expose the SSH port
+EXPOSE 2222
+
 WORKDIR /app
 
 COPY --from=uv /app /app
