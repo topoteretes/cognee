@@ -221,9 +221,9 @@ async def pipeline_method():
 
     has_edges = await na_adapter.has_edges(edges)
     if len(has_edges) == 0:
-        print(f"Delete successful")
+        print("Delete successful")
     else:
-        print(f"Delete failed")
+        print("Delete failed")
 
 
 async def misc_methods():

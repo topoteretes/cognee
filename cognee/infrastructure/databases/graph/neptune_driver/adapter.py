@@ -123,7 +123,7 @@ class NeptuneGraphDB(GraphDBInterface):
             return client
             
         except Exception as e:
-            raise NeptuneAnalyticsConfigurationError(f"Failed to initialize Neptune Analytics client: {format_neptune_error(e)}")
+            raise NeptuneAnalyticsConfigurationError(f"Failed to initialize Neptune Analytics client: {format_neptune_error(e)}") from e
 
     @staticmethod
     def _serialize_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
@@ -183,7 +183,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Neptune Analytics query failed: {error_msg}")
-            raise Exception(f"Query execution failed: {error_msg}")
+            raise Exception(f"Query execution failed: {error_msg}") from e
 
     async def add_node(self, node: DataPoint) -> None:
         """
@@ -191,8 +191,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
         Parameters:
         -----------
-            - node_id (str): Unique identifier for the node being added.
-            - properties (Dict[str, Any]): A dictionary of properties associated with the node.
+            - node (DataPoint): The DataPoint object to be added to the graph.
         """
         try:
             # Prepare node properties with the ID and graph type
@@ -216,7 +215,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to add node {node.id}: {error_msg}")
-            raise Exception(f"Failed to add node: {error_msg}")
+            raise Exception(f"Failed to add node: {error_msg}") from e
 
     @record_graph_changes
     async def add_nodes(self, nodes: List[DataPoint]) -> None:
@@ -294,7 +293,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to delete node {node_id}: {error_msg}")
-            raise Exception(f"Failed to delete node: {error_msg}")
+            raise Exception(f"Failed to delete node: {error_msg}") from e
 
     async def delete_nodes(self, node_ids: List[str]) -> None:
         """
@@ -370,7 +369,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get node {node_id}: {error_msg}")
-            raise Exception(f"Failed to get node: {error_msg}")
+            raise Exception(f"Failed to get node: {error_msg}") from e
 
     async def get_nodes(self, node_ids: List[str]) -> List[NodeData]:
         """
@@ -456,9 +455,9 @@ class NeptuneGraphDB(GraphDBInterface):
 
             A list of nodes represented as dictionaries.
         """
-        query = """
+        query = f"""
         UNWIND $node_ids AS id
-        MATCH (node) WHERE id(node) = id
+        MATCH (node :{self._GRAPH_NODE_LABEL}) WHERE id(node) = id
         RETURN node"""
 
         params = {"node_ids": node_ids}
@@ -514,7 +513,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to add edge {source_id} -> {target_id}: {error_msg}")
-            raise Exception(f"Failed to add edge: {error_msg}")
+            raise Exception(f"Failed to add edge: {error_msg}") from e
 
     @record_graph_changes
     async def add_edges(self, edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]]) -> None:
@@ -538,7 +537,7 @@ class NeptuneGraphDB(GraphDBInterface):
                 edges_by_relationship[relationship_name] = [edge]
 
         results = {}
-        for relationship_name, edges_by_relationship in edges_by_relationship.items():
+        for relationship_name, edges_for_relationship in edges_by_relationship.items():
             try:
                 # Create the bulk-edge OpenCypher query using UNWIND
                 query = f"""
@@ -562,7 +561,7 @@ class NeptuneGraphDB(GraphDBInterface):
                             "relationship_name": relationship_name,
                             "properties": self._serialize_properties(edge[3] if len(edge) > 3 and edge[3] else {}),
                         }
-                        for edge in edges_by_relationship
+                        for edge in edges_for_relationship
                     ]
                 }
                 results[relationship_name] = await self.query(query, params)
@@ -601,7 +600,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to delete graph: {error_msg}")
-            raise Exception(f"Failed to delete graph: {error_msg}")
+            raise Exception(f"Failed to delete graph: {error_msg}") from e
 
 
     async def get_graph_data(self) -> Tuple[List[Node], List[EdgeData]]:
@@ -655,7 +654,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get graph data: {error_msg}")
-            raise Exception(f"Failed to get graph data: {error_msg}")
+            raise Exception(f"Failed to get graph data: {error_msg}") from e
 
     async def get_graph_metrics(self, include_optional: bool = False) -> Dict[str, Any]:
         """
@@ -817,7 +816,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get edges for node {node_id}: {error_msg}")
-            raise Exception(f"Failed to get edges: {error_msg}")
+            raise Exception(f"Failed to get edges: {error_msg}") from e
 
     async def get_disconnected_nodes(self) -> list[str]:
         """
@@ -936,7 +935,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get neighbors for node {node_id}: {error_msg}")
-            raise Exception(f"Failed to get neighbors: {error_msg}")
+            raise Exception(f"Failed to get neighbors: {error_msg}") from e
 
     async def get_nodeset_subgraph(
             self,
@@ -1016,7 +1015,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get nodeset subgraph for type {node_type}: {error_msg}")
-            raise Exception(f"Failed to get nodeset subgraph: {error_msg}")
+            raise Exception(f"Failed to get nodeset subgraph: {error_msg}") from e
 
     async def get_connections(self, node_id: UUID) -> list:
         """
@@ -1073,7 +1072,7 @@ class NeptuneGraphDB(GraphDBInterface):
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get connections for node {node_id}: {error_msg}")
-            raise Exception(f"Failed to get connections: {error_msg}")
+            raise Exception(f"Failed to get connections: {error_msg}") from e
 
 
     async def remove_connection_to_predecessors_of(
@@ -1169,14 +1168,6 @@ class NeptuneGraphDB(GraphDBInterface):
         )
         return relationship_types_undirected_str
 
-    async def project_entire_graph(self, graph_name="myGraph"):
-        """
-        Project all node labels and relationship types into an in-memory graph using GDS.
-
-        Note: This method is currently a placeholder because GDS (Graph Data Science)
-        projection is not supported in Neptune Analytics.
-        """
-        pass
 
     async def drop_graph(self, graph_name="myGraph"):
         """
