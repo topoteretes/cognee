@@ -9,7 +9,7 @@ COPY package.json package-lock.json ./
 
 # Install any needed packages specified in package.json
 RUN npm ci
-# RUN npm rebuild lightningcss
+RUN npm rebuild lightningcss
 
 # Copy the rest of the application code to the working directory
 COPY src ./src

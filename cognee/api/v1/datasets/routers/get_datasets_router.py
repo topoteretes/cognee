@@ -290,7 +290,7 @@ def get_datasets_router() -> APIRouter:
         if dataset is None:
             raise DatasetNotFoundError(message=f"Dataset ({str(dataset_id)}) not found.")
 
-        graph_data = await get_formatted_graph_data(dataset)
+        graph_data = await get_formatted_graph_data(dataset.id, user.id)
 
         return graph_data
 

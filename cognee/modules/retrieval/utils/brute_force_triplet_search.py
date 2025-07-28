@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import List, Optional, Type
 
 from cognee.shared.logging_utils import get_logger, ERROR
@@ -59,13 +60,13 @@ async def get_memory_fragment(
     node_name: Optional[List[str]] = None,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
-    graph_engine = await get_graph_engine()
-    memory_fragment = CogneeGraph()
-
     if properties_to_project is None:
         properties_to_project = ["id", "description", "name", "type", "text"]
 
     try:
+        graph_engine = await get_graph_engine()
+        memory_fragment = CogneeGraph()
+
         await memory_fragment.project_graph_from_db(
             graph_engine,
             node_properties_to_project=properties_to_project,
@@ -73,7 +74,13 @@ async def get_memory_fragment(
             node_type=node_type,
             node_name=node_name,
         )
+
     except EntityNotFoundError:
+        # This is expected behavior - continue with empty fragment
+        pass
+    except Exception as e:
+        logger.error(f"Error during memory fragment creation: {str(e)}")
+        # Still return the fragment even if projection failed
         pass
 
     return memory_fragment
@@ -168,6 +175,8 @@ async def brute_force_search(
             return []
 
     try:
+        start_time = time.time()
+
         results = await asyncio.gather(
             *[search_in_collection(collection_name) for collection_name in collections]
         )
@@ -175,10 +184,20 @@ async def brute_force_search(
         if all(not item for item in results):
             return []
 
+        # Final statistics
+        projection_time = time.time() - start_time
+        logger.info(
+            f"Vector collection retrieval completed: Retrieved distances from {sum(1 for res in results if res)} collections in {projection_time:.2f}s"
+        )
+
         node_distances = {collection: result for collection, result in zip(collections, results)}
 
+        edge_distances = node_distances.get("EdgeType_relationship_name", None)
+
         await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)
-        await memory_fragment.map_vector_distances_to_graph_edges(vector_engine, query)
+        await memory_fragment.map_vector_distances_to_graph_edges(
+            vector_engine=vector_engine, query_vector=query_vector, edge_distances=edge_distances
+        )
 
         results = await memory_fragment.calculate_top_triplet_importances(k=top_k)
 

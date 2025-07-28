@@ -33,7 +33,7 @@ from .neo4j_metrics_utils import (
 from .deadlock_retry import deadlock_retry
 
 
-logger = get_logger("Neo4jAdapter", level=ERROR)
+logger = get_logger("Neo4jAdapter")
 
 BASE_LABEL = "__Node__"
 
@@ -870,34 +870,52 @@ class Neo4jAdapter(GraphDBInterface):
 
             A tuple containing two lists: nodes and edges with their properties.
         """
-        query = "MATCH (n) RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"
+        import time
 
-        result = await self.query(query)
+        start_time = time.time()
 
-        nodes = [
-            (
-                record["properties"]["id"],
-                record["properties"],
+        try:
+            # Retrieve nodes
+            query = "MATCH (n) RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties"
+            result = await self.query(query)
+
+            nodes = []
+            for record in result:
+                nodes.append(
+                    (
+                        record["properties"]["id"],
+                        record["properties"],
+                    )
+                )
+
+            # Retrieve edges
+            query = """
+            MATCH (n)-[r]->(m)
+            RETURN ID(n) AS source, ID(m) AS target, TYPE(r) AS type, properties(r) AS properties
+            """
+            result = await self.query(query)
+
+            edges = []
+            for record in result:
+                edges.append(
+                    (
+                        record["properties"]["source_node_id"],
+                        record["properties"]["target_node_id"],
+                        record["type"],
+                        record["properties"],
+                    )
+                )
+
+            retrieval_time = time.time() - start_time
+            logger.info(
+                f"Retrieved {len(nodes)} nodes and {len(edges)} edges in {retrieval_time:.2f} seconds"
             )
-            for record in result
-        ]
 
-        query = """
-        MATCH (n)-[r]->(m)
-        RETURN ID(n) AS source, ID(m) AS target, TYPE(r) AS type, properties(r) AS properties
-        """
-        result = await self.query(query)
-        edges = [
-            (
-                record["properties"]["source_node_id"],
-                record["properties"]["target_node_id"],
-                record["type"],
-                record["properties"],
-            )
-            for record in result
-        ]
+            return (nodes, edges)
 
-        return (nodes, edges)
+        except Exception as e:
+            logger.error(f"Error during graph data retrieval: {str(e)}")
+            raise
 
     async def get_nodeset_subgraph(
         self, node_type: Type[Any], node_name: List[str]
@@ -918,50 +936,71 @@ class Neo4jAdapter(GraphDBInterface):
             - Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]}: A tuple
               containing nodes and edges in the requested subgraph.
         """
-        label = node_type.__name__
+        import time
 
-        query = f"""
-        UNWIND $names AS wantedName
-        MATCH (n:`{label}`)
-        WHERE n.name = wantedName
-        WITH collect(DISTINCT n) AS primary
-        UNWIND primary AS p
-        OPTIONAL MATCH (p)--(nbr)
-        WITH primary, collect(DISTINCT nbr) AS nbrs
-        WITH primary + nbrs AS nodelist
-        UNWIND nodelist AS node
-        WITH collect(DISTINCT node) AS nodes
-        MATCH (a)-[r]-(b)
-        WHERE a IN nodes AND b IN nodes
-        WITH nodes, collect(DISTINCT r) AS rels
-        RETURN
-          [n IN nodes |
-             {{ id: n.id,
-                properties: properties(n) }}] AS rawNodes,
-          [r IN rels  |
-             {{ type: type(r),
-                properties: properties(r) }}] AS rawRels
-        """
+        start_time = time.time()
 
-        result = await self.query(query, {"names": node_name})
-        if not result:
-            return [], []
+        try:
+            label = node_type.__name__
 
-        raw_nodes = result[0]["rawNodes"]
-        raw_rels = result[0]["rawRels"]
+            query = f"""
+            UNWIND $names AS wantedName
+            MATCH (n:`{label}`)
+            WHERE n.name = wantedName
+            WITH collect(DISTINCT n) AS primary
+            UNWIND primary AS p
+            OPTIONAL MATCH (p)--(nbr)
+            WITH primary, collect(DISTINCT nbr) AS nbrs
+            WITH primary + nbrs AS nodelist
+            UNWIND nodelist AS node
+            WITH collect(DISTINCT node) AS nodes
+            MATCH (a)-[r]-(b)
+            WHERE a IN nodes AND b IN nodes
+            WITH nodes, collect(DISTINCT r) AS rels
+            RETURN
+              [n IN nodes |
+                 {{ id: n.id,
+                    properties: properties(n) }}] AS rawNodes,
+              [r IN rels  |
+                 {{ type: type(r),
+                    properties: properties(r) }}] AS rawRels
+            """
 
-        nodes = [(n["properties"]["id"], n["properties"]) for n in raw_nodes]
-        edges = [
-            (
-                r["properties"]["source_node_id"],
-                r["properties"]["target_node_id"],
-                r["type"],
-                r["properties"],
+            result = await self.query(query, {"names": node_name})
+
+            if not result:
+                return [], []
+
+            raw_nodes = result[0]["rawNodes"]
+            raw_rels = result[0]["rawRels"]
+
+            # Process nodes
+            nodes = []
+            for n in raw_nodes:
+                nodes.append((n["properties"]["id"], n["properties"]))
+
+            # Process edges
+            edges = []
+            for r in raw_rels:
+                edges.append(
+                    (
+                        r["properties"]["source_node_id"],
+                        r["properties"]["target_node_id"],
+                        r["type"],
+                        r["properties"],
+                    )
+                )
+
+            retrieval_time = time.time() - start_time
+            logger.info(
+                f"Retrieved {len(nodes)} nodes and {len(edges)} edges for {node_type.__name__} in {retrieval_time:.2f} seconds"
             )
-            for r in raw_rels
-        ]
 
-        return nodes, edges
+            return nodes, edges
+
+        except Exception as e:
+            logger.error(f"Error during nodeset subgraph retrieval: {str(e)}")
+            raise
 
     async def get_filtered_graph_data(self, attribute_filters):
         """
@@ -1011,8 +1050,8 @@ class Neo4jAdapter(GraphDBInterface):
 
         edges = [
             (
-                record["source"],
-                record["target"],
+                record["properties"]["source_node_id"],
+                record["properties"]["target_node_id"],
                 record["type"],
                 record["properties"],
             )

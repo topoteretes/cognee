@@ -19,7 +19,7 @@ class Data(Base):
     mime_type = Column(String)
     raw_data_location = Column(String)
     owner_id = Column(UUID, index=True)
-    tenant_id = Column(UUID, index=True, default=None)
+    tenant_id = Column(UUID, index=True, nullable=True)
     content_hash = Column(String)
     external_metadata = Column(JSON)
     # Store NodeSet as JSON list of strings
@@ -28,7 +28,7 @@ class Data(Base):
     # wouldn't be noticed when commiting a database session
     pipeline_status = Column(MutableDict.as_mutable(JSON))
     token_count = Column(Integer)
-    data_size = Column(Integer)  # File size in bytes
+    data_size = Column(Integer, nullable=True)  # File size in bytes
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 

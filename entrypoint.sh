@@ -4,6 +4,12 @@ set -e  # Exit on error
 echo "Debug mode: $DEBUG"
 echo "Environment: $ENVIRONMENT"
 
+# Set default ports if not specified
+DEBUG_PORT=${DEBUG_PORT:-5678}
+HTTP_PORT=${HTTP_PORT:-8000}
+echo "Debug port: $DEBUG_PORT"
+echo "HTTP port: $HTTP_PORT"
+
 # Run Alembic migrations with proper error handling.
 # Note on UserAlreadyExists error handling:
 # During database migrations, we attempt to create a default user. If this user
@@ -37,10 +43,10 @@ sleep 2
 if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
     if [ "$DEBUG" = "true" ]; then
         echo "Waiting for the debugger to attach..."
-        debugpy --wait-for-client --listen 0.0.0.0:5678 -m gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level debug --reload cognee.api.client:app
+        debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:$HTTP_PORT --log-level debug --reload cognee.api.client:app
     else
-        gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level debug --reload cognee.api.client:app
+        gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:$HTTP_PORT --log-level debug --reload cognee.api.client:app
     fi
 else
-    gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:8000 --log-level error cognee.api.client:app
+    gunicorn -w 3 -k uvicorn.workers.UvicornWorker -t 30000 --bind=0.0.0.0:$HTTP_PORT --log-level error cognee.api.client:app
 fi
