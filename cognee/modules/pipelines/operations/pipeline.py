@@ -2,7 +2,6 @@ import asyncio
 from uuid import UUID
 from typing import Union
 
-from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset

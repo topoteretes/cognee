@@ -1,5 +1,4 @@
 import os
-import cognee.modules.ingestion as ingestion
 
 import asyncio
 from uuid import UUID
@@ -7,6 +6,7 @@ from typing import Any
 from functools import wraps
 from sqlalchemy import select
 
+import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.pipelines.operations.run_tasks_distributed import run_tasks_distributed
