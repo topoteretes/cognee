@@ -17,7 +17,7 @@ from cognee.infrastructure.databases.graph.graph_db_interface import (
     EdgeData,
     Node,
 )
-from cognee.infrastructure.databases.vector.embeddings import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.infrastructure.engine import DataPoint
 
@@ -80,7 +80,7 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         self,
         database_url: str,
         database_port: int,
-        embedding_engine=EmbeddingEngine,
+        embedding_engine: EmbeddingEngine,
     ):
         self.driver = FalkorDB(
             host=database_url,
@@ -213,7 +213,7 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
             A tuple containing the query string and parameters dictionary.
         """
         node_label = type(data_point).__name__
-        property_names = DataPoint.get_embeddable_property_names(data_point)
+        property_names = data_point.get_embeddable_property_names()
 
         properties = {
             **data_point.model_dump(),
@@ -357,7 +357,7 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
         vector_map = {}
 
         for data_point in data_points:
-            property_names = DataPoint.get_embeddable_property_names(data_point)
+            property_names = data_point.get_embeddable_property_names()
             key = str(data_point.id)
             vector_map[key] = {}
 
@@ -377,7 +377,7 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
                 vectorized_values[vector_map[str(data_point.id)][property_name]]
                 if vector_map[str(data_point.id)][property_name] is not None
                 else None
-                for property_name in DataPoint.get_embeddable_property_names(data_point)
+                for property_name in data_point.get_embeddable_property_names()
             ]
 
             query, params = await self.create_data_point_query(data_point, vectorized_data)

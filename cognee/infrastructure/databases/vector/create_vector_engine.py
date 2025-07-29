@@ -1,3 +1,4 @@
+from typing import Optional
 from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
 
@@ -8,7 +9,7 @@ from functools import lru_cache
 def create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
-    vector_db_port: str = "",
+    vector_db_port: Optional[int] = None,
     vector_db_key: str = "",
 ):
     """
@@ -26,7 +27,7 @@ def create_vector_engine(
     -----------
 
         - vector_db_url (str): The URL for the vector database instance.
-        - vector_db_port (str): The port for the vector database instance. Required for some
+        - vector_db_port (int): The port for the vector database instance. Required for some
           providers.
         - vector_db_key (str): The API key or access token for the vector database instance.
         - vector_db_provider (str): The name of the vector database provider to use (e.g.,

@@ -294,10 +294,10 @@ class SQLAlchemyAdapter:
                 storage_config = get_storage_config()
 
                 if (
-                    storage_config["data_root_directory"]
+                    storage_config.data_root_directory
                     in raw_data_location_entities[0].raw_data_location
                 ):
-                    file_storage = get_file_storage(storage_config["data_root_directory"])
+                    file_storage = get_file_storage(storage_config.data_root_directory)
 
                     file_path = os.path.basename(raw_data_location_entities[0].raw_data_location)
 
