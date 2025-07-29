@@ -42,7 +42,7 @@ async def extract_content_graph(
     #     return graph
 
     # else:
-    graph = await b.ExtractContentGraph(
+    graph = await b.ExtractContentGraphGeneric(
         content, mode=mode, baml_options={"client_registry": baml_registry}
     )
 

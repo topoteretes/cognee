@@ -8,18 +8,24 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class BaseConfig(BaseSettings):
     data_root_directory: str = get_absolute_path(".data_storage")
+    system_root_directory: str = get_absolute_path(".data_storage")
     monitoring_tool: object = Observer.LANGFUSE
     langfuse_public_key: Optional[str] = os.getenv("LANGFUSE_PUBLIC_KEY")
     langfuse_secret_key: Optional[str] = os.getenv("LANGFUSE_SECRET_KEY")
     langfuse_host: Optional[str] = os.getenv("LANGFUSE_HOST")
     default_user_email: Optional[str] = os.getenv("DEFAULT_USER_EMAIL")
     default_user_password: Optional[str] = os.getenv("DEFAULT_USER_PASSWORD")
+    structured_output_framework: str = os.getenv(
+        "STRUCTURED_OUTPUT_FRAMEWORK", "llitellm_instructor"
+    )
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:
         return {
             "data_root_directory": self.data_root_directory,
+            "system_root_directory": self.system_root_directory,
             "monitoring_tool": self.monitoring_tool,
+            "structured_output_framework": self.structured_output_framework,
         }
 
 

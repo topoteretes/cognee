@@ -8,7 +8,9 @@ from litellm.exceptions import ContentPolicyViolationError
 from instructor.exceptions import InstructorRetryException
 
 from cognee.exceptions import InvalidValueError
-from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import (
+    read_query_prompt,
+)
 from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
