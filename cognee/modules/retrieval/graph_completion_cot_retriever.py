@@ -122,4 +122,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                     f"Chain-of-thought: round {round_idx} - follow-up question: {followup_question}"
                 )
 
+        if context and triplets:
+            await self.save_qa(question=query, answer=answer, context=context, triplets=triplets)
+
         return [answer]

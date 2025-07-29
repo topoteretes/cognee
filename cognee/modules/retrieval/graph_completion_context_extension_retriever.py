@@ -114,4 +114,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             system_prompt_path=self.system_prompt_path,
         )
 
+        if context and triplets:
+            await self.save_qa(question=query, answer=answer, context=context, triplets=triplets)
+
         return [answer]
