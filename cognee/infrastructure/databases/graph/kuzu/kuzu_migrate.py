@@ -94,6 +94,7 @@ def ensure_env(version: str, export_dir) -> str:
 
     print(f"→ Setting up venv for Kùzu {version}...", file=sys.stderr)
     # Create venv
+    # NOTE: Running python in debug mode can cause issues with creating a virtual environment from that python instance
     subprocess.run([sys.executable, "-m", "venv", base], check=True)
     # Install the specific Kùzu version
     subprocess.run([py_bin, "-m", "pip", "install", "--upgrade", "pip"], check=True)
@@ -169,6 +170,10 @@ def kuzu_migration(new_db, old_db, new_version, old_version=None, overwrite=None
 
     # Rename new kuzu database to old kuzu database name if enabled
     if overwrite or delete_old:
+        # Remove kuzu lock from migrated DB
+        lock_file = new_db + ".lock"
+        if os.path.exists(lock_file):
+            os.remove(lock_file)
         rename_databases(old_db, old_version, new_db, delete_old)
 
     print("✅ Kuzu graph database migration finished successfully!")
@@ -189,7 +194,7 @@ def rename_databases(old_db: str, old_version: str, new_db: str, delete_old: boo
 
     if os.path.isfile(old_db):
         # File-based database: handle main file and accompanying lock/WAL
-        for ext in ["", ".lock", ".wal"]:
+        for ext in ["", ".wal"]:
             src = old_db + ext
             dst = backup_base + ext
             if os.path.exists(src):
@@ -211,7 +216,7 @@ def rename_databases(old_db: str, old_version: str, new_db: str, delete_old: boo
         sys.exit(1)
 
     # Now move new files into place
-    for ext in ["", ".lock", ".wal"]:
+    for ext in ["", ".wal"]:
         src_new = new_db + ext
         dst_new = os.path.join(base_dir, name + ext)
         if os.path.exists(src_new):
@@ -227,7 +232,7 @@ Examples:
   %(prog)s --old-version 0.9.0 --new-version 0.11.0 \\
     --old-db /path/to/old/db --new-db /path/to/new/db --overwrite
 
-Note: This script will create virtual environments in .kuzu_envs/ directory
+Note: This script will create temporary virtual environments in .kuzu_envs/ directory
 to isolate different Kuzu versions.
         """,
         formatter_class=argparse.RawDescriptionHelpFormatter,

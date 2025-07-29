@@ -37,6 +37,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 .python-version
+cognee-mcp/.python-version
 MANIFEST
 
 # PyInstaller
