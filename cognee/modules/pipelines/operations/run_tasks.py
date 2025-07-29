@@ -25,6 +25,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunYield,
     PipelineRunAlreadyCompleted,
 )
+from cognee.modules.pipelines.models.DataItemStatus import DataItemStatus
 
 from cognee.modules.pipelines.operations import (
     log_pipeline_run_start,
@@ -99,7 +100,7 @@ async def run_tasks(
             if data_point:
                 if (
                     data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
-                    == "Completed"
+                    == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
                 ):
                     yield {
                         "run_info": PipelineRunAlreadyCompleted(
@@ -132,7 +133,9 @@ async def run_tasks(
                 data_point = (
                     await session.execute(select(Data).filter(Data.id == data_id))
                 ).scalar_one_or_none()
-                data_point.pipeline_status[pipeline_name] = {str(dataset.id): "Completed"}
+                data_point.pipeline_status[pipeline_name] = {
+                    str(dataset.id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+                }
                 await session.merge(data_point)
                 await session.commit()
 

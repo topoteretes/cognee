@@ -36,11 +36,6 @@ class PipelineRunAlreadyCompleted(PipelineRunInfo):
     pass
 
 
-class PipelineRun(PipelineRunInfo):
-    status: str = "PipelineRunCompleted"
-    pass
-
-
 class PipelineRunErrored(PipelineRunInfo):
     status: str = "PipelineRunErrored"
     pass
