@@ -1,5 +1,3 @@
-import json
-import tempfile
 from uuid import UUID
 from typing import Dict, Any, List
 from datetime import datetime, timezone
@@ -167,11 +165,11 @@ async def _export_vector_data(dataset_id: UUID, user: User) -> Dict[str, Any]:
                 },
                 "collection_count": 1
             }
-        else:
-            return {
-                "collections": {},
-                "collection_count": 0
-            }
+        
+        return {
+            "collections": {},
+            "collection_count": 0
+        }
             
     except Exception as e:
         logger.error(f"Error exporting vector data: {str(e)}")
@@ -256,7 +254,7 @@ def _node_belongs_to_dataset(node_data: Dict[str, Any], dataset_id: UUID) -> boo
         properties = node_data.get("properties", {})
         if isinstance(properties, dict):
             return properties.get("dataset_id") == str(dataset_id)
-        elif isinstance(properties, str):
+        if isinstance(properties, str):
             # Handle JSON string properties
             try:
                 import json

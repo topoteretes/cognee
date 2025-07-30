@@ -1,10 +1,8 @@
 from uuid import UUID
 from datetime import datetime
-from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import json
 from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File
-from fastapi.responses import JSONResponse, Response
 
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.modules.users.models import User
