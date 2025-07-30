@@ -192,17 +192,17 @@ def get_data_router() -> APIRouter:
             
             return import_result
             
-        except ValueError as error:
-            logger.error(f"Validation error importing dataset: {str(error)}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid transfer file: {str(error)}",
-            ) from error
         except json.JSONDecodeError as error:
             logger.error(f"JSON decode error importing dataset: {str(error)}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid JSON format in transfer file",
+            ) from error
+        except ValueError as error:
+            logger.error(f"Validation error importing dataset: {str(error)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid transfer file: {str(error)}",
             ) from error
         except Exception as error:
             logger.error(f"Error importing dataset: {str(error)}")

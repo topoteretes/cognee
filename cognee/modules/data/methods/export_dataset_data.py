@@ -28,7 +28,10 @@ async def export_dataset_data(dataset_id: UUID, user: User) -> Dict[str, Any]:
     logger.info(f"Starting export of dataset {dataset_id} for user {user.id}")
     
     # Set database context for the user
-    set_database_global_context_variables(user=user)
+    await set_database_global_context_variables(
+        dataset=dataset_id,
+        user_id=user.id
+    )
     
     try:
         # Get dataset metadata from PostgreSQL
