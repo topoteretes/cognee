@@ -21,6 +21,7 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
 from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
+from cognee.modules.retrieval.user_qa_feedback import UserQAFeedback
 from cognee.modules.search.types import SearchType
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.users.models import User
@@ -39,6 +40,7 @@ async def search(
     top_k: int = 10,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
+    last_k: Optional[int] = None,
 ):
     """
 
@@ -49,6 +51,7 @@ async def search(
         user:
         system_prompt_path:
         top_k:
+        last_k:
 
     Returns:
 
@@ -71,6 +74,7 @@ async def search(
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
+        last_k=last_k,
     )
 
     await log_result(
@@ -92,6 +96,7 @@ async def specific_search(
     top_k: int = 10,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
+    last_k: Optional[int] = None,
 ) -> list:
     search_tasks: dict[SearchType, Callable] = {
         SearchType.SUMMARIES: SummariesRetriever(top_k=top_k).get_completion,
@@ -127,6 +132,7 @@ async def specific_search(
         SearchType.CODE: CodeRetriever(top_k=top_k).get_completion,
         SearchType.CYPHER: CypherSearchRetriever().get_completion,
         SearchType.NATURAL_LANGUAGE: NaturalLanguageRetriever().get_completion,
+        SearchType.FEEDBACK: UserQAFeedback(last_k=last_k).add_feedback,
     }
 
     search_task = search_tasks.get(query_type)

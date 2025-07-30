@@ -1287,3 +1287,28 @@ class Neo4jAdapter(GraphDBInterface):
         """
         result = await self.query(query)
         return [record["n"] for record in result] if result else []
+
+    async def get_last_user_interaction_ids(self, limit: int) -> List[str]:
+        """
+        Retrieve the IDs of the most recent CogneeUserInteraction nodes.
+
+        Parameters:
+        -----------
+        - limit (int): The maximum number of interaction IDs to return.
+
+        Returns:
+        --------
+        - List[str]: A list of interaction IDs, sorted by created_at descending.
+        """
+
+        query = """
+        MATCH (n)
+        WHERE n.type = 'CogneeUserInteraction'
+        RETURN n.id as id
+        ORDER BY n.created_at DESC
+        LIMIT $limit
+        """
+        rows = await self.query(query, {"limit": limit})
+
+        id_list = [row["id"] for row in rows if "id" in row]
+        return id_list

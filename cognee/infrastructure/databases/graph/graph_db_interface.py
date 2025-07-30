@@ -388,3 +388,14 @@ class GraphDBInterface(ABC):
             - node_id (str): Unique identifier of the node for which to retrieve connections.
         """
         raise NotImplementedError
+
+    async def get_last_user_interaction_ids(self, limit: int) -> List[str]:
+        """
+        Get the last n userintaraction node ids from the graph
+
+        Parameters:
+        -----------
+
+            - limit (str): Last n userintaraction node ids to retrieve.
+        """
+        raise NotImplementedError

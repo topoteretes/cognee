@@ -19,6 +19,7 @@ async def search(
     top_k: int = 10,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
+    last_k: Optional[int] = None,
 ) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -101,6 +102,8 @@ async def search(
 
         node_name: Filter results to specific named entities (for targeted search).
 
+        last_k: Defines the number of historical answers to give the feedback to.
+
     Returns:
         list: Search results in format determined by query_type:
 
@@ -179,6 +182,7 @@ async def search(
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
+        last_k=last_k,
     )
 
     return filtered_search_results

@@ -10,3 +10,10 @@ class CogneeUserInteraction(DataPoint):
     answer: str
     context: str
     belongs_to_set: Optional[NodeSet] = None
+
+
+class CogneeUserFeedback(DataPoint):
+    """User - Cognee Feedback"""
+
+    feedback: str
+    belongs_to_set: Optional[NodeSet] = None
