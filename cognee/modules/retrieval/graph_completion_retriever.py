@@ -88,6 +88,21 @@ class GraphCompletionRetriever(BaseRetriever):
         )
         return f"Nodes:\n{node_section}\n\nConnections:\n{connection_section}"
 
+    def extract_uuid_from_node(self, node: Any) -> Optional[UUID]:
+        """
+        Try to pull a UUID string out of node.id or node.properties['id'],
+        then return a UUID instance (or None if neither exists).
+        """
+        id_str = None
+        if not id_str:
+            id_str = getattr(node, "id", None)
+
+        if hasattr(node, "attributes") and not id_str:
+            id_str = node.attributes.get("id", None)
+
+        id = UUID(id_str) if isinstance(id_str, str) else None
+        return id
+
     async def save_qa(self, question: str, answer: str, context: str, triplets: List) -> None:
         """
         Saves a question and answer pair for later analysis or storage.
@@ -118,42 +133,42 @@ class GraphCompletionRetriever(BaseRetriever):
         relationships = []
         relationship_name = "used_graph_element_to_answer"
         for triplet in triplets:
-            target_id_1 = UUID(triplet.node1.id)
-            target_id_2 = UUID(triplet.node2.id)
-
-            # Defined qa node to triplet  node 1
-            relationships.append(
-                (
-                    source_id,
-                    target_id_1,
-                    relationship_name,
-                    {
-                        "relationship_name": relationship_name,
-                        "source_node_id": source_id,
-                        "target_node_id": target_id_1,
-                        "ontology_valid": False,
-                    },
+            target_id_1 = self.extract_uuid_from_node(triplet.node1)
+            target_id_2 = self.extract_uuid_from_node(triplet.node2)
+            if target_id_1 and target_id_2:
+                # Defined qa node to triplet  node 1
+                relationships.append(
+                    (
+                        source_id,
+                        target_id_1,
+                        relationship_name,
+                        {
+                            "relationship_name": relationship_name,
+                            "source_node_id": source_id,
+                            "target_node_id": target_id_1,
+                            "ontology_valid": False,
+                        },
+                    )
                 )
-            )
 
-            # Defined qa node to triplet  node 2
-            relationships.append(
-                (
-                    source_id,
-                    target_id_2,
-                    relationship_name,
-                    {
-                        "relationship_name": relationship_name,
-                        "source_node_id": source_id,
-                        "target_node_id": target_id_2,
-                        "ontology_valid": False,
-                    },
+                # Defined qa node to triplet  node 2
+                relationships.append(
+                    (
+                        source_id,
+                        target_id_2,
+                        relationship_name,
+                        {
+                            "relationship_name": relationship_name,
+                            "source_node_id": source_id,
+                            "target_node_id": target_id_2,
+                            "ontology_valid": False,
+                        },
+                    )
                 )
-            )
 
-        if len(relationships) > 0:
-            graph_engine = await get_graph_engine()
-            await graph_engine.add_edges(relationships)
+            if len(relationships) > 0:
+                graph_engine = await get_graph_engine()
+                await graph_engine.add_edges(relationships)
 
     async def get_triplets(self, query: str) -> list:
         """
