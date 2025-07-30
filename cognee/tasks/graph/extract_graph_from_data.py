@@ -3,6 +3,7 @@ from typing import Type, List
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.base_config import get_base_config
@@ -51,7 +52,7 @@ async def integrate_chunk_graphs(
     )
 
     if len(graph_nodes) > 0:
-        await graph_engine.add_nodes(graph_nodes)
+        await add_data_points(graph_nodes)
 
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
