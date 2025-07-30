@@ -1,6 +1,6 @@
 "use client";
 
-import { MutableRefObject, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { MutableRefObject, useEffect, useImperativeHandle, useRef, useState, useCallback } from "react";
 import { forceCollide, forceManyBody } from "d3-force-3d";
 import ForceGraph, { ForceGraphMethods, GraphData, LinkObject, NodeObject } from "react-force-graph-2d";
 import { GraphControlsAPI } from "./GraphControls";
@@ -21,6 +21,45 @@ export default function GraphVisualization({ ref, data, graphControls }: GraphVi
   const textSize = 6;
   const nodeSize = 15;
   // const addNodeDistanceFromSourceNode = 15;
+
+  // State for tracking container dimensions
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Handle resize
+  const handleResize = useCallback(() => {
+    if (containerRef.current) {
+      const { clientWidth, clientHeight } = containerRef.current;
+      setDimensions({ width: clientWidth, height: clientHeight });
+
+      // Trigger graph refresh after resize
+      if (graphRef.current) {
+        // Small delay to ensure DOM has updated
+        setTimeout(() => {
+          graphRef.current?.zoomToFit(1000,50);
+        }, 100);
+      }
+    }
+  }, []);
+
+  // Set up resize observer
+  useEffect(() => {
+    // Initial size calculation
+    handleResize();
+
+    // ResizeObserver 
+    const resizeObserver = new ResizeObserver(() => {
+      handleResize();
+    });
+
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [handleResize]);
 
   const handleNodeClick = (node: NodeObject) => {
     graphControls.current?.setSelectedNode(node);
@@ -174,10 +213,12 @@ export default function GraphVisualization({ ref, data, graphControls }: GraphVi
   }));
 
   return (
-    <div className="w-full h-full" id="graph-container">
+    <div ref={containerRef} className="w-full h-full" id="graph-container">
       {(data && typeof window !== "undefined") ? (
         <ForceGraph
           ref={graphRef}
+          width={dimensions.width}
+          height={dimensions.height}
           dagMode={graphShape as unknown as undefined}
           dagLevelDistance={300}
           onDagError={handleDagError}
@@ -201,6 +242,8 @@ export default function GraphVisualization({ ref, data, graphControls }: GraphVi
       ) : (
         <ForceGraph
           ref={graphRef}
+          width={dimensions.width}
+          height={dimensions.height}
           dagMode={graphShape as unknown as undefined}
           dagLevelDistance={100}
           graphData={{
