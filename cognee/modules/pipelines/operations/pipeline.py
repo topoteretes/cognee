@@ -46,6 +46,7 @@ async def cognee_pipeline(
     pipeline_name: str = "custom_pipeline",
     vector_db_config: dict = None,
     graph_db_config: dict = None,
+    incremental_loading: bool = True,
 ):
     # Note: These context variables allow different value assignment for databases in Cognee
     #       per async task, thread, process and etc.
@@ -100,6 +101,7 @@ async def cognee_pipeline(
             data=data,
             pipeline_name=pipeline_name,
             context={"dataset": dataset},
+            incremental_loading=incremental_loading,
         ):
             yield run_info
 
@@ -111,6 +113,7 @@ async def run_pipeline(
     data=None,
     pipeline_name: str = "custom_pipeline",
     context: dict = None,
+    incremental_loading=True,
 ):
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
@@ -149,7 +152,9 @@ async def run_pipeline(
             )
             return
 
-    pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name, context)
+    pipeline_run = run_tasks(
+        tasks, dataset_id, data, user, pipeline_name, context, incremental_loading
+    )
 
     async for pipeline_run_info in pipeline_run:
         yield pipeline_run_info

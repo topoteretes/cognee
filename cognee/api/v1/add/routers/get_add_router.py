@@ -12,6 +12,7 @@ from typing import BinaryIO, List, Literal, Optional, Union
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
+from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -106,6 +107,9 @@ def get_add_router() -> APIRouter:
                 add_run = await cognee_add(
                     data, dataset_name=datasetName, user=user, dataset_id=datasetId
                 )
+
+                if isinstance(add_run, PipelineRunErrored):
+                    return JSONResponse(status_code=420, content=add_run.model_dump(mode="json"))
 
                 return add_run.model_dump() if add_run else None
         except Exception as error:

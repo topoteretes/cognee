@@ -22,6 +22,7 @@ async def add(
     user: Optional[User] = None,
     node_set: Optional[List[str]] = None,
     dataset_id: Optional[UUID] = None,
+    incremental_loading: bool = True,
 ):
     """
     Add data to Cognee for knowledge graph processing.
@@ -178,6 +179,7 @@ async def add(
         dataset=authorized_dataset,
         user=user,
         pipeline_name="add_pipeline",
+        incremental_loading=incremental_loading,
     ):
         pipeline_run_info = run_info
 

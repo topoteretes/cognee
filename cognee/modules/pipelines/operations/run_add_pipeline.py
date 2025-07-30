@@ -1,3 +1,4 @@
+from typing import Optional
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.data.models import Dataset
@@ -17,6 +18,7 @@ async def run_add_pipeline(
     dataset: Dataset,
     user: User,
     pipeline_name: str = "add_pipeline",
+    incremental_loading: Optional[bool] = True,
 ):
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
@@ -30,6 +32,7 @@ async def run_add_pipeline(
             "user": user,
             "dataset": dataset,
         },
+        incremental_loading,
     )
 
     async for pipeline_run_info in pipeline_run:
