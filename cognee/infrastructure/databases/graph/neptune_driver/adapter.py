@@ -71,10 +71,10 @@ class NeptuneGraphDB(GraphDBInterface):
 
         # Validate configuration
         if not validate_graph_id(graph_id):
-            raise NeptuneAnalyticsConfigurationError(f"Invalid graph ID: \"{graph_id}\"")
+            raise NeptuneAnalyticsConfigurationError(message=f"Invalid graph ID: \"{graph_id}\"")
         
         if region and not validate_aws_region(region):
-            raise NeptuneAnalyticsConfigurationError(f"Invalid AWS region: \"{region}\"")
+            raise NeptuneAnalyticsConfigurationError(message=f"Invalid AWS region: \"{region}\"")
         
         self.graph_id = graph_id
         self.region = region
@@ -123,7 +123,7 @@ class NeptuneGraphDB(GraphDBInterface):
             return client
             
         except Exception as e:
-            raise NeptuneAnalyticsConfigurationError(f"Failed to initialize Neptune Analytics client: {format_neptune_error(e)}") from e
+            raise NeptuneAnalyticsConfigurationError(message=f"Failed to initialize Neptune Analytics client: {format_neptune_error(e)}") from e
 
     @staticmethod
     def _serialize_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
