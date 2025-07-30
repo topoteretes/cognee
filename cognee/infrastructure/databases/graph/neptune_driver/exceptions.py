@@ -46,7 +46,7 @@ class NeptuneAnalyticsAuthenticationError(NeptuneAnalyticsError):
         self,
         message: str = "Authentication with Neptune Analytics failed. Please verify your credentials.",
         name: str = "NeptuneAnalyticsAuthenticationError",
-        status_code=status.HTTP_400_BAD_REQUEST
+        status_code=status.HTTP_401_UNAUTHORIZED
     ):
         super().__init__(message, name, status_code)
 
