@@ -1,6 +1,7 @@
 import enum
-from uuid import uuid4
+from uuid import uuid4, UUID as UUID_t
 from datetime import datetime, timezone
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import Column, DateTime, JSON, Enum, UUID, String
 from cognee.infrastructure.databases.relational import Base
 
@@ -19,9 +20,9 @@ class PipelineRun(Base):
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    status = Column(Enum(PipelineRunStatus))
-    pipeline_run_id = Column(UUID, index=True)
+    status: Mapped[PipelineRunStatus] = mapped_column(Enum(PipelineRunStatus))
+    pipeline_run_id: Mapped[UUID_t] = mapped_column(UUID, index=True)
     pipeline_name = Column(String)
-    pipeline_id = Column(UUID, index=True)
-    dataset_id = Column(UUID, index=True)
+    pipeline_id: Mapped[UUID_t] = mapped_column(UUID(as_uuid=True), index=True)
+    dataset_id: Mapped[UUID_t] = mapped_column(UUID(as_uuid=True), index=True)
     run_info = Column(JSON)

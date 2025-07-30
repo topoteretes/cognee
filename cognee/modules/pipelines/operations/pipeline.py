@@ -3,24 +3,23 @@ from uuid import UUID
 from typing import Union
 
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.engine.operations.setup import setup
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
-from cognee.modules.pipelines.utils import generate_pipeline_id
+from cognee.modules.pipelines.utils import validate_pipeline_inputs
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.methods import get_pipeline_run_by_dataset
 
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
-from cognee.modules.pipelines.operations import log_pipeline_run_initiated
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
     load_or_create_datasets,
-    check_dataset_name,
 )
 
 from cognee.modules.pipelines.models.PipelineRunInfo import (
@@ -28,12 +27,6 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunStarted,
 )
 
-from cognee.infrastructure.databases.relational import (
-    create_db_and_tables as create_relational_db_and_tables,
-)
-from cognee.infrastructure.databases.vector.pgvector import (
-    create_db_and_tables as create_pgvector_db_and_tables,
-)
 from cognee.context_global_variables import (
     graph_db_config as context_graph_db_config,
     vector_db_config as context_vector_db_config,
@@ -44,6 +37,7 @@ logger = get_logger("cognee.pipeline")
 update_status_lock = asyncio.Lock()
 
 
+@validate_pipeline_inputs
 async def cognee_pipeline(
     tasks: list[Task],
     data=None,
@@ -60,9 +54,8 @@ async def cognee_pipeline(
     if graph_db_config:
         context_graph_db_config.set(graph_db_config)
 
-    # Create tables for databases
-    await create_relational_db_and_tables()
-    await create_pgvector_db_and_tables()
+    # Create databases if they don't exist
+    await setup()
 
     # Initialize first_run attribute if it doesn't exist
     if not hasattr(cognee_pipeline, "first_run"):
@@ -84,16 +77,17 @@ async def cognee_pipeline(
     if isinstance(datasets, str) or isinstance(datasets, UUID):
         datasets = [datasets]
 
-    # Get datasets user wants write permissions for (verify user has permissions if datasets are provided as well)
-    # NOTE: If a user wants to write to a dataset he does not own it must be provided through UUID
-    existing_datasets = await get_authorized_existing_datasets(datasets, "write", user)
+    if not all([isinstance(dataset, Dataset) for dataset in datasets]):
+        # Get datasets user wants write permissions for (verify user has permissions if datasets are provided as well)
+        # NOTE: If a user wants to write to a dataset he does not own it must be provided through UUID
+        existing_datasets = await get_authorized_existing_datasets(datasets, "write", user)
 
-    if not datasets:
-        # Get datasets from database if none sent.
-        datasets = existing_datasets
-    else:
-        # If dataset matches an existing Dataset (by name or id), reuse it. Otherwise, create a new Dataset.
-        datasets = await load_or_create_datasets(datasets, existing_datasets, user)
+        if not datasets:
+            # Get datasets from database if none sent.
+            datasets = existing_datasets
+        else:
+            # If dataset matches an existing Dataset (by name or id), reuse it. Otherwise, create a new Dataset.
+            datasets = await load_or_create_datasets(datasets, existing_datasets, user)
 
     if not datasets:
         raise DatasetNotFoundError("There are no datasets to work with.")
@@ -118,30 +112,8 @@ async def run_pipeline(
     pipeline_name: str = "custom_pipeline",
     context: dict = None,
 ):
-    check_dataset_name(dataset.name)
-
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
-
-    # Ugly hack, but no easier way to do this.
-    if pipeline_name == "add_pipeline":
-        pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
-        # Refresh the add pipeline status so data is added to a dataset.
-        # Without this the app_pipeline status will be DATASET_PROCESSING_COMPLETED and will skip the execution.
-
-        await log_pipeline_run_initiated(
-            pipeline_id=pipeline_id,
-            pipeline_name="add_pipeline",
-            dataset_id=dataset.id,
-        )
-
-        # Refresh the cognify pipeline status after we add new files.
-        # Without this the cognify_pipeline status will be DATASET_PROCESSING_COMPLETED and will skip the execution.
-        await log_pipeline_run_initiated(
-            pipeline_id=pipeline_id,
-            pipeline_name="cognify_pipeline",
-            dataset_id=dataset.id,
-        )
 
     dataset_id = dataset.id
 
@@ -176,13 +148,6 @@ async def run_pipeline(
                 dataset_name=dataset.name,
             )
             return
-
-    if not isinstance(tasks, list):
-        raise ValueError("Tasks must be a list")
-
-    for task in tasks:
-        if not isinstance(task, Task):
-            raise ValueError(f"Task {task} is not an instance of Task")
 
     pipeline_run = run_tasks(tasks, dataset_id, data, user, pipeline_name, context)
 

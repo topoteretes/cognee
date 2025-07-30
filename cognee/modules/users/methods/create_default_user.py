@@ -4,8 +4,8 @@ from cognee.base_config import get_base_config
 
 async def create_default_user():
     base_config = get_base_config()
-    default_user_email = base_config.default_user_email or "default_user@example.com"
-    default_user_password = base_config.default_user_password or "default_password"
+    default_user_email = base_config.default_user_email
+    default_user_password = base_config.default_user_password
 
     user = await create_user(
         email=default_user_email,

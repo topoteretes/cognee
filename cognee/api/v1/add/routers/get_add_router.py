@@ -2,11 +2,12 @@ import os
 import requests
 import subprocess
 from uuid import UUID
+from io import BytesIO
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from fastapi import Form, File, UploadFile, Depends
-from typing import List, Optional, Union, Literal
+from typing import BinaryIO, List, Literal, Optional, Union
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
@@ -69,10 +70,11 @@ def get_add_router() -> APIRouter:
             },
         )
 
-        from cognee.api.v1.add import add as cognee_add
+        # Swagger send empty string so we convert it to None for type consistency
+        if datasetId == "":
+            datasetId = None
 
-        if not datasetId and not datasetName:
-            raise ValueError("Either datasetId or datasetName must be provided.")
+        from cognee.api.v1.add import add as cognee_add
 
         try:
             if (
@@ -88,19 +90,24 @@ def get_add_router() -> APIRouter:
                     await cognee_add(
                         "data://.data/",
                         f"{repo_name}",
+                        user=user,
                     )
                 else:
                     # Fetch and store the data from other types of URL using curl
                     response = requests.get(data)
                     response.raise_for_status()
 
-                    file_data = await response.content()
-                    # TODO: Update add call with dataset info
-                    return await cognee_add(file_data)
+                    file_data = response.content
+                    binary_io_data: BinaryIO = BytesIO(file_data)
+                    return await cognee_add(
+                        binary_io_data, dataset_name=datasetName, user=user, dataset_id=datasetId
+                    )
             else:
-                add_run = await cognee_add(data, datasetName, user=user, dataset_id=datasetId)
+                add_run = await cognee_add(
+                    data, dataset_name=datasetName, user=user, dataset_id=datasetId
+                )
 
-                return add_run.model_dump()
+                return add_run.model_dump() if add_run else None
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 

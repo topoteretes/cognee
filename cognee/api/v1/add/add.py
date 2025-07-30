@@ -1,19 +1,26 @@
 from uuid import UUID
+from fastapi import UploadFile
 from typing import Union, BinaryIO, List, Optional
 
 from cognee.modules.pipelines import Task
 from cognee.modules.users.models import User
-from cognee.modules.pipelines import cognee_pipeline
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.engine.operations.setup import setup
+from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
+from cognee.modules.data.methods import (
+    get_authorized_dataset,
+    get_authorized_dataset_by_name,
+    create_authorized_dataset,
+)
+from cognee.modules.pipelines.operations.run_add_pipeline import run_add_pipeline
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 
 
 async def add(
-    data: Union[BinaryIO, list[BinaryIO], str, list[str]],
-    dataset_name: str = "main_dataset",
-    user: User = None,
+    data: Union[BinaryIO, List[BinaryIO], str, List[str], UploadFile, List[UploadFile]],
+    dataset_name: Optional[str] = "main_dataset",
+    user: Optional[User] = None,
     node_set: Optional[List[str]] = None,
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
     dataset_id: Optional[UUID] = None,
 ):
     """
@@ -67,8 +74,6 @@ async def add(
               Users can only access datasets they have permissions for.
         node_set: Optional list of node identifiers for graph organization and access control.
                  Used for grouping related data points in the knowledge graph.
-        vector_db_config: Optional configuration for vector database (for custom setups).
-        graph_db_config: Optional configuration for graph database (for custom setups).
         dataset_id: Optional specific dataset UUID to use instead of dataset_name.
 
     Returns:
@@ -138,21 +143,41 @@ async def add(
         UnsupportedFileTypeError: If file format cannot be processed
         InvalidValueError: If LLM_API_KEY is not set or invalid
     """
+    # Create databases if not already created
+    await setup()
+
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),
         Task(ingest_data, dataset_name, user, node_set, dataset_id),
     ]
 
+    if not user:
+        user = await get_default_user()
+
+    if dataset_id:
+        authorized_dataset = await get_authorized_dataset(dataset_id, user, "write")
+    elif dataset_name:
+        authorized_dataset = await get_authorized_dataset_by_name(dataset_name, user, "write")
+        if not authorized_dataset:
+            authorized_dataset = await create_authorized_dataset(
+                dataset_name=dataset_name, user=user
+            )
+    else:
+        raise ValueError("Either dataset_id or dataset_name must be provided.")
+
+    if not authorized_dataset:
+        raise DatasetNotFoundError(
+            message=f"Dataset ({str(dataset_id) or dataset_name}) not found."
+        )
+
     pipeline_run_info = None
 
-    async for run_info in cognee_pipeline(
+    async for run_info in run_add_pipeline(
         tasks=tasks,
-        datasets=dataset_id if dataset_id else dataset_name,
         data=data,
+        dataset=authorized_dataset,
         user=user,
         pipeline_name="add_pipeline",
-        vector_db_config=vector_db_config,
-        graph_db_config=graph_db_config,
     ):
         pipeline_run_info = run_info
 

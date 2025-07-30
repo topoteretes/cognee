@@ -8,3 +8,4 @@ from .TenantDefaultPermissions import TenantDefaultPermissions
 from .Permission import Permission
 from .Tenant import Tenant
 from .ACL import ACL
+from .Principal import Principal

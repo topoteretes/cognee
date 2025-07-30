@@ -13,8 +13,8 @@ class BaseConfig(BaseSettings):
     langfuse_public_key: Optional[str] = os.getenv("LANGFUSE_PUBLIC_KEY")
     langfuse_secret_key: Optional[str] = os.getenv("LANGFUSE_SECRET_KEY")
     langfuse_host: Optional[str] = os.getenv("LANGFUSE_HOST")
-    default_user_email: Optional[str] = os.getenv("DEFAULT_USER_EMAIL")
-    default_user_password: Optional[str] = os.getenv("DEFAULT_USER_PASSWORD")
+    default_user_email: str = os.getenv("DEFAULT_USER_EMAIL", "default_user@example.com")
+    default_user_password: str = os.getenv("DEFAULT_USER_PASSWORD", "default_password")
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:

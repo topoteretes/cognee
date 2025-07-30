@@ -14,6 +14,8 @@ from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 from cognee.modules.users.models import User
+from cognee.modules.users.methods.get_default_user import get_default_user
+from cognee.modules.data.methods import get_authorized_existing_datasets
 
 from cognee.tasks.documents import (
     check_permissions_on_dataset,
@@ -185,13 +187,21 @@ async def cognify(
         ValueError: If chunks exceed max token limits (reduce chunk_size)
         DatabaseNotCreatedError: If databases are not properly initialized
     """
+    if not user:
+        user = await get_default_user()
+
+    if isinstance(datasets, str):
+        datasets = [datasets]
+
+    user_datasets = await get_authorized_existing_datasets(datasets, "write", user)
+
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 
     if run_in_background:
         return await run_cognify_as_background_process(
             tasks=tasks,
             user=user,
-            datasets=datasets,
+            datasets=user_datasets,
             vector_db_config=vector_db_config,
             graph_db_config=graph_db_config,
         )
@@ -199,7 +209,7 @@ async def cognify(
         return await run_cognify_blocking(
             tasks=tasks,
             user=user,
-            datasets=datasets,
+            datasets=user_datasets,
             vector_db_config=vector_db_config,
             graph_db_config=graph_db_config,
         )

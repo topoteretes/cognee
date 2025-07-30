@@ -1,7 +1,7 @@
-from uuid import uuid4
+from uuid import uuid4, UUID as UUID_t
 from typing import List
 from datetime import datetime, timezone
-from sqlalchemy.orm import relationship, Mapped
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy import Column, Text, DateTime, UUID
 from cognee.infrastructure.databases.relational import Base
 from .DatasetData import DatasetData
@@ -10,14 +10,14 @@ from .DatasetData import DatasetData
 class Dataset(Base):
     __tablename__ = "datasets"
 
-    id = Column(UUID, primary_key=True, default=uuid4)
+    id: Mapped[UUID_t] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
 
-    name = Column(Text)
+    name: Mapped[str] = mapped_column(Text)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
-    owner_id = Column(UUID, index=True)
+    owner_id: Mapped[UUID_t] = mapped_column(UUID(as_uuid=True), index=True)
 
     acls = relationship("ACL", back_populates="dataset", cascade="all, delete-orphan")
 
