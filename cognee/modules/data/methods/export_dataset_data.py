@@ -248,10 +248,22 @@ async def _export_metastore_data(dataset_id: UUID, user: User) -> Dict[str, Any]
 
 def _node_belongs_to_dataset(node_data: Dict[str, Any], dataset_id: UUID) -> bool:
     """Check if a node belongs to the specified dataset"""
-    # This is a simplified check - you may need to adjust based on your data model
     if isinstance(node_data, dict):
-        # Check if node has dataset context in properties
-        return str(dataset_id) in str(node_data.get("properties", ""))
+        # Check for dataset_id in node properties
+        properties = node_data.get("properties", {})
+        if isinstance(properties, dict):
+            return properties.get("dataset_id") == str(dataset_id)
+        elif isinstance(properties, str):
+            # Handle JSON string properties
+            try:
+                import json
+                props = json.loads(properties)
+                return props.get("dataset_id") == str(dataset_id)
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        
+        # Fallback: check if dataset_id appears as a field in node data
+        return node_data.get("dataset_id") == str(dataset_id)
     return False
 
 

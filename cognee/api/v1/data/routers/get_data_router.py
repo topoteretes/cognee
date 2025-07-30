@@ -2,6 +2,7 @@ from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
+import json
 from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File
 from fastapi.responses import JSONResponse, Response
 
@@ -99,11 +100,23 @@ def get_data_router() -> APIRouter:
             
             return export_data
             
+        except ValueError as error:
+            logger.error(f"Validation error exporting dataset {dataset_id}: {str(error)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid request: {str(error)}",
+            ) from error
+        except PermissionError as error:
+            logger.error(f"Permission error exporting dataset {dataset_id}: {str(error)}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions to export this dataset",
+            ) from error
         except Exception as error:
             logger.error(f"Error exporting dataset {dataset_id}: {str(error)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error exporting dataset: {str(error)}",
+                detail="An internal error occurred during export",
             ) from error
 
     @router.post("/import", response_model=DataImportResponseDTO)
@@ -160,6 +173,14 @@ def get_data_router() -> APIRouter:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid transfer file format. Expected JSON file."
                 )
+                
+            # Check file size (100MB limit)
+            MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+            if transfer_file.size and transfer_file.size > MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"File size exceeds maximum allowed size of {MAX_FILE_SIZE / 1024 / 1024}MB"
+                )
             
             # Read and parse transfer file content
             transfer_content = await transfer_file.read()
@@ -171,11 +192,23 @@ def get_data_router() -> APIRouter:
             
             return import_result
             
+        except ValueError as error:
+            logger.error(f"Validation error importing dataset: {str(error)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid transfer file: {str(error)}",
+            ) from error
+        except json.JSONDecodeError as error:
+            logger.error(f"JSON decode error importing dataset: {str(error)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid JSON format in transfer file",
+            ) from error
         except Exception as error:
             logger.error(f"Error importing dataset: {str(error)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error importing dataset: {str(error)}",
+                detail="An internal error occurred during import",
             ) from error
 
     return router

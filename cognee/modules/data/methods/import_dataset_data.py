@@ -31,22 +31,23 @@ async def import_dataset_data(
     """
     logger.info(f"Starting import for user {target_user.id}")
     
-    # Set database context for the target user
-    set_database_global_context_variables(user=target_user)
-    
     try:
         # Parse transfer content
         transfer_data = json.loads(transfer_content.decode('utf-8'))
         
         # Validate transfer data structure
         _validate_transfer_data(transfer_data)
-        
+
         # Create new dataset for imported data
         new_dataset = await _create_target_dataset(
             transfer_data, target_user, import_request
         )
         
-        # Import graph data to Kuzu
+        # Set database context for the target user with new dataset
+        await set_database_global_context_variables(
+            dataset=new_dataset.id,
+            user_id=target_user.id
+        )        # Import graph data to Kuzu
         nodes_imported, edges_imported = await _import_graph_data(
             transfer_data["graph_data"], new_dataset.id, target_user
         )
@@ -209,22 +210,26 @@ async def _import_vector_data(
         # Get or create vector collection for the new dataset
         from cognee.infrastructure.databases.utils import get_or_create_dataset_database
         dataset_db = await get_or_create_dataset_database(dataset_id, target_user)
-        target_collection_name = dataset_db.vector_database_name
+        base_collection_name = dataset_db.vector_database_name
         
-        # Import collections
+        # Import collections with proper naming
         for source_collection_name, collection_data in vector_data.get("collections", {}).items():
+            # Create unique collection name for each source collection
+            target_collection_name = f"{base_collection_name}_{source_collection_name}"
+            
             # Create target collection if it doesn't exist
             if not await vector_engine.has_collection(target_collection_name):
-                # You'll need to implement this based on your vector DB schema
                 await _create_vector_collection(vector_engine, target_collection_name, collection_data)
             
-            # Import vector data
-            # This is simplified - you'll need to implement actual vector data import
-            vectors_imported += await _import_collection_vectors(
+            # Import vector data with proper collection mapping
+            collection_vectors = await _import_collection_vectors(
                 vector_engine, target_collection_name, collection_data, target_user
             )
+            vectors_imported += collection_vectors
+            
+            logger.info(f"Imported {collection_vectors} vectors from {source_collection_name} to {target_collection_name}")
         
-        logger.info(f"Imported {vectors_imported} vectors")
+        logger.info(f"Total imported vectors: {vectors_imported}")
         return vectors_imported
         
     except Exception as e:
