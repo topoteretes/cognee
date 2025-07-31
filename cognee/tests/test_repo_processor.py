@@ -1,7 +1,7 @@
 import os
 import shutil
 import tempfile
-from cognee.tasks.repo_processor.code_graph_repo import get_source_code_files
+from cognee.tasks.repo_processor.get_repo_file_dependencies import get_source_code_files
 
 def test_get_source_code_files_excludes_common_dirs_and_files():
     # Create a temporary test directory
