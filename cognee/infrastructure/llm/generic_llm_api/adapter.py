@@ -10,8 +10,13 @@ from litellm.exceptions import ContentPolicyViolationError
 from instructor.exceptions import InstructorRetryException
 
 from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
-from cognee.infrastructure.llm.llm_interface import LLMInterface
-from cognee.infrastructure.llm.rate_limiter import rate_limit_async, sleep_and_retry_async
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.llm_interface import (
+    LLMInterface,
+)
+from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.rate_limiter import (
+    rate_limit_async,
+    sleep_and_retry_async,
+)
 
 
 class GenericAPIAdapter(LLMInterface):
