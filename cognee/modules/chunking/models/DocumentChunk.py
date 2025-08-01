@@ -3,6 +3,8 @@ from typing import List
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.processing.document_types import Document
 from cognee.modules.engine.models import Entity
+from typing import Union
+from cognee.temporal_poc.models.models import Event
 
 
 class DocumentChunk(DataPoint):
@@ -30,6 +32,6 @@ class DocumentChunk(DataPoint):
     chunk_index: int
     cut_type: str
     is_part_of: Document
-    contains: List[Entity] = None
+    contains: List[Union[Entity, Event]] = None
 
     metadata: dict = {"index_fields": ["text"]}
