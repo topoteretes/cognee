@@ -99,7 +99,9 @@ python cognee/cognee/tests/test_library.py
 
 ## 4. 📤 Submitting Changes
 
-1. Push your changes:
+1. Install ruff on your system
+2. Run ```ruff format .``` and ``` ruff check ``` and fix the issues
+3. Push your changes:
 ```shell
 git add .
 git commit -s -m "Description of your changes"
