@@ -43,17 +43,31 @@ async def run_code_graph_pipeline(repo_path, include_docs=False, excluded_paths=
     # Default exclusion patterns
     if excluded_paths is None:
         excluded_paths = [
-            ".venv/", "venv/", "__pycache__/", ".pytest_cache/",
-            "build/", "dist/", "node_modules/", ".npm/", ".git/",
-            ".svn/", ".idea/", ".vscode/", "tmp/", "temp/",
-            "*.pyc", "*.pyo", "*.log", "*.tmp"
+            ".venv/",
+            "venv/",
+            "__pycache__/",
+            ".pytest_cache/",
+            "build/",
+            "dist/",
+            "node_modules/",
+            ".npm/",
+            ".git/",
+            ".svn/",
+            ".idea/",
+            ".vscode/",
+            "tmp/",
+            "temp/",
+            "*.pyc",
+            "*.pyo",
+            "*.log",
+            "*.tmp",
         ]
 
     tasks = [
         Task(
             get_repo_file_dependencies,
             detailed_extraction=detailed_extraction,
-            excluded_paths=excluded_paths
+            excluded_paths=excluded_paths,
         ),
         Task(add_data_points, task_config={"batch_size": 30}),
     ]

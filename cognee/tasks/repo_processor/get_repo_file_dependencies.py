@@ -30,9 +30,24 @@ async def get_source_code_files(repo_path: str, excluded_paths: Optional[List[st
 
     # Default exclusions
     default_excluded_patterns = [
-        ".venv/", "venv/", "__pycache__/", ".pytest_cache/", "build/", "dist/",
-        "node_modules/", ".npm/", ".git/", ".svn/", ".idea/", ".vscode/", "tmp/", "temp/",
-        "*.pyc", "*.pyo", "*.log", "*.tmp"
+        ".venv/",
+        "venv/",
+        "__pycache__/",
+        ".pytest_cache/",
+        "build/",
+        "dist/",
+        "node_modules/",
+        ".npm/",
+        ".git/",
+        ".svn/",
+        ".idea/",
+        ".vscode/",
+        "tmp/",
+        "temp/",
+        "*.pyc",
+        "*.pyo",
+        "*.log",
+        "*.tmp",
     ]
 
     excluded_patterns = default_excluded_patterns + (excluded_paths or [])
@@ -51,11 +66,7 @@ async def get_source_code_files(repo_path: str, excluded_paths: Optional[List[st
             if should_exclude:
                 continue
 
-            if (
-                file.endswith(".py")
-                and not file.startswith("test_")
-                and not file.endswith("_test")
-            ):
+            if file.endswith(".py") and not file.startswith("test_") and not file.endswith("_test"):
                 py_files_paths.append(full_path)
 
     source_code_files = set()
@@ -84,9 +95,7 @@ def run_coroutine(coroutine_func, *args, **kwargs):
 
 
 async def get_repo_file_dependencies(
-    repo_path: str,
-    detailed_extraction: bool = False,
-    excluded_paths: Optional[List[str]] = None
+    repo_path: str, detailed_extraction: bool = False, excluded_paths: Optional[List[str]] = None
 ) -> AsyncGenerator[DataPoint, None]:
     """
     Generate a dependency graph for Python files in the given repository path.
