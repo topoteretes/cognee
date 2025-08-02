@@ -1,4 +1,5 @@
 from uuid import UUID
+from pathlib import Path
 from typing import Union, BinaryIO, List, Optional
 
 from cognee.modules.pipelines import Task
@@ -8,7 +9,7 @@ from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 
 
 async def add(
-    data: Union[BinaryIO, list[BinaryIO], str, list[str]],
+    data: Union[BinaryIO, list[BinaryIO], str, list[str], Path, list[Path]],
     dataset_name: str = "main_dataset",
     user: User = None,
     node_set: Optional[List[str]] = None,
@@ -17,7 +18,7 @@ async def add(
     dataset_id: Optional[UUID] = None,
     preferred_loaders: Optional[List[str]] = None,
     loader_config: Optional[dict] = None,
-
+    incremental_loading: bool = True,
 ):
     """
     Add data to Cognee for knowledge graph processing using a plugin-based loader system.
@@ -36,8 +37,9 @@ async def add(
 
     Supported Input Types:
         - **Text strings**: Direct text content (str) - any string not starting with "/" or "file://"
-        - **File paths**: Local file paths as strings in these formats:
-            * Absolute paths: "/path/to/document.pdf"
+        - **File paths**: Local file paths in these formats:
+            * Path objects: pathlib.Path("/path/to/document.pdf") - **Recommended for explicit file path handling**
+            * Absolute paths as strings: "/path/to/document.pdf"
             * File URLs: "file:///path/to/document.pdf" or "file://relative/path.txt"
             * S3 paths: "s3://bucket-name/path/to/file.pdf"
         - **Binary file objects**: File handles/streams (BinaryIO)
@@ -102,6 +104,8 @@ async def add(
                          If not provided, uses default loader priority.
         loader_config: Optional configuration for specific loaders. Dictionary mapping loader names
                       to their configuration options (e.g., {"pypdf_loader": {"strict": False}}).
+        incremental_loading: Whether to skip processing of documents already processed by the pipeline.
+                           Defaults to True for efficiency. Set to False to reprocess all data.
 
     Returns:
         PipelineRunInfo: Information about the ingestion pipeline execution including:

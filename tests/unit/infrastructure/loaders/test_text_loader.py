@@ -155,3 +155,43 @@ class TestTextLoader:
         """Test that TextLoader has no external dependencies."""
         assert text_loader.get_dependencies() == []
         assert text_loader.validate_dependencies() is True
+
+    def test_can_handle_path_object(self, text_loader):
+        """Test that can_handle works with Path objects."""
+        path_obj = Path("test.txt")
+        assert text_loader.can_handle(path_obj)
+
+        path_obj = Path("test.pdf")
+        assert not text_loader.can_handle(path_obj)
+
+        # Test case insensitive
+        path_obj = Path("test.TXT")
+        assert text_loader.can_handle(path_obj)
+
+    def test_can_handle_path_object_with_mime_type(self, text_loader):
+        """Test that can_handle works with Path objects and MIME type."""
+        path_obj = Path("test.unknown")
+        assert text_loader.can_handle(path_obj, mime_type="text/plain")
+        assert not text_loader.can_handle(path_obj, mime_type="application/pdf")
+
+    @pytest.mark.asyncio
+    async def test_load_path_object(self, text_loader, temp_text_file):
+        """Test loading a file using a Path object."""
+        path_obj = Path(temp_text_file)
+        result = await text_loader.load(path_obj)
+
+        assert isinstance(result.content, str)
+        assert "This is a test file." in result.content
+        assert result.content_type == ContentType.TEXT
+        assert result.metadata["loader"] == "text_loader"
+        assert result.metadata["name"] == path_obj.name
+        assert result.metadata["lines"] == 2
+        assert result.metadata["encoding"] == "utf-8"
+        assert result.source_info["file_path"] == str(path_obj)
+
+    @pytest.mark.asyncio
+    async def test_load_path_object_nonexistent(self, text_loader):
+        """Test loading a nonexistent file using a Path object."""
+        path_obj = Path("/nonexistent/file.txt")
+        with pytest.raises(FileNotFoundError):
+            await text_loader.load(path_obj)

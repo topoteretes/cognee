@@ -1,5 +1,6 @@
 import os
-from typing import List
+from typing import List, Union
+from pathlib import Path
 from ..LoaderInterface import LoaderInterface
 from ..models.LoaderResult import LoaderResult, ContentType
 
@@ -36,19 +37,22 @@ class TextLoader(LoaderInterface):
         """Unique identifier for this loader."""
         return "text_loader"
 
-    def can_handle(self, file_path: str, mime_type: str = None) -> bool:
+    def can_handle(self, file_path: Union[str, Path], mime_type: str = None) -> bool:
         """
         Check if this loader can handle the given file.
 
         Args:
-            file_path: Path to the file
+            file_path: Path to the file (Path type recommended for explicit file path handling)
             mime_type: Optional MIME type
 
         Returns:
             True if file can be handled, False otherwise
         """
+        # Convert to Path for consistent handling
+        path_obj = Path(file_path) if isinstance(file_path, str) else file_path
+
         # Check by extension
-        ext = os.path.splitext(file_path)[1].lower()
+        ext = path_obj.suffix.lower()
         if ext in self.supported_extensions:
             return True
 
@@ -60,7 +64,7 @@ class TextLoader(LoaderInterface):
         # This is useful when other loaders fail
         try:
             # Quick check if file appears to be text
-            with open(file_path, "rb") as f:
+            with open(path_obj, "rb") as f:
                 sample = f.read(512)
                 # Simple heuristic: if most bytes are printable, consider it text
                 if sample:
@@ -78,12 +82,14 @@ class TextLoader(LoaderInterface):
 
         return False
 
-    async def load(self, file_path: str, encoding: str = "utf-8", **kwargs) -> LoaderResult:
+    async def load(
+        self, file_path: Union[str, Path], encoding: str = "utf-8", **kwargs
+    ) -> LoaderResult:
         """
         Load and process the text file.
 
         Args:
-            file_path: Path to the file to load
+            file_path: Path to the file to load (Path type recommended for explicit file path handling)
             encoding: Text encoding to use (default: utf-8)
             **kwargs: Additional configuration (unused)
 
@@ -95,25 +101,28 @@ class TextLoader(LoaderInterface):
             UnicodeDecodeError: If file cannot be decoded with specified encoding
             OSError: If file cannot be read
         """
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
+        # Convert to Path for consistent handling
+        path_obj = Path(file_path) if isinstance(file_path, str) else file_path
+
+        if not path_obj.exists():
+            raise FileNotFoundError(f"File not found: {path_obj}")
 
         try:
-            with open(file_path, "r", encoding=encoding) as f:
+            with open(path_obj, "r", encoding=encoding) as f:
                 content = f.read()
         except UnicodeDecodeError:
             # Try with fallback encoding
             if encoding == "utf-8":
-                return await self.load(file_path, encoding="latin-1", **kwargs)
+                return await self.load(path_obj, encoding="latin-1", **kwargs)
             else:
                 raise
 
         # Extract basic metadata
-        file_stat = os.stat(file_path)
+        file_stat = path_obj.stat()
         metadata = {
-            "name": os.path.basename(file_path),
+            "name": path_obj.name,
             "size": file_stat.st_size,
-            "extension": os.path.splitext(file_path)[1],
+            "extension": path_obj.suffix,
             "encoding": encoding,
             "loader": self.loader_name,
             "lines": len(content.splitlines()) if content else 0,
@@ -124,5 +133,5 @@ class TextLoader(LoaderInterface):
             content=content,
             metadata=metadata,
             content_type=ContentType.TEXT,
-            source_info={"file_path": file_path, "encoding": encoding},
+            source_info={"file_path": str(path_obj), "encoding": encoding},
         )

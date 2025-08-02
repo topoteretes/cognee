@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Union
+from pathlib import Path
 from .models.LoaderResult import LoaderResult
 
 
@@ -45,12 +46,12 @@ class LoaderInterface(ABC):
         pass
 
     @abstractmethod
-    def can_handle(self, file_path: str, mime_type: str = None) -> bool:
+    def can_handle(self, file_path: Union[str, Path], mime_type: str = None) -> bool:
         """
         Check if this loader can handle the given file.
 
         Args:
-            file_path: Path to the file to be processed
+            file_path: Path to the file to be processed (Path type recommended for explicit file path handling)
             mime_type: Optional MIME type of the file
 
         Returns:
@@ -59,12 +60,12 @@ class LoaderInterface(ABC):
         pass
 
     @abstractmethod
-    async def load(self, file_path: str, **kwargs) -> LoaderResult:
+    async def load(self, file_path: Union[str, Path], **kwargs) -> LoaderResult:
         """
         Load and process the file, returning standardized result.
 
         Args:
-            file_path: Path to the file to be processed
+            file_path: Path to the file to be processed (Path type recommended for explicit file path handling)
             **kwargs: Additional loader-specific configuration
 
         Returns:
