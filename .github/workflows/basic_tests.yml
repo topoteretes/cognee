@@ -8,10 +8,6 @@ on:
         type: string
         default: '3.11.x'
     secrets:
-      GRAPHISTRY_USERNAME:
-        required: true
-      GRAPHISTRY_PASSWORD:
-        required: true
       LLM_PROVIDER:
         required: true
       LLM_MODEL:
@@ -125,9 +121,6 @@ jobs:
     name: Run Simple Examples
     runs-on: ubuntu-22.04
     env:
-      GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-      GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-
       LLM_PROVIDER: openai
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
       LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -157,9 +150,6 @@ jobs:
     name: Run Basic Graph Tests
     runs-on: ubuntu-22.04
     env:
-      GRAPHISTRY_USERNAME: ${{ secrets.GRAPHISTRY_USERNAME }}
-      GRAPHISTRY_PASSWORD: ${{ secrets.GRAPHISTRY_PASSWORD }}
-
       LLM_PROVIDER: openai
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
       LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}

@@ -72,11 +72,36 @@ class KuzuAdapter(GraphDBInterface):
 
                 run_sync(file_storage.ensure_directory_exists())
 
-                self.db = Database(
-                    self.db_path,
-                    buffer_pool_size=256 * 1024 * 1024,  # 256MB buffer pool
-                    max_db_size=1024 * 1024 * 1024,
-                )
+                try:
+                    self.db = Database(
+                        self.db_path,
+                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
+                        max_db_size=4096 * 1024 * 1024,
+                    )
+                except RuntimeError:
+                    from .kuzu_migrate import read_kuzu_storage_version
+                    import kuzu
+
+                    kuzu_db_version = read_kuzu_storage_version(self.db_path)
+                    if (
+                        kuzu_db_version == "0.9.0" or kuzu_db_version == "0.8.2"
+                    ) and kuzu_db_version != kuzu.__version__:
+                        # Try to migrate kuzu database to latest version
+                        from .kuzu_migrate import kuzu_migration
+
+                        kuzu_migration(
+                            new_db=self.db_path + "_new",
+                            old_db=self.db_path,
+                            new_version=kuzu.__version__,
+                            old_version=kuzu_db_version,
+                            overwrite=True,
+                        )
+
+                    self.db = Database(
+                        self.db_path,
+                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
+                        max_db_size=4096 * 1024 * 1024,
+                    )
 
             self.db.init_database()
             self.connection = Connection(self.db)
@@ -1438,11 +1463,8 @@ class KuzuAdapter(GraphDBInterface):
         It raises exceptions for failures occurring during deletion processes.
         """
         try:
-            # Use DETACH DELETE to remove both nodes and their relationships in one operation
-            await self.query("MATCH (n:Node) DETACH DELETE n")
-            logger.info("Cleared all data from graph while preserving structure")
-
             if self.connection:
+                self.connection.close()
                 self.connection = None
             if self.db:
                 self.db.close()

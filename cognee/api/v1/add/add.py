@@ -14,9 +14,10 @@ async def add(
     node_set: Optional[List[str]] = None,
     vector_db_config: dict = None,
     graph_db_config: dict = None,
-    dataset_id: UUID = None,
+    dataset_id: Optional[UUID] = None,
     preferred_loaders: Optional[List[str]] = None,
     loader_config: Optional[dict] = None,
+
 ):
     """
     Add data to Cognee for knowledge graph processing using a plugin-based loader system.
@@ -206,6 +207,7 @@ async def add(
         pipeline_name="add_pipeline",
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
+        incremental_loading=incremental_loading,
     ):
         pipeline_run_info = run_info
 

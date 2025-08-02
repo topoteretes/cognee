@@ -16,7 +16,7 @@
   ·
   <a href="https://www.reddit.com/r/AIMemory/">Join r/AIMemory</a>
   .
-  <a href="https://www.docs.cognee.ai">Docs</a>
+  <a href="https://docs.cognee.ai/">Docs</a>
   .
   <a href="https://github.com/topoteretes/cognee-community">cognee community repo</a>
   </p>
@@ -43,7 +43,7 @@
 
 
 
-**🚀 We are launching Cognee SaaS: Sign up [here](https://www.cognee.ai/waitlist) for the hosted beta!**
+**🚀 We launched Cogwit beta (Fully-hosted AI Memory): Sign up [here](https://platform.cognee.ai/)! 🚀** 
 
 Build dynamic memory for Agents and replace RAG using scalable, modular ECL (Extract, Cognify, Load) pipelines.
 
@@ -185,9 +185,9 @@ Try cognee UI out locally [here](https://docs.cognee.ai/how-to-guides/cognee-ui)
 
 ## Demos
 
-1. What is AI memory:
+1. Cogwit Beta demo:
 
-[Learn about cognee](https://github.com/user-attachments/assets/8b2a0050-5ec4-424c-b417-8269971503f0)
+[Cogwit Beta](https://github.com/user-attachments/assets/fa520cd2-2913-4246-a444-902ea5242cb0)
 
 2. Simple GraphRAG demo
 

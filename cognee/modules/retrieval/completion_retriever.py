@@ -1,10 +1,13 @@
 from typing import Any, Optional
 
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+
+logger = get_logger("CompletionRetriever")
 
 
 class CompletionRetriever(BaseRetriever):
@@ -56,8 +59,10 @@ class CompletionRetriever(BaseRetriever):
 
             # Combine all chunks text returned from vector search (number of chunks is determined by top_k
             chunks_payload = [found_chunk.payload["text"] for found_chunk in found_chunks]
-            return "\n".join(chunks_payload)
+            combined_context = "\n".join(chunks_payload)
+            return combined_context
         except CollectionNotFoundError as error:
+            logger.error("DocumentChunk_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
@@ -70,22 +75,19 @@ class CompletionRetriever(BaseRetriever):
         Parameters:
         -----------
 
-            - query (str): The input query for which the completion is generated.
-            - context (Optional[Any]): Optional context to use for generating the completion; if
-              not provided, it will be retrieved using get_context. (default None)
+            - query (str): The query string to be used for generating a completion.
+            - context (Optional[Any]): Optional pre-fetched context to use for generating the
+              completion; if None, it retrieves the context for the query. (default None)
 
         Returns:
         --------
 
-            - Any: A list containing the generated completion from the LLM.
+            - Any: The generated completion based on the provided query and context.
         """
         if context is None:
             context = await self.get_context(query)
 
         completion = await generate_completion(
-            query=query,
-            context=context,
-            user_prompt_path=self.user_prompt_path,
-            system_prompt_path=self.system_prompt_path,
+            query, context, self.user_prompt_path, self.system_prompt_path
         )
-        return [completion]
+        return completion

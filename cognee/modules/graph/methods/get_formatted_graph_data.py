@@ -33,7 +33,7 @@ async def get_formatted_graph_data(dataset_id: UUID, user_id: UUID):
                 lambda edge: {
                     "source": str(edge[0]),
                     "target": str(edge[1]),
-                    "label": edge[2],
+                    "label": str(edge[2]),
                 },
                 edges,
             )

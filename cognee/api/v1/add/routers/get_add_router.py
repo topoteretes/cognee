@@ -1,16 +1,18 @@
 import os
+import requests
+import subprocess
 from uuid import UUID
 
-from fastapi import Form, UploadFile, Depends
-from fastapi.responses import JSONResponse
 from fastapi import APIRouter
-from typing import List, Optional
-import subprocess
-from cognee.shared.logging_utils import get_logger
-import requests
+from fastapi.responses import JSONResponse
+from fastapi import Form, File, UploadFile, Depends
+from typing import List, Optional, Union, Literal
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.shared.utils import send_telemetry
+from cognee.modules.pipelines.models import PipelineRunErrored
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -20,9 +22,9 @@ def get_add_router() -> APIRouter:
 
     @router.post("", response_model=dict)
     async def add(
-        data: List[UploadFile],
+        data: List[UploadFile] = File(default=None),
         datasetName: Optional[str] = Form(default=None),
-        datasetId: Optional[UUID] = Form(default=None),
+        datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -38,7 +40,7 @@ def get_add_router() -> APIRouter:
           - GitHub repository URLs (will be cloned and processed)
           - Regular file uploads
         - **datasetName** (Optional[str]): Name of the dataset to add data to
-        - **datasetId** (Optional[UUID]): UUID of the dataset to add data to
+        - **datasetId** (Optional[UUID]): UUID of an already existing dataset
 
         Either datasetName or datasetId must be provided.
 
@@ -58,7 +60,16 @@ def get_add_router() -> APIRouter:
         - GitHub repositories are cloned and all files are processed
         - HTTP URLs are fetched and their content is processed
         - The ALLOW_HTTP_REQUESTS environment variable controls URL processing
+        - datasetId value can only be the UUID of an already existing dataset
         """
+        send_telemetry(
+            "Add API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/add",
+            },
+        )
+
         from cognee.api.v1.add import add as cognee_add
 
         if not datasetId and not datasetName:
@@ -90,6 +101,8 @@ def get_add_router() -> APIRouter:
             else:
                 add_run = await cognee_add(data, datasetName, user=user, dataset_id=datasetId)
 
+                if isinstance(add_run, PipelineRunErrored):
+                    return JSONResponse(status_code=420, content=add_run.model_dump(mode="json"))
                 return add_run.model_dump()
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})

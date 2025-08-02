@@ -1,11 +1,14 @@
 import asyncio
 from typing import Any, Optional
 
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+
+logger = get_logger("InsightsRetriever")
 
 
 class InsightsRetriever(BaseRetriever):
@@ -63,6 +66,7 @@ class InsightsRetriever(BaseRetriever):
                     vector_engine.search("EntityType_name", query_text=query, limit=self.top_k),
                 )
             except CollectionNotFoundError as error:
+                logger.error("Entity collections not found")
                 raise NoDataError("No data found in the system, please add data first.") from error
 
             results = [*results[0], *results[1]]

@@ -5,12 +5,12 @@ from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 
 import cognee.modules.ingestion as ingestion
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
     get_dataset_data,
@@ -134,6 +134,7 @@ async def ingest_data(
                         node_set=json.dumps(node_set) if node_set else None,
                         data_size=file_metadata["file_size"],
                         tenant_id=user.tenant_id if user.tenant_id else None,
+                        pipeline_status={},
                         token_count=-1,
                     )
 

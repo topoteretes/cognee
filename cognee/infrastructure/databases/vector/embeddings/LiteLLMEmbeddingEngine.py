@@ -177,7 +177,12 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         elif "mistral" in self.provider.lower():
             tokenizer = MistralTokenizer(model=model, max_tokens=self.max_tokens)
         else:
-            tokenizer = HuggingFaceTokenizer(model=self.model, max_tokens=self.max_tokens)
+            try:
+                tokenizer = HuggingFaceTokenizer(model=self.model, max_tokens=self.max_tokens)
+            except Exception as e:
+                logger.warning(f"Could not get tokenizer from HuggingFace due to: {e}")
+                logger.info("Switching to TikToken default tokenizer.")
+                tokenizer = TikTokenTokenizer(model=None, max_tokens=self.max_tokens)
 
         logger.debug(f"Tokenizer loaded for model: {self.model}")
         return tokenizer
