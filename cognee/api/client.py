@@ -185,16 +185,13 @@ async def readiness_check():
         if health_status.status == HealthStatus.UNHEALTHY:
             return JSONResponse(
                 status_code=503,
-                content={"status": "not ready", "reason": "critical services unhealthy"}
+                content={"status": "not ready", "reason": "critical services unhealthy"},
             )
-        return JSONResponse(
-            status_code=200,
-            content={"status": "ready"}
-        )
+        return JSONResponse(status_code=200, content={"status": "ready"})
     except Exception as e:
         return JSONResponse(
             status_code=503,
-            content={"status": "not ready", "reason": f"health check failed: {str(e)}"}
+            content={"status": "not ready", "reason": f"health check failed: {str(e)}"},
         )
 
 
@@ -210,18 +207,12 @@ async def detailed_health_check():
             status_code = 503
         elif health_status.status == HealthStatus.DEGRADED:
             status_code = 200  # Degraded is still operational
-        
-        return JSONResponse(
-            status_code=status_code,
-            content=health_status.model_dump()
-        )
+
+        return JSONResponse(status_code=status_code, content=health_status.model_dump())
     except Exception as e:
         return JSONResponse(
             status_code=503,
-            content={
-                "status": "unhealthy",
-                "error": f"Health check system failure: {str(e)}"
-            }
+            content={"status": "unhealthy", "error": f"Health check system failure: {str(e)}"},
         )
 
 
