@@ -8,13 +8,16 @@ from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import NeptuneAnalyticsAdapter, IndexSchema
+from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
+    NeptuneAnalyticsAdapter,
+    IndexSchema,
+)
 
 logger = get_logger()
 
 
 async def main():
-    graph_id = os.getenv('GRAPH_ID', "")
+    graph_id = os.getenv("GRAPH_ID", "")
     cognee.config.set_vector_db_provider("neptune_analytics")
     cognee.config.set_vector_db_url(f"neptune-graph://{graph_id}")
     data_directory_path = str(
@@ -87,6 +90,7 @@ async def main():
 
     await cognee.prune.prune_system(metadata=True)
 
+
 async def vector_backend_api_test():
     cognee.config.set_vector_db_provider("neptune_analytics")
 
@@ -101,7 +105,7 @@ async def vector_backend_api_test():
         get_vector_engine()
 
     # Return a valid engine object with valid URL.
-    graph_id = os.getenv('GRAPH_ID', "")
+    graph_id = os.getenv("GRAPH_ID", "")
     cognee.config.set_vector_db_url(f"neptune-graph://{graph_id}")
     engine = get_vector_engine()
     assert isinstance(engine, NeptuneAnalyticsAdapter)
@@ -133,28 +137,22 @@ async def vector_backend_api_test():
         query_text=TEST_TEXT,
         query_vector=None,
         limit=10,
-        with_vector=True)
-    assert (len(result_search) == 2)
+        with_vector=True,
+    )
+    assert len(result_search) == 2
 
     # # Retrieve data-points
     result = await engine.retrieve(TEST_COLLECTION_NAME, [TEST_UUID, TEST_UUID_2])
-    assert any(
-        str(r.id) == TEST_UUID and r.payload['text'] == TEST_TEXT
-        for r in result
-    )
-    assert any(
-        str(r.id) == TEST_UUID_2 and r.payload['text'] == TEST_TEXT_2
-        for r in result
-    )
+    assert any(str(r.id) == TEST_UUID and r.payload["text"] == TEST_TEXT for r in result)
+    assert any(str(r.id) == TEST_UUID_2 and r.payload["text"] == TEST_TEXT_2 for r in result)
     # Search multiple
     result_search_batch = await engine.batch_search(
         collection_name=TEST_COLLECTION_NAME,
         query_texts=[TEST_TEXT, TEST_TEXT_2],
         limit=10,
-        with_vectors=False
+        with_vectors=False,
     )
-    assert (len(result_search_batch) == 2 and
-            all(len(batch) == 2 for batch in result_search_batch))
+    assert len(result_search_batch) == 2 and all(len(batch) == 2 for batch in result_search_batch)
 
     # Delete datapoint from vector store
     await engine.delete_data_points(TEST_COLLECTION_NAME, [TEST_UUID, TEST_UUID_2])
@@ -162,6 +160,7 @@ async def vector_backend_api_test():
     # Retrieve should return an empty list.
     result_deleted = await engine.retrieve(TEST_COLLECTION_NAME, [TEST_UUID])
     assert result_deleted == []
+
 
 if __name__ == "__main__":
     import asyncio
