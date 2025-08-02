@@ -8,11 +8,13 @@ from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import NeptuneAnalyticsAdapter
+from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
+    NeptuneAnalyticsAdapter,
+)
 
 # Set up Amazon credentials in .env file and get the values from environment variables
 load_dotenv()
-graph_id = os.getenv('GRAPH_ID', "")
+graph_id = os.getenv("GRAPH_ID", "")
 
 # get the default embedder
 embedding_engine = get_embedding_engine()
@@ -22,6 +24,7 @@ na_vector = NeptuneAnalyticsAdapter(graph_id, embedding_engine)
 collection = "test_collection"
 
 logger = get_logger("test_neptune_analytics_hybrid")
+
 
 def setup_data():
     # Define nodes data before the main function
@@ -34,35 +37,35 @@ def setup_data():
     #     stored in Amazon S3.
 
     document = TextDocument(
-        name='text.txt',
-        raw_data_location='git/cognee/examples/database_examples/data_storage/data/text.txt',
-        external_metadata='{}',
-        mime_type='text/plain'
+        name="text.txt",
+        raw_data_location="git/cognee/examples/database_examples/data_storage/data/text.txt",
+        external_metadata="{}",
+        mime_type="text/plain",
     )
     document_chunk = DocumentChunk(
         text="Neptune Analytics is an ideal choice for investigatory, exploratory, or data-science workloads \n    that require fast iteration for data, analytical and algorithmic processing, or vector search on graph data. It \n    complements Amazon Neptune Database, a popular managed graph database. To perform intensive analysis, you can load \n    the data from a Neptune Database graph or snapshot into Neptune Analytics. You can also load graph data that's \n    stored in Amazon S3.\n    ",
         chunk_size=187,
         chunk_index=0,
-        cut_type='paragraph_end',
+        cut_type="paragraph_end",
         is_part_of=document,
     )
 
-    graph_database = EntityType(name='graph database', description='graph database')
+    graph_database = EntityType(name="graph database", description="graph database")
     neptune_analytics_entity = Entity(
-        name='neptune analytics',
-        description='A memory-optimized graph database engine for analytics that processes large amounts of graph data quickly.',
+        name="neptune analytics",
+        description="A memory-optimized graph database engine for analytics that processes large amounts of graph data quickly.",
     )
     neptune_database_entity = Entity(
-        name='amazon neptune database',
-        description='A popular managed graph database that complements Neptune Analytics.',
+        name="amazon neptune database",
+        description="A popular managed graph database that complements Neptune Analytics.",
     )
 
-    storage = EntityType(name='storage', description='storage')
+    storage = EntityType(name="storage", description="storage")
     storage_entity = Entity(
-        name='amazon s3',
-        description='A storage service provided by Amazon Web Services that allows storing graph data.',
+        name="amazon s3",
+        description="A storage service provided by Amazon Web Services that allows storing graph data.",
     )
-    
+
     nodes_data = [
         document,
         document_chunk,
@@ -77,40 +80,41 @@ def setup_data():
         (
             str(document_chunk.id),
             str(storage_entity.id),
-            'contains',
+            "contains",
         ),
         (
             str(storage_entity.id),
             str(storage.id),
-            'is_a',
+            "is_a",
         ),
         (
             str(document_chunk.id),
             str(neptune_database_entity.id),
-            'contains',
+            "contains",
         ),
         (
             str(neptune_database_entity.id),
             str(graph_database.id),
-            'is_a',
+            "is_a",
         ),
         (
             str(document_chunk.id),
             str(document.id),
-            'is_part_of',
+            "is_part_of",
         ),
         (
             str(document_chunk.id),
             str(neptune_analytics_entity.id),
-            'contains',
+            "contains",
         ),
         (
             str(neptune_analytics_entity.id),
             str(graph_database.id),
-            'is_a',
+            "is_a",
         ),
     ]
     return nodes_data, edges_data
+
 
 async def test_add_graph_then_vector_data():
     logger.info("------test_add_graph_then_vector_data-------")
@@ -134,6 +138,7 @@ async def test_add_graph_then_vector_data():
     assert len(edges) == 0
     logger.info("------PASSED-------")
 
+
 async def test_add_vector_then_node_data():
     logger.info("------test_add_vector_then_node_data-------")
     (nodes, edges) = setup_data()
@@ -156,6 +161,7 @@ async def test_add_vector_then_node_data():
     assert len(edges) == 0
     logger.info("------PASSED-------")
 
+
 def main():
     """
     Example script uses neptune analytics for the graph and vector (hybrid) store with small sample data
@@ -164,6 +170,7 @@ def main():
     """
     asyncio.run(test_add_graph_then_vector_data())
     asyncio.run(test_add_vector_then_node_data())
+
 
 if __name__ == "__main__":
     main()

@@ -29,6 +29,7 @@ logger = get_logger("NeptuneGraphDB")
 
 try:
     from langchain_aws import NeptuneAnalyticsGraph
+
     LANGCHAIN_AWS_AVAILABLE = True
 except ImportError:
     logger.warning("langchain_aws not available. Neptune Analytics functionality will be limited.")
@@ -36,11 +37,13 @@ except ImportError:
 
 NEPTUNE_ENDPOINT_URL = "neptune-graph://"
 
+
 class NeptuneGraphDB(GraphDBInterface):
     """
     Adapter for interacting with Amazon Neptune Analytics graph store.
     This class provides methods for querying, adding, deleting nodes and edges using the aws_langchain library.
     """
+
     _GRAPH_NODE_LABEL = "COGNEE_NODE"
 
     def __init__(
@@ -61,28 +64,30 @@ class NeptuneGraphDB(GraphDBInterface):
             - aws_access_key_id (Optional[str]): AWS access key ID
             - aws_secret_access_key (Optional[str]): AWS secret access key
             - aws_session_token (Optional[str]): AWS session token for temporary credentials
-            
+
         Raises:
         -------
             - NeptuneAnalyticsConfigurationError: If configuration parameters are invalid
         """
         # validate import
         if not LANGCHAIN_AWS_AVAILABLE:
-            raise ImportError("langchain_aws is not available. Please install it to use Neptune Analytics.")
+            raise ImportError(
+                "langchain_aws is not available. Please install it to use Neptune Analytics."
+            )
 
         # Validate configuration
         if not validate_graph_id(graph_id):
-            raise NeptuneAnalyticsConfigurationError(message=f"Invalid graph ID: \"{graph_id}\"")
-        
+            raise NeptuneAnalyticsConfigurationError(message=f'Invalid graph ID: "{graph_id}"')
+
         if region and not validate_aws_region(region):
-            raise NeptuneAnalyticsConfigurationError(message=f"Invalid AWS region: \"{region}\"")
-        
+            raise NeptuneAnalyticsConfigurationError(message=f'Invalid AWS region: "{region}"')
+
         self.graph_id = graph_id
         self.region = region
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
         self.aws_session_token = aws_session_token
-        
+
         # Build configuration
         self.config = build_neptune_config(
             graph_id=self.graph_id,
@@ -91,15 +96,17 @@ class NeptuneGraphDB(GraphDBInterface):
             aws_secret_access_key=self.aws_secret_access_key,
             aws_session_token=self.aws_session_token,
         )
-        
+
         # Initialize Neptune Analytics client using langchain_aws
         self._client: NeptuneAnalyticsGraph = self._initialize_client()
-        logger.info(f"Initialized Neptune Analytics adapter for graph: \"{graph_id}\" in region: \"{self.region}\"")
+        logger.info(
+            f'Initialized Neptune Analytics adapter for graph: "{graph_id}" in region: "{self.region}"'
+        )
 
     def _initialize_client(self) -> Optional[NeptuneAnalyticsGraph]:
         """
         Initialize the Neptune Analytics client using langchain_aws.
-        
+
         Returns:
         --------
             - Optional[Any]: The Neptune Analytics client or None if not available
@@ -108,9 +115,7 @@ class NeptuneGraphDB(GraphDBInterface):
             # Initialize the Neptune Analytics Graph client
             client_config = {
                 "graph_identifier": self.graph_id,
-                "config": Config(
-                    user_agent_appid='Cognee'
-                )
+                "config": Config(user_agent_appid="Cognee"),
             }
             # Add AWS credentials if provided
             if self.region:
@@ -121,13 +126,15 @@ class NeptuneGraphDB(GraphDBInterface):
                 client_config["aws_secret_access_key"] = self.aws_secret_access_key
             if self.aws_session_token:
                 client_config["aws_session_token"] = self.aws_session_token
-            
+
             client = NeptuneAnalyticsGraph(**client_config)
             logger.info("Successfully initialized Neptune Analytics client")
             return client
-            
+
         except Exception as e:
-            raise NeptuneAnalyticsConfigurationError(message=f"Failed to initialize Neptune Analytics client: {format_neptune_error(e)}") from e
+            raise NeptuneAnalyticsConfigurationError(
+                message=f"Failed to initialize Neptune Analytics client: {format_neptune_error(e)}"
+            ) from e
 
     @staticmethod
     def _serialize_properties(properties: Dict[str, Any]) -> Dict[str, Any]:
@@ -175,7 +182,7 @@ class NeptuneGraphDB(GraphDBInterface):
                 params = {}
             logger.debug(f"executing na query:\nquery={query}\n")
             result = self._client.query(query, params)
-            
+
             # Convert the result to list format expected by the interface
             if isinstance(result, list):
                 return result
@@ -183,7 +190,7 @@ class NeptuneGraphDB(GraphDBInterface):
                 return [result]
             else:
                 return [{"result": result}]
-                
+
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Neptune Analytics query failed: {error_msg}")
@@ -212,10 +219,11 @@ class NeptuneGraphDB(GraphDBInterface):
                 "node_id": str(node.id),
                 "properties": serialized_properties,
             }
-            
+
             result = await self.query(query, params)
             logger.debug(f"Successfully added/updated node: {node.id}")
-            
+            logger.debug(f"Successfully gotten: {str(result)}")
+
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to add node {node.id}: {error_msg}")
@@ -256,7 +264,7 @@ class NeptuneGraphDB(GraphDBInterface):
             }
             result = await self.query(query, params)
 
-            processed_count = result[0].get('nodes_processed', 0) if result else 0
+            processed_count = result[0].get("nodes_processed", 0) if result else 0
             logger.debug(f"Successfully processed {processed_count} nodes in bulk operation")
 
         except Exception as e:
@@ -268,7 +276,9 @@ class NeptuneGraphDB(GraphDBInterface):
                 try:
                     await self.add_node(node)
                 except Exception as node_error:
-                    logger.error(f"Failed to add individual node {node.id}: {format_neptune_error(node_error)}")
+                    logger.error(
+                        f"Failed to add individual node {node.id}: {format_neptune_error(node_error)}"
+                    )
                     continue
 
     async def delete_node(self, node_id: str) -> None:
@@ -287,13 +297,11 @@ class NeptuneGraphDB(GraphDBInterface):
             DETACH DELETE n
             """
 
-            params = {
-                "node_id": node_id
-            }
-            
+            params = {"node_id": node_id}
+
             await self.query(query, params)
             logger.debug(f"Successfully deleted node: {node_id}")
-            
+
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to delete node {node_id}: {error_msg}")
@@ -333,7 +341,9 @@ class NeptuneGraphDB(GraphDBInterface):
                 try:
                     await self.delete_node(node_id)
                 except Exception as node_error:
-                    logger.error(f"Failed to delete individual node {node_id}: {format_neptune_error(node_error)}")
+                    logger.error(
+                        f"Failed to delete individual node {node_id}: {format_neptune_error(node_error)}"
+                    )
                     continue
 
     async def get_node(self, node_id: str) -> Optional[NodeData]:
@@ -355,10 +365,10 @@ class NeptuneGraphDB(GraphDBInterface):
             WHERE id(n) = $node_id
             RETURN n
             """
-            params = {'node_id': node_id}
+            params = {"node_id": node_id}
 
             result = await self.query(query, params)
-            
+
             if result and len(result) == 1:
                 # Extract node properties from the result
                 logger.debug(f"Successfully retrieved node: {node_id}")
@@ -369,7 +379,7 @@ class NeptuneGraphDB(GraphDBInterface):
                 elif len(result) > 1:
                     logger.debug(f"Only one node expected, multiple returned: {node_id}")
                 return None
-                
+
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to get node {node_id}: {error_msg}")
@@ -406,7 +416,9 @@ class NeptuneGraphDB(GraphDBInterface):
             # Extract node data from results
             nodes = [record["n"] for record in result]
 
-            logger.debug(f"Successfully retrieved {len(nodes)} nodes out of {len(node_ids)} requested")
+            logger.debug(
+                f"Successfully retrieved {len(nodes)} nodes out of {len(node_ids)} requested"
+            )
             return nodes
 
         except Exception as e:
@@ -421,10 +433,11 @@ class NeptuneGraphDB(GraphDBInterface):
                     if node_data:
                         nodes.append(node_data)
                 except Exception as node_error:
-                    logger.error(f"Failed to get individual node {node_id}: {format_neptune_error(node_error)}")
+                    logger.error(
+                        f"Failed to get individual node {node_id}: {format_neptune_error(node_error)}"
+                    )
                     continue
             return nodes
-
 
     async def extract_node(self, node_id: str):
         """
@@ -512,8 +525,10 @@ class NeptuneGraphDB(GraphDBInterface):
                 "properties": serialized_properties,
             }
             await self.query(query, params)
-            logger.debug(f"Successfully added edge: {source_id} -[{relationship_name}]-> {target_id}")
-            
+            logger.debug(
+                f"Successfully added edge: {source_id} -[{relationship_name}]-> {target_id}"
+            )
+
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to add edge {source_id} -> {target_id}: {error_msg}")
@@ -557,20 +572,24 @@ class NeptuneGraphDB(GraphDBInterface):
                     """
 
                 # Prepare edges data for bulk operation
-                params = {"edges":
-                    [
+                params = {
+                    "edges": [
                         {
                             "from_node": str(edge[0]),
                             "to_node": str(edge[1]),
                             "relationship_name": relationship_name,
-                            "properties": self._serialize_properties(edge[3] if len(edge) > 3 and edge[3] else {}),
+                            "properties": self._serialize_properties(
+                                edge[3] if len(edge) > 3 and edge[3] else {}
+                            ),
                         }
                         for edge in edges_for_relationship
                     ]
                 }
                 results[relationship_name] = await self.query(query, params)
             except Exception as e:
-                logger.error(f"Failed to add edges for relationship {relationship_name}: {format_neptune_error(e)}")
+                logger.error(
+                    f"Failed to add edges for relationship {relationship_name}: {format_neptune_error(e)}"
+                )
                 logger.info("Falling back to individual edge creation")
                 for edge in edges_by_relationship:
                     try:
@@ -578,14 +597,15 @@ class NeptuneGraphDB(GraphDBInterface):
                         properties = edge[3] if len(edge) > 3 else {}
                         await self.add_edge(source_id, target_id, relationship_name, properties)
                     except Exception as edge_error:
-                        logger.error(f"Failed to add individual edge {edge[0]} -> {edge[1]}: {format_neptune_error(edge_error)}")
+                        logger.error(
+                            f"Failed to add individual edge {edge[0]} -> {edge[1]}: {format_neptune_error(edge_error)}"
+                        )
                         continue
 
         processed_count = 0
         for result in results.values():
-            processed_count += result[0].get('edges_processed', 0) if result else 0
+            processed_count += result[0].get("edges_processed", 0) if result else 0
         logger.debug(f"Successfully processed {processed_count} edges in bulk operation")
-
 
     async def delete_graph(self) -> None:
         """
@@ -599,13 +619,11 @@ class NeptuneGraphDB(GraphDBInterface):
             # Build openCypher query to delete the graph
             query = f"MATCH (n:{self._GRAPH_NODE_LABEL}) DETACH DELETE n"
             await self.query(query)
-            logger.debug(f"Successfully deleted all edges and nodes from the graph")
 
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to delete graph: {error_msg}")
             raise Exception(f"Failed to delete graph: {error_msg}") from e
-
 
     async def get_graph_data(self) -> Tuple[List[Node], List[EdgeData]]:
         """
@@ -633,13 +651,7 @@ class NeptuneGraphDB(GraphDBInterface):
             edges_result = await self.query(edges_query)
 
             # Format nodes as (node_id, properties) tuples
-            nodes = [
-                (
-                    result["node_id"],
-                    result["properties"]
-                )
-                for result in nodes_result
-            ]
+            nodes = [(result["node_id"], result["properties"]) for result in nodes_result]
 
             # Format edges as (source_id, target_id, relationship_name, properties) tuples
             edges = [
@@ -647,7 +659,7 @@ class NeptuneGraphDB(GraphDBInterface):
                     result["source_id"],
                     result["target_id"],
                     result["relationship_name"],
-                    result["properties"]
+                    result["properties"],
                 )
                 for result in edges_result
             ]
@@ -679,9 +691,11 @@ class NeptuneGraphDB(GraphDBInterface):
             "num_nodes": num_nodes,
             "num_edges": num_edges,
             "mean_degree": (2 * num_edges) / num_nodes if num_nodes != 0 else None,
-            "edge_density": num_edges * 1.0 / (num_nodes * (num_nodes - 1)) if num_nodes != 0 else None,
+            "edge_density": num_edges * 1.0 / (num_nodes * (num_nodes - 1))
+            if num_nodes != 0
+            else None,
             "num_connected_components": num_cluster,
-            "sizes_of_connected_components": list_clsuter_size
+            "sizes_of_connected_components": list_clsuter_size,
         }
 
         optional_metrics = {
@@ -692,7 +706,7 @@ class NeptuneGraphDB(GraphDBInterface):
         }
 
         if include_optional:
-            optional_metrics['num_selfloops'] = await self._count_self_loops()
+            optional_metrics["num_selfloops"] = await self._count_self_loops()
             # Unsupported due to long-running queries when computing the shortest path for each node in the graph:
             # optional_metrics['diameter']
             # optional_metrics['avg_shortest_path_length']
@@ -728,17 +742,19 @@ class NeptuneGraphDB(GraphDBInterface):
                 "source_id": source_id,
                 "target_id": target_id,
             }
-            
+
             result = await self.query(query, params)
-            
+
             if result and len(result) > 0:
-                edge_exists = result.pop().get('edge_exists', False)
-                logger.debug(f"Edge existence check for "
-                             f"{source_id} -[{relationship_name}]-> {target_id}: {edge_exists}")
+                edge_exists = result.pop().get("edge_exists", False)
+                logger.debug(
+                    f"Edge existence check for "
+                    f"{source_id} -[{relationship_name}]-> {target_id}: {edge_exists}"
+                )
                 return edge_exists
             else:
                 return False
-                
+
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to check edge existence {source_id} -> {target_id}: {error_msg}")
@@ -778,7 +794,7 @@ class NeptuneGraphDB(GraphDBInterface):
             results = await self.query(query, params)
             logger.debug(f"Found {len(results)} existing edges out of {len(edges)} checked")
             return [result["edge_exists"] for result in results]
-            
+
         except Exception as e:
             error_msg = format_neptune_error(e)
             logger.error(f"Failed to check edges existence: {error_msg}")
@@ -863,10 +879,7 @@ class NeptuneGraphDB(GraphDBInterface):
         RETURN predecessor
         """
 
-        results = await self.query(
-            query,
-            {"node_id": node_id}
-        )
+        results = await self.query(query, {"node_id": node_id})
 
         return [result["predecessor"] for result in results]
 
@@ -893,13 +906,9 @@ class NeptuneGraphDB(GraphDBInterface):
         RETURN successor
         """
 
-        results = await self.query(
-            query,
-            {"node_id": node_id}
-        )
+        results = await self.query(query, {"node_id": node_id})
 
         return [result["successor"] for result in results]
-
 
     async def get_neighbors(self, node_id: str) -> List[NodeData]:
         """
@@ -926,11 +935,7 @@ class NeptuneGraphDB(GraphDBInterface):
 
             # Format neighbors as NodeData objects
             neighbors = [
-                {
-                    "id": neighbor["neighbor_id"],
-                    **neighbor["properties"]
-                }
-                for neighbor in result
+                {"id": neighbor["neighbor_id"], **neighbor["properties"]} for neighbor in result
             ]
 
             logger.debug(f"Retrieved {len(neighbors)} neighbors for node: {node_id}")
@@ -942,9 +947,7 @@ class NeptuneGraphDB(GraphDBInterface):
             raise Exception(f"Failed to get neighbors: {error_msg}") from e
 
     async def get_nodeset_subgraph(
-            self,
-            node_type: Type[Any],
-            node_name: List[str]
+        self, node_type: Type[Any], node_name: List[str]
     ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
         """
         Fetch a subgraph consisting of a specific set of nodes and their relationships.
@@ -987,10 +990,7 @@ class NeptuneGraphDB(GraphDBInterface):
               }}] AS rawRels
             """
 
-            params = {
-                "names": node_name,
-                "type": node_type.__name__
-            }
+            params = {"names": node_name, "type": node_type.__name__}
 
             result = await self.query(query, params)
 
@@ -1002,18 +1002,14 @@ class NeptuneGraphDB(GraphDBInterface):
             raw_rels = result[0]["rawRels"]
 
             # Format nodes as (node_id, properties) tuples
-            nodes = [
-                (n["id"], n["properties"])
-                for n in raw_nodes
-            ]
+            nodes = [(n["id"], n["properties"]) for n in raw_nodes]
 
             # Format edges as (source_id, target_id, relationship_name, properties) tuples
-            edges = [
-                (r["source_id"], r["target_id"], r["type"], r["properties"])
-                for r in raw_rels
-            ]
+            edges = [(r["source_id"], r["target_id"], r["type"], r["properties"]) for r in raw_rels]
 
-            logger.debug(f"Retrieved subgraph with {len(nodes)} nodes and {len(edges)} edges for type {node_type.__name__}")
+            logger.debug(
+                f"Retrieved subgraph with {len(nodes)} nodes and {len(edges)} edges for type {node_type.__name__}"
+            )
             return (nodes, edges)
 
         except Exception as e:
@@ -1055,18 +1051,12 @@ class NeptuneGraphDB(GraphDBInterface):
                 # Return as (source_node, relationship, target_node)
                 connections.append(
                     (
-                        {
-                            "id": record["source_id"],
-                            **record["source_props"]
-                        },
+                        {"id": record["source_id"], **record["source_props"]},
                         {
                             "relationship_name": record["relationship_name"],
-                            **record["relationship_props"]
+                            **record["relationship_props"],
                         },
-                        {
-                            "id": record["target_id"],
-                            **record["target_props"]
-                        }
+                        {"id": record["target_id"], **record["target_props"]},
                     )
                 )
 
@@ -1078,10 +1068,7 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to get connections for node {node_id}: {error_msg}")
             raise Exception(f"Failed to get connections: {error_msg}") from e
 
-
-    async def remove_connection_to_predecessors_of(
-        self, node_ids: list[str], edge_label: str
-    ):
+    async def remove_connection_to_predecessors_of(self, node_ids: list[str], edge_label: str):
         """
         Remove connections (edges) to all predecessors of specified nodes based on edge label.
 
@@ -1101,10 +1088,7 @@ class NeptuneGraphDB(GraphDBInterface):
         params = {"node_ids": node_ids}
         await self.query(query, params)
 
-
-    async def remove_connection_to_successors_of(
-        self, node_ids: list[str], edge_label: str
-    ):
+    async def remove_connection_to_successors_of(self, node_ids: list[str], edge_label: str):
         """
         Remove connections (edges) to all successors of specified nodes based on edge label.
 
@@ -1124,7 +1108,6 @@ class NeptuneGraphDB(GraphDBInterface):
         params = {"node_ids": node_ids}
         await self.query(query, params)
 
-
     async def get_node_labels_string(self):
         """
         Fetch all node labels from the database and return them as a formatted string.
@@ -1138,7 +1121,9 @@ class NeptuneGraphDB(GraphDBInterface):
         -------
             ValueError: If no node labels are found in the database.
         """
-        node_labels_query = "CALL neptune.graph.pg_schema() YIELD schema RETURN schema.nodeLabels as labels "
+        node_labels_query = (
+            "CALL neptune.graph.pg_schema() YIELD schema RETURN schema.nodeLabels as labels "
+        )
         node_labels_result = await self.query(node_labels_query)
         node_labels = node_labels_result[0]["labels"] if node_labels_result else []
 
@@ -1156,7 +1141,9 @@ class NeptuneGraphDB(GraphDBInterface):
 
             A formatted string of relationship types.
         """
-        relationship_types_query = "CALL neptune.graph.pg_schema() YIELD schema RETURN schema.edgeLabels as relationships "
+        relationship_types_query = (
+            "CALL neptune.graph.pg_schema() YIELD schema RETURN schema.edgeLabels as relationships "
+        )
         relationship_types_result = await self.query(relationship_types_query)
         relationship_types = (
             relationship_types_result[0]["relationships"] if relationship_types_result else []
@@ -1171,7 +1158,6 @@ class NeptuneGraphDB(GraphDBInterface):
             + "}"
         )
         return relationship_types_undirected_str
-
 
     async def drop_graph(self, graph_name="myGraph"):
         """
@@ -1207,7 +1193,6 @@ class NeptuneGraphDB(GraphDBInterface):
             True if the graph exists, otherwise False.
         """
         pass
-
 
     async def project_entire_graph(self, graph_name="myGraph"):
         """
@@ -1279,7 +1264,6 @@ class NeptuneGraphDB(GraphDBInterface):
         ]
 
         return (nodes, edges)
-
 
     async def get_degree_one_nodes(self, node_type: str):
         """
@@ -1361,8 +1345,6 @@ class NeptuneGraphDB(GraphDBInterface):
         result = await self.query(query, {"content_hash": content_hash})
         return result[0] if result else None
 
-
-
     async def _get_model_independent_graph_data(self):
         """
         Retrieve the basic graph data without considering the model specifics, returning nodes
@@ -1380,8 +1362,8 @@ class NeptuneGraphDB(GraphDBInterface):
             RETURN nodeCount AS numVertices, count(r) AS numEdges
         """
         query_response = await self.query(query_string)
-        num_nodes = query_response[0].get('numVertices')
-        num_edges = query_response[0].get('numEdges')
+        num_nodes = query_response[0].get("numVertices")
+        num_edges = query_response[0].get("numEdges")
 
         return (num_nodes, num_edges)
 
@@ -1437,4 +1419,9 @@ class NeptuneGraphDB(GraphDBInterface):
 
     @staticmethod
     def _convert_relationship_to_edge(relationship: dict) -> EdgeData:
-        return relationship["source_id"], relationship["target_id"], relationship["relationship_name"], relationship["properties"]
+        return (
+            relationship["source_id"],
+            relationship["target_id"],
+            relationship["relationship_name"],
+            relationship["properties"],
+        )
