@@ -40,6 +40,9 @@ async def resolve_data_directories(
                     if include_subdirectories:
                         base_path = item if item.endswith("/") else item + "/"
                         s3_keys = fs.glob(base_path + "**")
+                        # If path is not directory attempt to add item directly
+                        if not s3_keys:
+                            s3_keys = fs.ls(item)
                     else:
                         s3_keys = fs.ls(item)
                     # Filter out keys that represent directories using fs.isdir
