@@ -27,17 +27,14 @@ async def reading_temporal_data():
 
 
 async def main():
-    import random
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
 
-    if random.random() > 0.9999999:
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
+    texts = await reading_temporal_data()
+    texts = texts[:5]
 
-        texts = await reading_temporal_data()
-        texts = texts[:5]
-
-        await cognee.add(texts)
-        await temporal_cognify()
+    await cognee.add(texts)
+    await temporal_cognify()
 
     search_results = await cognee.search(
         query_type=SearchType.TEMPORAL, query_text="What happened in 2015"
