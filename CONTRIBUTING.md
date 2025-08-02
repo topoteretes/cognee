@@ -109,7 +109,7 @@ git push origin feature/your-feature-name
 ```
 
 2. Create a Pull Request:
-   - Go to the [**cognee** repository](https://github.com/topoteretes/cognee)
+   - Go to the [**cognee** repository](https://github.com/topoteretes/cognee) or [cognee community repository](https://github.com/topoteretes/cognee-community)
    - Click "Compare & Pull Request" and open a PR against dev branch
    - Fill in the PR template with details about your changes
 
