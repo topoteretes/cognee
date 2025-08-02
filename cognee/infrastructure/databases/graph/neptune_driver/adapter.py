@@ -13,6 +13,7 @@ from cognee.infrastructure.databases.graph.graph_db_interface import (
 )
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.infrastructure.engine import DataPoint
+from botocore.config import Config
 
 from .exceptions import (
     NeptuneAnalyticsConfigurationError,
@@ -107,6 +108,9 @@ class NeptuneGraphDB(GraphDBInterface):
             # Initialize the Neptune Analytics Graph client
             client_config = {
                 "graph_identifier": self.graph_id,
+                "config": Config(
+                    user_agent_appid='Cognee'
+                )
             }
             # Add AWS credentials if provided
             if self.region:
