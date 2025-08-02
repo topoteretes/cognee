@@ -4,13 +4,13 @@ from typing import Optional
 from pydantic import BaseModel, Field, ConfigDict
 
 
-class Interval(DataPoint):
-    time_from: int = Field(..., ge=0)
-    time_to: int = Field(..., ge=0)
-
-
 class Timestamp(DataPoint):
-    time_at: int = Field(..., ge=0)
+    time_at: int = Field(...)
+
+
+class Interval(DataPoint):
+    time_from: Timestamp = Field(...)
+    time_to: Timestamp = Field(...)
 
 
 class Event(DataPoint):

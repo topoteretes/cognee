@@ -29,7 +29,7 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
 
     texts = await reading_temporal_data()
-    texts = texts[:10]
+    texts = texts[:5]
 
     await cognee.add(texts)
     await temporal_cognify()
