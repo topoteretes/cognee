@@ -28,6 +28,7 @@ from cognee.modules.data.models import Dataset
 from cognee.shared.utils import send_telemetry
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from cognee.modules.search.operations import log_query, log_result
+from cognee.temporal_poc.temporal_retriever import TemporalRetriever
 
 
 async def search(
@@ -127,6 +128,7 @@ async def specific_search(
         SearchType.CODE: CodeRetriever(top_k=top_k).get_completion,
         SearchType.CYPHER: CypherSearchRetriever().get_completion,
         SearchType.NATURAL_LANGUAGE: NaturalLanguageRetriever().get_completion,
+        SearchType.TEMPORAL: TemporalRetriever().get_completion,
     }
 
     search_task = search_tasks.get(query_type)

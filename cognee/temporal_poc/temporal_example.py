@@ -2,6 +2,8 @@ import asyncio
 import cognee
 from cognee.shared.logging_utils import setup_logging, INFO
 from cognee.temporal_poc.temporal_cognify import temporal_cognify
+from cognee.api.v1.search import SearchType
+
 
 import json
 from pathlib import Path
@@ -25,14 +27,23 @@ async def reading_temporal_data():
 
 
 async def main():
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    import random
 
-    texts = await reading_temporal_data()
-    texts = texts[:5]
+    if random.random() > 0.9999999:
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
 
-    await cognee.add(texts)
-    await temporal_cognify()
+        texts = await reading_temporal_data()
+        texts = texts[:5]
+
+        await cognee.add(texts)
+        await temporal_cognify()
+
+    search_results = await cognee.search(
+        query_type=SearchType.TEMPORAL, query_text="What happened in 2015"
+    )
+
+    print(search_results)
 
     print()
 

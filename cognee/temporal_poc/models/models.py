@@ -17,6 +17,11 @@ class Interval(BaseModel):
     ends_at: Timestamp
 
 
+class QueryInterval(BaseModel):
+    starts_at: Optional[Timestamp] = None
+    ends_at: Optional[Timestamp] = None
+
+
 class Event(BaseModel):
     name: str
     description: Optional[str] = None
