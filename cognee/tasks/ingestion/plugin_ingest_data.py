@@ -227,6 +227,18 @@ async def plugin_ingest_data(
                     if "_" in content_identifier:
                         return content_identifier.split("_", 1)[-1]
                     return content_identifier
+                elif field_name == "file_size":
+                    # Get file size from metadata or filesystem
+                    if "file_size" in metadata:
+                        return metadata["file_size"]
+                    elif file_path:
+                        import os
+
+                        try:
+                            return os.path.getsize(file_path)
+                        except (OSError, TypeError):
+                            return None
+                    return None
 
                 return default_value
 
@@ -275,6 +287,9 @@ async def plugin_ingest_data(
                     content_hash=get_metadata_field(file_metadata, "content_hash"),
                     external_metadata=ext_metadata,
                     node_set=json.dumps(node_set) if node_set else None,
+                    data_size=get_metadata_field(file_metadata, "file_size"),
+                    tenant_id=user.tenant_id if user.tenant_id else None,
+                    pipeline_status={},
                     token_count=-1,
                 )
 

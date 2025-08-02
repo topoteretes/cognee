@@ -98,10 +98,9 @@ async def run_tasks(
                 await session.execute(select(Data).filter(Data.id == data_id))
             ).scalar_one_or_none()
             if data_point:
-                if (
-                    data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
-                    == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-                ):
+                if (data_point.pipeline_status or {}).get(pipeline_name, {}).get(
+                    str(dataset.id)
+                ) == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED:
                     yield {
                         "run_info": PipelineRunAlreadyCompleted(
                             pipeline_run_id=pipeline_run_id,
@@ -133,11 +132,20 @@ async def run_tasks(
                 data_point = (
                     await session.execute(select(Data).filter(Data.id == data_id))
                 ).scalar_one_or_none()
-                data_point.pipeline_status[pipeline_name] = {
-                    str(dataset.id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-                }
-                await session.merge(data_point)
-                await session.commit()
+                if data_point is not None:
+                    if data_point.pipeline_status is None:
+                        data_point.pipeline_status = {}
+                    data_point.pipeline_status[pipeline_name] = {
+                        str(dataset.id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+                    }
+                    await session.merge(data_point)
+                    await session.commit()
+                else:
+                    # Log warning if data point not found but don't fail the pipeline
+                    logger = get_logger(__name__)
+                    logger.warning(
+                        f"Data point with ID {data_id} not found in database, skipping pipeline status update"
+                    )
 
             yield {
                 "run_info": PipelineRunCompleted(
