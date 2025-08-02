@@ -28,7 +28,7 @@ logger = get_logger("code_graph_pipeline")
 
 
 @observe
-async def run_code_graph_pipeline(repo_path, include_docs=False):
+async def run_code_graph_pipeline(repo_path, include_docs=False, excluded_paths=None):
     import cognee
     from cognee.low_level import setup
 
@@ -40,14 +40,39 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
     user = await get_default_user()
     detailed_extraction = True
 
+    # Default exclusion patterns
+    if excluded_paths is None:
+        excluded_paths = [
+            ".venv/",
+            "venv/",
+            "__pycache__/",
+            ".pytest_cache/",
+            "build/",
+            "dist/",
+            "node_modules/",
+            ".npm/",
+            ".git/",
+            ".svn/",
+            ".idea/",
+            ".vscode/",
+            "tmp/",
+            "temp/",
+            "*.pyc",
+            "*.pyo",
+            "*.log",
+            "*.tmp",
+        ]
+
     tasks = [
-        Task(get_repo_file_dependencies, detailed_extraction=detailed_extraction),
-        # Task(summarize_code, task_config={"batch_size": 500}), # This task takes a long time to complete
+        Task(
+            get_repo_file_dependencies,
+            detailed_extraction=detailed_extraction,
+            excluded_paths=excluded_paths,
+        ),
         Task(add_data_points, task_config={"batch_size": 30}),
     ]
 
     if include_docs:
-        # This tasks take a long time to complete
         non_code_tasks = [
             Task(get_non_py_files, task_config={"batch_size": 50}),
             Task(ingest_data, dataset_name="repo_docs", user=user),
@@ -67,7 +92,6 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
 
     dataset_name = "codebase"
 
-    # Save dataset to database
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         dataset = await create_dataset(dataset_name, user, session)
