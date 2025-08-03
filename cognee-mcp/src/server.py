@@ -786,7 +786,7 @@ async def main():
 
     # Run Alembic migrations from the main cognee directory where alembic.ini is located
     print("Running database migrations...")
-    
+
     # Detect if we're in Docker (alembic.ini in /app) or local (alembic.ini in parent dir)
     if os.path.exists("/app/alembic.ini"):
         # Docker environment - use explicit config path
