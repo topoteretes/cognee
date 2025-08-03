@@ -24,7 +24,14 @@ echo "HTTP port: $HTTP_PORT"
 # smooth redeployments and container restarts while maintaining data integrity.
 echo "Running database migrations..."
 
-MIGRATION_OUTPUT=$(alembic upgrade head)
+# Detect if we're in Docker (alembic.ini in /app) or local (alembic.ini in parent dir)
+if [ -f "/app/alembic.ini" ]; then
+    MIGRATION_OUTPUT=$(alembic -c /app/alembic.ini upgrade head 2>&1)
+else
+    # Local execution - change to cognee root directory where alembic.ini exists
+    cd "$(dirname "$0")/.."
+    MIGRATION_OUTPUT=$(alembic upgrade head 2>&1)
+fi
 MIGRATION_EXIT_CODE=$?
 
 if [[ $MIGRATION_EXIT_CODE -ne 0 ]]; then

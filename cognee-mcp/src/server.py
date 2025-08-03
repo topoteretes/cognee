@@ -786,12 +786,24 @@ async def main():
 
     # Run Alembic migrations from the main cognee directory where alembic.ini is located
     print("Running database migrations...")
-    migration_result = subprocess.run(
-        ["python", "-m", "alembic", "upgrade", "head"],
-        capture_output=True,
-        text=True,
-        cwd=Path(__file__).resolve().parent.parent.parent,
-    )
+    
+    # Detect if we're in Docker (alembic.ini in /app) or local (alembic.ini in parent dir)
+    if os.path.exists("/app/alembic.ini"):
+        # Docker environment - use explicit config path
+        migration_result = subprocess.run(
+            ["python", "-m", "alembic", "-c", "/app/alembic.ini", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+            cwd="/app",
+        )
+    else:
+        # Local environment - use relative path
+        migration_result = subprocess.run(
+            ["python", "-m", "alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).resolve().parent.parent.parent,
+        )
 
     if migration_result.returncode != 0:
         migration_output = migration_result.stderr + migration_result.stdout
