@@ -162,7 +162,7 @@ Negotiation and Relationship Building
 
 
 async def main():
-    pre_graph_creation = False
+    pre_graph_creation = True
 
     if pre_graph_creation:
         await cognee.prune.prune_data()
