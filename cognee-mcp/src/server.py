@@ -123,11 +123,34 @@ async def cognee_add_developer_rules(
 @mcp.tool()
 async def cognify(data: str, graph_model_file: str = None, graph_model_name: str = None) -> list:
     """
-    Transform data into a structured knowledge graph in Cognee's memory layer.
+    Transform ingested data into a structured knowledge graph.
 
-    This function launches a background task that processes the provided text/file location and
-    generates a knowledge graph representation. The function returns immediately while
-    the processing continues in the background due to MCP timeout constraints.
+    This is the core processing step in Cognee that converts raw text and documents
+    into an intelligent knowledge graph. It analyzes content, extracts entities and
+    relationships, and creates semantic connections for enhanced search and reasoning.
+
+    Prerequisites:
+        - **LLM_API_KEY**: Must be configured (required for entity extraction and graph generation)
+        - **Data Added**: Must have data previously added via `cognee.add()`
+        - **Vector Database**: Must be accessible for embeddings storage
+        - **Graph Database**: Must be accessible for relationship storage
+
+    Input Requirements:
+        - **Content Types**: Works with any text-extractable content including:
+            * Natural language documents
+            * Structured data (CSV, JSON)
+            * Code repositories
+            * Academic papers and technical documentation
+            * Mixed multimedia content (with text extraction)
+
+    Processing Pipeline:
+        1. **Document Classification**: Identifies document types and structures
+        2. **Permission Validation**: Ensures user has processing rights
+        3. **Text Chunking**: Breaks content into semantically meaningful segments
+        4. **Entity Extraction**: Identifies key concepts, people, places, organizations
+        5. **Relationship Detection**: Discovers connections between entities
+        6. **Graph Construction**: Builds semantic knowledge graph with embeddings
+        7. **Content Summarization**: Creates hierarchical summaries for navigation
 
     Parameters
     ----------
@@ -152,11 +175,60 @@ async def cognify(data: str, graph_model_file: str = None, graph_model_name: str
         A list containing a single TextContent object with information about the
         background task launch and how to check its status.
 
+    Next Steps:
+        After successful cognify processing, use search functions to query the knowledge:
+
+        ```python
+        import cognee
+        from cognee import SearchType
+
+        # Process your data into knowledge graph
+        await cognee.cognify()
+
+        # Query for insights using different search types:
+
+        # 1. Natural language completion with graph context
+        insights = await cognee.search(
+            "What are the main themes?",
+            query_type=SearchType.GRAPH_COMPLETION
+        )
+
+        # 2. Get entity relationships and connections
+        relationships = await cognee.search(
+            "connections between concepts",
+            query_type=SearchType.INSIGHTS
+        )
+
+        # 3. Find relevant document chunks
+        chunks = await cognee.search(
+            "specific topic",
+            query_type=SearchType.CHUNKS
+        )
+        ```
+
+    Environment Variables:
+        Required:
+        - LLM_API_KEY: API key for your LLM provider
+
+        Optional:
+        - LLM_PROVIDER, LLM_MODEL, VECTOR_DB_PROVIDER, GRAPH_DATABASE_PROVIDER
+        - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
+        - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
+
     Notes
     -----
     - The function launches a background task and returns immediately
     - The actual cognify process may take significant time depending on text length
     - Use the cognify_status tool to check the progress of the operation
+
+    Raises
+    ------
+    InvalidValueError
+        If LLM_API_KEY is not set
+    ValueError
+        If chunks exceed max token limits (reduce chunk_size)
+    DatabaseNotCreatedError
+        If databases are not properly initialized
     """
 
     async def cognify_task(
@@ -327,17 +399,69 @@ async def codify(repo_path: str) -> list:
 @mcp.tool()
 async def search(search_query: str, search_type: str) -> list:
     """
-    Search the Cognee knowledge graph for information relevant to the query.
+    Search and query the knowledge graph for insights, information, and connections.
 
-    This function executes a search against the Cognee knowledge graph using the
-    specified query and search type. It returns formatted results based on the
-    search type selected.
+    This is the final step in the Cognee workflow that retrieves information from the
+    processed knowledge graph. It supports multiple search modes optimized for different
+    use cases - from simple fact retrieval to complex reasoning and code analysis.
+
+    Search Prerequisites:
+        - **LLM_API_KEY**: Required for GRAPH_COMPLETION and RAG_COMPLETION search types
+        - **Data Added**: Must have data previously added via `cognee.add()`
+        - **Knowledge Graph Built**: Must have processed data via `cognee.cognify()`
+        - **Vector Database**: Must be accessible for semantic search functionality
+
+    Search Types & Use Cases:
+
+        **GRAPH_COMPLETION** (Recommended):
+            Natural language Q&A using full graph context and LLM reasoning.
+            Best for: Complex questions, analysis, summaries, insights.
+            Returns: Conversational AI responses with graph-backed context.
+
+        **RAG_COMPLETION**:
+            Traditional RAG using document chunks without graph structure.
+            Best for: Direct document retrieval, specific fact-finding.
+            Returns: LLM responses based on relevant text chunks.
+
+        **INSIGHTS**:
+            Structured entity relationships and semantic connections.
+            Best for: Understanding concept relationships, knowledge mapping.
+            Returns: Formatted relationship data and entity connections.
+
+        **CHUNKS**:
+            Raw text segments that match the query semantically.
+            Best for: Finding specific passages, citations, exact content.
+            Returns: Ranked list of relevant text chunks with metadata.
+
+        **SUMMARIES**:
+            Pre-generated hierarchical summaries of content.
+            Best for: Quick overviews, document abstracts, topic summaries.
+            Returns: Multi-level summaries from detailed to high-level.
+
+        **CODE**:
+            Code-specific search with syntax and semantic understanding.
+            Best for: Finding functions, classes, implementation patterns.
+            Returns: Structured code information with context and relationships.
+
+        **CYPHER**:
+            Direct graph database queries using Cypher syntax.
+            Best for: Advanced users, specific graph traversals, debugging.
+            Returns: Raw graph query results.
+
+        **FEELING_LUCKY**:
+            Intelligently selects and runs the most appropriate search type.
+            Best for: General-purpose queries or when you're unsure which search type is best.
+            Returns: The results from the automatically selected search type.
 
     Parameters
     ----------
     search_query : str
-        The search query in natural language. This can be a question, instruction, or
-        any text that expresses what information is needed from the knowledge graph.
+        Your question or search query in natural language.
+        Examples:
+        - "What are the main themes in this research?"
+        - "How do these concepts relate to each other?"
+        - "Find information about machine learning algorithms"
+        - "What functions handle user authentication?"
 
     search_type : str
         The type of search to perform. Valid options include:
@@ -346,6 +470,9 @@ async def search(search_query: str, search_type: str) -> list:
         - "CODE": Returns code-related knowledge in JSON format
         - "CHUNKS": Returns raw text chunks from the knowledge graph
         - "INSIGHTS": Returns relationships between nodes in readable format
+        - "SUMMARIES": Returns pre-generated hierarchical summaries
+        - "CYPHER": Direct graph database queries
+        - "FEELING_LUCKY": Automatically selects best search type
 
         The search_type is case-insensitive and will be converted to uppercase.
 
@@ -354,16 +481,45 @@ async def search(search_query: str, search_type: str) -> list:
     list
         A list containing a single TextContent object with the search results.
         The format of the result depends on the search_type:
-        - For CODE: JSON-formatted search results
-        - For GRAPH_COMPLETION/RAG_COMPLETION: A single text completion
-        - For CHUNKS: String representation of the raw chunks
-        - For INSIGHTS: Formatted string showing node relationships
-        - For other types: String representation of the search results
+        - **GRAPH_COMPLETION/RAG_COMPLETION**: Conversational AI response strings
+        - **INSIGHTS**: Formatted relationship descriptions and entity connections
+        - **CHUNKS**: Relevant text passages with source metadata
+        - **SUMMARIES**: Hierarchical summaries from general to specific
+        - **CODE**: Structured code information with context
+        - **FEELING_LUCKY**: Results in format of automatically selected search type
+        - **CYPHER**: Raw graph query results
+
+    Performance & Optimization:
+        - **GRAPH_COMPLETION**: Slower but most intelligent, uses LLM + graph context
+        - **RAG_COMPLETION**: Medium speed, uses LLM + document chunks (no graph traversal)
+        - **INSIGHTS**: Fast, returns structured relationships without LLM processing
+        - **CHUNKS**: Fastest, pure vector similarity search without LLM
+        - **SUMMARIES**: Fast, returns pre-computed summaries
+        - **CODE**: Medium speed, specialized for code understanding
+        - **FEELING_LUCKY**: Variable speed, uses LLM + search type selection intelligently
+
+    Environment Variables:
+        Required for LLM-based search types (GRAPH_COMPLETION, RAG_COMPLETION):
+        - LLM_API_KEY: API key for your LLM provider
+
+        Optional:
+        - LLM_PROVIDER, LLM_MODEL: Configure LLM for search responses
+        - VECTOR_DB_PROVIDER: Must match what was used during cognify
+        - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     Notes
     -----
     - Different search types produce different output formats
     - The function handles the conversion between Cognee's internal result format and MCP's output format
+
+    Raises
+    ------
+    InvalidValueError
+        If LLM_API_KEY is not set (for LLM-based search types)
+    ValueError
+        If query_text is empty or search parameters are invalid
+    NoDataError
+        If no relevant data found for the search query
     """
 
     async def search_task(search_query: str, search_type: str) -> str:
