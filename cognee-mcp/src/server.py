@@ -938,30 +938,38 @@ async def main():
         help="Log level for the HTTP server (default: info)",
     )
 
-    args = parser.parse_args()
-
-    # Run Alembic migrations from the main cognee directory where alembic.ini is located
-    print("Running database migrations...")
-    migration_result = subprocess.run(
-        ["python", "-m", "alembic", "upgrade", "head"],
-        capture_output=True,
-        text=True,
-        cwd=Path(__file__).resolve().parent.parent.parent,
+    parser.add_argument(
+        "--no-migration",
+        default=False,
+        action="store_true",
+        help="Argument stops database migration from being attempted",
     )
 
-    if migration_result.returncode != 0:
-        migration_output = migration_result.stderr + migration_result.stdout
-        # Check for the expected UserAlreadyExists error (which is not critical)
-        if (
-            "UserAlreadyExists" in migration_output
-            or "User default_user@example.com already exists" in migration_output
-        ):
-            print("Warning: Default user already exists, continuing startup...")
-        else:
-            print(f"Migration failed with unexpected error: {migration_output}")
-            sys.exit(1)
+    args = parser.parse_args()
 
-    print("Database migrations done.")
+    if not args.no_migration:
+        # Run Alembic migrations from the main cognee directory where alembic.ini is located
+        logger.info("Running database migrations...")
+        migration_result = subprocess.run(
+            ["python", "-m", "alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).resolve().parent.parent.parent,
+        )
+
+        if migration_result.returncode != 0:
+            migration_output = migration_result.stderr + migration_result.stdout
+            # Check for the expected UserAlreadyExists error (which is not critical)
+            if (
+                "UserAlreadyExists" in migration_output
+                or "User default_user@example.com already exists" in migration_output
+            ):
+                logger.warning("Warning: Default user already exists, continuing startup...")
+            else:
+                logger.error(f"Migration failed with unexpected error: {migration_output}")
+                sys.exit(1)
+
+        logger.info("Database migrations done.")
 
     logger.info(f"Starting MCP server with transport: {args.transport}")
     if args.transport == "stdio":
