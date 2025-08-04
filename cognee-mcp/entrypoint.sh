@@ -48,27 +48,27 @@ if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
     if [ "$DEBUG" = "true" ]; then
         echo "Waiting for the debugger to attach..."
         if [ "$TRANSPORT_MODE" = "sse" ]; then
-            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee --transport sse
+            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee --transport sse --no-migration
         elif [ "$TRANSPORT_MODE" = "http" ]; then
-            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee --transport http --host 0.0.0.0 --port $HTTP_PORT
+            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee --transport http --host 0.0.0.0 --port $HTTP_PORT --no-migration
         else
-            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee --transport stdio
+            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee --transport stdio --no-migration
         fi
     else
         if [ "$TRANSPORT_MODE" = "sse" ]; then
-            exec cognee --transport sse
+            exec cognee --transport sse --no-migration
         elif [ "$TRANSPORT_MODE" = "http" ]; then
-            exec cognee --transport http --host 0.0.0.0 --port $HTTP_PORT
+            exec cognee --transport http --host 0.0.0.0 --port $HTTP_PORT --no-migration
         else
-            exec cognee --transport stdio
+            exec cognee --transport stdio --no-migration
         fi
     fi
 else
     if [ "$TRANSPORT_MODE" = "sse" ]; then
-        exec cognee --transport sse
+        exec cognee --transport sse --no-migration
     elif [ "$TRANSPORT_MODE" = "http" ]; then
-        exec cognee --transport http --host 0.0.0.0 --port $HTTP_PORT
+        exec cognee --transport http --host 0.0.0.0 --port $HTTP_PORT --no-migration
     else
-        exec cognee --transport stdio
+        exec cognee --transport stdio --no-migration
     fi
 fi

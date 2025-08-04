@@ -1,3 +1,4 @@
+import time
 from cognee.shared.logging_utils import get_logger
 from typing import List, Dict, Union, Optional, Type
 
@@ -154,38 +155,34 @@ class CogneeGraph(CogneeAbstractGraph):
                 raise ValueError("Failed to generate query embedding.")
 
             if edge_distances is None:
+                start_time = time.time()
                 edge_distances = await vector_engine.search(
                     collection_name="EdgeType_relationship_name",
                     query_vector=query_vector,
                     limit=0,
+                )
+                projection_time = time.time() - start_time
+                logger.info(
+                    f"Edge collection distances were calculated separately from nodes in {projection_time:.2f}s"
                 )
 
             embedding_map = {result.payload["text"]: result.score for result in edge_distances}
 
             for edge in self.edges:
                 relationship_type = edge.attributes.get("relationship_type")
-                if relationship_type and relationship_type in embedding_map:
-                    edge.attributes["vector_distance"] = embedding_map[relationship_type]
+                distance = embedding_map.get(relationship_type, None)
+                if distance is not None:
+                    edge.attributes["vector_distance"] = distance
 
         except Exception as ex:
             logger.error(f"Error mapping vector distances to edges: {str(ex)}")
             raise ex
 
     async def calculate_top_triplet_importances(self, k: int) -> List:
-        min_heap = []
+        def score(edge):
+            n1 = edge.node1.attributes.get("vector_distance", 1)
+            n2 = edge.node2.attributes.get("vector_distance", 1)
+            e = edge.attributes.get("vector_distance", 1)
+            return n1 + n2 + e
 
-        for i, edge in enumerate(self.edges):
-            source_node = self.get_node(edge.node1.id)
-            target_node = self.get_node(edge.node2.id)
-
-            source_distance = source_node.attributes.get("vector_distance", 1) if source_node else 1
-            target_distance = target_node.attributes.get("vector_distance", 1) if target_node else 1
-            edge_distance = edge.attributes.get("vector_distance", 1)
-
-            total_distance = source_distance + target_distance + edge_distance
-
-            heapq.heappush(min_heap, (-total_distance, i, edge))
-            if len(min_heap) > k:
-                heapq.heappop(min_heap)
-
-        return [edge for _, _, edge in sorted(min_heap)]
+        return heapq.nsmallest(k, self.edges, key=score)

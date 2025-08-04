@@ -620,7 +620,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "0.2.1.dev7"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -663,9 +663,10 @@ dependencies = [
     { name = "tiktoken" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f4/84/da4d45a0d74f91ac9302ec66c728aa14c93a980fa24fa590f3c30d2f7e23/cognee-0.2.1.dev7.tar.gz", hash = "sha256:fb280ccf900753fd984d23a984440a1e4ca52c1fcba267743fb4149047301c49", size = 15492306 }
+
+sdist = { url = "https://files.pythonhosted.org/packages/41/46/e7df1faebc92fa31ef8e33faf81feb435782727a789de5532d178e047224/cognee-0.2.1.tar.gz", hash = "sha256:bf5208383fc841981641c040e5b6588e58111af4d771f9eab6552f441e6a8e6c", size = 15497626, upload-time = "2025-07-25T15:53:57.009Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e0/39/4ea24c1e43c99ff2ec0b2904a12cf6947a26d9a875f92a6be776d7101397/cognee-0.2.1.dev7-py3-none-any.whl", hash = "sha256:5923395fd7ec3fa52bbcf84f1b85c4a3a69004b4c7ed721fa90797c7bd727f22", size = 1016188 },
+    { url = "https://files.pythonhosted.org/packages/b3/0e/b705c6eeb538dcdd8fbbb331be25fe8e0bbc1af7d76e61566ec9845b29d3/cognee-0.2.1-py3-none-any.whl", hash = "sha256:6e9d437e0c58a16233841ebf19b1a3d8b67da069460a4f08d0c0e00301b1d36d", size = 1019851, upload-time = "2025-07-25T15:53:53.488Z" },
 ]
 
 [package.optional-dependencies]
@@ -711,7 +712,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cognee", extras = ["postgres", "codegraph", "gemini", "huggingface", "docs", "neo4j"], specifier = ">=0.2.0,<1.0.0" },
+    { name = "cognee", extras = ["postgres", "codegraph", "gemini", "huggingface", "docs", "neo4j"], specifier = "==0.2.1" },
     { name = "fastmcp", specifier = ">=2.10.0,<3.0.0" },
     { name = "mcp", specifier = ">=1.12.0,<2.0.0" },
     { name = "uv", specifier = ">=0.6.3,<1.0.0" },
