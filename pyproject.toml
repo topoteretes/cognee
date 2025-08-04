@@ -58,7 +58,9 @@ dependencies = [
     "pympler>=1.1,<2.0.0",
     "onnxruntime>=1.0.0,<2.0.0",
     "pylance>=0.22.0,<1.0.0",
-    "kuzu (==0.11.0)"
+    "kuzu (==0.11.0)",
+    "click>=8.0.0,<9.0.0",
+    "rich-argparse>=1.1.0,<2.0.0"
 ]
 
 [project.optional-dependencies]
@@ -142,6 +144,9 @@ debug = ["debugpy>=1.8.9,<2.0.0"]
 [project.urls]
 Homepage = "https://www.cognee.ai"
 Repository = "https://github.com/topoteretes/cognee"
+
+[project.scripts]
+cognee = "cognee.cli.minimal_cli:main"
 
 [build-system]
 requires = ["hatchling"]
