@@ -114,7 +114,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                     prompt_file_name=self.followup_system_prompt_path
                 )
 
-                followup_question = await LLMAdapter.llm_client.acreate_structured_output(
+                followup_question = await LLMAdapter.acreate_structured_output(
                     text_input=followup_prompt, system_prompt=followup_system, response_model=str
                 )
                 logger.info(
