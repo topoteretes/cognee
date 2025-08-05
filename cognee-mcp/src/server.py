@@ -947,6 +947,9 @@ async def main():
 
     args = parser.parse_args()
 
+    mcp.settings.host = args.host
+    mcp.settings.port = args.port
+
     if not args.no_migration:
         # Run Alembic migrations from the main cognee directory where alembic.ini is located
         logger.info("Running database migrations...")

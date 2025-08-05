@@ -51,6 +51,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Copy the virtual environment from the uv stage
 COPY --from=uv /usr/local /usr/local
 COPY --from=uv /app /app
 
