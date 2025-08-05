@@ -15,12 +15,7 @@ from pydantic import BaseModel
 
 from cognee.modules.graph.exceptions import EntityNotFoundError
 from cognee.modules.ingestion.exceptions import IngestionError
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import (
-    read_query_prompt,
-)
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
-    get_llm_client,
-)
+
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.data.chunking.get_chunking_engine import get_chunk_engine
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
@@ -32,6 +27,7 @@ from cognee.modules.data.methods.add_model_class_to_graph import (
 from cognee.tasks.graph.models import NodeModel, GraphOntology
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.engine.utils import generate_node_id, generate_node_name
+from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
 
 logger = get_logger("task:infer_data_ontology")
 
@@ -56,11 +52,10 @@ async def extract_ontology(content: str, response_model: Type[BaseModel]):
 
         The structured ontology extracted from the content.
     """
-    llm_client = get_llm_client()
 
-    system_prompt = read_query_prompt("extract_ontology.txt")
+    system_prompt = LLMAdapter.read_query_prompt("extract_ontology.txt")
 
-    ontology = await llm_client.acreate_structured_output(content, system_prompt, response_model)
+    ontology = await LLMAdapter.acreate_structured_output(content, system_prompt, response_model)
 
     return ontology
 

@@ -7,12 +7,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
-    get_llm_client,
-)
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import (
-    read_query_prompt,
-)
+from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
 
 logger = get_logger("CodeRetriever")
 
@@ -46,11 +41,10 @@ class CodeRetriever(BaseRetriever):
             f"Processing query with LLM: '{query[:100]}{'...' if len(query) > 100 else ''}'"
         )
 
-        system_prompt = read_query_prompt("codegraph_retriever_system.txt")
-        llm_client = get_llm_client()
+        system_prompt = LLMAdapter.read_query_prompt("codegraph_retriever_system.txt")
 
         try:
-            result = await llm_client.acreate_structured_output(
+            result = await LLMAdapter.acreate_structured_output(
                 text_input=query,
                 system_prompt=system_prompt,
                 response_model=self.CodeQueryInfo,

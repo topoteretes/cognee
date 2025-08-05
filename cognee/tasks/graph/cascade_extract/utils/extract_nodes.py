@@ -1,13 +1,7 @@
 from typing import List
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
-    get_llm_client,
-)
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import (
-    render_prompt,
-    read_query_prompt,
-)
+from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
 from cognee.root_dir import get_absolute_path
 
 
@@ -19,7 +13,6 @@ class PotentialNodes(BaseModel):
 
 async def extract_nodes(text: str, n_rounds: int = 2) -> List[str]:
     """Extracts node names from content through multiple rounds of analysis."""
-    llm_client = get_llm_client()
     all_nodes: List[str] = []
     existing_nodes = set()
 
@@ -31,13 +24,13 @@ async def extract_nodes(text: str, n_rounds: int = 2) -> List[str]:
             "text": text,
         }
         base_directory = get_absolute_path("./tasks/graph/cascade_extract/prompts")
-        text_input = render_prompt(
+        text_input = LLMAdapter.render_prompt(
             "extract_graph_nodes_prompt_input.txt", context, base_directory=base_directory
         )
-        system_prompt = read_query_prompt(
+        system_prompt = LLMAdapter.read_query_prompt(
             "extract_graph_nodes_prompt_system.txt", base_directory=base_directory
         )
-        response = await llm_client.acreate_structured_output(
+        response = await LLMAdapter.acreate_structured_output(
             text_input=text_input, system_prompt=system_prompt, response_model=PotentialNodes
         )
 

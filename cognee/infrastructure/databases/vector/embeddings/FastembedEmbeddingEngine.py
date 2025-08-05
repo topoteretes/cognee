@@ -5,7 +5,7 @@ import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.tokenizer.TikToken import (
+from cognee.infrastructure.llm.tokenizer.TikToken import (
     TikTokenTokenizer,
 )
 

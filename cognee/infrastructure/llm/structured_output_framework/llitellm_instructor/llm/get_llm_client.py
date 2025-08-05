@@ -50,7 +50,7 @@ def get_llm_client():
 
     # Check if max_token value is defined in liteLLM for given model
     # if not use value from cognee configuration
-    from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.utils import (
+    from cognee.infrastructure.llm.utils import (
         get_model_max_tokens,
     )  # imported here to avoid circular imports
 

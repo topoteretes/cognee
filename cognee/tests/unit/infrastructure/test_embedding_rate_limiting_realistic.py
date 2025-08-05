@@ -3,10 +3,10 @@ import time
 import asyncio
 import logging
 
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.config import (
+from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.embedding_rate_limiter import (
+from cognee.infrastructure.databases.vector.embeddings.embedding_rate_limiter import (
     EmbeddingRateLimiter,
 )
 from cognee.tests.unit.infrastructure.mock_embedding_engine import MockEmbeddingEngine

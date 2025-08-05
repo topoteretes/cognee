@@ -4,7 +4,7 @@ from enum import Enum, auto
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.config import (
+from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
 

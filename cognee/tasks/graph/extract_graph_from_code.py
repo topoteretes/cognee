@@ -2,22 +2,9 @@ import asyncio
 from typing import Type, List
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.tasks.storage import add_data_points
-from cognee.base_config import get_base_config
-
-# Framework selection
-base = get_base_config()
-if base.structured_output_framework == "BAML":
-    print(f"Using BAML framework: {base.structured_output_framework}")
-    from cognee.infrastructure.llm.structured_output_framework.baml_src.extraction import (
-        extract_content_graph,
-    )
-else:
-    print(f"Using llitellm_instructor framework: {base.structured_output_framework}")
-    from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import (
-        extract_content_graph,
-    )
 
 
 async def extract_graph_from_code(
@@ -31,7 +18,7 @@ async def extract_graph_from_code(
         - Graph nodes are stored using the `add_data_points` function for later retrieval or analysis.
     """
     chunk_graphs = await asyncio.gather(
-        *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
+        *[LLMAdapter.extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )
 
     for chunk_index, chunk in enumerate(data_chunks):

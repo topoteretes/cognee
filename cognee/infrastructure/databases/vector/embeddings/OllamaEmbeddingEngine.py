@@ -7,10 +7,10 @@ import os
 import aiohttp.http_exceptions
 
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.tokenizer.HuggingFace import (
+from cognee.infrastructure.llm.tokenizer.HuggingFace import (
     HuggingFaceTokenizer,
 )
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.embedding_rate_limiter import (
+from cognee.infrastructure.databases.vector.embeddings.embedding_rate_limiter import (
     embedding_rate_limit_async,
     embedding_sleep_and_retry_async,
 )

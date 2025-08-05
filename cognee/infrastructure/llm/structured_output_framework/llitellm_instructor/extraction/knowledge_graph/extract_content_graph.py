@@ -7,7 +7,7 @@ from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.l
 from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import (
     render_prompt,
 )
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.config import (
+from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
 

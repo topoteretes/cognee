@@ -1,1 +1,0 @@
-# Vector database tests module

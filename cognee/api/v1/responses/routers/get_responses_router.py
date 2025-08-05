@@ -17,7 +17,7 @@ from cognee.api.v1.responses.models import (
 )
 from cognee.api.v1.responses.dispatch_function import dispatch_function
 from cognee.api.v1.responses.default_tools import DEFAULT_TOOLS
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.config import (
+from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
 from cognee.modules.users.models import User

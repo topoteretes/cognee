@@ -1,7 +1,5 @@
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
-    get_llm_client,
-)
 from cognee.modules.chunking.Chunker import Chunker
+from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
 
 from .Document import Document
 
@@ -10,7 +8,7 @@ class AudioDocument(Document):
     type: str = "audio"
 
     async def create_transcript(self):
-        result = await get_llm_client().create_transcript(self.raw_data_location)
+        result = await LLMAdapter.create_transcript(self.raw_data_location)
         return result.text
 
     async def read(self, chunker_cls: Chunker, max_chunk_size: int):

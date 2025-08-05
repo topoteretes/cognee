@@ -15,9 +15,7 @@ class BaseConfig(BaseSettings):
     langfuse_host: Optional[str] = os.getenv("LANGFUSE_HOST")
     default_user_email: Optional[str] = os.getenv("DEFAULT_USER_EMAIL")
     default_user_password: Optional[str] = os.getenv("DEFAULT_USER_PASSWORD")
-    structured_output_framework: str = os.getenv(
-        "STRUCTURED_OUTPUT_FRAMEWORK", "llitellm_instructor"
-    )
+
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def to_dict(self) -> dict:

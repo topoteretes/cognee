@@ -2,13 +2,9 @@ from uuid import NAMESPACE_OID, uuid5
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import (
-    render_prompt,
-)
+
 from cognee.low_level import DataPoint
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
-    get_llm_client,
-)
+from cognee.infrastructure.llm import LLMAdapter
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.engine.models import NodeSet
 from cognee.tasks.storage import add_data_points, index_graph_edges
@@ -95,16 +91,17 @@ async def get_origin_edges(data: str, rules: List[Rule]) -> list[Any]:
 
 
 async def add_rule_associations(data: str, rules_nodeset_name: str):
-    llm_client = get_llm_client()
     graph_engine = await get_graph_engine()
     existing_rules = await get_existing_rules(rules_nodeset_name=rules_nodeset_name)
 
     user_context = {"chat": data, "rules": existing_rules}
 
-    user_prompt = render_prompt("coding_rule_association_agent_user.txt", context=user_context)
-    system_prompt = render_prompt("coding_rule_association_agent_system.txt", context={})
+    user_prompt = LLMAdapter.render_prompt(
+        "coding_rule_association_agent_user.txt", context=user_context
+    )
+    system_prompt = LLMAdapter.render_prompt("coding_rule_association_agent_system.txt", context={})
 
-    rule_list = await llm_client.acreate_structured_output(
+    rule_list = await LLMAdapter.acreate_structured_output(
         text_input=user_prompt, system_prompt=system_prompt, response_model=RuleSet
     )
 

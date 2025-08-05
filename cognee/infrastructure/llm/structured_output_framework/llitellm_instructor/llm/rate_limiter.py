@@ -49,9 +49,7 @@ from functools import wraps
 from limits import RateLimitItemPerMinute, storage
 from limits.strategies import MovingWindowRateLimiter
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.config import (
-    get_llm_config,
-)
+from cognee.infrastructure.llm.config import get_llm_config
 
 logger = get_logger()
 
