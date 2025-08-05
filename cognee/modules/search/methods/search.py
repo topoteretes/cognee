@@ -27,7 +27,7 @@ from cognee.modules.users.models import User
 from cognee.modules.data.models import Dataset
 from cognee.shared.utils import send_telemetry
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
-from cognee.modules.search.operations import log_query, log_result
+from cognee.modules.search.operations import log_query, log_result, select_search_type
 
 
 async def search(
@@ -128,6 +128,10 @@ async def specific_search(
         SearchType.CYPHER: CypherSearchRetriever().get_completion,
         SearchType.NATURAL_LANGUAGE: NaturalLanguageRetriever().get_completion,
     }
+
+    # If the query type is FEELING_LUCKY, select the search type intelligently
+    if query_type is SearchType.FEELING_LUCKY:
+        query_type = await select_search_type(query)
 
     search_task = search_tasks.get(query_type)
 
