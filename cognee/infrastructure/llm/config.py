@@ -48,6 +48,7 @@ class LLMConfig(BaseSettings):
     baml_llm_endpoint: str = ""
     baml_llm_api_key: Optional[str] = None
     baml_llm_temperature: float = 0.0
+    baml_llm_api_version: str = ""
 
     transcription_model: str = "whisper-1"
     graph_prompt_path: str = "generate_graph_prompt.txt"
@@ -75,11 +76,12 @@ class LLMConfig(BaseSettings):
                 "model": self.baml_llm_model,
                 "temperature": self.baml_llm_temperature,
                 "api_key": self.baml_llm_api_key,
-                "endpoint": self.baml_llm_endpoint,
+                "base_url": self.baml_llm_endpoint,
+                "api_version": self.baml_llm_api_version,
             },
         )
         # Sets the primary client
-        self.baml_registry.set_primary(self.llm_provider)
+        self.baml_registry.set_primary(self.baml_llm_provider)
 
     @model_validator(mode="after")
     def ensure_env_vars_for_ollama(self) -> "LLMConfig":

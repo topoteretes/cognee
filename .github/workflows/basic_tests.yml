@@ -151,15 +151,17 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       STRUCTURED_OUTPUT_FRAMEWORK: "BAML"
-      BAML_LLM_PROVIDER: openai-generic
+      BAML_LLM_PROVIDER: azure-openai
       BAML_LLM_MODEL: ${{ secrets.LLM_MODEL }}
       BAML_LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
       BAML_LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      BAML_LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
       LLM_PROVIDER: openai
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
       LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
       EMBEDDING_PROVIDER: openai
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
