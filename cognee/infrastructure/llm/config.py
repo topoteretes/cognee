@@ -42,6 +42,13 @@ class LLMConfig(BaseSettings):
     llm_temperature: float = 0.0
     llm_streaming: bool = False
     llm_max_tokens: int = 16384
+
+    baml_llm_provider: str = "openai"
+    baml_llm_model: str = "gpt-4o-mini"
+    baml_llm_endpoint: str = ""
+    baml_llm_api_key: Optional[str] = None
+    baml_llm_temperature: float = 0.0
+
     transcription_model: str = "whisper-1"
     graph_prompt_path: str = "generate_graph_prompt.txt"
     llm_rate_limit_enabled: bool = False
@@ -62,12 +69,13 @@ class LLMConfig(BaseSettings):
     def model_post_init(self, __context) -> None:
         """Initialize the BAML registry after the model is created."""
         self.baml_registry.add_llm_client(
-            name=self.llm_provider,
-            provider=self.llm_provider,
+            name=self.baml_llm_provider,
+            provider=self.baml_llm_provider,
             options={
-                "model": self.llm_model,
-                "temperature": self.llm_temperature,
-                "api_key": self.llm_api_key,
+                "model": self.baml_llm_model,
+                "temperature": self.baml_llm_temperature,
+                "api_key": self.baml_llm_api_key,
+                "endpoint": self.baml_llm_endpoint,
             },
         )
         # Sets the primary client
