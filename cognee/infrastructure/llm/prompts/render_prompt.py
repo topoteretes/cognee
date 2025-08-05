@@ -25,9 +25,7 @@ def render_prompt(filename: str, context: dict, base_directory: str = None) -> s
 
     # Set the base directory relative to the cognee root directory
     if base_directory is None:
-        base_directory = get_absolute_path(
-            "./infrastructure/llm/structured_output_framework/llitellm_instructor/llm/prompts"
-        )
+        base_directory = get_absolute_path("./infrastructure/llm/prompts")
 
     # Initialize the Jinja2 environment to load templates from the filesystem
     env = Environment(

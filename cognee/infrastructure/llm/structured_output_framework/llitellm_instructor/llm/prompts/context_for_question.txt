@@ -1,2 +1,0 @@
-The question is: `{{ question }}`
-And here is the context: `{{ context }}`

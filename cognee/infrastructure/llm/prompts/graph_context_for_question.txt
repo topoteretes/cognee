@@ -1,0 +1,2 @@
+The question is: `{{ question }}`
+and here is the context provided with a set of relationships from a knowledge graph separated by \n---\n each represented as node1 -- relation -- node2 triplet: `{{ context }}`

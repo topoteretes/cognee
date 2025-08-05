@@ -6,13 +6,12 @@ from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.prompts import (
-    read_query_prompt,
-)
 from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.rate_limiter import (
     rate_limit_async,
     sleep_and_retry_async,
 )
+
+from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
 
 
 class AnthropicAdapter(LLMInterface):
@@ -92,7 +91,7 @@ class AnthropicAdapter(LLMInterface):
         if not system_prompt:
             raise InvalidValueError(message="No system prompt path provided.")
 
-        system_prompt = read_query_prompt(system_prompt)
+        system_prompt = LLMAdapter.read_query_prompt(system_prompt)
 
         formatted_prompt = (
             f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
