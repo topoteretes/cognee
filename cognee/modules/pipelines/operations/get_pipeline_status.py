@@ -1,11 +1,13 @@
 from uuid import UUID
 from sqlalchemy import select, func
 from cognee.infrastructure.databases.relational import get_relational_engine
-from ..models import PipelineRun
+from ..models import PipelineRun, PipelineRunStatus
 from sqlalchemy.orm import aliased
 
 
-async def get_pipeline_status(dataset_ids: list[UUID], pipeline_name: str):
+async def get_pipeline_status(
+    dataset_ids: list[UUID], pipeline_name: str
+) -> dict[str, PipelineRunStatus]:
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
