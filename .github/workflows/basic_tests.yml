@@ -156,6 +156,11 @@ jobs:
       BAML_LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
       BAML_LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
 
+      LLM_PROVIDER: openai
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+
       EMBEDDING_PROVIDER: openai
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
       EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
