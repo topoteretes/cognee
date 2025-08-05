@@ -4,7 +4,7 @@ from enum import Enum
 
 from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm import get_llm_config
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.ollama.adapter import (
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter import (
     OllamaAPIAdapter,
 )
 
@@ -61,7 +61,7 @@ def get_llm_client():
         if llm_config.llm_api_key is None:
             raise InvalidValueError(message="LLM API key is not set.")
 
-        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.openai.adapter import (
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
             OpenAIAdapter,
         )
 
@@ -82,7 +82,7 @@ def get_llm_client():
         if llm_config.llm_api_key is None:
             raise InvalidValueError(message="LLM API key is not set.")
 
-        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.generic_llm_api import (
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api import (
             GenericAPIAdapter,
         )
 
@@ -95,7 +95,7 @@ def get_llm_client():
         )
 
     elif provider == LLMProvider.ANTHROPIC:
-        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.anthropic import (
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.anthropic import (
             AnthropicAdapter,
         )
 
@@ -105,7 +105,7 @@ def get_llm_client():
         if llm_config.llm_api_key is None:
             raise InvalidValueError(message="LLM API key is not set.")
 
-        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.generic_llm_api import (
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api import (
             GenericAPIAdapter,
         )
 
@@ -124,7 +124,7 @@ def get_llm_client():
         if llm_config.llm_api_key is None:
             raise InvalidValueError(message="LLM API key is not set.")
 
-        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.gemini import (
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini import (
             GeminiAdapter,
         )
 

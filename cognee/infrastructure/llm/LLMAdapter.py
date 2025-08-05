@@ -21,7 +21,7 @@ class LLMAdapter:
     def acreate_structured_output(
         text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
-        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
             get_llm_client,
         )
 
@@ -34,7 +34,7 @@ class LLMAdapter:
     def create_structured_output(
         text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
-        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
             get_llm_client,
         )
 
@@ -45,7 +45,7 @@ class LLMAdapter:
 
     @staticmethod
     def create_transcript(input):
-        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
             get_llm_client,
         )
 
@@ -54,7 +54,7 @@ class LLMAdapter:
 
     @staticmethod
     def transcribe_image(input):
-        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
             get_llm_client,
         )
 
@@ -63,7 +63,7 @@ class LLMAdapter:
 
     @staticmethod
     def show_prompt(text_input: str, system_prompt: str) -> str:
-        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.get_llm_client import (
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
             get_llm_client,
         )
 
@@ -88,7 +88,7 @@ class LLMAdapter:
 
             return extract_content_graph(content=content, response_model=response_model, mode=mode)
         else:
-            from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import (
+            from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.extraction import (
                 extract_content_graph,
             )
 
@@ -97,7 +97,7 @@ class LLMAdapter:
     @staticmethod
     def extract_categories(content: str, response_model: Type[BaseModel]):
         # TODO: Add BAML version of category and extraction and update function
-        from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import (
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.extraction import (
             extract_categories,
         )
 
@@ -113,7 +113,7 @@ class LLMAdapter:
 
             return extract_code_summary(content=content)
         else:
-            from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import (
+            from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.extraction import (
                 extract_code_summary,
             )
 
@@ -129,7 +129,7 @@ class LLMAdapter:
 
             return extract_summary(content=content, response_model=response_model)
         else:
-            from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.extraction import (
+            from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.extraction import (
                 extract_summary,
             )
 

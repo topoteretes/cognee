@@ -1,7 +1,7 @@
 import time
 import asyncio
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.rate_limiter import (
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
     sleep_and_retry_sync,
     sleep_and_retry_async,
     is_rate_limit_error,

@@ -4,10 +4,10 @@ from typing import Type
 from openai import OpenAI
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.llm_interface import (
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
-from cognee.infrastructure.llm.structured_output_framework.llitellm_instructor.llm.rate_limiter import (
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
     rate_limit_async,
     sleep_and_retry_async,
 )
