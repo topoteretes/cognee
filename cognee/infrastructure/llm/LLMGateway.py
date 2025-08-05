@@ -107,7 +107,7 @@ class LLMGateway:
     @staticmethod
     def extract_code_summary(content: str) -> Coroutine:
         llm_config = get_llm_config()
-        if llm_config.structured_output_framework == "BAML":
+        if llm_config.structured_output_framework.upper() == "BAML":
             from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction import (
                 extract_code_summary,
             )
@@ -123,7 +123,7 @@ class LLMGateway:
     @staticmethod
     def extract_summary(content: str, response_model: Type[BaseModel]) -> Coroutine:
         llm_config = get_llm_config()
-        if llm_config.structured_output_framework == "BAML":
+        if llm_config.structured_output_framework.upper() == "BAML":
             from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction import (
                 extract_summary,
             )
