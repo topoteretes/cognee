@@ -99,7 +99,9 @@ python cognee/cognee/tests/test_library.py
 
 ## 4. 📤 Submitting Changes
 
-1. Push your changes:
+1. Install ruff on your system
+2. Run ```ruff format .``` and ``` ruff check ``` and fix the issues
+3. Push your changes:
 ```shell
 git add .
 git commit -s -m "Description of your changes"
@@ -107,7 +109,7 @@ git push origin feature/your-feature-name
 ```
 
 2. Create a Pull Request:
-   - Go to the [**cognee** repository](https://github.com/topoteretes/cognee)
+   - Go to the [**cognee** repository](https://github.com/topoteretes/cognee) or [cognee community repository](https://github.com/topoteretes/cognee-community)
    - Click "Compare & Pull Request" and open a PR against dev branch
    - Fill in the PR template with details about your changes
 
