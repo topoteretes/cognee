@@ -2,7 +2,7 @@ from typing import Any, Optional
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.graph.networkx.adapter import NetworkXAdapter
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
@@ -50,7 +50,7 @@ class NaturalLanguageRetriever(BaseRetriever):
 
     async def _generate_cypher_query(self, query: str, edge_schemas, previous_attempts=None) -> str:
         """Generate a Cypher query using LLM based on natural language query and schema information."""
-        system_prompt = LLMAdapter.render_prompt(
+        system_prompt = LLMGateway.render_prompt(
             self.system_prompt_path,
             context={
                 "edge_schemas": edge_schemas,
@@ -58,7 +58,7 @@ class NaturalLanguageRetriever(BaseRetriever):
             },
         )
 
-        return await LLMAdapter.acreate_structured_output(
+        return await LLMGateway.acreate_structured_output(
             text_input=query,
             system_prompt=system_prompt,
             response_model=str,

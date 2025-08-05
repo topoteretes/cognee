@@ -2,7 +2,7 @@ import os
 from typing import Type
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
@@ -22,9 +22,9 @@ async def extract_content_graph(content: str, response_model: Type[BaseModel]):
     else:
         base_directory = None
 
-    system_prompt = LLMAdapter.render_prompt(prompt_path, {}, base_directory=base_directory)
+    system_prompt = LLMGateway.render_prompt(prompt_path, {}, base_directory=base_directory)
 
-    content_graph = await LLMAdapter.acreate_structured_output(
+    content_graph = await LLMGateway.acreate_structured_output(
         content, system_prompt, response_model
     )
 

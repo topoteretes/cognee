@@ -11,7 +11,7 @@ from cognee.modules.graph.utils import (
     retrieve_existing_edges,
 )
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 
 async def integrate_chunk_graphs(
@@ -56,7 +56,7 @@ async def extract_graph_from_data(
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
     chunk_graphs = await asyncio.gather(
-        *[LLMAdapter.extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
+        *[LLMGateway.extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )
 
     # Note: Filter edges with missing source or target nodes

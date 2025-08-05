@@ -3,7 +3,7 @@ import logging
 import cognee
 import asyncio
 
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from dotenv import load_dotenv
 from cognee.api.v1.search import SearchType
 from cognee.modules.engine.models import NodeSet
@@ -185,7 +185,7 @@ async def run_procurement_example():
     print(research_information)
     print("\nPassing research to LLM for final procurement recommendation...\n")
 
-    final_decision = await LLMAdapter.acreate_structured_output(
+    final_decision = await LLMGateway.acreate_structured_output(
         text_input=research_information,
         system_prompt="""You are a procurement decision assistant. Use the provided QA pairs that were collected through a research phase. Recommend the best vendor,
          based on pricing, delivery, warranty, policy fit, and past performance. Be concise and justify your choice with evidence.

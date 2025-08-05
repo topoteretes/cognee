@@ -8,7 +8,7 @@ from litellm.exceptions import ContentPolicyViolationError
 from instructor.exceptions import InstructorRetryException
 
 from cognee.exceptions import InvalidValueError
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
@@ -326,7 +326,7 @@ class OpenAIAdapter(LLMInterface):
             text_input = "No user input provided."
         if not system_prompt:
             raise InvalidValueError(message="No system prompt path provided.")
-        system_prompt = LLMAdapter.read_query_prompt(system_prompt)
+        system_prompt = LLMGateway.read_query_prompt(system_prompt)
 
         formatted_prompt = (
             f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""

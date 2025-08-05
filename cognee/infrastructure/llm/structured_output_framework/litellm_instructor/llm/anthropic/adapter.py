@@ -11,7 +11,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     sleep_and_retry_async,
 )
 
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 
 class AnthropicAdapter(LLMInterface):
@@ -91,7 +91,7 @@ class AnthropicAdapter(LLMInterface):
         if not system_prompt:
             raise InvalidValueError(message="No system prompt path provided.")
 
-        system_prompt = LLMAdapter.read_query_prompt(system_prompt)
+        system_prompt = LLMGateway.read_query_prompt(system_prompt)
 
         formatted_prompt = (
             f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""

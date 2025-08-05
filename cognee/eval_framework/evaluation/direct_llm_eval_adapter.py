@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from cognee.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
 from cognee.eval_framework.eval_config import EvalConfig
 
-from cognee.infrastructure.llm import LLMAdapter
+from cognee.infrastructure.llm import LLMGateway
 
 
 class CorrectnessEvaluation(BaseModel):
@@ -25,10 +25,10 @@ class DirectLLMEvalAdapter(BaseEvalAdapter):
     ) -> Dict[str, Any]:
         args = {"question": question, "answer": answer, "golden_answer": golden_answer}
 
-        user_prompt = LLMAdapter.render_prompt(self.eval_prompt_path, args)
-        system_prompt = LLMAdapter.read_query_prompt(self.system_prompt_path)
+        user_prompt = LLMGateway.render_prompt(self.eval_prompt_path, args)
+        system_prompt = LLMGateway.read_query_prompt(self.system_prompt_path)
 
-        evaluation = await LLMAdapter.acreate_structured_output(
+        evaluation = await LLMGateway.acreate_structured_output(
             text_input=user_prompt,
             system_prompt=system_prompt,
             response_model=CorrectnessEvaluation,

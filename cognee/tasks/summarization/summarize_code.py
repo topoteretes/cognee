@@ -3,7 +3,7 @@ from typing import AsyncGenerator, Union
 from uuid import uuid5
 
 from cognee.infrastructure.engine import DataPoint
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from .models import CodeSummary
 
 
@@ -16,7 +16,7 @@ async def summarize_code(
     code_data_points = [file for file in code_graph_nodes if hasattr(file, "source_code")]
 
     file_summaries = await asyncio.gather(
-        *[LLMAdapter.extract_code_summary(file.source_code) for file in code_data_points]
+        *[LLMGateway.extract_code_summary(file.source_code) for file in code_data_points]
     )
 
     file_summaries_map = {

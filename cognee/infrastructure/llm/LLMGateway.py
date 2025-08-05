@@ -4,7 +4,7 @@ from typing import Coroutine
 from cognee.infrastructure.llm import get_llm_config
 
 
-class LLMAdapter:
+class LLMGateway:
     """
     Class handles selection of structured output frameworks and LLM functions.
     Class used as a namespace for LLM related functions, should not be instantiated, all methods are static.

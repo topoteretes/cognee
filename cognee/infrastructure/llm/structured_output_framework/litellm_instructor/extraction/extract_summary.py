@@ -5,7 +5,7 @@ from typing import Type
 from instructor.exceptions import InstructorRetryException
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.shared.data_models import SummarizedCode
 
 logger = get_logger("extract_summary")
@@ -25,9 +25,9 @@ def get_mock_summarized_code():
 
 
 async def extract_summary(content: str, response_model: Type[BaseModel]):
-    system_prompt = LLMAdapter.read_query_prompt("summarize_content.txt")
+    system_prompt = LLMGateway.read_query_prompt("summarize_content.txt")
 
-    llm_output = await LLMAdapter.acreate_structured_output(content, system_prompt, response_model)
+    llm_output = await LLMGateway.acreate_structured_output(content, system_prompt, response_model)
 
     return llm_output
 

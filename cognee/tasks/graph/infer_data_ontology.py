@@ -27,7 +27,7 @@ from cognee.modules.data.methods.add_model_class_to_graph import (
 from cognee.tasks.graph.models import NodeModel, GraphOntology
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.engine.utils import generate_node_id, generate_node_name
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 logger = get_logger("task:infer_data_ontology")
 
@@ -53,9 +53,9 @@ async def extract_ontology(content: str, response_model: Type[BaseModel]):
         The structured ontology extracted from the content.
     """
 
-    system_prompt = LLMAdapter.read_query_prompt("extract_ontology.txt")
+    system_prompt = LLMGateway.read_query_prompt("extract_ontology.txt")
 
-    ontology = await LLMAdapter.acreate_structured_output(content, system_prompt, response_model)
+    ontology = await LLMGateway.acreate_structured_output(content, system_prompt, response_model)
 
     return ontology
 

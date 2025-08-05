@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine.models import DataPoint
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
 
@@ -40,7 +40,7 @@ async def chunk_naive_llm_classifier(
         return data_chunks
 
     chunk_classifications = await asyncio.gather(
-        *[LLMAdapter.extract_categories(chunk.text, classification_model) for chunk in data_chunks],
+        *[LLMGateway.extract_categories(chunk.text, classification_model) for chunk in data_chunks],
     )
 
     classification_data_points = []

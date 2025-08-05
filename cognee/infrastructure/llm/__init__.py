@@ -11,4 +11,4 @@ from cognee.infrastructure.llm.utils import (
     test_embedding_connection,
 )
 
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway

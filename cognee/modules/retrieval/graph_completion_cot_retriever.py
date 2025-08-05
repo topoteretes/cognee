@@ -3,7 +3,7 @@ from cognee.shared.logging_utils import get_logger
 
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 logger = get_logger()
 
@@ -94,27 +94,27 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             logger.info(f"Chain-of-thought: round {round_idx} - answer: {answer}")
             if round_idx < max_iter:
                 valid_args = {"query": query, "answer": answer, "context": context}
-                valid_user_prompt = LLMAdapter.render_prompt(
+                valid_user_prompt = LLMGateway.render_prompt(
                     filename=self.validation_user_prompt_path, context=valid_args
                 )
-                valid_system_prompt = LLMAdapter.read_query_prompt(
+                valid_system_prompt = LLMGateway.read_query_prompt(
                     prompt_file_name=self.validation_system_prompt_path
                 )
 
-                reasoning = await LLMAdapter.acreate_structured_output(
+                reasoning = await LLMGateway.acreate_structured_output(
                     text_input=valid_user_prompt,
                     system_prompt=valid_system_prompt,
                     response_model=str,
                 )
                 followup_args = {"query": query, "answer": answer, "reasoning": reasoning}
-                followup_prompt = LLMAdapter.render_prompt(
+                followup_prompt = LLMGateway.render_prompt(
                     filename=self.followup_user_prompt_path, context=followup_args
                 )
-                followup_system = LLMAdapter.read_query_prompt(
+                followup_system = LLMGateway.read_query_prompt(
                     prompt_file_name=self.followup_system_prompt_path
                 )
 
-                followup_question = await LLMAdapter.acreate_structured_output(
+                followup_question = await LLMGateway.acreate_structured_output(
                     text_input=followup_prompt, system_prompt=followup_system, response_model=str
                 )
                 logger.info(

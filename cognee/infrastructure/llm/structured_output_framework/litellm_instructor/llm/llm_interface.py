@@ -3,7 +3,7 @@
 from typing import Type, Protocol
 from abc import abstractmethod
 from pydantic import BaseModel
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 
 class LLMInterface(Protocol):
@@ -57,7 +57,7 @@ class LLMInterface(Protocol):
             text_input = "No user input provided."
         if not system_prompt:
             raise ValueError("No system prompt path provided.")
-        system_prompt = LLMAdapter.read_query_prompt(system_prompt)
+        system_prompt = LLMGateway.read_query_prompt(system_prompt)
 
         formatted_prompt = f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
 

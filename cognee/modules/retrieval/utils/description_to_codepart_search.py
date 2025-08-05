@@ -9,7 +9,7 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 from cognee.modules.search.methods import search
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 logger = get_logger(level=ERROR)
 
@@ -71,7 +71,7 @@ async def code_description_to_code_part(
                 if isinstance(obj, dict) and "description" in obj
             )
 
-            context_from_documents = await LLMAdapter.acreate_structured_output(
+            context_from_documents = await LLMGateway.acreate_structured_output(
                 text_input=f"The retrieved context from documents is {concatenated_descriptions}.",
                 system_prompt="You are a Senior Software Engineer, summarize the context from documents"
                 f" in a way that it is gonna be provided next to codeparts as context"

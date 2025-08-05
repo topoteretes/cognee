@@ -4,7 +4,7 @@ from uuid import uuid5
 from pydantic import BaseModel
 
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.cognify.config import get_cognify_config
 from .models import TextSummary
 
@@ -43,7 +43,7 @@ async def summarize_text(
         summarization_model = cognee_config.summarization_model
 
     chunk_summaries = await asyncio.gather(
-        *[LLMAdapter.extract_summary(chunk.text, summarization_model) for chunk in data_chunks]
+        *[LLMGateway.extract_summary(chunk.text, summarization_model) for chunk in data_chunks]
     )
 
     summaries = [
