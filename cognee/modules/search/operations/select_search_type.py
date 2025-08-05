@@ -1,7 +1,7 @@
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.llm.LLMAdapter import LLMAdapter
 
 logger = get_logger("SearchTypeSelector")
 
@@ -22,10 +22,9 @@ async def select_search_type(
     """
     default_search_type = SearchType.RAG_COMPLETION
     system_prompt = read_query_prompt(system_prompt_path)
-    llm_client = get_llm_client()
 
     try:
-        response = await llm_client.acreate_structured_output(
+        response = await LLMAdapter.acreate_structured_output(
             text_input=query,
             system_prompt=system_prompt,
             response_model=str,
