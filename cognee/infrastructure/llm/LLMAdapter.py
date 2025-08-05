@@ -1,10 +1,9 @@
 from typing import Type
 from pydantic import BaseModel
-
+from typing import Coroutine
 from cognee.infrastructure.llm import get_llm_config
 
 
-# TODO: Check if Coroutines should be returned or awaited result values
 class LLMAdapter:
     """
     Class handles selection of structured output frameworks and LLM functions.
@@ -20,7 +19,7 @@ class LLMAdapter:
     @staticmethod
     def acreate_structured_output(
         text_input: str, system_prompt: str, response_model: Type[BaseModel]
-    ) -> BaseModel:
+    ) -> Coroutine:
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
             get_llm_client,
         )
@@ -44,7 +43,7 @@ class LLMAdapter:
         )
 
     @staticmethod
-    def create_transcript(input):
+    def create_transcript(input) -> Coroutine:
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
             get_llm_client,
         )
@@ -53,7 +52,7 @@ class LLMAdapter:
         return llm_client.create_transcript(input=input)
 
     @staticmethod
-    def transcribe_image(input):
+    def transcribe_image(input) -> Coroutine:
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
             get_llm_client,
         )
@@ -79,7 +78,9 @@ class LLMAdapter:
         return read_query_prompt(prompt_file_name=prompt_file_name, base_directory=base_directory)
 
     @staticmethod
-    def extract_content_graph(content: str, response_model: Type[BaseModel], mode: str = "simple"):
+    def extract_content_graph(
+        content: str, response_model: Type[BaseModel], mode: str = "simple"
+    ) -> Coroutine:
         llm_config = get_llm_config()
         if llm_config.structured_output_framework.upper() == "BAML":
             from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction import (
@@ -95,7 +96,7 @@ class LLMAdapter:
             return extract_content_graph(content=content, response_model=response_model)
 
     @staticmethod
-    def extract_categories(content: str, response_model: Type[BaseModel]):
+    def extract_categories(content: str, response_model: Type[BaseModel]) -> Coroutine:
         # TODO: Add BAML version of category and extraction and update function
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.extraction import (
             extract_categories,
@@ -104,7 +105,7 @@ class LLMAdapter:
         return extract_categories(content=content, response_model=response_model)
 
     @staticmethod
-    def extract_code_summary(content: str):
+    def extract_code_summary(content: str) -> Coroutine:
         llm_config = get_llm_config()
         if llm_config.structured_output_framework == "BAML":
             from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction import (
@@ -120,7 +121,7 @@ class LLMAdapter:
             return extract_code_summary(content=content)
 
     @staticmethod
-    def extract_summary(content: str, response_model: Type[BaseModel]):
+    def extract_summary(content: str, response_model: Type[BaseModel]) -> Coroutine:
         llm_config = get_llm_config()
         if llm_config.structured_output_framework == "BAML":
             from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction import (
