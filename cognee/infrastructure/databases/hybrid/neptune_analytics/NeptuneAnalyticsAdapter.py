@@ -17,6 +17,7 @@ from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredRes
 
 logger = get_logger("NeptuneAnalyticsAdapter")
 
+
 class IndexSchema(DataPoint):
     """
     Represents a schema for an index data point containing an ID and text.
@@ -27,16 +28,19 @@ class IndexSchema(DataPoint):
     - metadata: A dictionary with default index fields for the schema, currently configured
     to include 'text'.
     """
+
     id: str
     text: str
     metadata: dict = {"index_fields": ["text"]}
 
+
 NEPTUNE_ANALYTICS_ENDPOINT_URL = "neptune-graph://"
+
 
 class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
     """
     Hybrid adapter that combines Neptune Analytics Vector and Graph functionality.
-    
+
     This adapter extends NeptuneGraphDB and implements VectorDBInterface to provide
     a unified interface for working with Neptune Analytics as both a vector store
     and a graph database.
@@ -48,14 +52,14 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
     _TOPK_UPPER_BOUND = 10
 
     def __init__(
-            self,
-            graph_id: str,
-            embedding_engine: Optional[EmbeddingEngine] = None,
-            region: Optional[str] = None,
-            aws_access_key_id: Optional[str] = None,
-            aws_secret_access_key: Optional[str] = None,
-            aws_session_token: Optional[str] = None,
-        ):
+        self,
+        graph_id: str,
+        embedding_engine: Optional[EmbeddingEngine] = None,
+        region: Optional[str] = None,
+        aws_access_key_id: Optional[str] = None,
+        aws_secret_access_key: Optional[str] = None,
+        aws_session_token: Optional[str] = None,
+    ):
         """
         Initialize the Neptune Analytics hybrid adapter.
 
@@ -74,12 +78,14 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             region=region,
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=aws_secret_access_key,
-            aws_session_token=aws_session_token
+            aws_session_token=aws_session_token,
         )
-        
+
         # Add vector-specific attributes
         self.embedding_engine = embedding_engine
-        logger.info(f"Initialized Neptune Analytics hybrid adapter for graph: \"{graph_id}\" in region: \"{self.region}\"")
+        logger.info(
+            f'Initialized Neptune Analytics hybrid adapter for graph: "{graph_id}" in region: "{self.region}"'
+        )
 
     # VectorDBInterface methods implementation
 
@@ -161,7 +167,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         # Fetch embeddings
         texts = [DataPoint.get_embeddable_data(t) for t in data_points]
-        data_vectors = (await self.embedding_engine.embed_text(texts))
+        data_vectors = await self.embedding_engine.embed_text(texts)
 
         for index, data_point in enumerate(data_points):
             node_id = data_point.id
@@ -172,23 +178,24 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             properties = self._serialize_properties(data_point.model_dump())
             properties[self._COLLECTION_PREFIX] = collection_name
             params = dict(
-                node_id = str(node_id),
-                properties = properties,
-                embedding = data_vector,
-                collection_name = collection_name
+                node_id=str(node_id),
+                properties=properties,
+                embedding=data_vector,
+                collection_name=collection_name,
             )
 
             # Compose the query and send
             query_string = (
-                    f"MERGE (n "
-                    f":{self._VECTOR_NODE_LABEL} "
-                    f" {{`~id`: $node_id}}) "
-                    f"ON CREATE SET n = $properties, n.updated_at = timestamp() "
-                    f"ON MATCH SET n += $properties, n.updated_at = timestamp() "
-                    f"WITH n, $embedding AS embedding "
-                    f"CALL neptune.algo.vectors.upsert(n, embedding) "
-                    f"YIELD success "
-                    f"RETURN success ")
+                f"MERGE (n "
+                f":{self._VECTOR_NODE_LABEL} "
+                f" {{`~id`: $node_id}}) "
+                f"ON CREATE SET n = $properties, n.updated_at = timestamp() "
+                f"ON MATCH SET n += $properties, n.updated_at = timestamp() "
+                f"WITH n, $embedding AS embedding "
+                f"CALL neptune.algo.vectors.upsert(n, embedding) "
+                f"YIELD success "
+                f"RETURN success "
+            )
 
             try:
                 self._client.query(query_string, params)
@@ -208,10 +215,12 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         """
         # Do the fetch for each node
         params = dict(node_ids=data_point_ids, collection_name=collection_name)
-        query_string = (f"MATCH( n :{self._VECTOR_NODE_LABEL}) "
-                        f"WHERE id(n) in $node_ids AND "
-                        f"n.{self._COLLECTION_PREFIX} = $collection_name "
-                        f"RETURN n as payload ")
+        query_string = (
+            f"MATCH( n :{self._VECTOR_NODE_LABEL}) "
+            f"WHERE id(n) in $node_ids AND "
+            f"n.{self._COLLECTION_PREFIX} = $collection_name "
+            f"RETURN n as payload "
+        )
 
         try:
             result = self._client.query(query_string, params)
@@ -259,7 +268,8 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         if not limit or limit <= self._TOPK_LOWER_BOUND or limit > self._TOPK_UPPER_BOUND:
             logger.warning(
                 "Provided limit (%s) is invalid (zero, negative, or exceeds maximum). "
-                "Defaulting to limit=10.", limit
+                "Defaulting to limit=10.",
+                limit,
             )
             limit = self._TOPK_UPPER_BOUND
 
@@ -272,7 +282,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         elif query_vector:
             embedding = query_vector
         else:
-            data_vectors = (await self.embedding_engine.embed_text([query_text]))
+            data_vectors = await self.embedding_engine.embed_text([query_text])
             embedding = data_vectors[0]
 
         # Compose the parameters map
@@ -305,9 +315,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         try:
             query_response = self._client.query(query_string, params)
-            return [self._get_scored_result(
-                item = item, with_score = True
-            ) for item in query_response]
+            return [self._get_scored_result(item=item, with_score=True) for item in query_response]
         except Exception as e:
             self._na_exception_handler(e, query_string)
 
@@ -332,11 +340,13 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         self._validate_embedding_engine()
 
         # Convert text to embedding array in batch
-        data_vectors = (await self.embedding_engine.embed_text(query_texts))
-        return await asyncio.gather(*[
-            self.search(collection_name, None, vector, limit, with_vectors)
-            for vector in data_vectors
-        ])
+        data_vectors = await self.embedding_engine.embed_text(query_texts)
+        return await asyncio.gather(
+            *[
+                self.search(collection_name, None, vector, limit, with_vectors)
+                for vector in data_vectors
+            ]
+        )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
         """
@@ -350,10 +360,12 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             - data_point_ids (list[str]): A list of IDs of the data points to delete.
         """
         params = dict(node_ids=data_point_ids, collection_name=collection_name)
-        query_string = (f"MATCH (n :{self._VECTOR_NODE_LABEL}) "
-                        f"WHERE id(n) IN $node_ids "
-                        f"AND n.{self._COLLECTION_PREFIX} = $collection_name "
-                        f"DETACH DELETE n")
+        query_string = (
+            f"MATCH (n :{self._VECTOR_NODE_LABEL}) "
+            f"WHERE id(n) IN $node_ids "
+            f"AND n.{self._COLLECTION_PREFIX} = $collection_name "
+            f"DETACH DELETE n"
+        )
         try:
             self._client.query(query_string, params)
         except Exception as e:
@@ -370,7 +382,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         await self.create_collection(f"{index_name}_{index_property_name}")
 
     async def index_data_points(
-            self, index_name: str, index_property_name: str, data_points: list[DataPoint]
+        self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
         """
         Indexes a list of data points into Neptune Analytics by creating them as nodes.
@@ -402,29 +414,28 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         Remove obsolete or unnecessary data from the database.
         """
         # Run actual truncate
-        self._client.query(f"MATCH (n :{self._VECTOR_NODE_LABEL}) "
-                           f"DETACH DELETE n")
+        self._client.query(f"MATCH (n :{self._VECTOR_NODE_LABEL}) DETACH DELETE n")
         pass
 
     @staticmethod
-    def _get_scored_result(item: dict, with_vector: bool = False, with_score: bool = False) -> ScoredResult:
+    def _get_scored_result(
+        item: dict, with_vector: bool = False, with_score: bool = False
+    ) -> ScoredResult:
         """
         Util method to simplify the object creation of ScoredResult base on incoming NX payload response.
         """
         return ScoredResult(
-            id=item.get('payload').get('~id'),
-            payload=item.get('payload').get('~properties'),
-            score=item.get('score') if with_score else 0,
-            vector=item.get('embedding') if with_vector else None
+            id=item.get("payload").get("~id"),
+            payload=item.get("payload").get("~properties"),
+            score=item.get("score") if with_score else 0,
+            vector=item.get("embedding") if with_vector else None,
         )
 
     def _na_exception_handler(self, ex, query_string: str):
         """
         Generic exception handler for NA langchain.
         """
-        logger.error(
-            "Neptune Analytics query failed: %s | Query: [%s]", ex, query_string
-        )
+        logger.error("Neptune Analytics query failed: %s | Query: [%s]", ex, query_string)
         raise ex
 
     def _validate_embedding_engine(self):
@@ -433,4 +444,6 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         :raises: ValueError if this object does not have a valid embedding_engine
         """
         if self.embedding_engine is None:
-            raise ValueError("Neptune Analytics requires an embedder defined to make vector operations")
+            raise ValueError(
+                "Neptune Analytics requires an embedder defined to make vector operations"
+            )

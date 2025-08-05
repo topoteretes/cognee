@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 async def main():
     """
     Example script demonstrating how to use Cognee with Amazon Neptune Analytics
@@ -22,7 +23,7 @@ async def main():
     """
 
     # Set up Amazon credentials in .env file and get the values from environment variables
-    graph_endpoint_url = "neptune-graph://" + os.getenv('GRAPH_ID', "")
+    graph_endpoint_url = "neptune-graph://" + os.getenv("GRAPH_ID", "")
 
     # Configure Neptune Analytics as the graph & vector database provider
     cognee.config.set_graph_db_config(
@@ -77,7 +78,9 @@ async def main():
 
     # Now let's perform some searches
     # 1. Search for insights related to "Neptune Analytics"
-    insights_results = await cognee.search(query_type=SearchType.INSIGHTS, query_text="Neptune Analytics")
+    insights_results = await cognee.search(
+        query_type=SearchType.INSIGHTS, query_text="Neptune Analytics"
+    )
     print("\n========Insights about Neptune Analytics========:")
     for result in insights_results:
         print(f"- {result}")

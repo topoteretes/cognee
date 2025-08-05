@@ -8,7 +8,7 @@ from cognee.modules.data.processing.document_types import TextDocument
 
 # Set up Amazon credentials in .env file and get the values from environment variables
 load_dotenv()
-graph_id = os.getenv('GRAPH_ID', "")
+graph_id = os.getenv("GRAPH_ID", "")
 
 na_adapter = NeptuneGraphDB(graph_id)
 
@@ -24,33 +24,33 @@ def setup():
     #     stored in Amazon S3.
 
     document = TextDocument(
-        name='text_test.txt',
-        raw_data_location='git/cognee/examples/database_examples/data_storage/data/text_test.txt',
-        external_metadata='{}',
-        mime_type='text/plain'
+        name="text_test.txt",
+        raw_data_location="git/cognee/examples/database_examples/data_storage/data/text_test.txt",
+        external_metadata="{}",
+        mime_type="text/plain",
     )
     document_chunk = DocumentChunk(
         text="Neptune Analytics is an ideal choice for investigatory, exploratory, or data-science workloads \n    that require fast iteration for data, analytical and algorithmic processing, or vector search on graph data. It \n    complements Amazon Neptune Database, a popular managed graph database. To perform intensive analysis, you can load \n    the data from a Neptune Database graph or snapshot into Neptune Analytics. You can also load graph data that's \n    stored in Amazon S3.\n    ",
         chunk_size=187,
         chunk_index=0,
-        cut_type='paragraph_end',
+        cut_type="paragraph_end",
         is_part_of=document,
     )
 
-    graph_database = EntityType(name='graph database', description='graph database')
+    graph_database = EntityType(name="graph database", description="graph database")
     neptune_analytics_entity = Entity(
-        name='neptune analytics',
-        description='A memory-optimized graph database engine for analytics that processes large amounts of graph data quickly.',
+        name="neptune analytics",
+        description="A memory-optimized graph database engine for analytics that processes large amounts of graph data quickly.",
     )
     neptune_database_entity = Entity(
-        name='amazon neptune database',
-        description='A popular managed graph database that complements Neptune Analytics.',
+        name="amazon neptune database",
+        description="A popular managed graph database that complements Neptune Analytics.",
     )
 
-    storage = EntityType(name='storage', description='storage')
+    storage = EntityType(name="storage", description="storage")
     storage_entity = Entity(
-        name='amazon s3',
-        description='A storage service provided by Amazon Web Services that allows storing graph data.',
+        name="amazon s3",
+        description="A storage service provided by Amazon Web Services that allows storing graph data.",
     )
 
     nodes_data = [
@@ -67,37 +67,37 @@ def setup():
         (
             str(document_chunk.id),
             str(storage_entity.id),
-            'contains',
+            "contains",
         ),
         (
             str(storage_entity.id),
             str(storage.id),
-            'is_a',
+            "is_a",
         ),
         (
             str(document_chunk.id),
             str(neptune_database_entity.id),
-            'contains',
+            "contains",
         ),
         (
             str(neptune_database_entity.id),
             str(graph_database.id),
-            'is_a',
+            "is_a",
         ),
         (
             str(document_chunk.id),
             str(document.id),
-            'is_part_of',
+            "is_part_of",
         ),
         (
             str(document_chunk.id),
             str(neptune_analytics_entity.id),
-            'contains',
+            "contains",
         ),
         (
             str(neptune_analytics_entity.id),
             str(graph_database.id),
-            'is_a',
+            "is_a",
         ),
     ]
 
@@ -155,42 +155,44 @@ async def pipeline_method():
     print("------NEIGHBORING NODES-------")
     center_node = nodes[2]
     neighbors = await na_adapter.get_neighbors(str(center_node.id))
-    print(f"found {len(neighbors)} neighbors for node \"{center_node.name}\"")
+    print(f'found {len(neighbors)} neighbors for node "{center_node.name}"')
     for neighbor in neighbors:
         print(neighbor)
 
     print("------NEIGHBORING EDGES-------")
     center_node = nodes[2]
     neighbouring_edges = await na_adapter.get_edges(str(center_node.id))
-    print(f"found {len(neighbouring_edges)} edges neighbouring node \"{center_node.name}\"")
+    print(f'found {len(neighbouring_edges)} edges neighbouring node "{center_node.name}"')
     for edge in neighbouring_edges:
         print(edge)
 
     print("------GET CONNECTIONS (SOURCE NODE)-------")
     document_chunk_node = nodes[0]
     connections = await na_adapter.get_connections(str(document_chunk_node.id))
-    print(f"found {len(connections)} connections for node \"{document_chunk_node.type}\"")
+    print(f'found {len(connections)} connections for node "{document_chunk_node.type}"')
     for connection in connections:
         src, relationship, tgt = connection
         src = src.get("name", src.get("type", "unknown"))
         relationship = relationship["relationship_name"]
         tgt = tgt.get("name", tgt.get("type", "unknown"))
-        print(f"\"{src}\"-[{relationship}]->\"{tgt}\"")
+        print(f'"{src}"-[{relationship}]->"{tgt}"')
 
     print("------GET CONNECTIONS (TARGET NODE)-------")
     connections = await na_adapter.get_connections(str(center_node.id))
-    print(f"found {len(connections)} connections for node \"{center_node.name}\"")
+    print(f'found {len(connections)} connections for node "{center_node.name}"')
     for connection in connections:
         src, relationship, tgt = connection
         src = src.get("name", src.get("type", "unknown"))
         relationship = relationship["relationship_name"]
         tgt = tgt.get("name", tgt.get("type", "unknown"))
-        print(f"\"{src}\"-[{relationship}]->\"{tgt}\"")
+        print(f'"{src}"-[{relationship}]->"{tgt}"')
 
     print("------SUBGRAPH-------")
     node_names = ["neptune analytics", "amazon neptune database"]
     subgraph_nodes, subgraph_edges = await na_adapter.get_nodeset_subgraph(Entity, node_names)
-    print(f"found {len(subgraph_nodes)} nodes and  {len(subgraph_edges)} edges in the subgraph around {node_names}")
+    print(
+        f"found {len(subgraph_nodes)} nodes and  {len(subgraph_edges)} edges in the subgraph around {node_names}"
+    )
     for subgraph_node in subgraph_nodes:
         print(subgraph_node)
     for subgraph_edge in subgraph_edges:
@@ -199,17 +201,17 @@ async def pipeline_method():
     print("------STAT-------")
     stat = await na_adapter.get_graph_metrics(include_optional=True)
     assert type(stat) is dict
-    assert stat['num_nodes'] == 7
-    assert stat['num_edges'] == 7
-    assert stat['mean_degree'] == 2.0
-    assert round(stat['edge_density'], 3) == 0.167
-    assert stat['num_connected_components'] == [7]
-    assert stat['sizes_of_connected_components'] == 1
-    assert stat['num_selfloops'] == 0
+    assert stat["num_nodes"] == 7
+    assert stat["num_edges"] == 7
+    assert stat["mean_degree"] == 2.0
+    assert round(stat["edge_density"], 3) == 0.167
+    assert stat["num_connected_components"] == [7]
+    assert stat["sizes_of_connected_components"] == 1
+    assert stat["num_selfloops"] == 0
     # Unsupported optional metrics
-    assert stat['diameter'] == -1
-    assert stat['avg_shortest_path_length'] == -1
-    assert stat['avg_clustering'] == -1
+    assert stat["diameter"] == -1
+    assert stat["avg_shortest_path_length"] == -1
+    assert stat["avg_clustering"] == -1
 
     print("------DELETE-------")
     # delete all nodes and edges:
@@ -253,7 +255,9 @@ async def misc_methods():
     print(edge_labels)
 
     print("------Get Filtered Graph-------")
-    filtered_nodes, filtered_edges = await na_adapter.get_filtered_graph_data([{'name': ['text_test.txt']}])
+    filtered_nodes, filtered_edges = await na_adapter.get_filtered_graph_data(
+        [{"name": ["text_test.txt"]}]
+    )
     print(filtered_nodes, filtered_edges)
 
     print("------Get Degree one nodes-------")
@@ -261,15 +265,13 @@ async def misc_methods():
     print(degree_one_nodes)
 
     print("------Get Doc sub-graph-------")
-    doc_sub_graph = await na_adapter.get_document_subgraph('test.txt')
+    doc_sub_graph = await na_adapter.get_document_subgraph("test.txt")
     print(doc_sub_graph)
 
     print("------Fetch and Remove connections (Predecessors)-------")
     # Fetch test edge
     (src_id, dest_id, relationship) = edges[0]
-    nodes_predecessors = await na_adapter.get_predecessors(
-        node_id=dest_id, edge_label=relationship
-    )
+    nodes_predecessors = await na_adapter.get_predecessors(node_id=dest_id, edge_label=relationship)
     assert len(nodes_predecessors) > 0
 
     await na_adapter.remove_connection_to_predecessors_of(
@@ -281,24 +283,18 @@ async def misc_methods():
     # Return empty after relationship being deleted.
     assert len(nodes_predecessors_after) == 0
 
-
     print("------Fetch and Remove connections (Successors)-------")
     _, edges_suc = await na_adapter.get_graph_data()
     (src_id, dest_id, relationship, _) = edges_suc[0]
 
-    nodes_successors = await na_adapter.get_successors(
-        node_id=src_id, edge_label=relationship
-    )
+    nodes_successors = await na_adapter.get_successors(node_id=src_id, edge_label=relationship)
     assert len(nodes_successors) > 0
 
-    await na_adapter.remove_connection_to_successors_of(
-        node_ids=[dest_id], edge_label=relationship
-    )
+    await na_adapter.remove_connection_to_successors_of(node_ids=[dest_id], edge_label=relationship)
     nodes_successors_after = await na_adapter.get_successors(
         node_id=src_id, edge_label=relationship
     )
     assert len(nodes_successors_after) == 0
-
 
     # no-op
     await na_adapter.project_entire_graph()
