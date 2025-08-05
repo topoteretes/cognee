@@ -1,9 +1,12 @@
 import os
 import json
 import asyncio
+from typing import List, Any
 from cognee import prune
 from cognee import visualize_graph
 from cognee.low_level import setup, DataPoint
+from cognee.modules.data.methods import load_or_create_datasets
+from cognee.modules.users.methods import get_default_user
 from cognee.pipelines import run_tasks, Task
 from cognee.tasks.storage import add_data_points
 
@@ -27,12 +30,9 @@ class Company(DataPoint):
     is_type: CompanyType
 
 
-def ingest_files():
-    companies_file_path = os.path.join(os.path.dirname(__file__), "companies.json")
-    companies = json.loads(open(companies_file_path, "r").read())
-
-    people_file_path = os.path.join(os.path.dirname(__file__), "people.json")
-    people = json.loads(open(people_file_path, "r").read())
+def ingest_files(data: List[Any]):
+    people = data[0]["people"]
+    companies = data[0]["companies"]
 
     people_data_points = {}
     departments_data_points = {}
@@ -72,9 +72,27 @@ async def main():
     await prune.prune_data()
     await prune.prune_system(metadata=True)
 
+    # Create relational database tables
     await setup()
 
-    pipeline = run_tasks([Task(ingest_files), Task(add_data_points)])
+    # If no user is provided use default user
+    user = await get_default_user()
+
+    # Create dataset object to keep track of pipeline status
+    datasets = await load_or_create_datasets(["test_dataset"], [], user)
+
+    # Prepare data for pipeline
+    companies_file_path = os.path.join(os.path.dirname(__file__), "companies.json")
+    companies = json.loads(open(companies_file_path, "r").read())
+    people_file_path = os.path.join(os.path.dirname(__file__), "people.json")
+    people = json.loads(open(people_file_path, "r").read())
+
+    pipeline = run_tasks(
+        [Task(ingest_files), Task(add_data_points)],
+        dataset_id=datasets[0].id,
+        data=[{"companies": companies, "people": people}],
+        incremental_loading=False,
+    )
 
     async for status in pipeline:
         print(status)
