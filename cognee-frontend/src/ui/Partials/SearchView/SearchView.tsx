@@ -4,7 +4,7 @@ import classNames from "classnames";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { LoadingIndicator } from "@/ui/App";
-import { CTAButton, Select, TextArea } from "@/ui/elements";
+import { CTAButton, Select, TextArea, Input } from "@/ui/elements";
 import useChat from "@/modules/chat/hooks/useChat";
 
 import styles from "./SearchView.module.css";
@@ -59,30 +59,36 @@ export default function SearchView() {
   }, [refreshChat, scrollToBottom]);
 
   const [searchInputValue, setSearchInputValue] = useState("");
+  // Add state for top_k
+  const [topK, setTopK] = useState(10);
 
   const handleSearchInputChange = useCallback((value: string) => {
     setSearchInputValue(value);
   }, []);
 
+  // Add handler for top_k input
+  const handleTopKChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = parseInt(e.target.value, 10);
+    if (isNaN(value)) value = 10;
+    if (value < 1) value = 1;
+    if (value > 100) value = 100;
+    setTopK(value);
+  }, []);
+
   const handleChatMessageSubmit = useCallback((event: React.FormEvent<SearchFormPayload>) => {
     event.preventDefault();
-
     const formElements = event.currentTarget;
-
     const searchType = formElements.searchType.value;
     const chatInput = searchInputValue.trim();
-
     if (chatInput === "") {
       return;
     }
-
     scrollToBottom();
-
     setSearchInputValue("");
-
-    sendMessage(chatInput, searchType)
+    // Pass topK to sendMessage
+    sendMessage(chatInput, searchType, topK)
       .then(scrollToBottom)
-  }, [scrollToBottom, sendMessage, searchInputValue]);
+  }, [scrollToBottom, sendMessage, searchInputValue, topK]);
 
   const chatFormRef = useRef<HTMLFormElement>(null);
 
@@ -132,6 +138,20 @@ export default function SearchView() {
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </Select>
+              {/* Add top_k input here */}
+              <label className="text-gray-600 whitespace-nowrap" title="Controls how many results to return. Smaller = focused, larger = broader graph exploration.">
+                Max results:
+                <Input
+                  type="number"
+                  name="topK"
+                  min={1}
+                  max={100}
+                  value={topK}
+                  onChange={handleTopKChange}
+                  className="w-20 ml-2"
+                  title="Controls how many results to return. Smaller = focused, larger = broader graph exploration."
+                />
+              </label>
             </div>
             <CTAButton disabled={isSearchRunning} type="submit">
               {isSearchRunning? "Searching..." : "Search"}
