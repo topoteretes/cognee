@@ -115,7 +115,7 @@ def _process_datapoint_field(
             properties_to_visit.add(field_name)
 
 
-def _datapoints_generator(
+def _targets_generator(
     data_point: DataPoint,
     properties_to_visit: set,
 ) -> Tuple[DataPoint, str, Optional[Edge]]:
@@ -194,7 +194,7 @@ async def get_graph_from_model(
         added_nodes[data_point_id] = True
 
     # Process all relationships using generator
-    for target_datapoint, field_name, edge_metadata in _datapoints_generator(
+    for target_datapoint, field_name, edge_metadata in _targets_generator(
         data_point, properties_to_visit
     ):
         relationship_name = _get_relationship_key(field_name, edge_metadata)
