@@ -4,8 +4,8 @@ from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.modules.storage.utils import copy_model
 
 
-def _extract_field_info(field_value: Any) -> Tuple[str, Any, Optional[Edge]]:
-    """Extract field type, actual value, and edge metadata from a field value."""
+def _extract_field_info(field_value: Any) -> Tuple[List[DataPoint], Optional[Edge]]:
+    """Extract list of DataPoints and edge metadata from a field value."""
 
     # Handle tuple[Edge, DataPoint]
     if (
@@ -14,7 +14,7 @@ def _extract_field_info(field_value: Any) -> Tuple[str, Any, Optional[Edge]]:
         and isinstance(field_value[0], Edge)
         and isinstance(field_value[1], DataPoint)
     ):
-        return "single_datapoint_with_edge", field_value[1], field_value[0]
+        return [field_value[1]], field_value[0]
 
     # Handle tuple[Edge, list[DataPoint]]
     if (
@@ -25,11 +25,11 @@ def _extract_field_info(field_value: Any) -> Tuple[str, Any, Optional[Edge]]:
         and len(field_value[1]) > 0
         and isinstance(field_value[1][0], DataPoint)
     ):
-        return "list_datapoint_with_edge", field_value[1], field_value[0]
+        return field_value[1], field_value[0]
 
     # Handle single DataPoint
     if isinstance(field_value, DataPoint):
-        return "single_datapoint", field_value, None
+        return [field_value], None
 
     # Handle list of DataPoints
     if (
@@ -37,10 +37,10 @@ def _extract_field_info(field_value: Any) -> Tuple[str, Any, Optional[Edge]]:
         and len(field_value) > 0
         and isinstance(field_value[0], DataPoint)
     ):
-        return "list_datapoint", field_value, None
+        return field_value, None
 
-    # Regular property
-    return "property", field_value, None
+    # Regular property - return empty list
+    return [], None
 
 
 def _create_edge_properties(
@@ -92,18 +92,17 @@ def _process_datapoint_field(
     properties_to_visit: set,
     excluded_properties: set,
 ) -> None:
-    """Process a field containing DataPoint(s), handling both single and list cases."""
+    """Process a field containing DataPoints, always working with lists."""
     excluded_properties.add(field_name)
     relationship_key = _get_relationship_key(field_name, edge_metadata)
 
-    for index, datapoint in enumerate(datapoints):
+    for datapoint in datapoints:
         property_key = _generate_property_key(data_point_id, relationship_key, str(datapoint.id))
         if property_key in visited_properties:
             continue
 
-        # For single datapoint, use field_name; for list, use field_name.index
-        field_identifier = field_name if len(datapoints) == 1 else f"{field_name}.{index}"
-        properties_to_visit.add(field_identifier)
+        # Always use field_name since we're working with lists
+        properties_to_visit.add(field_name)
 
 
 async def get_graph_from_model(
@@ -143,25 +142,17 @@ async def get_graph_from_model(
         if field_name == "metadata":
             continue
 
-        field_type, actual_value, edge_metadata = _extract_field_info(field_value)
+        datapoints, edge_metadata = _extract_field_info(field_value)
 
-        if field_type == "property":
+        if not datapoints:
+            # Regular property
             data_point_properties[field_name] = field_value
-        elif field_type in ["single_datapoint", "single_datapoint_with_edge"]:
+        else:
+            # DataPoint relationship
             _process_datapoint_field(
                 data_point_id,
                 field_name,
-                [actual_value],
-                edge_metadata,
-                visited_properties,
-                properties_to_visit,
-                excluded_properties,
-            )
-        elif field_type in ["list_datapoint", "list_datapoint_with_edge"]:
-            _process_datapoint_field(
-                data_point_id,
-                field_name,
-                actual_value,
+                datapoints,
                 edge_metadata,
                 visited_properties,
                 properties_to_visit,
@@ -177,14 +168,7 @@ async def get_graph_from_model(
         added_nodes[data_point_id] = True
 
     # Process all relationships
-    for field_name_with_index in properties_to_visit:
-        # Parse field name and index
-        if "." in field_name_with_index:
-            field_name, index_str = field_name_with_index.split(".")
-            index = int(index_str)
-        else:
-            field_name, index = field_name_with_index, None
-
+    for field_name in properties_to_visit:
         # Get field value and extract edge metadata
         field_value = getattr(data_point, field_name)
         edge_metadata = None
@@ -196,45 +180,46 @@ async def get_graph_from_model(
         ):
             edge_metadata, field_value = field_value
 
-        # Get specific datapoint - handle both single and list cases
-        if index is not None:
-            # List case: extract specific item by index
-            target_datapoint = field_value[index]
+        # Convert to list if single DataPoint
+        if isinstance(field_value, DataPoint):
+            datapoints = [field_value]
         elif isinstance(field_value, list):
-            # Single datapoint case that was wrapped in a list
-            target_datapoint = field_value[0]
+            datapoints = field_value
         else:
-            # True single datapoint case
-            target_datapoint = field_value
+            continue
 
-        # Create edge if not already added
-        edge_key = f"{data_point_id}{target_datapoint.id}{field_name}"
-        if edge_key not in added_edges:
-            relationship_name = _get_relationship_key(field_name, edge_metadata)
-            edge_properties = _create_edge_properties(
-                data_point.id, target_datapoint.id, relationship_name, edge_metadata
+        # Process each datapoint in the list
+        for target_datapoint in datapoints:
+            # Create edge if not already added
+            edge_key = f"{data_point_id}{target_datapoint.id}{field_name}"
+            if edge_key not in added_edges:
+                relationship_name = _get_relationship_key(field_name, edge_metadata)
+                edge_properties = _create_edge_properties(
+                    data_point.id, target_datapoint.id, relationship_name, edge_metadata
+                )
+                edges.append(
+                    (data_point.id, target_datapoint.id, relationship_name, edge_properties)
+                )
+                added_edges[edge_key] = True
+
+            # Mark property as visited - CRITICAL for preventing infinite loops
+            relationship_key = _get_relationship_key(field_name, edge_metadata)
+            property_key = _generate_property_key(
+                data_point_id, relationship_key, str(target_datapoint.id)
             )
-            edges.append((data_point.id, target_datapoint.id, relationship_name, edge_properties))
-            added_edges[edge_key] = True
+            visited_properties[property_key] = True
 
-        # Mark property as visited - CRITICAL for preventing infinite loops
-        relationship_key = _get_relationship_key(field_name, edge_metadata)
-        property_key = _generate_property_key(
-            data_point_id, relationship_key, str(target_datapoint.id)
-        )
-        visited_properties[property_key] = True
-
-        # Recursively process target node if not already processed
-        if str(target_datapoint.id) not in added_nodes:
-            child_nodes, child_edges = await get_graph_from_model(
-                target_datapoint,
-                include_root=True,
-                added_nodes=added_nodes,
-                added_edges=added_edges,
-                visited_properties=visited_properties,
-            )
-            nodes.extend(child_nodes)
-            edges.extend(child_edges)
+            # Recursively process target node if not already processed
+            if str(target_datapoint.id) not in added_nodes:
+                child_nodes, child_edges = await get_graph_from_model(
+                    target_datapoint,
+                    include_root=True,
+                    added_nodes=added_nodes,
+                    added_edges=added_edges,
+                    visited_properties=visited_properties,
+                )
+                nodes.extend(child_nodes)
+                edges.extend(child_edges)
 
     return nodes, edges
 
