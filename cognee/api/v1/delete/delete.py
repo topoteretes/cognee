@@ -167,7 +167,7 @@ async def delete_single_document(data_id: str, dataset_id: UUID = None, mode: st
 
         # Get the data point
         data_point = (
-            await session.execute(select(Data).filter(Data.id == data_id))
+            await session.execute(select(Data).filter(Data.id == UUID(data_id)))
         ).scalar_one_or_none()
 
         if data_point is None:
