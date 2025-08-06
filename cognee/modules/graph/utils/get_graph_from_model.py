@@ -4,7 +4,7 @@ from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.modules.storage.utils import copy_model
 
 
-def _extract_field_data(field_value: Any) -> Tuple[Optional[Edge], List[DataPoint]]:
+def _extract_field_data(field_value: Any) -> List[Tuple[Optional[Edge], List[DataPoint]]]:
     """Extract edge metadata and datapoints from a field value."""
     # Handle tuple[Edge, DataPoint] or tuple[Edge, list[DataPoint]]
     if (
@@ -16,17 +16,17 @@ def _extract_field_data(field_value: Any) -> Tuple[Optional[Edge], List[DataPoin
         data_value = field_value[1]
 
         if isinstance(data_value, DataPoint):
-            return edge_metadata, [data_value]
+            return [(edge_metadata, [data_value])]
         elif (
             isinstance(data_value, list)
             and len(data_value) > 0
             and isinstance(data_value[0], DataPoint)
         ):
-            return edge_metadata, data_value
+            return [(edge_metadata, data_value)]
 
     # Handle single DataPoint
     if isinstance(field_value, DataPoint):
-        return None, [field_value]
+        return [(None, [field_value])]
 
     # Handle list of DataPoints
     if (
@@ -34,10 +34,10 @@ def _extract_field_data(field_value: Any) -> Tuple[Optional[Edge], List[DataPoin
         and len(field_value) > 0
         and isinstance(field_value[0], DataPoint)
     ):
-        return None, field_value
+        return [(None, field_value)]
 
     # Regular property or empty list
-    return None, []
+    return []
 
 
 def _create_edge_properties(
@@ -83,23 +83,26 @@ def _generate_property_key(data_point_id: str, relationship_key: str, target_id:
 def _process_datapoint_field(
     data_point_id: str,
     field_name: str,
-    datapoints: List[DataPoint],
-    edge_metadata: Optional[Edge],
+    edge_datapoint_pairs: List[Tuple[Optional[Edge], List[DataPoint]]],
     visited_properties: Dict[str, bool],
     properties_to_visit: set,
     excluded_properties: set,
 ) -> None:
     """Process a field containing DataPoints, always working with lists."""
     excluded_properties.add(field_name)
-    relationship_key = _get_relationship_key(field_name, edge_metadata)
 
-    for datapoint in datapoints:
-        property_key = _generate_property_key(data_point_id, relationship_key, str(datapoint.id))
-        if property_key in visited_properties:
-            continue
+    for edge_metadata, datapoints in edge_datapoint_pairs:
+        relationship_key = _get_relationship_key(field_name, edge_metadata)
 
-        # Always use field_name since we're working with lists
-        properties_to_visit.add(field_name)
+        for datapoint in datapoints:
+            property_key = _generate_property_key(
+                data_point_id, relationship_key, str(datapoint.id)
+            )
+            if property_key in visited_properties:
+                continue
+
+            # Always use field_name since we're working with lists
+            properties_to_visit.add(field_name)
 
 
 def _datapoints_generator(
@@ -109,13 +112,14 @@ def _datapoints_generator(
     """Generator that yields (target_datapoint, field_name, edge_metadata) tuples."""
     for field_name in properties_to_visit:
         field_value = getattr(data_point, field_name)
-        edge_metadata, datapoints = _extract_field_data(field_value)
+        edge_datapoint_pairs = _extract_field_data(field_value)
 
-        if not datapoints:
+        if not edge_datapoint_pairs:
             continue
 
-        for target_datapoint in datapoints:
-            yield target_datapoint, field_name, edge_metadata
+        for edge_metadata, datapoints in edge_datapoint_pairs:
+            for target_datapoint in datapoints:
+                yield target_datapoint, field_name, edge_metadata
 
 
 async def get_graph_from_model(
@@ -155,9 +159,9 @@ async def get_graph_from_model(
         if field_name == "metadata":
             continue
 
-        edge_metadata, datapoints = _extract_field_data(field_value)
+        edge_datapoint_pairs = _extract_field_data(field_value)
 
-        if not datapoints:
+        if not edge_datapoint_pairs:
             # Regular property
             data_point_properties[field_name] = field_value
         else:
@@ -165,8 +169,7 @@ async def get_graph_from_model(
             _process_datapoint_field(
                 data_point_id,
                 field_name,
-                datapoints,
-                edge_metadata,
+                edge_datapoint_pairs,
                 visited_properties,
                 properties_to_visit,
                 excluded_properties,
