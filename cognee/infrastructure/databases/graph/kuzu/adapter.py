@@ -1524,7 +1524,7 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Error during database clearing: {e}")
             raise
 
-    async def get_document_subgraph(self, content_hash: str):
+    async def get_document_subgraph(self, data_id: str):
         """
         Get all nodes that should be deleted when removing a document.
 
@@ -1535,7 +1535,7 @@ class KuzuAdapter(GraphDBInterface):
         Parameters:
         -----------
 
-            - content_hash (str): The identifier for the document to query against.
+            - data_id (str): The identifier for the document to query against.
 
         Returns:
         --------
@@ -1545,7 +1545,7 @@ class KuzuAdapter(GraphDBInterface):
         """
         query = """
         MATCH (doc:Node)
-        WHERE (doc.type = 'TextDocument' OR doc.type = 'PdfDocument') AND doc.name = $content_hash
+        WHERE (doc.type = 'TextDocument' OR doc.type = 'PdfDocument') AND doc.id = $data_id
 
         OPTIONAL MATCH (doc)<-[e1:EDGE]-(chunk:Node)
         WHERE e1.relationship_name = 'is_part_of' AND chunk.type = 'DocumentChunk'
@@ -1583,7 +1583,7 @@ class KuzuAdapter(GraphDBInterface):
             COLLECT(DISTINCT made_node) as made_from_nodes,
             COLLECT(DISTINCT type) as orphan_types
         """
-        result = await self.query(query, {"content_hash": f"text_{content_hash}"})
+        result = await self.query(query, {"data_id": f"{data_id}"})
         if not result or not result[0]:
             return None
 

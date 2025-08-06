@@ -16,7 +16,11 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.context_global_variables import set_database_global_context_variables
 
-from .exceptions import DocumentNotFoundError, DatasetNotFoundError, DocumentSubgraphNotFoundError
+from cognee.api.v1.delete.exceptions import (
+    DocumentNotFoundError,
+    DatasetNotFoundError,
+    DocumentSubgraphNotFoundError,
+)
 
 logger = get_logger()
 
@@ -82,17 +86,17 @@ async def delete(
             raise DocumentNotFoundError(f"Data {data_id} not found in dataset {dataset_id}")
 
         # Get the content hash for deletion
-        content_hash = data_point.content_hash
+        data_id = str(data_point.id)
 
     # Use the existing comprehensive deletion logic
-    return await delete_single_document(content_hash, dataset.id, mode)
+    return await delete_single_document(data_id, dataset.id, mode)
 
 
-async def delete_single_document(content_hash: str, dataset_id: UUID = None, mode: str = "soft"):
+async def delete_single_document(data_id: str, dataset_id: UUID = None, mode: str = "soft"):
     """Delete a single document by its content hash."""
 
     # Delete from graph database
-    deletion_result = await delete_document_subgraph(content_hash, mode)
+    deletion_result = await delete_document_subgraph(data_id, mode)
 
     logger.info(f"Deletion result: {deletion_result}")
 
@@ -163,12 +167,12 @@ async def delete_single_document(content_hash: str, dataset_id: UUID = None, mod
 
         # Get the data point
         data_point = (
-            await session.execute(select(Data).filter(Data.content_hash == content_hash))
+            await session.execute(select(Data).filter(Data.id == data_id))
         ).scalar_one_or_none()
 
         if data_point is None:
             raise DocumentNotFoundError(
-                f"Document not found in relational DB with content hash: {content_hash}"
+                f"Document not found in relational DB with data id: {data_id}"
             )
 
         doc_id = data_point.id
@@ -203,7 +207,7 @@ async def delete_single_document(content_hash: str, dataset_id: UUID = None, mod
         "status": "success",
         "message": "Document deleted from both graph and relational databases",
         "graph_deletions": deletion_result["deleted_counts"],
-        "content_hash": content_hash,
+        "data_id": data_id,
         "dataset": dataset_id,
         "deleted_node_ids": [
             str(node_id) for node_id in deleted_node_ids
@@ -211,12 +215,12 @@ async def delete_single_document(content_hash: str, dataset_id: UUID = None, mod
     }
 
 
-async def delete_document_subgraph(content_hash: str, mode: str = "soft"):
+async def delete_document_subgraph(document_id: str, mode: str = "soft"):
     """Delete a document and all its related nodes in the correct order."""
     graph_db = await get_graph_engine()
-    subgraph = await graph_db.get_document_subgraph(content_hash)
+    subgraph = await graph_db.get_document_subgraph(document_id)
     if not subgraph:
-        raise DocumentSubgraphNotFoundError(f"Document not found with content hash: {content_hash}")
+        raise DocumentSubgraphNotFoundError(f"Document not found with id: {document_id}")
 
     # Delete in the correct order to maintain graph integrity
     deletion_order = [
@@ -260,6 +264,6 @@ async def delete_document_subgraph(content_hash: str, mode: str = "soft"):
     return {
         "status": "success",
         "deleted_counts": deleted_counts,
-        "content_hash": content_hash,
+        "document_id": document_id,
         "deleted_node_ids": deleted_node_ids,
     }
