@@ -36,6 +36,7 @@ class GraphConfig(BaseSettings):
     graph_database_provider: str = Field("kuzu", env="GRAPH_DATABASE_PROVIDER")
 
     graph_database_url: str = ""
+    graph_database_name: str = ""
     graph_database_username: str = ""
     graph_database_password: str = ""
     graph_database_port: int = 123
@@ -105,6 +106,7 @@ class GraphConfig(BaseSettings):
         return {
             "graph_database_provider": self.graph_database_provider,
             "graph_database_url": self.graph_database_url,
+            "graph_database_name": self.graph_database_name,
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
             "graph_database_port": self.graph_database_port,
