@@ -102,6 +102,22 @@ def _process_datapoint_field(
         properties_to_visit.add(field_name)
 
 
+def _datapoints_generator(
+    data_point: DataPoint,
+    properties_to_visit: set,
+) -> Tuple[DataPoint, str, Optional[Edge]]:
+    """Generator that yields (target_datapoint, field_name, edge_metadata) tuples."""
+    for field_name in properties_to_visit:
+        field_value = getattr(data_point, field_name)
+        edge_metadata, datapoints = _extract_field_data(field_value)
+
+        if not datapoints:
+            continue
+
+        for target_datapoint in datapoints:
+            yield target_datapoint, field_name, edge_metadata
+
+
 async def get_graph_from_model(
     data_point: DataPoint,
     added_nodes: Dict[str, bool],
@@ -164,50 +180,40 @@ async def get_graph_from_model(
         nodes.append(SimpleDataPointModel(**data_point_properties))
         added_nodes[data_point_id] = True
 
-    # Process all relationships
-    for field_name in properties_to_visit:
-        # Get field value and extract edge metadata
-        field_value = getattr(data_point, field_name)
-        edge_metadata, datapoints = _extract_field_data(field_value)
+    # Process all relationships using generator
+    for target_datapoint, field_name, edge_metadata in _datapoints_generator(
+        data_point, properties_to_visit
+    ):
+        relationship_name = _get_relationship_key(field_name, edge_metadata)
 
-        # Skip if no datapoints found
-        if not datapoints:
+        # Create edge if not already added
+        edge_key = f"{data_point_id}{target_datapoint.id}{field_name}"
+        if edge_key not in added_edges:
+            edge_properties = _create_edge_properties(
+                data_point.id, target_datapoint.id, relationship_name, edge_metadata
+            )
+            edges.append((data_point.id, target_datapoint.id, relationship_name, edge_properties))
+            added_edges[edge_key] = True
+
+        # Mark property as visited - CRITICAL for preventing infinite loops
+        property_key = _generate_property_key(
+            data_point_id, relationship_name, str(target_datapoint.id)
+        )
+        visited_properties[property_key] = True
+
+        # Recursively process target node if not already processed
+        if str(target_datapoint.id) in added_nodes:
             continue
 
-        # Process each datapoint in the list
-        for target_datapoint in datapoints:
-            relationship_name = _get_relationship_key(field_name, edge_metadata)
-
-            # Create edge if not already added
-            edge_key = f"{data_point_id}{target_datapoint.id}{field_name}"
-            if edge_key not in added_edges:
-                edge_properties = _create_edge_properties(
-                    data_point.id, target_datapoint.id, relationship_name, edge_metadata
-                )
-                edges.append(
-                    (data_point.id, target_datapoint.id, relationship_name, edge_properties)
-                )
-                added_edges[edge_key] = True
-
-            # Mark property as visited - CRITICAL for preventing infinite loops
-            property_key = _generate_property_key(
-                data_point_id, relationship_name, str(target_datapoint.id)
-            )
-            visited_properties[property_key] = True
-
-            # Recursively process target node if not already processed
-            if str(target_datapoint.id) in added_nodes:
-                continue
-
-            child_nodes, child_edges = await get_graph_from_model(
-                target_datapoint,
-                include_root=True,
-                added_nodes=added_nodes,
-                added_edges=added_edges,
-                visited_properties=visited_properties,
-            )
-            nodes.extend(child_nodes)
-            edges.extend(child_edges)
+        child_nodes, child_edges = await get_graph_from_model(
+            target_datapoint,
+            include_root=True,
+            added_nodes=added_nodes,
+            added_edges=added_edges,
+            visited_properties=visited_properties,
+        )
+        nodes.extend(child_nodes)
+        edges.extend(child_edges)
 
     return nodes, edges
 
