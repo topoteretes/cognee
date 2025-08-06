@@ -6,15 +6,37 @@ from cognee.modules.storage.utils import copy_model
 
 def _extract_field_data(field_value: Any) -> List[Tuple[Optional[Edge], List[DataPoint]]]:
     """Extract edge metadata and datapoints from a field value."""
-    # Handle tuple[Edge, DataPoint] or tuple[Edge, list[DataPoint]]
+    # Handle single DataPoint
+    if isinstance(field_value, DataPoint):
+        return [(None, [field_value])]
+
+    # Handle list - could contain DataPoints, edge tuples, or mixed
+    if isinstance(field_value, list) and len(field_value) > 0:
+        result = []
+        for item in field_value:
+            # Handle tuple[Edge, DataPoint or list[DataPoint]]
+            if isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], Edge):
+                edge, data_value = item
+                if isinstance(data_value, DataPoint):
+                    result.append((edge, [data_value]))
+                elif (
+                    isinstance(data_value, list)
+                    and len(data_value) > 0
+                    and isinstance(data_value[0], DataPoint)
+                ):
+                    result.append((edge, data_value))
+            # Handle single DataPoint in list
+            elif isinstance(item, DataPoint):
+                result.append((None, [item]))
+        return result
+
+    # Handle tuple[Edge, DataPoint or list[DataPoint]]
     if (
         isinstance(field_value, tuple)
         and len(field_value) == 2
         and isinstance(field_value[0], Edge)
     ):
-        edge_metadata = field_value[0]
-        data_value = field_value[1]
-
+        edge_metadata, data_value = field_value
         if isinstance(data_value, DataPoint):
             return [(edge_metadata, [data_value])]
         elif (
@@ -23,18 +45,6 @@ def _extract_field_data(field_value: Any) -> List[Tuple[Optional[Edge], List[Dat
             and isinstance(data_value[0], DataPoint)
         ):
             return [(edge_metadata, data_value)]
-
-    # Handle single DataPoint
-    if isinstance(field_value, DataPoint):
-        return [(None, [field_value])]
-
-    # Handle list of DataPoints
-    if (
-        isinstance(field_value, list)
-        and len(field_value) > 0
-        and isinstance(field_value[0], DataPoint)
-    ):
-        return [(None, field_value)]
 
     # Regular property or empty list
     return []
