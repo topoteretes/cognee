@@ -173,7 +173,9 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def add_node(self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None) -> None:
+    async def add_node(
+        self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
+    ) -> None:
         """
         Add a single node with specified properties to the graph.
 
@@ -272,7 +274,9 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     @record_graph_changes
-    async def add_edges(self, edges: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]) -> None:
+    async def add_edges(
+        self, edges: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]
+    ) -> None:
         """
         Add multiple edges to the graph in a single operation.
 

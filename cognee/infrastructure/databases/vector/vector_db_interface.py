@@ -123,7 +123,9 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    async def delete_data_points(self, collection_name: str, data_point_ids: Union[List[str], list[str]]):
+    async def delete_data_points(
+        self, collection_name: str, data_point_ids: Union[List[str], list[str]]
+    ):
         """
         Delete specified data points from a collection.
 
@@ -182,11 +184,13 @@ class VectorDBInterface(Protocol):
         """
         pass
 
-    async def index_data_points(self, index_name: str, index_property_name: str, data_points: List[DataPoint]):
+    async def index_data_points(
+        self, index_name: str, index_property_name: str, data_points: List[DataPoint]
+    ):
         """
         Index data points for improved search performance.
         This method is optional and may be a no-op for adapters that don't support separate indexing.
-        
+
         Parameters:
         -----------
             - index_name (str): Name of the index to create/update
@@ -199,11 +203,11 @@ class VectorDBInterface(Protocol):
         """
         Get or transform a data point schema for the specific vector database.
         This method is optional and may return the input unchanged for simple adapters.
-        
+
         Parameters:
         -----------
             - model_type (Any): The model type to get schema for
-            
+
         Returns:
         --------
             - Any: The schema object suitable for this vector database
