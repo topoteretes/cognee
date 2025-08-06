@@ -81,6 +81,7 @@ class GraphConfig(BaseSettings):
             "graph_filename": self.graph_filename,
             "graph_database_provider": self.graph_database_provider,
             "graph_database_url": self.graph_database_url,
+            "graph_database_name": self.graph_database_name,
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
             "graph_database_port": self.graph_database_port,
