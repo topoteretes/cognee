@@ -33,6 +33,7 @@ def create_graph_engine(
     graph_database_provider,
     graph_file_path,
     graph_database_url="",
+    graph_database_name="",
     graph_database_username="",
     graph_database_password="",
     graph_database_port="",
@@ -86,6 +87,7 @@ def create_graph_engine(
             graph_database_url=graph_database_url,
             graph_database_username=graph_database_username or None,
             graph_database_password=graph_database_password or None,
+            graph_database_name=graph_database_name or None,
         )
 
     elif graph_database_provider == "falkordb":
