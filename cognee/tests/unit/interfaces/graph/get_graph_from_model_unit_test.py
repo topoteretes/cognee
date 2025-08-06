@@ -1,6 +1,6 @@
 import pytest
 from typing import List
-from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine import DataPoint, Edge
 
 from cognee.modules.graph.utils import get_graph_from_model
 
@@ -28,7 +28,20 @@ class Entity(DataPoint):
     metadata: dict = {"index_fields": ["name"]}
 
 
+class Company(DataPoint):
+    name: str
+    employees: List["Employee"] = None
+    metadata: dict = {"index_fields": ["name"]}
+
+
+class Employee(DataPoint):
+    name: str
+    role: str
+    metadata: dict = {"index_fields": ["name"]}
+
+
 DocumentChunk.model_rebuild()
+Company.model_rebuild()
 
 
 @pytest.mark.asyncio
@@ -149,3 +162,48 @@ async def test_get_graph_from_model_no_contains():
 
     assert len(nodes) == 2, f"Expected 2 nodes, got {len(nodes)}"
     assert len(edges) == 1, f"Expected 1 edge, got {len(edges)}"
+
+
+@pytest.mark.asyncio
+async def test_get_graph_from_model_flexible_edges():
+    """Tests the new flexible edge system with mixed relationships"""
+    # Create employees
+    manager = Employee(name="Manager", role="Manager")
+    sales1 = Employee(name="Sales1", role="Sales")
+    sales2 = Employee(name="Sales2", role="Sales")
+    admin1 = Employee(name="Admin1", role="Admin")
+    admin2 = Employee(name="Admin2", role="Admin")
+
+    # Create company with mixed employee relationships
+    company = Company(
+        name="Test Company",
+        employees=[
+            # Weighted relationship
+            (Edge(weight=0.9, relationship_type="manages"), manager),
+            # Multiple weights relationship
+            (
+                Edge(weights={"performance": 0.8, "experience": 0.7}, relationship_type="employs"),
+                sales1,
+            ),
+            # Simple relationship
+            sales2,
+            # Group relationship
+            (Edge(weights={"team_efficiency": 0.8}, relationship_type="employs"), [admin1, admin2]),
+        ],
+    )
+
+    added_nodes = {}
+    added_edges = {}
+    visited_properties = {}
+
+    nodes, edges = await get_graph_from_model(company, added_nodes, added_edges, visited_properties)
+
+    # Should have 6 nodes: company + 5 employees
+    assert len(nodes) == 6, f"Expected 6 nodes, got {len(nodes)}"
+    # Should have 5 edges: 4 employee relationships
+    assert len(edges) == 5, f"Expected 5 edges, got {len(edges)}"
+
+    # Verify all employees are connected
+    employee_ids = {str(emp.id) for emp in [manager, sales1, sales2, admin1, admin2]}
+    edge_target_ids = {edge[1] for edge in edges}
+    assert employee_ids.issubset(edge_target_ids), "Not all employees are connected"
