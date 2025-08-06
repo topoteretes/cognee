@@ -5,7 +5,9 @@ import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
-from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.infrastructure.llm.tokenizer.TikToken import (
+    TikTokenTokenizer,
+)
 
 litellm.set_verbose = False
 logger = get_logger("FastembedEmbeddingEngine")
