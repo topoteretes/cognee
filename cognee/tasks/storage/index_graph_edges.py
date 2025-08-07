@@ -2,7 +2,7 @@ from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 from cognee.shared.logging_utils import get_logger, ERROR
 from collections import Counter
 
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine, VECTOR_INDEX_LOCK
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.models.EdgeType import EdgeType
 
@@ -58,9 +58,14 @@ async def index_graph_edges(batch_size: int = 1024):
         for field_name in edge.metadata["index_fields"]:
             index_name = f"{data_point_type.__name__}.{field_name}"
 
+            # We need two IFs for the vector index lock
             if index_name not in created_indexes:
-                await vector_engine.create_vector_index(data_point_type.__name__, field_name)
-                created_indexes[index_name] = True
+                async with VECTOR_INDEX_LOCK:
+                    if index_name not in created_indexes:
+                        await vector_engine.create_vector_index(
+                            data_point_type.__name__, field_name
+                        )
+                        created_indexes[index_name] = True
 
             if index_name not in index_points:
                 index_points[index_name] = []

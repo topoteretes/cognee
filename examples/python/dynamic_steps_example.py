@@ -159,6 +159,151 @@ CRM Software: Salesforce, Zoho
 Negotiation and Relationship Building
 """
 
+job_6 = """
+CV 6: Not Relevant
+Name: Jessica Miller
+Contact Information:
+
+Email: jessica.miller@example.com
+Phone: (555) 567-8901
+Summary:
+
+Experienced Sales Manager with a strong track record in driving sales growth and building high-performing teams. Excellent communication and leadership skills.
+
+Education:
+
+B.A. in Business Administration, University of Southern California (2010)
+Experience:
+
+Sales Manager, Global Enterprises (2015 – Present)
+Managed a sales team of 15 members, achieving a 20% increase in annual revenue.
+Developed sales strategies that expanded customer base by 25%.
+Sales Representative, Market Leaders Inc. (2010 – 2015)
+Consistently exceeded sales targets and received the 'Top Salesperson' award in 2013.
+Skills:
+
+Sales Strategy and Planning
+Team Leadership and Development
+CRM Software: Salesforce, Zoho
+Negotiation and Relationship Building
+"""
+
+job_7 = """
+CV 7: Not Relevant
+Name: Jessica Miller
+Contact Information:
+
+Email: jessica.miller@example.com
+Phone: (555) 567-8901
+Summary:
+
+Experienced Sales Manager with a strong track record in driving sales growth and building high-performing teams. Excellent communication and leadership skills.
+
+Education:
+
+B.A. in Business Administration, University of Southern California (2010)
+Experience:
+
+Sales Manager, Global Enterprises (2015 – Present)
+Managed a sales team of 15 members, achieving a 20% increase in annual revenue.
+Developed sales strategies that expanded customer base by 25%.
+Sales Representative, Market Leaders Inc. (2010 – 2015)
+Consistently exceeded sales targets and received the 'Top Salesperson' award in 2013.
+Skills:
+
+Sales Strategy and Planning
+Team Leadership and Development
+CRM Software: Salesforce, Zoho
+Negotiation and Relationship Building
+"""
+
+job_8 = """
+CV 8: Not Relevant
+Name: Jessica Miller
+Contact Information:
+
+Email: jessica.miller@example.com
+Phone: (555) 567-8901
+Summary:
+
+Experienced Sales Manager with a strong track record in driving sales growth and building high-performing teams. Excellent communication and leadership skills.
+
+Education:
+
+B.A. in Business Administration, University of Southern California (2010)
+Experience:
+
+Sales Manager, Global Enterprises (2015 – Present)
+Managed a sales team of 15 members, achieving a 20% increase in annual revenue.
+Developed sales strategies that expanded customer base by 25%.
+Sales Representative, Market Leaders Inc. (2010 – 2015)
+Consistently exceeded sales targets and received the 'Top Salesperson' award in 2013.
+Skills:
+
+Sales Strategy and Planning
+Team Leadership and Development
+CRM Software: Salesforce, Zoho
+Negotiation and Relationship Building
+"""
+
+job_9 = """
+CV 9: Not Relevant
+Name: Jessica Miller
+Contact Information:
+
+Email: jessica.miller@example.com
+Phone: (555) 567-8901
+Summary:
+
+Experienced Sales Manager with a strong track record in driving sales growth and building high-performing teams. Excellent communication and leadership skills.
+
+Education:
+
+B.A. in Business Administration, University of Southern California (2010)
+Experience:
+
+Sales Manager, Global Enterprises (2015 – Present)
+Managed a sales team of 15 members, achieving a 20% increase in annual revenue.
+Developed sales strategies that expanded customer base by 25%.
+Sales Representative, Market Leaders Inc. (2010 – 2015)
+Consistently exceeded sales targets and received the 'Top Salesperson' award in 2013.
+Skills:
+
+Sales Strategy and Planning
+Team Leadership and Development
+CRM Software: Salesforce, Zoho
+Negotiation and Relationship Building
+"""
+
+job_10 = """
+CV 10: Not Relevant
+Name: Jessica Miller
+Contact Information:
+
+Email: jessica.miller@example.com
+Phone: (555) 567-8901
+Summary:
+
+Experienced Sales Manager with a strong track record in driving sales growth and building high-performing teams. Excellent communication and leadership skills.
+
+Education:
+
+B.A. in Business Administration, University of Southern California (2010)
+Experience:
+
+Sales Manager, Global Enterprises (2015 – Present)
+Managed a sales team of 15 members, achieving a 20% increase in annual revenue.
+Developed sales strategies that expanded customer base by 25%.
+Sales Representative, Market Leaders Inc. (2010 – 2015)
+Consistently exceeded sales targets and received the 'Top Salesperson' award in 2013.
+Skills:
+
+Sales Strategy and Planning
+Team Leadership and Development
+CRM Software: Salesforce, Zoho
+Negotiation and Relationship Building
+"""
+
 
 async def main(enable_steps):
     # Step 1: Reset data and system state
@@ -172,10 +317,9 @@ async def main(enable_steps):
 
     # Step 2: Add text
     if enable_steps.get("add_text"):
-        text_list = [job_1, job_2, job_3, job_4, job_5]
-        for text in text_list:
-            await cognee.add(text)
-            print(f"Added text: {text[:35]}...")
+        # jobs = [job_1, job_2, job_3, job_4, job_5, job_6, job_7, job_8, job_9, job_10]
+        # for text in jobs:
+        await cognee.add([job_1, job_2, job_3, job_4, job_5, job_6, job_7, job_8, job_9, job_10])
 
     # Step 3: Create knowledge graph
     if enable_steps.get("cognify"):

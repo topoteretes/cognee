@@ -1,15 +1,10 @@
-import asyncio
-
 from cognee.shared.logging_utils import get_logger
 
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine, VECTOR_INDEX_LOCK
 from cognee.infrastructure.engine import DataPoint
 
 logger = get_logger("index_data_points")
-
-# A single lock shared by all coroutines
-vector_index_lock = asyncio.Lock()
 
 
 async def index_data_points(data_points: list[DataPoint]):
@@ -27,11 +22,15 @@ async def index_data_points(data_points: list[DataPoint]):
 
             index_name = f"{data_point_type.__name__}_{field_name}"
 
-            # Add async lock to make sure two different coroutines won't create a table at the same time
-            async with vector_index_lock:
-                if index_name not in created_indexes:
-                    await vector_engine.create_vector_index(data_point_type.__name__, field_name)
-                    created_indexes[index_name] = True
+            # We need two IFs for the vector index lock
+            if index_name not in created_indexes:
+                # Add async lock to make sure two different coroutines won't create a table at the same time
+                async with VECTOR_INDEX_LOCK:
+                    if index_name not in created_indexes:
+                        await vector_engine.create_vector_index(
+                            data_point_type.__name__, field_name
+                        )
+                        created_indexes[index_name] = True
 
             if index_name not in index_points:
                 index_points[index_name] = []

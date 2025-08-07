@@ -11,6 +11,7 @@ from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.modules.storage.utils import copy_model, get_own_properties
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector import VECTOR_INDEX_LOCK
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
@@ -107,32 +108,33 @@ class LanceDBAdapter(VectorDBInterface):
         return collection_name in collection_names
 
     async def create_collection(self, collection_name: str, payload_schema: BaseModel):
-        vector_size = self.embedding_engine.get_vector_size()
+        async with VECTOR_INDEX_LOCK:
+            vector_size = self.embedding_engine.get_vector_size()
 
-        payload_schema = self.get_data_point_schema(payload_schema)
-        data_point_types = get_type_hints(payload_schema)
+            payload_schema = self.get_data_point_schema(payload_schema)
+            data_point_types = get_type_hints(payload_schema)
 
-        class LanceDataPoint(LanceModel):
-            """
-            Represents a data point in the Lance model with an ID, vector, and associated payload.
+            class LanceDataPoint(LanceModel):
+                """
+                Represents a data point in the Lance model with an ID, vector, and associated payload.
 
-            The class inherits from LanceModel and defines the following public attributes:
-            - id: A unique identifier for the data point.
-            - vector: A vector representing the data point in a specified dimensional space.
-            - payload: Additional data or metadata associated with the data point.
-            """
+                The class inherits from LanceModel and defines the following public attributes:
+                - id: A unique identifier for the data point.
+                - vector: A vector representing the data point in a specified dimensional space.
+                - payload: Additional data or metadata associated with the data point.
+                """
 
-            id: data_point_types["id"]
-            vector: Vector(vector_size)
-            payload: payload_schema
+                id: data_point_types["id"]
+                vector: Vector(vector_size)
+                payload: payload_schema
 
-        if not await self.has_collection(collection_name):
-            connection = await self.get_connection()
-            return await connection.create_table(
-                name=collection_name,
-                schema=LanceDataPoint,
-                exist_ok=True,
-            )
+            if not await self.has_collection(collection_name):
+                connection = await self.get_connection()
+                return await connection.create_table(
+                    name=collection_name,
+                    schema=LanceDataPoint,
+                    exist_ok=True,
+                )
 
     async def get_collection(self, collection_name: str):
         if not await self.has_collection(collection_name):
@@ -290,16 +292,17 @@ class LanceDBAdapter(VectorDBInterface):
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
-        await self.create_data_points(
-            f"{index_name}_{index_property_name}",
-            [
-                IndexSchema(
-                    id=str(data_point.id),
-                    text=getattr(data_point, data_point.metadata["index_fields"][0]),
-                )
-                for data_point in data_points
-            ],
-        )
+        async with VECTOR_INDEX_LOCK:
+            await self.create_data_points(
+                f"{index_name}_{index_property_name}",
+                [
+                    IndexSchema(
+                        id=str(data_point.id),
+                        text=getattr(data_point, data_point.metadata["index_fields"][0]),
+                    )
+                    for data_point in data_points
+                ],
+            )
 
     async def prune(self):
         connection = await self.get_connection()
