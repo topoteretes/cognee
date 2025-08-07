@@ -1,11 +1,13 @@
 import os
 from urllib.parse import urlparse
+from pathlib import Path
 from typing import List, Union, BinaryIO
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
 
 
 async def resolve_data_directories(
-    data: Union[BinaryIO, List[BinaryIO], str, List[str]], include_subdirectories: bool = True
+    data: Union[BinaryIO, List[BinaryIO], str, List[str], Path, List[Path]],
+    include_subdirectories: bool = True,
 ):
     """
     Resolves directories by replacing them with their contained files.
@@ -33,7 +35,26 @@ async def resolve_data_directories(
         )
 
     for item in data:
-        if isinstance(item, str):  # Check if the item is a path
+        if isinstance(item, Path):  # Path objects explicitly indicate file paths
+            # Convert Path to string for processing
+            item_str = str(item)
+            if item.is_dir():  # If it's a directory
+                if include_subdirectories:
+                    # Recursively add all files in the directory and subdirectories
+                    for root, _, files in os.walk(item_str):
+                        resolved_data.extend([Path(os.path.join(root, f)) for f in files])
+                else:
+                    # Add all files (not subdirectories) in the directory
+                    resolved_data.extend(
+                        [
+                            Path(os.path.join(item_str, f))
+                            for f in os.listdir(item_str)
+                            if os.path.isfile(os.path.join(item_str, f))
+                        ]
+                    )
+            else:  # If it's a file, add it directly
+                resolved_data.append(item)
+        elif isinstance(item, str):  # Check if the item is a path or text content
             # S3
             if urlparse(item).scheme == "s3":
                 if fs is not None:

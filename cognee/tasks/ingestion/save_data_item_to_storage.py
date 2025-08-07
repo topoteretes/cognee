@@ -1,5 +1,6 @@
 import os
 from urllib.parse import urlparse
+from pathlib import Path
 from typing import Union, BinaryIO, Any
 
 from cognee.modules.ingestion.exceptions import IngestionError
@@ -16,7 +17,7 @@ class SaveDataSettings(BaseSettings):
 settings = SaveDataSettings()
 
 
-async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str:
+async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Path, Any]) -> str:
     if "llama_index" in str(type(data_item)):
         # Dynamic import is used because the llama_index module is optional.
         from .transform_data import get_data_from_llama_index
@@ -26,6 +27,18 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
     # data is a file object coming from upload.
     if hasattr(data_item, "file"):
         return await save_data_to_file(data_item.file, filename=data_item.filename)
+
+    # data is a Path object - explicitly indicates a file path
+    if isinstance(data_item, Path):
+        if settings.accept_local_file_path:
+            # Convert Path to file URL for consistency
+            normalized_path = str(data_item.resolve())
+            # Use forward slashes in file URLs for consistency
+            url_path = normalized_path.replace(os.sep, "/")
+            file_path = "file://" + url_path
+            return file_path
+        else:
+            raise IngestionError(message="Local files are not accepted.")
 
     if isinstance(data_item, str):
         parsed_url = urlparse(data_item)

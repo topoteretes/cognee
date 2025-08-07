@@ -75,6 +75,25 @@ async def cognee_pipeline(
             test_embedding_connection,
         )
 
+        # Ensure NLTK data is downloaded on first run
+        def ensure_nltk_data():
+            """Download required NLTK data if not already present."""
+            try:
+                import nltk
+
+                # Download essential NLTK data used by the system
+                nltk.download("punkt_tab", quiet=True)
+                nltk.download("punkt", quiet=True)
+                nltk.download("averaged_perceptron_tagger", quiet=True)
+                nltk.download("averaged_perceptron_tagger_eng", quiet=True)
+                nltk.download("maxent_ne_chunker", quiet=True)
+                nltk.download("words", quiet=True)
+                logger.info("NLTK data initialized successfully")
+            except Exception as e:
+                logger.warning(f"Failed to initialize NLTK data: {e}")
+
+        ensure_nltk_data()
+
         # Test LLM and Embedding configuration once before running Cognee
         await test_llm_connection()
         await test_embedding_connection()
