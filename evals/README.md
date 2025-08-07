@@ -49,6 +49,25 @@ Raw results stored in Modal volumes under `/qa-benchmarks/<benchmark>/{answers,e
 - **Significant variance** observed in metrics across small runs due to LLM-as-judge inconsistencies
 - **Cognee showed consistent improvements** across all measured dimensions compared to Mem0, Lightrag, and Graphiti
 
+### Visualization Results
+
+The following charts visualize the benchmark results and performance comparisons:
+
+#### Comprehensive Metrics Comparison
+![Comprehensive Metrics Comparison](comprehensive_metrics_comparison.png)
+
+A comprehensive comparison of all evaluated systems across multiple metrics, showing Cognee's performance relative to Mem0, Graphiti, and LightRAG.
+
+#### Detailed Metrics Comparison
+![Metrics Comparison](metrics_comparison.png)
+
+Detailed breakdown of performance metrics across different evaluation dimensions, providing granular insights into system capabilities.
+
+#### Optimized Cognee Configurations
+![Optimized Cognee Configurations](optimized_cognee_configurations.png)
+
+Performance analysis of different Cognee retriever configurations (GRAPH_COMPLETION, GRAPH_COMPLETION_COT, GRAPH_COMPLETION_CONTEXT_EXTENSION), showing optimization results.
+
 ## Notes
 
 - **Traditional QA metrics (EM/F1)** miss core value of AI memory systems - measure letter/word differences rather than information content
