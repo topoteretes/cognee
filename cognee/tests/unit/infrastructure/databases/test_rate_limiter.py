@@ -1,14 +1,15 @@
 """Tests for the LLM rate limiter."""
 
 import pytest
-import asyncio
-import time
 from unittest.mock import patch
-from cognee.infrastructure.llm.rate_limiter import (
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
     llm_rate_limiter,
     rate_limit_async,
     rate_limit_sync,
 )
+
+LLM_RATE_LIMITER = "cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter.llm_rate_limiter"
+GET_LLM_CONFIG = "cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter.get_llm_config"
 
 
 @pytest.fixture(autouse=True)
@@ -20,7 +21,7 @@ def reset_limiter_singleton():
 
 def test_rate_limiter_initialization():
     """Test that the rate limiter can be initialized properly."""
-    with patch("cognee.infrastructure.llm.rate_limiter.get_llm_config") as mock_config:
+    with patch(GET_LLM_CONFIG) as mock_config:
         mock_config.return_value.llm_rate_limit_enabled = True
         mock_config.return_value.llm_rate_limit_requests = 10
         mock_config.return_value.llm_rate_limit_interval = 60  # 1 minute
@@ -34,7 +35,7 @@ def test_rate_limiter_initialization():
 
 def test_rate_limiter_disabled():
     """Test that the rate limiter is disabled by default."""
-    with patch("cognee.infrastructure.llm.rate_limiter.get_llm_config") as mock_config:
+    with patch(GET_LLM_CONFIG) as mock_config:
         mock_config.return_value.llm_rate_limit_enabled = False
 
         limiter = llm_rate_limiter()
@@ -45,7 +46,7 @@ def test_rate_limiter_disabled():
 
 def test_rate_limiter_singleton():
     """Test that the rate limiter is a singleton."""
-    with patch("cognee.infrastructure.llm.rate_limiter.get_llm_config") as mock_config:
+    with patch(GET_LLM_CONFIG) as mock_config:
         mock_config.return_value.llm_rate_limit_enabled = True
         mock_config.return_value.llm_rate_limit_requests = 5
         mock_config.return_value.llm_rate_limit_interval = 60
@@ -58,7 +59,7 @@ def test_rate_limiter_singleton():
 
 def test_sync_decorator():
     """Test the sync decorator."""
-    with patch("cognee.infrastructure.llm.rate_limiter.llm_rate_limiter") as mock_limiter_class:
+    with patch(LLM_RATE_LIMITER) as mock_limiter_class:
         mock_limiter = mock_limiter_class.return_value
         mock_limiter.wait_if_needed.return_value = 0
 
@@ -75,7 +76,7 @@ def test_sync_decorator():
 @pytest.mark.asyncio
 async def test_async_decorator():
     """Test the async decorator."""
-    with patch("cognee.infrastructure.llm.rate_limiter.llm_rate_limiter") as mock_limiter_class:
+    with patch(LLM_RATE_LIMITER) as mock_limiter_class:
         mock_limiter = mock_limiter_class.return_value
 
         # Mock an async method with a coroutine
@@ -96,7 +97,7 @@ async def test_async_decorator():
 
 def test_rate_limiting_actual():
     """Test actual rate limiting behavior with a small window."""
-    with patch("cognee.infrastructure.llm.rate_limiter.get_llm_config") as mock_config:
+    with patch(GET_LLM_CONFIG) as mock_config:
         # Configure for 3 requests per minute
         mock_config.return_value.llm_rate_limit_enabled = True
         mock_config.return_value.llm_rate_limit_requests = 3
@@ -117,7 +118,7 @@ def test_rate_limiting_actual():
 
 def test_rate_limit_60_per_minute():
     """Test rate limiting with the default 60 requests per minute limit."""
-    with patch("cognee.infrastructure.llm.rate_limiter.get_llm_config") as mock_config:
+    with patch(GET_LLM_CONFIG) as mock_config:
         # Configure for default values: 60 requests per 60 seconds
         mock_config.return_value.llm_rate_limit_enabled = True
         mock_config.return_value.llm_rate_limit_requests = 60  # 60 requests
