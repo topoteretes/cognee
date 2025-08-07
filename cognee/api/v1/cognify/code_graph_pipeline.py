@@ -28,7 +28,7 @@ logger = get_logger("code_graph_pipeline")
 
 
 @observe
-async def run_code_graph_pipeline(repo_path, include_docs=False):
+async def run_code_graph_pipeline(repo_path, include_docs=False, excluded_paths=None):
     import cognee
     from cognee.low_level import setup
 
@@ -39,9 +39,21 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
     cognee_config = get_cognify_config()
     user = await get_default_user()
     detailed_extraction = True
+     # Default exclusion patterns
+    if excluded_paths is None:
+        excluded_paths = [
+            ".venv/", "venv/", "__pycache__/", ".pytest_cache/",
+            "build/", "dist/", "node_modules/", ".npm/", ".git/",
+            ".svn/", ".idea/", ".vscode/", "tmp/", "temp/",
+            "*.pyc", "*.pyo", "*.log", "*.tmp"
+        ]
 
     tasks = [
-        Task(get_repo_file_dependencies, detailed_extraction=detailed_extraction),
+        Task(
+            get_repo_file_dependencies,
+            detailed_extraction=detailed_extraction,
+            excluded_paths=excluded_paths
+        ),
         # Task(summarize_code, task_config={"batch_size": 500}), # This task takes a long time to complete
         Task(add_data_points, task_config={"batch_size": 30}),
     ]
