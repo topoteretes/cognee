@@ -79,7 +79,12 @@ def _plot_grouped_bar(
     ax.set_title(title, fontsize=16, fontweight="bold", pad=15)
     ax.set_ylabel("Score")
     ax.set_xticks(ind)
-    ax.set_xticklabels(systems, rotation=15 if rotate_xticks else 0, ha="right")
+    ha = "right" if rotate_xticks else "center"
+    ax.set_xticklabels(
+        systems,
+        rotation=15 if rotate_xticks else 0,
+        ha=ha,
+    )
 
     for i, (metric, colour) in enumerate(METRIC_KEYS.items()):
         offset = ind + (i - (n_metrics - 1) / 2) * width
@@ -132,6 +137,9 @@ def main() -> None:
 
     # Cognee vs. competition
     comp_records = _load(comp_file)
+    for record in comp_records:
+        if record.get("system") == "Graphiti":
+            record["system"] = "Graphiti (Previous Results)"
     systems, means, err_m, err_p = _extract_matrix(comp_records)
     _plot_grouped_bar(
         systems,
