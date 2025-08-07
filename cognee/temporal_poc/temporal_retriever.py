@@ -4,7 +4,7 @@ import string
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.engine import DataPoint
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
@@ -12,7 +12,7 @@ from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
 from cognee.shared.logging_utils import get_logger
 from cognee.temporal_poc.models.models import QueryInterval
-from cognee.temporal_poc.temporal_cognify import date_to_int
+from cognee.temporal_poc.event_extraction import date_to_int
 
 logger = get_logger("TemporalRetriever")
 
@@ -98,8 +98,6 @@ class TemporalRetriever(BaseRetriever):
         return found_triplets
 
     async def extract_time_from_query(self, query: str):
-        llm_client = get_llm_client()
-
         system_prompt = """
                 For the purposes of identifying timestamps in a query, you are tasked with extracting relevant timestamps from the query.
                 ## Timestamp requirements
@@ -117,7 +115,7 @@ class TemporalRetriever(BaseRetriever):
                 ```
         """
 
-        interval = await llm_client.acreate_structured_output(query, system_prompt, QueryInterval)
+        interval = await LLMGateway.acreate_structured_output(query, system_prompt, QueryInterval)
 
         return interval
 
