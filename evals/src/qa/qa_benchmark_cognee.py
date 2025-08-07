@@ -27,7 +27,7 @@ class CogneeConfig(QABenchmarkConfig):
 
     # Eval framework parameters
     benchmark: str = "HotPotQA"
-    qa_engine: str = "cognee_completion"
+    qa_engine: str = "cognee_graph_completion"
     task_getter_type: str = "Default"
     chunk_size: int = 1024
     top_k: int = 5
@@ -167,7 +167,7 @@ if __name__ == "__main__":
     config = CogneeConfig(
         corpus_limit=5,  # Small test
         qa_limit=3,
-        qa_engine="cognee_completion",
+        qa_engine="cognee_graph_completion",
         task_getter_type="Default",
         print_results=True,
         clean_start=True,

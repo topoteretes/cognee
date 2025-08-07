@@ -45,7 +45,7 @@ def run_cognee_benchmark(config_params: dict, dir_suffix: str):
     print("Received benchmark request for Cognee.")
 
     # Create benchmark folder structure
-    qa_engine = config_params.get("qa_engine", "cognee_completion")
+    qa_engine = config_params.get("qa_engine", "cognee_graph_completion")
     answers_folder = _create_benchmark_folder(VOLUME_NAME, BENCHMARK_NAME, dir_suffix, qa_engine)
     print(f"Created benchmark folder: {answers_folder}")
 
@@ -64,13 +64,13 @@ def run_cognee_benchmark(config_params: dict, dir_suffix: str):
     volume.commit()
 
 
-# qa_engine: str = 'cognee_completion', 'cognee_graph_completion', 'cognee_graph_completion_cot', 'cognee_graph_completion_context_extension'
+# qa_engine: str = 'cognee_graph_completion', 'cognee_graph_completion_cot', 'cognee_graph_completion_context_extension'
 @app.local_entrypoint()
 async def main(
     runs: int = 45,
     corpus_limit: int = None,
     qa_limit: int = None,
-    qa_engine: str = "cognee_completion",  # 'cognee_graph_completion', 'cognee_graph_completion_cot', 'cognee_graph_completion_context_extension'
+    qa_engine: str = "cognee_graph_completion",  # 'cognee_graph_completion_cot', 'cognee_graph_completion_context_extension'
     top_k: int = 15,
     system_prompt_path: str = "answer_simple_question_benchmark2.txt",
     clean_start: bool = True,

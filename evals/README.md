@@ -1,93 +1,56 @@
-# Accuracy Analysis for AI Memory Systems
+# QA Evaluation
 
-This repository contains a comparative analysis of three different question-answering systems: Mem0, Graphiti, and Falkor's GraphRAG-SDK. The analysis is performed using a subset of the HotpotQA dataset.
+Repeated runs of QA evaluation on 24-item HotpotQA subset, comparing Mem0, Graphiti, LightRAG, and Cognee (multiple retriever configs). Uses Modal for distributed benchmark execution.
 
 ## Dataset
 
-The analysis uses two key data files:
-- `hotpot_50_corpus.json`: Contains 50 randomly selected instances from HotpotQA
-- `hotpot_50_qa_pairs.json`: Contains corresponding question-answer pairs
+- `hotpot_qa_24_corpus.json` and `hotpot_qa_24_qa_pairs.json`
+- `hotpot_qa_24_instance_filter.json` for instance filtering
 
-### Generating the Dataset
+## Systems Evaluated
 
-You can generate these files using the Cognee framework:
+- **Mem0**: OpenAI-based memory QA system
+- **Graphiti**: LangChain + Neo4j knowledge graph QA
+- **LightRAG**: Falkor's GraphRAG-SDK
+- **Cognee**: Multiple retriever configurations (GRAPH_COMPLETION, GRAPH_COMPLETION_COT, GRAPH_COMPLETION_CONTEXT_EXTENSION)
 
-```python
-import json
-from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
+## Project Structure
 
-adapter = HotpotQAAdapter()
-corpus_list, question_answer_pairs = adapter.load_corpus(limit=50)
+- `src/` - Analysis scripts and QA implementations
+- `src/modal_apps/` - Modal deployment configurations
+- `src/qa/` - QA benchmark classes
+- `src/helpers/` and `src/analysis/` - Utilities
 
-with open('hotpot_50_corpus.json', 'w') as outfile:
-    json.dump(corpus_list, outfile)
-with open('hotpot_50_qa_pairs.json', 'w') as outfile:
-    json.dump(question_answer_pairs, outfile)
-```
-
-## Systems Analyzed
-
-### 1. Mem0
-
-A memory-based QA system that uses OpenAI API for answering questions with context management.
-
-#### Setup and Running
-1. Clone the repository: `git clone https://github.com/mem0ai/mem0`
-2. Create `.env` file with your `OPENAI_API_KEY`
-3. Copy the dataset JSON files to the repo root
-4. Run the analysis script: `python hotpot_qa_mem0.py`
-
-Results are available in:
-- `metrics_output_mem0.json`
-- `metrics_output_mem0_direct_llm.json`
-- `aggregate_metrics_mem0.json`
-- `aggregate_metrics_mem0_direct_llm.json`
-
-### 2. Graphiti
-
-A knowledge graph-based QA system using LangChain and Neo4j.
-
-#### Setup and Running
-1. Clone the repository: `git clone https://github.com/getzep/graphiti.git`
-2. Ensure Neo4j is running
-3. Create `.env` file with:
-   - `OPENAI_API_KEY`
-   - `NEO4J_URI`
-   - `NEO4J_USER`
-   - `NEO4J_PASSWORD`
-4. Copy the dataset JSON files to the repo root
-5. Run the analysis script: `python hotpot_qa_graphiti.py`
-
-Results are available in:
-- `metrics_output_graphiti.json`
-- `metrics_output_graphiti_direct_llm.json`
-- `aggregate_metrics_graphiti.json`
-- `aggregate_metrics_graphiti_direct_llm.json`
+**Notes:**
+- Use `PyProject.toml` for dependencies
+- Ensure Modal CLI is configured
+- Modular QA benchmark classes enable parallel execution on other platforms beyond Modal
 
 
+## Running Benchmarks (Modal)
 
-#### Human Evaluation
+Execute repeated runs via Modal apps:
+- `modal run modal_apps/modal_qa_benchmark_<system>.py`
 
-In order to ensure the highest possible accuracy of our results, we conducted a thorough human evaluation of the dataset. We had human evaluators compare responses against golden answers, and we manually reviewed each failed question to validate the results. 
+Where `<system>` is one of: `mem0`, `graphiti`, `lightrag`, `cognee`
 
-Since we focused on validating false negatives rather than checking for false positives, the scores might be slightly higher than a comprehensive evaluation. However, we believe this difference is relatively small and doesn't significantly impact the comparative analysis.
+Raw results stored in Modal volumes under `/qa-benchmarks/<benchmark>/{answers,evaluated}`
 
-<img src="metrics_comparison.png" width="600" alt="Competitor Comparison">
+## Results Analysis
 
-#### Adding Dreamify
-
-When we enhanced Cognee with Dreamify optimization, we saw significant improvements across all evaluation metrics, particularly in DeepEval F1 and EM scores.
-
-<img src="cognee_comparison.png" width="600" alt="Cognee with Dreamify Comparison">
-
-#### Problems with the Approach
-
-- LLM as a judge metrics are not reliable measure and can indicate the overall accuracy
-- F1 scores measure character matching and are too granular for use in semantic memory evaluation
-- Human as a judge is labor intensive and does not scale
-- Hotpot is not the hardest metric out there
-
+- `python run_cross_benchmark_analysis.py`
+- Downloads Modal volumes, processes evaluated JSONs
+- Generates per-benchmark CSVs and cross-benchmark summary
+- Use `visualize_benchmarks.py` to create comparison charts
 
 ## Results
 
-The results for each system are stored in separate JSON files, containing both detailed metrics and aggregate performance measures. These can be found in the respective metrics output files for each system.
+- **45 evaluation cycles** on 24 HotPotQA questions with multiple metrics (EM, F1, DeepEval Correctness, Human-like Correctness)
+- **Significant variance** observed in metrics across small runs due to LLM-as-judge inconsistencies
+- **Cognee showed consistent improvements** across all measured dimensions compared to Mem0, Lightrag, and Graphiti
+
+## Notes
+
+- **Traditional QA metrics (EM/F1)** miss core value of AI memory systems - measure letter/word differences rather than information content
+- **HotPotQA benchmark mismatch** - designed for multi-hop reasoning but operates in constrained contexts vs. real-world cross-context linking
+- **DeepEval variance** - LLM-as-judge evaluation carries inconsistencies of underlying language model
