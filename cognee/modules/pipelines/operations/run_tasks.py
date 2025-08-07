@@ -2,7 +2,7 @@ import os
 
 import asyncio
 from uuid import UUID
-from typing import Any
+from typing import Any, List
 from functools import wraps
 from sqlalchemy import select
 
@@ -60,9 +60,9 @@ def override_run_tasks(new_gen):
 
 @override_run_tasks(run_tasks_distributed)
 async def run_tasks(
-    tasks: list[Task],
+    tasks: List[Task],
     dataset_id: UUID,
-    data: Any = None,
+    data: List[Any] = None,
     user: User = None,
     pipeline_name: str = "unknown_pipeline",
     context: dict = None,

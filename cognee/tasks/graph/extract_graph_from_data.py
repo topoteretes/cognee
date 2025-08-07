@@ -3,15 +3,15 @@ from typing import Type, List
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.data.extraction.knowledge_graph import extract_content_graph
 from cognee.modules.graph.utils import (
     expand_with_nodes_and_edges,
     retrieve_existing_edges,
 )
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.tasks.storage.add_data_points import add_data_points
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 
 async def integrate_chunk_graphs(
@@ -40,6 +40,7 @@ async def integrate_chunk_graphs(
 
     if len(graph_nodes) > 0:
         await add_data_points(graph_nodes)
+
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
 
@@ -55,7 +56,7 @@ async def extract_graph_from_data(
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
     chunk_graphs = await asyncio.gather(
-        *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
+        *[LLMGateway.extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )
 
     # Note: Filter edges with missing source or target nodes

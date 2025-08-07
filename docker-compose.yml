@@ -1,34 +1,3 @@
-# Cognee Docker Compose Configuration
-#
-# This docker-compose file includes the main Cognee API server and optional services:
-#
-# BASIC USAGE:
-# Start main Cognee API server:
-#   docker-compose up cognee
-#
-# MCP SERVER USAGE:
-# The MCP (Model Context Protocol) server enables IDE integration with tools like Cursor, Claude Desktop, etc.
-# 
-# Start with MCP server (stdio transport - recommended):
-#   docker-compose --profile mcp up
-#
-# Start with MCP server (SSE transport for HTTP access):
-#   TRANSPORT_MODE=sse docker-compose --profile mcp up
-#
-# PORT CONFIGURATION:
-# - Main Cognee API: http://localhost:8000
-# - MCP Server (SSE mode): http://localhost:8001 
-# - Frontend (UI): http://localhost:3000 (with --profile ui)
-
-#
-# DEBUGGING:
-# Enable debug mode by setting DEBUG=true in your .env file or:
-#   DEBUG=true docker-compose --profile mcp up
-#
-# This exposes debugger ports:
-# - Main API debugger: localhost:5678
-# - MCP Server debugger: localhost:5679
-
 services:
   cognee:
     container_name: cognee
@@ -69,15 +38,13 @@ services:
       dockerfile: cognee-mcp/Dockerfile
     volumes:
       - .env:/app/.env
-      # Optional: Mount local data for ingestion
-      - ./examples/data:/app/data:ro
     environment:
       - DEBUG=false # Change to true if debugging
       - ENVIRONMENT=local
       - LOG_LEVEL=INFO
-      - TRANSPORT_MODE=stdio # Use 'sse' for Server-Sent Events over HTTP
+      - TRANSPORT_MODE=sse
       # Database configuration - should match the main cognee service
-      - DB_TYPE=${DB_TYPE:-sqlite}
+      - DB_PROVIDER=${DB_PROVIDER:-sqlite}
       - DB_HOST=${DB_HOST:-host.docker.internal}
       - DB_PORT=${DB_PORT:-5432}
       - DB_NAME=${DB_NAME:-cognee_db}
@@ -89,11 +56,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      # Only expose ports when using SSE transport
-      - "8001:8000" # MCP SSE port (mapped to avoid conflict with main API)
-      - "5679:5678" # MCP debugger port (different from main service)
-    depends_on:
-      - cognee
+      - "8000:8000" # MCP port
+      - "5678:5678" # MCP debugger port
     deploy:
       resources:
         limits:

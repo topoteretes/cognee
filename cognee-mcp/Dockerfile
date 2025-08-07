@@ -51,7 +51,8 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY --from=uv /root/.local /root/.local
+# Copy the virtual environment from the uv stage
+COPY --from=uv /usr/local /usr/local
 COPY --from=uv /app /app
 
 RUN chmod +x /app/entrypoint.sh
