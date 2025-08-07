@@ -62,7 +62,7 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    async def retrieve(self, collection_name: str, data_point_ids: Union[List[str], list[str]]):
+    async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         """
         Retrieve data points from a collection using their IDs.
 
