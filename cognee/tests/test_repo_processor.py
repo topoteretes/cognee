@@ -43,3 +43,4 @@ def test_get_source_code_files_excludes_common_dirs_and_files():
 
     # Cleanup
     shutil.rmtree(test_repo)
+    
