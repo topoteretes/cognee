@@ -32,3 +32,19 @@ class Event(BaseModel):
 
 class EventList(BaseModel):
     events: List[Event]
+
+
+class EntityAttribute(BaseModel):
+    entity: str
+    entity_type: str
+    relationship: str
+
+
+class EventWithEntities(BaseModel):
+    event_name: str
+    description: Optional[str] = None
+    attributes: List[EntityAttribute] = []
+
+
+class EventEntityList(BaseModel):
+    events: List[EventWithEntities]

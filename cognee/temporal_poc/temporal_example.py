@@ -33,11 +33,13 @@ async def main():
     texts = await reading_temporal_data()
     texts = texts[:5]
 
+    # texts = ["Buzz Aldrin (born January 20, 1930) is an American former astronaut."]
+
     await cognee.add(texts)
     await temporal_cognify()
 
     search_results = await cognee.search(
-        query_type=SearchType.TEMPORAL, query_text="What happened in 2015"
+        query_type=SearchType.TEMPORAL, query_text="What happened in the 1930s?"
     )
 
     print(search_results)
