@@ -11,12 +11,13 @@ from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.modules.storage.utils import copy_model, get_own_properties
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
-from cognee.infrastructure.databases.vector import VECTOR_INDEX_LOCK
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..models.ScoredResult import ScoredResult
 from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
+
+LANCEDB_LOCK = asyncio.Lock()
 
 
 class IndexSchema(DataPoint):
@@ -128,7 +129,7 @@ class LanceDBAdapter(VectorDBInterface):
             payload: payload_schema
 
         if not await self.has_collection(collection_name):
-            async with VECTOR_INDEX_LOCK:
+            async with LANCEDB_LOCK:
                 if not await self.has_collection(collection_name):
                     connection = await self.get_connection()
                     return await connection.create_table(
@@ -148,7 +149,7 @@ class LanceDBAdapter(VectorDBInterface):
         payload_schema = type(data_points[0])
 
         if not await self.has_collection(collection_name):
-            async with VECTOR_INDEX_LOCK:
+            async with LANCEDB_LOCK:
                 if not await self.has_collection(collection_name):
                     await self.create_collection(
                         collection_name,
@@ -193,7 +194,7 @@ class LanceDBAdapter(VectorDBInterface):
             for (data_point_index, data_point) in enumerate(data_points)
         ]
 
-        async with VECTOR_INDEX_LOCK:
+        async with LANCEDB_LOCK:
             await (
                 collection.merge_insert("id")
                 .when_matched_update_all()

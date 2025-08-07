@@ -1,4 +1,4 @@
 import asyncio
 
 # A single lock shared by all coroutines
-VECTOR_INDEX_LOCK = asyncio.Lock()
+VECTOR_DB_LOCK = asyncio.Lock()

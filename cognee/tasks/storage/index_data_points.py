@@ -1,7 +1,7 @@
 from cognee.shared.logging_utils import get_logger
 
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
-from cognee.infrastructure.databases.vector import get_vector_engine, VECTOR_INDEX_LOCK
+from cognee.infrastructure.databases.vector import get_vector_engine, VECTOR_DB_LOCK
 from cognee.infrastructure.engine import DataPoint
 
 logger = get_logger("index_data_points")
@@ -25,7 +25,7 @@ async def index_data_points(data_points: list[DataPoint]):
             # We need two IFs for the vector index lock
             if index_name not in created_indexes:
                 # Add async lock to make sure two different coroutines won't create a table at the same time
-                async with VECTOR_INDEX_LOCK:
+                async with VECTOR_DB_LOCK:
                     if index_name not in created_indexes:
                         await vector_engine.create_vector_index(
                             data_point_type.__name__, field_name
