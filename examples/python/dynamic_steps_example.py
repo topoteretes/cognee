@@ -172,9 +172,10 @@ async def main(enable_steps):
 
     # Step 2: Add text
     if enable_steps.get("add_text"):
-        jobs = [job_1, job_2, job_3, job_4, job_5]
-        for text in jobs:
+        text_list = [job_1, job_2, job_3, job_4, job_5]
+        for text in text_list:
             await cognee.add(text)
+            print(f"Added text: {text[:35]}...")
 
     # Step 3: Create knowledge graph
     if enable_steps.get("cognify"):
