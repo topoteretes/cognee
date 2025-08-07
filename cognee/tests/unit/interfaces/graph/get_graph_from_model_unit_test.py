@@ -1,5 +1,5 @@
 import pytest
-from typing import List
+from typing import List, Any
 from cognee.infrastructure.engine import DataPoint, Edge
 
 from cognee.modules.graph.utils import get_graph_from_model
@@ -30,7 +30,7 @@ class Entity(DataPoint):
 
 class Company(DataPoint):
     name: str
-    employees: List["Employee"] = None
+    employees: List[Any] = None  # Allow flexible edge system with tuples
     metadata: dict = {"index_fields": ["name"]}
 
 
@@ -63,7 +63,7 @@ async def test_get_graph_from_model_simple_structure():
     assert len(nodes) == 2, f"Expected 2 nodes, got {len(nodes)}"
     assert len(edges) == 1, f"Expected 1 edges, got {len(edges)}"
 
-    edge_key = str(entity.id) + str(entitytype.id) + "is_type"
+    edge_key = f"{str(entity.id)}_{str(entitytype.id)}_is_type"
     assert edge_key in added_edges, f"Edge {edge_key} not found"
 
 
@@ -205,5 +205,5 @@ async def test_get_graph_from_model_flexible_edges():
 
     # Verify all employees are connected
     employee_ids = {str(emp.id) for emp in [manager, sales1, sales2, admin1, admin2]}
-    edge_target_ids = {edge[1] for edge in edges}
+    edge_target_ids = {str(edge[1]) for edge in edges}
     assert employee_ids.issubset(edge_target_ids), "Not all employees are connected"
