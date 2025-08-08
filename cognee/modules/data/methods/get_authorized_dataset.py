@@ -1,11 +1,10 @@
 from typing import Optional
 from uuid import UUID
-from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from ..models import Dataset
 
 
-async def get_dataset_with_permissions(
+async def get_authorized_dataset(
     user_id: UUID, dataset_id: UUID, permission_type="read"
 ) -> Optional[Dataset]:
     """
@@ -19,11 +18,6 @@ async def get_dataset_with_permissions(
     Returns:
         Optional[Dataset]: dataset with permissions
     """
-    try:
-        datasets = await get_specific_user_permission_datasets(
-            user_id, permission_type, [dataset_id]
-        )
-    except PermissionDeniedError:
-        return None
+    datasets = await get_specific_user_permission_datasets(user_id, permission_type, [dataset_id])
 
-    return datasets[0]
+    return datasets[0] if datasets else None

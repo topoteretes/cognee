@@ -2,11 +2,11 @@ from uuid import UUID
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.modules.data.exceptions.exceptions import DatasetNotFoundError
-from cognee.modules.data.methods import get_dataset_with_permissions
+from cognee.modules.data.methods import get_authorized_dataset
 
 
 async def get_formatted_graph_data(dataset_id: UUID, user_id: UUID):
-    dataset = await get_dataset_with_permissions(user_id, dataset_id)
+    dataset = await get_authorized_dataset(user_id, dataset_id)
     if not dataset:
         raise DatasetNotFoundError(message="Dataset not found.")
 

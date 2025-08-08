@@ -8,9 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 import cognee
 from cognee.api.client import app
-from cognee.modules.data.methods import get_datasets_by_name
-from cognee.modules.users.methods import create_user, get_default_user, get_user_by_email
-from cognee.modules.users.models import User
+from cognee.modules.users.methods import create_user, get_default_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
 
 # Use pytest-asyncio to handle all async tests
@@ -123,10 +121,13 @@ async def test_granting_permission_enables_access(client: AsyncClient, setup_env
         f"/api/v1/datasets/{dataset_id}/graph",
         headers=await get_authentication_headers(client, test_user_email, test_user_password),
     )
-    assert response.status_code == 404, (
+    assert response.status_code == 403, (
         "Access to graph visualization should be denied without READ permission."
     )
-    assert response.json()["detail"] == "Dataset not found. [DatasetNotFoundError]"
+    assert (
+        response.json()["detail"]
+        == "Request owner does not have necessary permission: [read] for all datasets requested. [PermissionDeniedError]"
+    )
     print("✅ Access to graph visualization should be denied without READ permission.")
 
     # Grant permission to the test user
