@@ -1,0 +1,552 @@
+[
+    {
+        "question": "In what year was the university where Sergei Aleksandrovich Tokarev was a professor founded?",
+        "answer": "1755",
+        "golden_answer": "1755",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer '1755' matches the golden answer exactly, indicating it is correct and provides the required information regarding the year the university was founded."
+            }
+        }
+    },
+    {
+        "question": "Black Book starred the actress and writer of what heritage?",
+        "answer": "Jewish",
+        "golden_answer": "dutch",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer 'Jewish' is incorrect as it does not match the golden answer 'dutch'. The two heritages are distinct, and therefore the provided answer fails to accurately address the question."
+            }
+        }
+    },
+    {
+        "question": "Which actor does American Beauty and American Beauty have in common?",
+        "answer": "Kevin Spacey",
+        "golden_answer": "kevin spacey",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Kevin Spacey' correctly identifies the actor common to both films 'American Beauty' and 'American Beauty'. Even though the 'Golden Answer' has a slightly different casing, the core information is accurate and complete, warranting a perfect score."
+            }
+        }
+    },
+    {
+        "question": "Ken Pruitt  was a Republican member of an upper house of the legislature with how many members ?",
+        "answer": "28 members",
+        "golden_answer": "40 members",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer states that there are 28 members, while the golden answer indicates there are 40 members. Since the provided answer is incorrect and does not accurately reflect the actual number of members in the upper house of the legislature, it receives a score of 0."
+            }
+        }
+    },
+    {
+        "question": "Between Greyia and Calibanus, which genus contains more species?",
+        "answer": "Greyia",
+        "golden_answer": "greyia",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Greyia' correctly identifies the genus with more species, matching the meaning of the golden answer 'greyia', despite the difference in capitalization. Therefore, the answer is fully correct."
+            }
+        }
+    },
+    {
+        "question": "Did John Updike and Tom Clancy both publish more than 15 bestselling novels?",
+        "answer": "No.",
+        "golden_answer": "yes",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer 'No' is incorrect as the golden answer is 'yes'. Both John Updike and Tom Clancy are known for their prolific writing and have published more than 15 bestselling novels, making the correct response 'yes'."
+            }
+        }
+    },
+    {
+        "question": "Who was hung for assisting the attempted surrender of a defector from the American Continental Army to the British Army?",
+        "answer": "John André",
+        "golden_answer": "john andré",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'John André' correctly identifies the person who was hung for assisting in the attempted surrender of a defector from the American Continental Army to the British Army. The golden answer 'john andré' is simply a lowercase version of the same name, and both answers refer to the same individual, indicating an accurate understanding of the question."
+            }
+        }
+    },
+    {
+        "question": "which Mexican and American film actress is Ethel Houbiers  French voice of ",
+        "answer": "Salma Hayek and Penélope Cruz",
+        "golden_answer": "salma hayek pinault",
+        "metrics": {
+            "correctness": {
+                "score": 0.5,
+                "reason": "The provided answer mentions two actresses, Salma Hayek and Penélope Cruz, which suggests some correctness. However, the golden answer specifically identifies Salma Hayek Pinault and does not mention Penélope Cruz, making the provided answer incomplete for the specific requirement of identifying the French voice of Ethel Houbiers. Therefore, it is partially correct."
+            }
+        }
+    },
+    {
+        "question": "Which major international airport in south-east England ranks as the 8th busiest airport in Europe and replaced Croydon Airport?",
+        "answer": "Gatwick Airport",
+        "golden_answer": "gatwick airport",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Gatwick Airport' correctly identifies the major international airport in south-east England that ranks as the 8th busiest airport in Europe and replaced Croydon Airport. The answer matches the golden answer in terms of meaning, even though the casing differs. Therefore, it is a correct response."
+            }
+        }
+    },
+    {
+        "question": "Isabella Kelly was born at a ruined castle characterized as one of the most isolated fortifications in Britain by who?",
+        "answer": "'The Changing Scottish Landscape'",
+        "golden_answer": "the changing scottish landscape",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer, 'The Changing Scottish Landscape,' accurately matches the golden answer, 'the changing scottish landscape,' both in content and meaning, despite the difference in case and formatting. Therefore, the answer is considered correct."
+            }
+        }
+    },
+    {
+        "question": "The facility where Robert Croft worked as a navy instructor was also known as?",
+        "answer": "US Naval Submarine Base New London",
+        "golden_answer": "\"home of the submarine force\"",
+        "metrics": {
+            "correctness": {
+                "score": 0.5,
+                "reason": "The provided answer, 'US Naval Submarine Base New London,' is a specific location, but it doesn't directly convey the essence or common reference of the facility being called 'home of the submarine force.' While it is related to the correct context, it doesn't match the known nickname or description as required by the golden answer."
+            }
+        }
+    },
+    {
+        "question": "Who released the song \"With or Without You\" first, Jai McDowall or U2?",
+        "answer": "U2",
+        "golden_answer": "u2",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'U2' is correct as it matches the golden answer 'u2' in terms of meaning, despite the difference in capitalization. The answer accurately identifies U2 as the artist who released the song 'With or Without You' first."
+            }
+        }
+    },
+    {
+        "question": "Which \"Roseanne\" star is in Scream 2?",
+        "answer": "Laurie Metcalf",
+        "golden_answer": "laurie metcalf",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Laurie Metcalf' is correct as it matches the golden answer 'laurie metcalf' in terms of meaning. The difference in capitalization does not affect the correctness of the answer."
+            }
+        }
+    },
+    {
+        "question": "In what city is the company that Fastjet Tanzania was originally founded as a part of prior to rebranding based?",
+        "answer": "Nairobi",
+        "golden_answer": "nairobi, kenya",
+        "metrics": {
+            "correctness": {
+                "score": 0.5,
+                "reason": "The provided answer 'Nairobi' is correct as it matches the city where Fastjet Tanzania was originally founded. However, it lacks the additional detail 'Kenya,' which is part of the golden answer. Therefore, while the core information is accurate, the absence of the full context results in a score of 0.5."
+            }
+        }
+    },
+    {
+        "question": "What is the name of the Australian specialist electronic music magazine that features avant-rock, experimental sound art, and experimental hip hop?",
+        "answer": "Cyclic Defrost",
+        "golden_answer": "cyclic defrost",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Cyclic Defrost' matches the golden answer 'cyclic defrost' in meaning, as both refer to the same Australian electronic music magazine. The difference in capitalization does not affect the correctness of the answer."
+            }
+        }
+    },
+    {
+        "question": "What is the population of the city that Munsonville is in the northwest corner of?",
+        "answer": "Unknown",
+        "golden_answer": "729 at the 2010 census",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer 'Unknown' does not provide any relevant information about the population of the city, while the golden answer specifies a concrete population figure (729) at the 2010 census. The two answers are not aligned, leading to a score of 0."
+            }
+        }
+    },
+    {
+        "question": "A Pair of Brown Eyes and Wild Mountain Thyme is based from what artists song?",
+        "answer": "Francis McPeake",
+        "golden_answer": "francis mcpeake",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Francis McPeake' correctly identifies the artist associated with the song 'A Pair of Brown Eyes and Wild Mountain Thyme.' The capitalization differs from the golden answer, but the essential information is accurate and consistent in meaning."
+            }
+        }
+    },
+    {
+        "question": "Armageddon in Retrospect was written by the author who was best known for what 1969 satire novel?",
+        "answer": "Slaughterhouse-Five",
+        "golden_answer": "slaughterhouse-five",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Slaughterhouse-Five' accurately identifies the novel that the question refers to. Since the golden answer is 'slaughterhouse-five', and the provided answer matches the correct title, albeit with a different capitalization, it is considered correct in meaning."
+            }
+        }
+    },
+    {
+        "question": "What class of instrument does Apatim Majumdar play?",
+        "answer": "String instrument",
+        "golden_answer": "strings",
+        "metrics": {
+            "correctness": {
+                "score": 0.9,
+                "reason": "The provided answer 'String instrument' is close in meaning to the golden answer 'strings'. While 'string instrument' is a broader term and indicates the class of instrument, 'strings' is more specific and casual. The essence of the answer is correct, so it receives a high score, albeit slightly lower due to the phrasing difference."
+            }
+        }
+    },
+    {
+        "question": " Which movie did Disney produce first,  The Many Adventures of Winnie the Pooh or Ride a Wild Pony?",
+        "answer": "The Many Adventures of Winnie the Pooh",
+        "golden_answer": "ride a wild pony",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer, 'The Many Adventures of Winnie the Pooh,' is incorrect because it does not match the golden answer, 'ride a wild pony.' The query asks for the earlier Disney production, and 'The Many Adventures of Winnie the Pooh' is not the correct response in this context."
+            }
+        }
+    },
+    {
+        "question": "Pandikona and Berger Blanc Suisse are both what kinds of animals?",
+        "answer": "Dogs",
+        "golden_answer": "dogs",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Dogs' accurately reflects the common understanding that Pandikona and Berger Blanc Suisse are indeed both dog breeds. The answer includes the essential information needed to correctly answer the question, thus warranting a full score."
+            }
+        }
+    },
+    {
+        "question": "The Prussian General Carl von Clausewitz is associated with what type of realism?",
+        "answer": "Classical Realism",
+        "golden_answer": "modern thinkers associated with classical realism are carl von clausewitz",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer \"Classical Realism\" correctly identifies the type of realism associated with Carl von Clausewitz as mentioned in the golden answer. The golden answer also acknowledges Clausewitz as a modern thinker associated with classical realism, which the provided answer captures accurately, hence it is fully correct."
+            }
+        }
+    },
+    {
+        "question": "What where both Hawker Hurricane and No. 1455 Flight apart of?",
+        "answer": "Royal Air Force",
+        "golden_answer": "royal air force",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Royal Air Force' is correct and captures the essential information that both the Hawker Hurricane and No. 1455 Flight were a part of. It accurately reflects the golden answer 'royal air force', despite the difference in case. The meaning is preserved."
+            }
+        }
+    },
+    {
+        "question": "what language did the ethnic group which Torstein Ellingsen was its drumer  speaks ",
+        "answer": "Sudanese Arabic",
+        "golden_answer": "norwegian language",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer 'Sudanese Arabic' is incorrect because the golden answer specifies 'norwegian language,' which is a completely different language. Therefore, the provided answer fails to address the question correctly."
+            }
+        }
+    },
+    {
+        "question": "From March 631 to April 631, Farrukhzad Khosrau V was the king of an empire that succeeded which empire?",
+        "answer": "Parthian Empire",
+        "golden_answer": "the parthian empire",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Parthian Empire' correctly identifies the empire that was succeeded by the empire ruled by Farrukhzad Khosrau V, as per the context given in the question. Although the case does not match exactly with the golden answer 'the parthian empire', the essential information is accurate and aligns with common understanding."
+            }
+        }
+    },
+    {
+        "question": "Beer Wars covers the differences between large corporate breweries, and small breweries, such as what brewery that is headquartered in Escondido, california?",
+        "answer": "Stone Brewing Co.",
+        "golden_answer": "stone brewing",
+        "metrics": {
+            "correctness": {
+                "score": 0.9,
+                "reason": "The provided answer 'Stone Brewing Co.' correctly identifies the brewery located in Escondido, California. While the golden answer is 'stone brewing' which is less formal, both answers refer to the same entity. The minor difference in naming (the inclusion of 'Co.' in the provided answer) does not detract from its correctness."
+            }
+        }
+    },
+    {
+        "question": "Which head coach has led their team for a longer period of time, Tim Cluess or Steve Prohm?",
+        "answer": "Tim Cluess",
+        "golden_answer": "tim cluess",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Tim Cluess' matches the golden answer 'tim cluess' in terms of meaning, as both indicate that Tim Cluess is the head coach who has led their team for a longer period of time. The difference in capitalization does not affect the correctness of the answer."
+            }
+        }
+    },
+    {
+        "question": "During what war were the Russia-United Kingdom relations in a state of rivalry after the abdication of Emperor Nicholas II? ",
+        "answer": "None",
+        "golden_answer": "the cold war (1947–91)",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer 'None' does not address the question regarding the rivalry in Russia-United Kingdom relations following the abdication of Emperor Nicholas II. The golden answer is 'the cold war (1947–91)', which is a specific event relevant to the question. Since the provided answer fails to provide any relevant information or correct context, it received a score of 0."
+            }
+        }
+    },
+    {
+        "question": "How far from Sacramento is the flight school in Atwater?",
+        "answer": "115 miles",
+        "golden_answer": "about 115 miles (185 km)",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer of '115 miles' accurately matches the information stated in the golden answer, which also indicates 'about 115 miles.' While the golden answer includes an additional conversion to kilometers, the essence of the distance from Sacramento to the flight school remains consistent. Therefore, the provided answer is fully correct."
+            }
+        }
+    },
+    {
+        "question": "Baraki Barak District is situated in the western part of a province whose capital is what?",
+        "answer": "Logar Province",
+        "golden_answer": "puli alam",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer 'Logar Province' is incorrect as it names the province instead of its capital. The golden answer 'Puli Alam' correctly identifies the capital of Logar Province, which makes the provided answer completely off the mark."
+            }
+        }
+    },
+    {
+        "question": "What was the 2010 population of the town where Black Crescent Mountain was located? ",
+        "answer": "196",
+        "golden_answer": "310",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer of 196 is significantly lower than the golden answer of 310, indicating that it is incorrect. The discrepancy suggests a misunderstanding of the population figure, leading to a complete failure to address the question accurately."
+            }
+        }
+    },
+    {
+        "question": "In the NASA mission where Moon trees were taken into space, what was the nickname of the Command Module?",
+        "answer": "Kitty Hawk",
+        "golden_answer": "\"kitty hawk\"",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer \"Kitty Hawk\" correctly identifies the nickname of the Command Module from the NASA mission associated with the Moon trees, which matches the golden answer \"kitty hawk\" when accounting for case insensitivity. Therefore, the answer is fully correct."
+            }
+        }
+    },
+    {
+        "question": "Which comic series involves characters such as Nick Fury and Baron von Strucker?",
+        "answer": "Nick Fury: Agent of S.H.I.E.L.D.",
+        "golden_answer": "marvel",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer 'Nick Fury: Agent of S.H.I.E.L.D.' does not accurately match the golden answer 'marvel', which suggests that the correct response should focus on the general category of the comic series rather than a specific title. Therefore, the score is 0 as there is no substantial alignment with the expectation set by the golden answer."
+            }
+        }
+    },
+    {
+        "question": "College Humor is a 1933 American pre-Code musical comedy film that starred what American singer and actor who has a trademark warm bass-baritone voice?",
+        "answer": "Bing Crosby",
+        "golden_answer": "harry lillis \"bing\" crosby jr.",
+        "metrics": {
+            "correctness": {
+                "score": 0.9,
+                "reason": "The provided answer \"Bing Crosby\" is correct as it identifies the singer and actor in question. However, it lacks the full name 'Harry Lillis \"Bing\" Crosby Jr.' which is more accurate and specific. This omission results in a slight deduction, but the core information is accurate."
+            }
+        }
+    },
+    {
+        "question": "Who is writing a book about the Koch family who control the second-largest privately owned company in the United States?",
+        "answer": "Unknown",
+        "golden_answer": "jane mayer",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer 'Unknown' does not identify the author of the book about the Koch family, while the golden answer specifies 'jane mayer' as the correct author. Therefore, the provided answer is incorrect."
+            }
+        }
+    },
+    {
+        "question": "New York State Route 9R rejoins its parent in a hamlet located  in what New York County?",
+        "answer": "Essex County",
+        "golden_answer": "albany",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer 'Essex County' is incorrect because the golden answer is 'albany' which refers to Albany County. The two counties are different, so the provided answer does not match the correct answer."
+            }
+        }
+    },
+    {
+        "question": "12 Years a Slave starred what British actor born 10 July 1977)",
+        "answer": "Chiwetel Ejiofor",
+        "golden_answer": "chiwetel ejiofor",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Chiwetel Ejiofor' correctly identifies the British actor who starred in '12 Years a Slave.' It matches the golden answer in meaning, as both refer to the same individual, even though the casing differs. Therefore, the answer is completely correct."
+            }
+        }
+    },
+    {
+        "question": "What was the capital of India when the Taj Mahal was commissioned?",
+        "answer": "Agra",
+        "golden_answer": "agra",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Agra' matches the golden answer 'agra' in meaning. Both refer to the same city, which was the capital of India during the time the Taj Mahal was commissioned. The difference in capitalization does not affect the correctness of the answer."
+            }
+        }
+    },
+    {
+        "question": "In what city did the \"Prince of tenors\" star in a film based on an opera by Giacomo Puccini?",
+        "answer": "Tuscany",
+        "golden_answer": "rome",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer \"Tuscany\" is incorrect because the correct city is \"Rome\". Tuscany is a region in Italy, not a city, and does not answer the question properly."
+            }
+        }
+    },
+    {
+        "question": "What river can a  large African bovine be seen bathing in in the Mwabvi Wildlife Reserve?",
+        "answer": "Mwabvi river",
+        "golden_answer": "buffalo",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The provided answer 'Mwabvi river' does not directly answer the question about which large African bovine can be seen bathing in that river. The golden answer is 'buffalo,' which refers to the specific animal. Therefore, while the provided answer is relevant to the location, it fails to identify the correct large African bovine."
+            }
+        }
+    },
+    {
+        "question": "Jalen Jones plays basketball for an NBA team that plays their home games in what arena?",
+        "answer": "Smoothie King Center",
+        "golden_answer": "smoothie king center",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Smoothie King Center' accurately identifies the arena where Jalen Jones's NBA team plays their home games. While the capitalization differs from the golden answer, the answer's meaning is correct and matches the expected response."
+            }
+        }
+    },
+    {
+        "question": "The On Tour Forever album gave Blues Traveler the opportunity to display what musical trademark?",
+        "answer": "Live performances",
+        "golden_answer": "extensive use of segues",
+        "metrics": {
+            "correctness": {
+                "score": 0.2,
+                "reason": "The provided answer 'Live performances' does not accurately reflect the golden answer 'extensive use of segues.' While live performances may involve segues, it does not directly address the specific musical trademark that the question asks for, resulting in a low score."
+            }
+        }
+    },
+    {
+        "question": "Which Victorian poet was born in a 15th-century castle home to the Earl of Southesk?",
+        "answer": "Lady Charlotte Elliot",
+        "golden_answer": "charlotte carnegie",
+        "metrics": {
+            "correctness": {
+                "score": 0.3,
+                "reason": "The provided answer, 'Lady Charlotte Elliot,' is incorrect because it refers to the wrong individual; the correct answer is 'Charlotte Carnegie,' who is associated with the location in question. While there is a partial name match ('Charlotte'), the last name is entirely incorrect, which significantly affects the accuracy."
+            }
+        }
+    },
+    {
+        "question": "Alexander Petrovich Nikolayev received the title Hero of the Soviet Union and the Order of Lenin for his actions during the   the final major offensive of the European theatre of what war?",
+        "answer": "World War II",
+        "golden_answer": "world war ii",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'World War II' is correct and accurately identifies the war related to Alexander Petrovich Nikolayev's recognition, matching the context of the question."
+            }
+        }
+    },
+    {
+        "question": "Where did Cale Gundy's brother play football in college?",
+        "answer": "Oklahoma State University",
+        "golden_answer": "oklahoma state university",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Oklahoma State University' correctly identifies the institution where Cale Gundy's brother played football in college. It matches the golden answer in meaning, even though it has a different casing. Therefore, it is considered correct and complete."
+            }
+        }
+    },
+    {
+        "question": "Who has released more solo albums, Nick Carter or Brady Seals?",
+        "answer": "Brady Seals.",
+        "golden_answer": "brady seals",
+        "metrics": {
+            "correctness": {
+                "score": 0.8,
+                "reason": "The provided answer 'Brady Seals' is correct in identifying the right person who has released more solo albums. However, it has a slight mismatch in wording since the golden answer uses lowercase. Despite this, it conveys the same meaning, so it is still largely correct."
+            }
+        }
+    },
+    {
+        "question": "Which Istanbul mosque is unique for retaining a Baroque style of architecture, the Bayezid II Mosque or the Nusretiye Mosque?",
+        "answer": "Nusretiye Mosque",
+        "golden_answer": "nusretiye mosque",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'Nusretiye Mosque' accurately identifies the unique mosque known for retaining a Baroque style of architecture, which is confirmed by the golden answer 'nusretiye mosque.' The slight difference in capitalization does not affect the correctness of the response."
+            }
+        }
+    },
+    {
+        "question": "What university did the last Detroit Pistons player to wear the number retired in honor of a player nicknamed \"The Worm\" attend?",
+        "answer": "Georgetown University",
+        "golden_answer": "georgetown university",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer, 'Georgetown University', correctly identifies the university attended by the last Detroit Pistons player to wear the number retired in honor of 'The Worm', which refers to Dennis Rodman. The golden answer indicated is 'georgetown university', and despite the difference in casing, the core information is identical, making the provided answer fully correct."
+            }
+        }
+    },
+    {
+        "question": "The Atik Valide Mosque and Valens Aqueduct are found in what country?",
+        "answer": "Turkey",
+        "golden_answer": "turkey",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer \"Turkey\" correctly identifies the country where the Atik Valide Mosque and Valens Aqueduct are located. The golden answer \"turkey\" accurately represents the same answer with a slight difference in casing, but this does not affect the correctness. Thus, the provided answer is deemed correct."
+            }
+        }
+    },
+    {
+        "question": "Which of the four US Presidents who have been assinated was shot on the grounds of the Pan-American Exposition at the Temple of Music in Buffalo, New York?",
+        "answer": "William McKinley",
+        "golden_answer": "william mckinley",
+        "metrics": {
+            "correctness": {
+                "score": 1.0,
+                "reason": "The provided answer 'William McKinley' accurately identifies the correct answer to the question about which US President was shot at the Pan-American Exposition, which is 'william mckinley' in lowercase. The answer is correct in meaning, even though it has different capitalization."
+            }
+        }
+    }
+]

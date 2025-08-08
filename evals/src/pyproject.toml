@@ -1,0 +1,19 @@
+[project]
+name = "comparative-evals"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "cognee==0.2.0",
+    "deepeval>=3.2.8",
+    "dotenv>=0.9.9",
+    "gdown>=5.2.0",
+    "graphiti-core>=0.17.8",
+    "langchain-openai>=0.3.28",
+    "lightrag-hku[api]>=1.4.1",
+    "mem0ai>=0.1.114",
+    "modal>=1.0.5",
+    "nano-vectordb>=0.0.4.3",
+    "openai>=1.97.0",
+    "plotly>=6.2.0",
+]
