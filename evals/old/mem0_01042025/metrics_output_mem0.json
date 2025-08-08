@@ -1,0 +1,952 @@
+[
+    {
+        "question": "In what year was the university where Sergei Aleksandrovich Tokarev was a professor founded?",
+        "answer": "The context provided does not include information about Sergei Aleksandrovich Tokarev or the university where he was a professor. Therefore, I cannot determine the year the university was founded based on the information given. If you have more specific information or another question, feel free to share!",
+        "golden_answer": "1755",
+        "metrics": {
+            "correctness": {
+                "score": 0.07295252575012522,
+                "reason": "The actual output acknowledges the lack of information about Sergei Aleksandrovich Tokarev and the university, contradicting the expected output of 1755. However, it remains factual without introducing contradictions."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "Black Book starred the actress and writer of what heritage?",
+        "answer": "The actress and writer in \"Black Book\" is Dutch, as the film features Carice van Houten, who is of Dutch heritage.",
+        "golden_answer": "dutch",
+        "metrics": {
+            "correctness": {
+                "score": 0.7724624642762056,
+                "reason": "The actual output provides accurate information by stating that the actress and writer are of Dutch heritage and identifies Carice van Houten, but it contains more detail than the expected output requires, which is just 'dutch'."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0909090909090909,
+                "reason": "F1: 0.09 (Precision: 0.05, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Which actor does American Beauty and American Beauty have in common?",
+        "answer": "The context provided does not mention any actors from the film \"American Beauty.\" Therefore, I am unable to identify any common actors based on the information given. If you mean to ask about a specific actor related to \"American Beauty,\" please provide more details or clarify your question.",
+        "golden_answer": "kevin spacey",
+        "metrics": {
+            "correctness": {
+                "score": 0.007585817532042317,
+                "reason": "The actual output fails to provide the actor Kevin Spacey, which is a direct contradiction to the expected output; additionally, it omits crucial information by not answering the question."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "Ken Pruitt  was a Republican member of an upper house of the legislature with how many members ?",
+        "answer": "Ken Pruitt was a member of the Florida Senate, which is the upper house of the Florida Legislature. The Florida Senate has 40 members.",
+        "golden_answer": "40 members",
+        "metrics": {
+            "correctness": {
+                "score": 0.871594065640353,
+                "reason": "While the actual output correctly states that Ken Pruitt was a member of the Florida Senate and mentions that it has 40 members, it includes more information than the expected output, which only provides the number of members. There is no contradiction, but some details are omitted, affecting conciseness."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.15384615384615385,
+                "reason": "F1: 0.15 (Precision: 0.08, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Between Greyia and Calibanus, which genus contains more species?",
+        "answer": "Based on the context provided, there is no information regarding the genera Greyia and Calibanus or their species count. Therefore, I am unable to determine which genus contains more species. For accurate information, you may want to consult a biological database or a taxonomy resource.",
+        "golden_answer": "greyia",
+        "metrics": {
+            "correctness": {
+                "score": 0.10043805981830971,
+                "reason": "The actual output fails to answer the question about the species count of Greyia and Calibanus and does not provide any information or details that could help determine an answer."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.04347826086956522,
+                "reason": "F1: 0.04 (Precision: 0.02, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Did John Updike and Tom Clancy both publish more than 15 bestselling novels?",
+        "answer": "Yes, both John Updike and Tom Clancy published more than 15 bestselling novels. John Updike is known for his Rabbit series and many other works, while Tom Clancy is famous for his military and espionage thrillers, including \"The Hunt for Red October\" and \"Patriot Games.\" Both authors have had significant commercial success throughout their careers.",
+        "golden_answer": "yes",
+        "metrics": {
+            "correctness": {
+                "score": 0.33478741530156875,
+                "reason": "The actual output contains excessive detail and contradicts the simplicity of the expected output, which is just a confirmation."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.03571428571428572,
+                "reason": "F1: 0.04 (Precision: 0.02, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Who was hung for assisting the attempted surrender of a defector from the American Continental Army to the British Army?",
+        "answer": "Major John André was hung for assisting the attempted surrender of a defector from the American Continental Army to the British Army. André was involved in a plot with Benedict Arnold, who was attempting to betray West Point to the British.",
+        "golden_answer": "john andré",
+        "metrics": {
+            "correctness": {
+                "score": 0.5759655963248086,
+                "reason": "The output correctly identifies John André but includes additional detail about Benedict Arnold and the plot, which was not necessary for the direct answer. The expected output only required the name 'john andré'."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.09302325581395349,
+                "reason": "F1: 0.09 (Precision: 0.05, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "which Mexican and American film actress is Ethel Houbiers  French voice of ",
+        "answer": "Ethel Houbiers is the French voice of Mexican and American film actress Salma Hayek.",
+        "golden_answer": "salma hayek pinault",
+        "metrics": {
+            "correctness": {
+                "score": 0.7300605616942584,
+                "reason": "Actual output correctly identifies Ethel Houbiers as the French voice of Salma Hayek, but lacks the full name 'Salma Hayek Pinault' as stated in the expected output."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.23529411764705882,
+                "reason": "F1: 0.24 (Precision: 0.14, Recall: 0.67)"
+            }
+        }
+    },
+    {
+        "question": "Which major international airport in south-east England ranks as the 8th busiest airport in Europe and replaced Croydon Airport?",
+        "answer": "Gatwick Airport is the major international airport in south-east England that ranks as the 8th busiest airport in Europe and replaced Croydon Airport.",
+        "golden_answer": "gatwick airport",
+        "metrics": {
+            "correctness": {
+                "score": 0.7492226943054524,
+                "reason": "The actual output correctly identifies Gatwick Airport but includes unnecessary detail and does not match the expected output's format."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.16,
+                "reason": "F1: 0.16 (Precision: 0.09, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Isabella Kelly was born at a ruined castle characterized as one of the most isolated fortifications in Britain by who?",
+        "answer": "Isabella Kelly was born at a ruined castle characterized as one of the most isolated fortifications in Britain by Neil Smith.",
+        "golden_answer": "the changing scottish landscape",
+        "metrics": {
+            "correctness": {
+                "score": 0.246477843047804,
+                "reason": "The actual output includes an author name, Neil Smith, while the expected output refers to 'the changing scottish landscape', indicating a significant omission of detail regarding the expected characterization."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.08,
+                "reason": "F1: 0.08 (Precision: 0.05, Recall: 0.25)"
+            }
+        }
+    },
+    {
+        "question": "The facility where Robert Croft worked as a navy instructor was also known as?",
+        "answer": "Based on the provided context, there is no mention of Robert Croft or a facility where he worked as a navy instructor. The information primarily focuses on Huffman Aviation and its operations. Therefore, I'm unable to provide an answer regarding Robert Croft's affiliation or facility. If there are specific details or additional context you would like to provide, I can assist further.",
+        "golden_answer": "\"home of the submarine force\"",
+        "metrics": {
+            "correctness": {
+                "score": 0.036349893969876805,
+                "reason": "The actual output fails to mention Robert Croft and omits specific detail about the facility, contradicting the expected output which identifies it as the 'home of the submarine force'."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.05970149253731343,
+                "reason": "F1: 0.06 (Precision: 0.03, Recall: 0.40)"
+            }
+        }
+    },
+    {
+        "question": "Who released the song \"With or Without You\" first, Jai McDowall or U2?",
+        "answer": "U2 released the song \"With or Without You\" first, as it is one of their well-known tracks from the album \"The Joshua Tree,\" which was released in 1987. Jai McDowall, a Scottish singer, covered the song later in his career.",
+        "golden_answer": "u2",
+        "metrics": {
+            "correctness": {
+                "score": 0.7002017890372143,
+                "reason": "The actual output correctly states that U2 released the song first and provides additional context about the album, though it exceeds the brevity of the expected output, which only required 'u2'."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.04878048780487806,
+                "reason": "F1: 0.05 (Precision: 0.03, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Which \"Roseanne\" star is in Scream 2?",
+        "answer": "The \"Roseanne\" star who appears in \"Scream 2\" is Laurie Metcalf.",
+        "golden_answer": "laurie metcalf",
+        "metrics": {
+            "correctness": {
+                "score": 0.7838950112014241,
+                "reason": "The actual output correctly identifies Laurie Metcalf as the 'Roseanne' star in 'Scream 2', but it includes unnecessary detail such as quotation marks and capitalization, which is more verbose than the expected simple response."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.3076923076923077,
+                "reason": "F1: 0.31 (Precision: 0.18, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "In what city is the company that Fastjet Tanzania was originally founded as a part of prior to rebranding based?",
+        "answer": "Fastjet Tanzania was originally founded as a part of Fly540, which is based in Nairobi, Kenya.",
+        "golden_answer": "nairobi, kenya",
+        "metrics": {
+            "correctness": {
+                "score": 0.7812519320091226,
+                "reason": "The actual output correctly identifies Nairobi, Kenya as the location related to Fly540, fulfilling factual accuracy, but does not match the succinct format of the expected output."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.2222222222222222,
+                "reason": "F1: 0.22 (Precision: 0.12, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "What is the name of the Australian specialist electronic music magazine that features avant-rock, experimental sound art, and experimental hip hop?",
+        "answer": "The name of the Australian specialist electronic music magazine that features avant-rock, experimental sound art, and experimental hip hop is \"Mixdown.\"",
+        "golden_answer": "cyclic defrost",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The actual output states 'Mixdown' as the magazine name, which contradicts the expected output of 'cyclic defrost'."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "What is the population of the city that Munsonville is in the northwest corner of?",
+        "answer": "Munsonville is located in the town of Sullivan, New Hampshire. The population of Sullivan, according to the 2020 census, is approximately 900 residents. However, if you are referring to a specific city in the northwest corner of New Hampshire, you may want to clarify which city that is, as the population can vary significantly between different locations.",
+        "golden_answer": "729 at the 2010 census",
+        "metrics": {
+            "correctness": {
+                "score": 0.25750920899213414,
+                "reason": "The actual output provides population information for Sullivan but fails to match the expected output of 729 at the 2010 census, resulting in a significant omission of detail."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.06451612903225806,
+                "reason": "F1: 0.06 (Precision: 0.04, Recall: 0.40)"
+            }
+        }
+    },
+    {
+        "question": "A Pair of Brown Eyes and Wild Mountain Thyme is based from what artists song?",
+        "answer": "\"A Pair of Brown Eyes\" is based on a song by the artist Shane MacGowan and his band The Pogues. \"Wild Mountain Thyme,\" commonly known as \"Will Ye Go, Lassie, Go,\" is often associated with various artists, but one of the most popular renditions was performed by The Dubliners. If you are looking for a specific connection between them, let me know!",
+        "golden_answer": "francis mcpeake",
+        "metrics": {
+            "correctness": {
+                "score": 0.2052075533281595,
+                "reason": "The actual output attributes 'A Pair of Brown Eyes' to Shane MacGowan and The Pogues, which is correct, but fails to mention Francis McPeake as the connection for 'Wild Mountain Thyme,' thus omitting crucial detail from the expected output."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "Armageddon in Retrospect was written by the author who was best known for what 1969 satire novel?",
+        "answer": "Armageddon in Retrospect was written by Kurt Vonnegut, who is best known for his 1969 satire novel \"Slaughterhouse-Five.\"",
+        "golden_answer": "slaughterhouse-five",
+        "metrics": {
+            "correctness": {
+                "score": 0.580901533908451,
+                "reason": "The actual output correctly identifies the author and the novel, but it includes more detail than the expected output, which omits the author's name and provides just the title."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.10526315789473684,
+                "reason": "F1: 0.11 (Precision: 0.06, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "What class of instrument does Apatim Majumdar play?",
+        "answer": "The context does not provide any information about Apatim Majumdar or what class of instrument he plays. If you have any further details or a specific question regarding him or his music, please let me know!",
+        "golden_answer": "strings",
+        "metrics": {
+            "correctness": {
+                "score": 0.027229804120083106,
+                "reason": "The actual output fails to provide any information about Apatim Majumdar's class of instrument, which is explicitly identified as 'strings' in the expected output."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": " Which movie did Disney produce first,  The Many Adventures of Winnie the Pooh or Ride a Wild Pony?",
+        "answer": "Disney produced \"The Many Adventures of Winnie the Pooh\" first, as it was released in 1977. \"Ride a Wild Pony\" was produced later, in 1975, but it was a television movie made for the Disney Channel, while \"The Many Adventures of Winnie the Pooh\" was a theatrical release.",
+        "golden_answer": "ride a wild pony",
+        "metrics": {
+            "correctness": {
+                "score": 0.2259421177062108,
+                "reason": "The actual output provides incorrect information by stating 'Ride a Wild Pony' was produced in 1975 when it was actually released in 1977, and it contradicts the expected output, which simply states 'ride a wild pony'."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.15384615384615385,
+                "reason": "F1: 0.15 (Precision: 0.08, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Pandikona and Berger Blanc Suisse are both what kinds of animals?",
+        "answer": "Pandikona and Berger Blanc Suisse are both breeds of dogs.",
+        "golden_answer": "dogs",
+        "metrics": {
+            "correctness": {
+                "score": 0.8893981597693024,
+                "reason": "The actual output correctly identifies both Pandikona and Berger Blanc Suisse as breeds of dogs, aligning with the expected output's categorization as dogs, but it includes unnecessary detail."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.18181818181818182,
+                "reason": "F1: 0.18 (Precision: 0.10, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "The Prussian General Carl von Clausewitz is associated with what type of realism?",
+        "answer": "The Prussian General Carl von Clausewitz is associated with military realism, often referred to as \"Clausewitzian realism.\" This approach emphasizes the chaotic and unpredictable nature of war, the importance of understanding the political context of military actions, and the idea that war is a continuation of politics by other means. His works, particularly \"On War,\" explore the complexities and strategies involved in warfare, making him a key figure in the study of realist theories in military strategy.",
+        "golden_answer": "modern thinkers associated with classical realism are carl von clausewitz",
+        "metrics": {
+            "correctness": {
+                "score": 0.38591652004103977,
+                "reason": "The actual output provides detailed explanations about Clausewitz's contributions to military realism, but it doesn't align with the expected output which states he is associated with classical realism, leading to a contradiction."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.1379310344827586,
+                "reason": "F1: 0.14 (Precision: 0.08, Recall: 0.60)"
+            }
+        }
+    },
+    {
+        "question": "What where both Hawker Hurricane and No. 1455 Flight apart of?",
+        "answer": "Both the Hawker Hurricane and No. 1455 Flight were part of the Royal Air Force (RAF) during World War II. The Hawker Hurricane was a British single-seat fighter aircraft that played a crucial role in the Battle of Britain, while No. 1455 Flight was a unit within the RAF equipped with these aircraft.",
+        "golden_answer": "royal air force",
+        "metrics": {
+            "correctness": {
+                "score": 0.7835216866230825,
+                "reason": "The actual output accurately states that both the Hawker Hurricane and No. 1455 Flight were part of the Royal Air Force during World War II, which aligns with the expected output. However, it includes additional details that, while informative, are not strictly necessary for the question asked."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.10714285714285715,
+                "reason": "F1: 0.11 (Precision: 0.06, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "what language did the ethnic group which Torstein Ellingsen was its drumer  speaks ",
+        "answer": "Torstein Ellingsen is associated with the Sami ethnic group, which speaks the Sami languages. These languages belong to the Finno-Ugric branch of the Uralic language family.",
+        "golden_answer": "norwegian language",
+        "metrics": {
+            "correctness": {
+                "score": 0.17279092569374135,
+                "reason": "The actual output states that the Sami ethnic group speaks Sami languages, contradicting the expected output which specifies Norwegian language."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.07142857142857144,
+                "reason": "F1: 0.07 (Precision: 0.04, Recall: 0.50)"
+            }
+        }
+    },
+    {
+        "question": "From March 631 to April 631, Farrukhzad Khosrau V was the king of an empire that succeeded which empire?",
+        "answer": "Farrukhzad Khosrau V was the king of the Sasanian Empire, which succeeded the Parthian Empire.",
+        "golden_answer": "the parthian empire",
+        "metrics": {
+            "correctness": {
+                "score": 0.5165159066305006,
+                "reason": "The actual output correctly identifies the Sasanian Empire and the Parthian Empire, but it provides excessive detail compared to the expected output, which only requires the name of the succeeded empire."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.33333333333333337,
+                "reason": "F1: 0.33 (Precision: 0.20, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Beer Wars covers the differences between large corporate breweries, and small breweries, such as what brewery that is headquartered in Escondido, california?",
+        "answer": "The brewery headquartered in Escondido, California, that is often discussed in the context of Beer Wars is Stone Brewing.",
+        "golden_answer": "stone brewing",
+        "metrics": {
+            "correctness": {
+                "score": 0.7533344935117745,
+                "reason": "The actual output provides the correct answer with specific details, mentioning Stone Brewing as the brewery in Escondido, but it fails to match the expected output's succinctness."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.1904761904761905,
+                "reason": "F1: 0.19 (Precision: 0.11, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Which head coach has led their team for a longer period of time, Tim Cluess or Steve Prohm?",
+        "answer": "Tim Cluess has led his team for a longer period of time compared to Steve Prohm. Cluess was the head coach at Iona College from 2010 to 2021, while Prohm was the head coach at Iowa State University from 2015 to 2021. Therefore, Cluess had a longer tenure at Iona than Prohm had at Iowa State.",
+        "golden_answer": "tim cluess",
+        "metrics": {
+            "correctness": {
+                "score": 0.6580571005494367,
+                "reason": "While the actual output correctly identifies Tim Cluess as having a longer tenure, it provides detailed reasoning and context that goes beyond the one-word expected output."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0689655172413793,
+                "reason": "F1: 0.07 (Precision: 0.04, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "During what war were the Russia-United Kingdom relations in a state of rivalry after the abdication of Emperor Nicholas II? ",
+        "answer": "The Russia-United Kingdom relations were in a state of rivalry during the Russian Civil War, which followed the abdication of Emperor Nicholas II in 1917. The civil war was characterized by the struggle between the Bolshevik (Red) forces and their opponents, which included the White forces and various allied factions. The UK, among other countries, intervened in the conflict, contributing to the rivalry.",
+        "golden_answer": "the cold war (1947–91)",
+        "metrics": {
+            "correctness": {
+                "score": 0.0927779376790629,
+                "reason": "The actual output incorrectly states that the rivalry occurred during the Russian Civil War instead of the Cold War, which contradicts the expected output's information."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.05970149253731343,
+                "reason": "F1: 0.06 (Precision: 0.03, Recall: 0.50)"
+            }
+        }
+    },
+    {
+        "question": "How far from Sacramento is the flight school in Atwater?",
+        "answer": "The context provided does not include specific distance information between Sacramento and the flight school in Atwater. To find the distance, you could check a map or a navigation tool for precise measurements. Would you like assistance with something else?",
+        "golden_answer": "about 115 miles (185 km)",
+        "metrics": {
+            "correctness": {
+                "score": 0.16936690434211205,
+                "reason": "The actual output fails to provide any specific distance information as expected, significantly omitting the required detail about the flight school's distance from Sacramento."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "Baraki Barak District is situated in the western part of a province whose capital is what?",
+        "answer": "Baraki Barak District is located in the Logar Province of Afghanistan. The capital of Logar Province is Pul-e-Alam.",
+        "golden_answer": "puli alam",
+        "metrics": {
+            "correctness": {
+                "score": 0.7677543645911231,
+                "reason": "The actual output provides accurate information about the district and its capital but uses full naming instead of the expected concise form 'puli alam'. This is a minor omission of detail."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "What was the 2010 population of the town where Black Crescent Mountain was located? ",
+        "answer": "The provided context does not contain information about the town where Black Crescent Mountain is located or its population in 2010. Therefore, I cannot provide an answer to that question based on the given information.",
+        "golden_answer": "310",
+        "metrics": {
+            "correctness": {
+                "score": 0.00971309716301246,
+                "reason": "The actual output fails to provide any information about the population or town, which directly contradicts the expected output that states the population as 310."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "In the NASA mission where Moon trees were taken into space, what was the nickname of the Command Module?",
+        "answer": "The Command Module in the NASA mission where Moon trees were taken into space was nicknamed \"Columbia.\" It was part of the Apollo 14 mission, which took place in February 1971.",
+        "golden_answer": "\"kitty hawk\"",
+        "metrics": {
+            "correctness": {
+                "score": 0.01205341616535242,
+                "reason": "The actual output states the Command Module was nicknamed 'Columbia,' while the expected output specifies 'kitty hawk,' which directly contradicts the facts."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "Which comic series involves characters such as Nick Fury and Baron von Strucker?",
+        "answer": "The comic series that involves characters such as Nick Fury and Baron von Strucker is \"S.H.I.E.L.D.\" and various Marvel comics where they appear as part of the broader Marvel Universe, particularly in stories related to espionage and conflicts involving S.H.I.E.L.D. and Hydra. Nick Fury was originally introduced in \"Sgt. Fury and his Howling Commandos,\" and both characters have appeared in many storylines over the years, particularly those involving the Avengers and other superhero teams.",
+        "golden_answer": "marvel",
+        "metrics": {
+            "correctness": {
+                "score": 0.3227068102525554,
+                "reason": "The actual output provides relevant information about the characters and their appearances but fails to directly answer the question in the expected format, which is simply 'marvel.' There is also an omission of the requested direct reference to the comic series name."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.026666666666666665,
+                "reason": "F1: 0.03 (Precision: 0.01, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "College Humor is a 1933 American pre-Code musical comedy film that starred what American singer and actor who has a trademark warm bass-baritone voice?",
+        "answer": "The American singer and actor known for his trademark warm bass-baritone voice who starred in the 1933 film \"College Humor\" is Bing Crosby.",
+        "golden_answer": "harry lillis \"bing\" crosby jr.",
+        "metrics": {
+            "correctness": {
+                "score": 0.5567671386554366,
+                "reason": "The actual output correctly identifies Bing Crosby as the star of 'College Humor,' but lacks the full name 'Harry Lillis Crosby Jr.' as specified in the expected output, leading to a penalty for omission of detail."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.14285714285714285,
+                "reason": "F1: 0.14 (Precision: 0.09, Recall: 0.40)"
+            }
+        }
+    },
+    {
+        "question": "Who is writing a book about the Koch family who control the second-largest privately owned company in the United States?",
+        "answer": "The book about the Koch family is being written by Jane Mayer, who is the author of 'Dark Money: The Hidden History of the Billionaires Behind the Rise of the Radical Right'.",
+        "golden_answer": "jane mayer",
+        "metrics": {
+            "correctness": {
+                "score": 0.47042523697052996,
+                "reason": "The actual output correctly identifies Jane Mayer as the author but includes excessive detail about her other work, which diverges from the concise expectation in the output."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.11764705882352941,
+                "reason": "F1: 0.12 (Precision: 0.06, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "New York State Route 9R rejoins its parent in a hamlet located  in what New York County?",
+        "answer": "New York State Route 9R rejoins its parent in the hamlet of Rhinebeck, which is located in Dutchess County.",
+        "golden_answer": "albany",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The actual output states that Rhinebeck is in Dutchess County, while the expected output specifies Albany, which directly contradicts the expected information."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "12 Years a Slave starred what British actor born 10 July 1977)",
+        "answer": "\"12 Years a Slave\" starred the British actor Chiwetel Ejiofor, who was born on 10 July 1977.",
+        "golden_answer": "chiwetel ejiofor",
+        "metrics": {
+            "correctness": {
+                "score": 0.8106843559040244,
+                "reason": "The actual output correctly identifies Chiwetel Ejiofor as the actor and provides his birth date, matching the primary details of the expected output but includes extra information that was not necessary."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.21052631578947367,
+                "reason": "F1: 0.21 (Precision: 0.12, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "What was the capital of India when the Taj Mahal was commissioned?",
+        "answer": "When the Taj Mahal was commissioned in 1632, the capital of India was Agra. The Taj Mahal, located in Agra, served as a mausoleum for Mumtaz Mahal, the wife of Mughal Emperor Shah Jahan.",
+        "golden_answer": "agra",
+        "metrics": {
+            "correctness": {
+                "score": 0.724660181676092,
+                "reason": "The actual output provides correct information about the capital of India as Agra and includes relevant context about the Taj Mahal, which adds detail beyond the expected output. However, the expected output only specified a single word response."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.05714285714285715,
+                "reason": "F1: 0.06 (Precision: 0.03, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "In what city did the \"Prince of tenors\" star in a film based on an opera by Giacomo Puccini?",
+        "answer": "The \"Prince of tenors,\" referring to the renowned opera singer Luciano Pavarotti, starred in a film based on Giacomo Puccini's opera \"Tosca.\" This film, titled \"Tosca,\" was filmed in Rome, Italy.",
+        "golden_answer": "rome",
+        "metrics": {
+            "correctness": {
+                "score": 0.727537033234668,
+                "reason": "The actual output correctly identifies Rome, Italy as the filming location, aligning with the expected output, but includes additional information about the film and its connection to Pavarotti which adds unnecessary detail."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0625,
+                "reason": "F1: 0.06 (Precision: 0.03, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "What river can a  large African bovine be seen bathing in in the Mwabvi Wildlife Reserve?",
+        "answer": "In the Mwabvi Wildlife Reserve, large African bovines, such as buffalo, can often be seen bathing in the Shire River.",
+        "golden_answer": "buffalo",
+        "metrics": {
+            "correctness": {
+                "score": 0.5800749306235402,
+                "reason": "The actual output provides relevant information about buffalo in the Mwabvi Wildlife Reserve and names the Shire River, but it does not directly match the expected output's need for brevity, as it includes unnecessary details."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.09523809523809523,
+                "reason": "F1: 0.10 (Precision: 0.05, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Jalen Jones plays basketball for an NBA team that plays their home games in what arena?",
+        "answer": "The context provided does not contain information about Jalen Jones or the arena where his NBA team plays. Therefore, I cannot provide an answer to your question based on the given context.",
+        "golden_answer": "smoothie king center",
+        "metrics": {
+            "correctness": {
+                "score": 0.007703364639648129,
+                "reason": "The actual output does not provide any information related to Jalen Jones or the arena, which is a significant omission compared to the expected output."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "The On Tour Forever album gave Blues Traveler the opportunity to display what musical trademark?",
+        "answer": "The On Tour Forever album allowed Blues Traveler to display their trademark improvisational style and live performance energy. This characteristic is a significant aspect of their identity as a jam band, showcasing their ability to blend different genres and interact with the audience during live shows.",
+        "golden_answer": "extensive use of segues",
+        "metrics": {
+            "correctness": {
+                "score": 0.3242417434621426,
+                "reason": "While the actual output discusses Blues Traveler's improvisational style and live performance energy, it completely omits the extensive use of segues mentioned in the expected output, resulting in a significant detail omission."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.04,
+                "reason": "F1: 0.04 (Precision: 0.02, Recall: 0.25)"
+            }
+        }
+    },
+    {
+        "question": "Which Victorian poet was born in a 15th-century castle home to the Earl of Southesk?",
+        "answer": "The Victorian poet born in a 15th-century castle that was home to the Earl of Southesk is James Kenneth Stephen.",
+        "golden_answer": "charlotte carnegie",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The actual output incorrectly identifies the poet as James Kenneth Stephen, contradicting the expected output which clearly states it is Charlotte Carnegie."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.0,
+                "reason": "F1: 0.00 (Precision: 0.00, Recall: 0.00)"
+            }
+        }
+    },
+    {
+        "question": "Alexander Petrovich Nikolayev received the title Hero of the Soviet Union and the Order of Lenin for his actions during the   the final major offensive of the European theatre of what war?",
+        "answer": "Alexander Petrovich Nikolayev received the title Hero of the Soviet Union and the Order of Lenin for his actions during the final major offensive of the European theatre of World War II.",
+        "golden_answer": "world war ii",
+        "metrics": {
+            "correctness": {
+                "score": 0.7854680294319161,
+                "reason": "The actual output correctly identifies World War II as the war in question, matching the expected output's intent, but it includes excessive detail that was not necessary for the concise expected output."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.17142857142857143,
+                "reason": "F1: 0.17 (Precision: 0.09, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Where did Cale Gundy's brother play football in college?",
+        "answer": "Cale Gundy's brother, Clay Gundy, played college football at the University of Oklahoma.",
+        "golden_answer": "oklahoma state university",
+        "metrics": {
+            "correctness": {
+                "score": 0.0,
+                "reason": "The actual output states Clay Gundy played at the University of Oklahoma, which directly contradicts the expected output indicating he played at Oklahoma State University."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.25,
+                "reason": "F1: 0.25 (Precision: 0.15, Recall: 0.67)"
+            }
+        }
+    },
+    {
+        "question": "Who has released more solo albums, Nick Carter or Brady Seals?",
+        "answer": "As of my last knowledge update in October 2023, Nick Carter has released more solo albums than Brady Seals. Nick Carter, a member of the Backstreet Boys, has released multiple solo albums, while Brady Seals, known for his work in country music and his time with the band Little Texas, has released fewer solo albums in comparison. For the most current and specific discography numbers, it's advisable to check the latest sources or discography listings.",
+        "golden_answer": "brady seals",
+        "metrics": {
+            "correctness": {
+                "score": 0.22879546614167506,
+                "reason": "The actual output provides an accurate comparison, stating that Nick Carter has released more solo albums than Brady Seals, but it does not match the expected output, which simply states 'brady seals' without context or explanation."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.05194805194805195,
+                "reason": "F1: 0.05 (Precision: 0.03, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Which Istanbul mosque is unique for retaining a Baroque style of architecture, the Bayezid II Mosque or the Nusretiye Mosque?",
+        "answer": "The Nusretiye Mosque is unique for retaining a Baroque style of architecture.",
+        "golden_answer": "nusretiye mosque",
+        "metrics": {
+            "correctness": {
+                "score": 0.7335382219036678,
+                "reason": "The actual output correctly states that the Nusretiye Mosque retains a Baroque style, aligning with the expected output, though it could provide more detail."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.2857142857142857,
+                "reason": "F1: 0.29 (Precision: 0.17, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "What university did the last Detroit Pistons player to wear the number retired in honor of a player nicknamed \"The Worm\" attend?",
+        "answer": "The last Detroit Pistons player to wear the number 10, which is retired in honor of Dennis Rodman, who was nicknamed \"The Worm,\" attended Southeastern Oklahoma State University.",
+        "golden_answer": "georgetown university",
+        "metrics": {
+            "correctness": {
+                "score": 0.078871888947064,
+                "reason": "The actual output incorrectly states Southeastern Oklahoma State University instead of Georgetown University, directly contradicting the expected output."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.06666666666666667,
+                "reason": "F1: 0.07 (Precision: 0.04, Recall: 0.50)"
+            }
+        }
+    },
+    {
+        "question": "The Atik Valide Mosque and Valens Aqueduct are found in what country?",
+        "answer": "The Atik Valide Mosque and Valens Aqueduct are found in Turkey, specifically in Istanbul.",
+        "golden_answer": "turkey",
+        "metrics": {
+            "correctness": {
+                "score": 0.813120549426268,
+                "reason": "The actual output correctly identifies the country as Turkey and specifies Istanbul, but the expected output is too vague and lacks detail, resulting in a score reduction."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.13333333333333333,
+                "reason": "F1: 0.13 (Precision: 0.07, Recall: 1.00)"
+            }
+        }
+    },
+    {
+        "question": "Which of the four US Presidents who have been assinated was shot on the grounds of the Pan-American Exposition at the Temple of Music in Buffalo, New York?",
+        "answer": "The US President who was assassinated at the Pan-American Exposition at the Temple of Music in Buffalo, New York, was William McKinley. He was shot on September 6, 1901, and died a few days later from his wounds.",
+        "golden_answer": "william mckinley",
+        "metrics": {
+            "correctness": {
+                "score": 0.7812433329022708,
+                "reason": "The actual output accurately identifies William McKinley as the President, including the context of the assassination, but it provides more detail than the expected output requires, which only states the name."
+            },
+            "EM": {
+                "score": 0.0,
+                "reason": "Not an exact match"
+            },
+            "f1": {
+                "score": 0.1,
+                "reason": "F1: 0.10 (Precision: 0.05, Recall: 1.00)"
+            }
+        }
+    }
+]
