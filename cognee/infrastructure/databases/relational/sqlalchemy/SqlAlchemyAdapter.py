@@ -53,6 +53,7 @@ class SQLAlchemyAdapter:
             self.engine = create_async_engine(
                 connection_string,
                 poolclass=NullPool,
+                connect_args={"timeout": 30},
             )
         else:
             self.engine = create_async_engine(

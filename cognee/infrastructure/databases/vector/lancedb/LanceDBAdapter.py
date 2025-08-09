@@ -17,6 +17,8 @@ from ..models.ScoredResult import ScoredResult
 from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
 
+LANCEDB_LOCK = asyncio.Lock()
+
 
 class IndexSchema(DataPoint):
     """
@@ -127,12 +129,14 @@ class LanceDBAdapter(VectorDBInterface):
             payload: payload_schema
 
         if not await self.has_collection(collection_name):
-            connection = await self.get_connection()
-            return await connection.create_table(
-                name=collection_name,
-                schema=LanceDataPoint,
-                exist_ok=True,
-            )
+            async with LANCEDB_LOCK:
+                if not await self.has_collection(collection_name):
+                    connection = await self.get_connection()
+                    return await connection.create_table(
+                        name=collection_name,
+                        schema=LanceDataPoint,
+                        exist_ok=True,
+                    )
 
     async def get_collection(self, collection_name: str):
         if not await self.has_collection(collection_name):
@@ -145,10 +149,12 @@ class LanceDBAdapter(VectorDBInterface):
         payload_schema = type(data_points[0])
 
         if not await self.has_collection(collection_name):
-            await self.create_collection(
-                collection_name,
-                payload_schema,
-            )
+            async with LANCEDB_LOCK:
+                if not await self.has_collection(collection_name):
+                    await self.create_collection(
+                        collection_name,
+                        payload_schema,
+                    )
 
         collection = await self.get_collection(collection_name)
 
@@ -188,12 +194,13 @@ class LanceDBAdapter(VectorDBInterface):
             for (data_point_index, data_point) in enumerate(data_points)
         ]
 
-        await (
-            collection.merge_insert("id")
-            .when_matched_update_all()
-            .when_not_matched_insert_all()
-            .execute(lance_data_points)
-        )
+        async with LANCEDB_LOCK:
+            await (
+                collection.merge_insert("id")
+                .when_matched_update_all()
+                .when_not_matched_insert_all()
+                .execute(lance_data_points)
+            )
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         collection = await self.get_collection(collection_name)
