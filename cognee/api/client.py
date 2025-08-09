@@ -164,30 +164,20 @@ async def root():
 @app.get("/health")
 async def health_check():
     """
-    Basic health check endpoint for liveness probe.
+    Health check endpoint for liveness/readiness probes.
     """
     try:
         health_status = await health_checker.get_health_status(detailed=False)
-        if health_status.status == HealthStatus.UNHEALTHY:
-            return Response(status_code=503)
-        return Response(status_code=200)
-    except Exception:
-        return Response(status_code=503)
+        status_code = 503 if health_status.status == HealthStatus.UNHEALTHY else 200
 
-
-@app.get("/health/ready")
-async def readiness_check():
-    """
-    Readiness probe for Kubernetes deployments.
-    """
-    try:
-        health_status = await health_checker.get_health_status(detailed=False)
-        if health_status.status == HealthStatus.UNHEALTHY:
-            return JSONResponse(
-                status_code=503,
-                content={"status": "not ready", "reason": "critical services unhealthy"},
-            )
-        return JSONResponse(status_code=200, content={"status": "ready"})
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "status": "ready" if status_code == 200 else "not ready",
+                "health": health_status.status,
+                "version": health_status.version,
+            },
+        )
     except Exception as e:
         return JSONResponse(
             status_code=503,

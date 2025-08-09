@@ -114,12 +114,14 @@ class HealthChecker:
             config = get_graph_config()
             engine = await get_graph_engine()
 
-            # Test basic operation - just check if engine is accessible
-            if hasattr(engine, "health_check"):
-                await engine.health_check()
+            # Test basic operation with actual graph query
+            if hasattr(engine, "execute"):
+                # For SQL-like graph DBs (Neo4j, Memgraph)
+                await engine.execute("MATCH () RETURN count(*) LIMIT 1")
             elif hasattr(engine, "get_nodes"):
-                # Basic connectivity test
-                pass
+                # For other graph engines - try to get nodes
+                list(engine.get_nodes(limit=1))
+            # If engine exists but no test method, consider it healthy
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
@@ -190,20 +192,16 @@ class HealthChecker:
 
             config = get_llm_config()
 
-            # Simple configuration check - don't actually call the API
-            if config.llm_api_key or config.llm_provider == "ollama":
-                status = HealthStatus.HEALTHY
-                details = "Configuration valid"
-            else:
-                status = HealthStatus.DEGRADED
-                details = "No API key configured"
+            # Test actual API connection with minimal request
+            client = get_llm_client()
+            await client.acomplete("test", max_tokens=1)
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
-                status=status,
+                status=HealthStatus.HEALTHY,
                 provider=config.llm_provider,
                 response_time_ms=response_time,
-                details=details,
+                details="API responding",
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
@@ -211,7 +209,7 @@ class HealthChecker:
                 status=HealthStatus.DEGRADED,
                 provider="unknown",
                 response_time_ms=response_time,
-                details=f"Config check failed: {str(e)}",
+                details=f"API check failed: {str(e)}",
             )
 
     async def check_embedding_service(self) -> ComponentHealth:
@@ -222,15 +220,16 @@ class HealthChecker:
                 get_embedding_engine,
             )
 
-            # Just check if we can get the engine without calling it
-            get_embedding_engine()
+            # Test actual embedding generation with minimal text
+            engine = get_embedding_engine()
+            await engine.embed_text("test")
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
                 status=HealthStatus.HEALTHY,
                 provider="configured",
                 response_time_ms=response_time,
-                details="Embedding engine accessible",
+                details="Embedding generation working",
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
@@ -238,7 +237,7 @@ class HealthChecker:
                 status=HealthStatus.DEGRADED,
                 provider="unknown",
                 response_time_ms=response_time,
-                details=f"Embedding engine failed: {str(e)}",
+                details=f"Embedding test failed: {str(e)}",
             )
 
     async def get_health_status(self, detailed: bool = False) -> HealthResponse:
@@ -251,13 +250,12 @@ class HealthChecker:
             ("vector_db", self.check_vector_db()),
             ("graph_db", self.check_graph_db()),
             ("file_storage", self.check_file_storage()),
-        ]
-
-        # Non-critical services (only for detailed checks)
-        non_critical_checks = [
             ("llm_provider", self.check_llm_provider()),
             ("embedding_service", self.check_embedding_service()),
         ]
+
+        # Non-critical services (only for detailed checks)
+        non_critical_checks = []
 
         # Run critical checks
         critical_results = await asyncio.gather(
@@ -275,8 +273,8 @@ class HealthChecker:
             else:
                 components[name] = result
 
-        # Run non-critical checks if detailed
-        if detailed:
+        # Run non-critical checks if detailed (currently none)
+        if detailed and non_critical_checks:
             non_critical_results = await asyncio.gather(
                 *[check for _, check in non_critical_checks], return_exceptions=True
             )
@@ -296,7 +294,15 @@ class HealthChecker:
         critical_unhealthy = any(
             comp.status == HealthStatus.UNHEALTHY
             for name, comp in components.items()
-            if name in ["relational_db", "vector_db", "graph_db", "file_storage"]
+            if name
+            in [
+                "relational_db",
+                "vector_db",
+                "graph_db",
+                "file_storage",
+                "llm_provider",
+                "embedding_service",
+            ]
         )
 
         has_degraded = any(comp.status == HealthStatus.DEGRADED for comp in components.values())
