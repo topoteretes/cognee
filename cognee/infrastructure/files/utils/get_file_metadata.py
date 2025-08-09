@@ -5,6 +5,7 @@ from typing import BinaryIO, TypedDict
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.utils.get_file_content_hash import get_file_content_hash
 from .guess_file_type import guess_file_type
+from pathlib import Path
 
 logger = get_logger("FileMetadata")
 
@@ -55,7 +56,7 @@ async def get_file_metadata(file: BinaryIO) -> FileMetadata:
     file_type = guess_file_type(file)
 
     file_path = getattr(file, "name", None) or getattr(file, "full_name", None)
-    file_name = str(file_path).split("/")[-1].split(".")[0] if file_path else None
+    file_name = Path(file_path).stem if file_path else None
 
     # Get file size
     pos = file.tell()  # remember current pointer
