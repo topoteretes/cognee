@@ -353,7 +353,7 @@ def get_datasets_router() -> APIRouter:
 
     @router.get("/status", response_model=dict[str, PipelineRunStatus])
     async def get_dataset_status(
-        datasets: Annotated[List[UUID], Query(alias="dataset")] = None,
+        datasets: Annotated[List[UUID], Query(alias="dataset")] = [],
         user: User = Depends(get_authenticated_user),
     ):
         """

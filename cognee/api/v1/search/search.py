@@ -71,6 +71,12 @@ async def search(
             Best for: Advanced users, specific graph traversals, debugging.
             Returns: Raw graph query results.
 
+        **FEELING_LUCKY**:
+            Intelligently selects and runs the most appropriate search type.
+            Best for: General-purpose queries or when you're unsure which search type is best.
+            Returns: The results from the automatically selected search type.
+
+
     Args:
         query_text: Your question or search query in natural language.
             Examples:
@@ -119,6 +125,9 @@ async def search(
             **CODE**:
                 [List of structured code information with context]
 
+            **FEELING_LUCKY**:
+                [List of results in the format of the search type that is automatically selected]
+
 
 
 
@@ -130,6 +139,7 @@ async def search(
         - **CHUNKS**: Fastest, pure vector similarity search without LLM
         - **SUMMARIES**: Fast, returns pre-computed summaries
         - **CODE**: Medium speed, specialized for code understanding
+        - **FEELING_LUCKY**: Variable speed, uses LLM + search type selection intelligently
         - **top_k**: Start with 10, increase for comprehensive analysis (max 100)
         - **datasets**: Specify datasets to improve speed and relevance
 

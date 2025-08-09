@@ -16,7 +16,11 @@ from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.authentication.default.default_jwt_strategy import DefaultJWTStrategy
-from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunInfo
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunCompleted,
+    PipelineRunInfo,
+    PipelineRunErrored,
+)
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     get_from_queue,
     initialize_queue,
@@ -105,6 +109,9 @@ def get_cognify_router() -> APIRouter:
                 datasets, user, run_in_background=payload.run_in_background
             )
 
+            # If any cognify run errored return JSONResponse with proper error status code
+            if any(isinstance(v, PipelineRunErrored) for v in cognify_run.values()):
+                return JSONResponse(status_code=420, content=cognify_run)
             return cognify_run
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})

@@ -26,8 +26,8 @@ async def test_deduplication():
     explanation_file_path2 = os.path.join(
         pathlib.Path(__file__).parent, "test_data/Natural_language_processing_copy.txt"
     )
-    await cognee.add([explanation_file_path], dataset_name)
-    await cognee.add([explanation_file_path2], dataset_name2)
+    await cognee.add([explanation_file_path], dataset_name, incremental_loading=False)
+    await cognee.add([explanation_file_path2], dataset_name2, incremental_loading=False)
 
     result = await relational_engine.get_all_data_from_table("data")
     assert len(result) == 1, "More than one data entity was found."
