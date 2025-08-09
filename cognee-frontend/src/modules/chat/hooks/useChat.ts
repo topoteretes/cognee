@@ -14,7 +14,7 @@ const fetchMessages = () => {
     .then(response => response.json());
 };
 
-const sendMessage = (message: string, searchType: string) => {
+const sendMessage = (message: string, searchType: string, topK: number = 10) => {
   return fetch("/v1/search/", {
     method: "POST",
     headers: {
@@ -24,6 +24,7 @@ const sendMessage = (message: string, searchType: string) => {
       query: message,
       searchType,
       datasets: ["main_dataset"],
+      top_k: topK,
     }),
   })
     .then(response => response.json());
@@ -45,7 +46,7 @@ export default function useChat(dataset: Dataset) {
     return setMessages(data);
   }, []);
 
-  const handleMessageSending = useCallback((message: string, searchType: string) => {
+  const handleMessageSending = useCallback((message: string, searchType: string, topK: number = 10) => {
     const sentMessageId = v4();
 
     setMessages((messages) => [
@@ -59,7 +60,7 @@ export default function useChat(dataset: Dataset) {
 
     disableSearchRun();
 
-    return sendMessage(message, searchType)
+    return sendMessage(message, searchType, topK)
       .then(newMessages => {
         setMessages((messages) => [
           ...messages,
