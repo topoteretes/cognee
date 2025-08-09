@@ -1,5 +1,6 @@
 from os import path
 from io import BufferedReader
+from pathlib import Path
 from typing import Union, BinaryIO
 from tempfile import SpooledTemporaryFile
 
@@ -12,7 +13,7 @@ def classify(data: Union[str, BinaryIO], filename: str = None):
         return TextData(data)
 
     if isinstance(data, BufferedReader) or isinstance(data, SpooledTemporaryFile):
-        return BinaryData(data, filename if filename else str(data.name).split("/")[-1])
+        return BinaryData(data, filename if filename else Path(data.name).name)
 
     try:
         from s3fs import S3File

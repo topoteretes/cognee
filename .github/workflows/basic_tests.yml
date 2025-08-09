@@ -73,7 +73,7 @@ jobs:
 
   unit-tests:
     name: Run Unit Tests
-    runs-on: ubuntu-22.04
+    runs-on: [ubuntu-22.04, windows-2022]
     env:
       LLM_PROVIDER: openai
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
