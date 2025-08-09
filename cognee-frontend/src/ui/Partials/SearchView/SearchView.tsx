@@ -91,7 +91,7 @@ export default function SearchView() {
 
     setSearchInputValue("");
     
-    // Pass topK to sendMessage
+    
     sendMessage(chatInput, searchType, topK)
       .then(scrollToBottom)
   }, [scrollToBottom, sendMessage, searchInputValue, topK]);
