@@ -14,7 +14,7 @@ const fetchMessages = () => {
     .then(response => response.json());
 };
 
-const sendMessage = (message: string, searchType: string, topK: number = 10) => {
+const sendMessage = (message: string, searchType: string, topK: number) => {
   return fetch("/v1/search/", {
     method: "POST",
     headers: {
@@ -46,7 +46,7 @@ export default function useChat(dataset: Dataset) {
     return setMessages(data);
   }, []);
 
-  const handleMessageSending = useCallback((message: string, searchType: string, topK: number = 10) => {
+  const handleMessageSending = useCallback((message: string, searchType: string, topK: number) => {
     const sentMessageId = v4();
 
     setMessages((messages) => [

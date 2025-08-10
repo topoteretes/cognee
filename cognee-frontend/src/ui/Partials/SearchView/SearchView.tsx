@@ -77,14 +77,20 @@ export default function SearchView() {
 
   const handleChatMessageSubmit = useCallback((event: React.FormEvent<SearchFormPayload>) => {
     event.preventDefault();
+
     const formElements = event.currentTarget;
     const searchType = formElements.searchType.value;
+
     const chatInput = searchInputValue.trim();
+
     if (chatInput === "") {
       return;
     }
+
     scrollToBottom();
+
     setSearchInputValue("");
+    
     // Pass topK to sendMessage
     sendMessage(chatInput, searchType, topK)
       .then(scrollToBottom)
@@ -131,16 +137,19 @@ export default function SearchView() {
             className="resize-none min-h-14 max-h-96 overflow-y-auto"
           />
           <div className="flex flex-row items-center justify-between gap-4">
-            <div className="flex flex-row items-center gap-2">
-              <label className="text-gray-600 whitespace-nowrap">Search type:</label>
-              <Select name="searchType" defaultValue={searchOptions[0].value} className="max-w-2xs">
-                {searchOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </Select>
-              {/* Add top_k input here */}
-              <label className="text-gray-600 whitespace-nowrap" title="Controls how many results to return. Smaller = focused, larger = broader graph exploration.">
-                Max results:
+            <div className="flex flex-row items-center gap-4">
+              <div className="flex flex-row items-center gap-2">
+                <label className="text-gray-600 whitespace-nowrap">Search type:</label>
+                <Select name="searchType" defaultValue={searchOptions[0].value} className="max-w-2xs">
+                  {searchOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </Select>
+              </div>
+              <div className="flex flex-row items-center gap-2">
+                <label className="text-gray-600 whitespace-nowrap" title="Controls how many results to return. Smaller = focused, larger = broader graph exploration.">
+                  Max results:
+                </label>
                 <Input
                   type="number"
                   name="topK"
@@ -148,10 +157,10 @@ export default function SearchView() {
                   max={100}
                   value={topK}
                   onChange={handleTopKChange}
-                  className="w-20 ml-2"
+                  className="w-20"
                   title="Controls how many results to return. Smaller = focused, larger = broader graph exploration."
                 />
-              </label>
+              </div>
             </div>
             <CTAButton disabled={isSearchRunning} type="submit">
               {isSearchRunning? "Searching..." : "Search"}
