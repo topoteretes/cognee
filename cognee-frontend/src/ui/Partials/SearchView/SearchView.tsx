@@ -77,14 +77,20 @@ export default function SearchView() {
 
   const handleChatMessageSubmit = useCallback((event: React.FormEvent<SearchFormPayload>) => {
     event.preventDefault();
+
     const formElements = event.currentTarget;
     const searchType = formElements.searchType.value;
+
     const chatInput = searchInputValue.trim();
+
     if (chatInput === "") {
       return;
     }
+
     scrollToBottom();
+
     setSearchInputValue("");
+    
     // Pass topK to sendMessage
     sendMessage(chatInput, searchType, topK)
       .then(scrollToBottom)
