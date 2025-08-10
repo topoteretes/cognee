@@ -27,13 +27,28 @@ Notes:
 - Can only be used to migrate to newer Kuzu versions, from 0.11.0 onwards
 """
 
-import tempfile
-import sys
-import struct
-import shutil
-import subprocess
 import argparse
 import os
+import shutil
+import struct
+import subprocess
+import sys
+import tempfile
+from typing import Any, Optional
+
+
+# Lazy-import s3fs via our storage adapter only when needed, so local-only runs
+# don't require S3 credentials or dependencies at import time.
+def _is_s3_path(path: str) -> bool:
+    return path.startswith("s3://")
+
+
+def _get_s3_client() -> Any:  # Returns configured s3fs client via project storage adapter
+    from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+
+    storage: Any = S3FileStorage("")
+    client: Any = storage.s3  # type: ignore[attr-defined]
+    return client
 
 
 kuzu_version_mapping = {
@@ -46,38 +61,56 @@ kuzu_version_mapping = {
 }
 
 
-def read_kuzu_storage_version(kuzu_db_path: str) -> int:
+def read_kuzu_storage_version(kuzu_db_path: str) -> str:
     """
-    Reads the Kùzu storage version code from the first catalog.bin file bytes.
+    Read the Kuzu storage version from the first bytes of catalog.kz and map it
+    to a human-readable Kuzu semantic version string (e.g. "0.9.0").
 
-    :param kuzu_db_path: Path to the Kuzu database file/directory.
-    :return: Storage version code as an integer.
+    :param kuzu_db_path: Path/URI (local or s3://) to the Kuzu database file/directory.
+    :return: Semantic version string (e.g. "0.9.0").
     """
-    if os.path.isdir(kuzu_db_path):
-        kuzu_version_file_path = os.path.join(kuzu_db_path, "catalog.kz")
-        if not os.path.isfile(kuzu_version_file_path):
-            raise FileExistsError("Kuzu catalog.kz file does not exist")
+    if _is_s3_path(kuzu_db_path):
+        s3 = _get_s3_client()
+        # Determine whether the remote path is a directory or file
+        version_key = kuzu_db_path
+        try:
+            if s3.isdir(kuzu_db_path):
+                version_key = kuzu_db_path.rstrip("/") + "/catalog.kz"
+            # Open directly from S3 without downloading the entire DB
+            with s3.open(version_key, "rb") as f:
+                f.seek(4)
+                data = f.read(8)
+        except FileNotFoundError:
+            raise FileExistsError("Kuzu catalog.kz file does not exist on S3")
     else:
-        kuzu_version_file_path = kuzu_db_path
+        if os.path.isdir(kuzu_db_path):
+            kuzu_version_file_path = os.path.join(kuzu_db_path, "catalog.kz")
+            if not os.path.isfile(kuzu_version_file_path):
+                raise FileExistsError("Kuzu catalog.kz file does not exist")
+        else:
+            kuzu_version_file_path = kuzu_db_path
 
-    with open(kuzu_version_file_path, "rb") as f:
-        # Skip the 3-byte magic "KUZ" and one byte of padding
-        f.seek(4)
-        # Read the next 8 bytes as a little-endian unsigned 64-bit integer
-        data = f.read(8)
-        if len(data) < 8:
-            raise ValueError(
-                f"File '{kuzu_version_file_path}' does not contain a storage version code."
-            )
-        version_code = struct.unpack("<Q", data)[0]
+        with open(kuzu_version_file_path, "rb") as f:
+            # Skip the 3-byte magic "KUZ" and one byte of padding
+            f.seek(4)
+            # Read the next 8 bytes as a little-endian unsigned 64-bit integer
+            data = f.read(8)
+            if len(data) < 8:
+                raise ValueError(
+                    f"File '{kuzu_version_file_path}' does not contain a storage version code."
+                )
+
+    if len(data) < 8:
+        raise ValueError("catalog.kz does not contain a storage version code.")
+    version_code = struct.unpack("<Q", data)[0]
 
     if kuzu_version_mapping.get(version_code):
         return kuzu_version_mapping[version_code]
     else:
-        ValueError("Could not map version_code to proper Kuzu version.")
+        raise ValueError("Could not map version_code to proper Kuzu version.")
 
 
-def ensure_env(version: str, export_dir) -> str:
+def ensure_env(version: str, export_dir: str) -> str:
     """
     Create (if needed) a venv at .kuzu_envs/{version} and install kuzu=={version}.
     Returns the path to the venv's python executable.
@@ -119,7 +152,14 @@ conn.execute(r\"\"\"{cypher}\"\"\")
         sys.exit(proc.returncode)
 
 
-def kuzu_migration(new_db, old_db, new_version, old_version=None, overwrite=None, delete_old=None):
+def kuzu_migration(
+    new_db: str,
+    old_db: str,
+    new_version: str,
+    old_version: Optional[str] = None,
+    overwrite: Optional[bool] = None,
+    delete_old: Optional[bool] = None,
+) -> None:
     """
     Main migration function that handles the complete migration process.
     """
@@ -131,23 +171,52 @@ def kuzu_migration(new_db, old_db, new_version, old_version=None, overwrite=None
     if not old_version:
         old_version = read_kuzu_storage_version(old_db)
 
-    # Check if old database exists
-    if not os.path.exists(old_db):
-        print(f"Source database '{old_db}' does not exist.", file=sys.stderr)
-        sys.exit(1)
+    # Check if old database exists (local or S3)
+    if _is_s3_path(old_db):
+        s3 = _get_s3_client()
+        if not (s3.exists(old_db) or s3.exists(old_db.rstrip("/") + "/")):
+            print(f"Source database '{old_db}' does not exist.", file=sys.stderr)
+            sys.exit(1)
+    else:
+        if not os.path.exists(old_db):
+            print(f"Source database '{old_db}' does not exist.", file=sys.stderr)
+            sys.exit(1)
 
     # Prepare target - ensure parent directory exists but remove target if it exists
     parent_dir = os.path.dirname(new_db)
-    if parent_dir:
-        os.makedirs(parent_dir, exist_ok=True)
-
-    if os.path.exists(new_db):
-        raise FileExistsError(
-            "File already exists at new database location, remove file or change new database file path to continue"
-        )
+    if _is_s3_path(new_db):
+        # For S3 we don't create directories locally; just ensure the key doesn't already exist
+        s3 = _get_s3_client()
+        if s3.exists(new_db) or s3.exists(new_db.rstrip("/") + "/"):
+            raise FileExistsError(
+                "File already exists at new database location on S3; remove it or change new database path to continue"
+            )
+    else:
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
+        if os.path.exists(new_db):
+            raise FileExistsError(
+                "File already exists at new database location, remove file or change new database file path to continue"
+            )
 
     # Use temp directory for all processing, it will be cleaned up after with statement
     with tempfile.TemporaryDirectory() as export_dir:
+        is_old_s3 = _is_s3_path(old_db)
+        is_new_s3 = _is_s3_path(new_db)
+
+        # If old DB is on S3, download it locally first.
+        local_old_db = old_db
+        local_new_db = new_db
+        if is_old_s3:
+            s3 = _get_s3_client()
+            local_old_db = os.path.join(export_dir, "old_kuzu_db")
+            # Download either a file or a directory recursively
+            print(f"⬇️  Downloading old DB from S3 → {local_old_db}", file=sys.stderr)
+            s3.get(old_db, local_old_db, recursive=True)
+
+        if is_new_s3:
+            # Always stage new DB locally, then upload after migration
+            local_new_db = os.path.join(export_dir, "new_kuzu_db")
         # Set up environments
         print(f"Setting up Kuzu {old_version} environment...", file=sys.stderr)
         old_py = ensure_env(old_version, export_dir)
@@ -156,7 +225,7 @@ def kuzu_migration(new_db, old_db, new_version, old_version=None, overwrite=None
 
         export_file = os.path.join(export_dir, "kuzu_export")
         print(f"Exporting old DB → {export_dir}", file=sys.stderr)
-        run_migration_step(old_py, old_db, f"EXPORT DATABASE '{export_file}'")
+        run_migration_step(old_py, local_old_db, f"EXPORT DATABASE '{export_file}'")
         print("Export complete.", file=sys.stderr)
 
         # Check if export files were created and have content
@@ -164,17 +233,36 @@ def kuzu_migration(new_db, old_db, new_version, old_version=None, overwrite=None
         if not os.path.exists(schema_file) or os.path.getsize(schema_file) == 0:
             raise ValueError(f"Schema file not found: {schema_file}")
 
-        print(f"Importing into new DB at {new_db}", file=sys.stderr)
-        run_migration_step(new_py, new_db, f"IMPORT DATABASE '{export_file}'")
+        print(f"Importing into new DB at {local_new_db}", file=sys.stderr)
+        run_migration_step(new_py, local_new_db, f"IMPORT DATABASE '{export_file}'")
         print("Import complete.", file=sys.stderr)
 
-    # Rename new kuzu database to old kuzu database name if enabled
+        # If the target is S3, upload the migrated DB now
+        if is_new_s3:
+            # Remove kuzu lock from migrated DB before upload if present
+            lock_file = local_new_db + ".lock"
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+
+            print(f"⬆️  Uploading new DB to S3: {new_db}", file=sys.stderr)
+            s3 = _get_s3_client()
+            s3.put(local_new_db, new_db, recursive=True)
+
+    # Normalize flags
+    overwrite = bool(overwrite)
+    delete_old = bool(delete_old)
+
+    # Rename/move results into place if requested
     if overwrite or delete_old:
-        # Remove kuzu lock from migrated DB
-        lock_file = new_db + ".lock"
-        if os.path.exists(lock_file):
-            os.remove(lock_file)
-        rename_databases(old_db, old_version, new_db, delete_old)
+        if _is_s3_path(new_db) or _is_s3_path(old_db):
+            # S3-aware rename
+            _s3_rename_databases(old_db, old_version, new_db, delete_old)
+        else:
+            # Remove kuzu lock from migrated DB
+            lock_file = new_db + ".lock"
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+            rename_databases(old_db, old_version, new_db, delete_old)
 
     print("✅ Kuzu graph database migration finished successfully!")
 
@@ -222,6 +310,57 @@ def rename_databases(old_db: str, old_version: str, new_db: str, delete_old: boo
         if os.path.exists(src_new):
             os.rename(src_new, dst_new)
             print(f"Renamed '{src_new}' to '{dst_new}'", file=sys.stderr)
+
+
+def _s3_rename_databases(old_db: str, old_version: str, new_db: str, delete_old: bool):
+    """
+    Perform S3-equivalent of rename_databases: optionally back up the original old_db
+    to *_old_<version>, replace it with the new_db contents, and clean up.
+
+    This function handles both file-based and directory-based Kuzu databases by using
+    recursive copy and remove operations provided by s3fs.
+    """
+    s3 = _get_s3_client()
+
+    # Normalize paths (keep s3:// URIs as they are; s3fs supports them)
+    def _isdir(p: str) -> bool:
+        try:
+            return s3.isdir(p)
+        except FileNotFoundError:
+            return False
+
+    def _isfile(p: str) -> bool:
+        try:
+            return s3.isfile(p)
+        except FileNotFoundError:
+            return False
+
+    base_dir = os.path.dirname(old_db.rstrip("/"))
+    name = os.path.basename(old_db.rstrip("/"))
+    backup_database_name = f"{name}_old_" + old_version.replace(".", "_")
+    backup_base = base_dir + "/" + backup_database_name
+
+    # Back up or delete the original old_db
+    if _isfile(old_db):
+        if not delete_old:
+            s3.copy(old_db, backup_base, recursive=True)
+            print(f"Copied '{old_db}' to '{backup_base}' on S3", file=sys.stderr)
+        s3.rm(old_db, recursive=True)
+    elif _isdir(old_db):
+        if not delete_old:
+            s3.copy(old_db, backup_base, recursive=True)
+            print(f"Copied directory '{old_db}' to '{backup_base}' on S3", file=sys.stderr)
+        s3.rm(old_db, recursive=True)
+    else:
+        print(f"Original database path '{old_db}' not found on S3 for renaming.", file=sys.stderr)
+        sys.exit(1)
+
+    # Move new into place under the old name
+    target_path = base_dir + "/" + name
+    s3.copy(new_db, target_path, recursive=True)
+    print(f"Copied '{new_db}' to '{target_path}' on S3", file=sys.stderr)
+    # Remove the staging 'new_db' key
+    s3.rm(new_db, recursive=True)
 
 
 def main():
