@@ -57,7 +57,7 @@ class CogneeTestClient:
             print("   Some tests may fail without proper LLM API configuration.")
             print("   Set OPENAI_API_KEY environment variable for full functionality.")
         else:
-            print(f"✅ API key configured (key ending in: ...{api_key[-4:]})")
+            print("✅ API key configured.")
 
         # Create temporary test files
         self.test_data_dir = tempfile.mkdtemp(prefix="cognee_test_")
