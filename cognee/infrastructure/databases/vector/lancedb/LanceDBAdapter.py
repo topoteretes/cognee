@@ -17,8 +17,6 @@ from ..models.ScoredResult import ScoredResult
 from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
 
-LANCEDB_LOCK = asyncio.Lock()
-
 
 class IndexSchema(DataPoint):
     """
@@ -53,6 +51,7 @@ class LanceDBAdapter(VectorDBInterface):
         self.url = url
         self.api_key = api_key
         self.embedding_engine = embedding_engine
+        self.VECTOR_DB_LOCK = asyncio.Lock()
 
     async def get_connection(self):
         """
@@ -129,7 +128,7 @@ class LanceDBAdapter(VectorDBInterface):
             payload: payload_schema
 
         if not await self.has_collection(collection_name):
-            async with LANCEDB_LOCK:
+            async with self.VECTOR_DB_LOCK:
                 if not await self.has_collection(collection_name):
                     connection = await self.get_connection()
                     return await connection.create_table(
@@ -149,7 +148,7 @@ class LanceDBAdapter(VectorDBInterface):
         payload_schema = type(data_points[0])
 
         if not await self.has_collection(collection_name):
-            async with LANCEDB_LOCK:
+            async with self.VECTOR_DB_LOCK:
                 if not await self.has_collection(collection_name):
                     await self.create_collection(
                         collection_name,
@@ -194,7 +193,7 @@ class LanceDBAdapter(VectorDBInterface):
             for (data_point_index, data_point) in enumerate(data_points)
         ]
 
-        async with LANCEDB_LOCK:
+        async with self.VECTOR_DB_LOCK:
             await (
                 collection.merge_insert("id")
                 .when_matched_update_all()
