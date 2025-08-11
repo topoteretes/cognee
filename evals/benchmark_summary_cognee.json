@@ -1,0 +1,94 @@
+[
+  {
+    "system": "Cognee Graph Completion CoT",
+    "Human-like Correctness": 0.925,
+    "Human-like Correctness Error": [
+      0.911,
+      0.94
+    ],
+    "DeepEval Correctness": 0.846,
+    "DeepEval Correctness Error": [
+      0.83,
+      0.863
+    ],
+    "DeepEval EM": 0.687,
+    "DeepEval EM Error": [
+      0.661,
+      0.717
+    ],
+    "DeepEval F1": 0.841,
+    "DeepEval F1 Error": [
+      0.821,
+      0.861
+    ]
+  },
+  {
+    "system": "Cognee Graph Completion Context Extension",
+    "Human-like Correctness": 0.871,
+    "Human-like Correctness Error": [
+      0.852,
+      0.891
+    ],
+    "DeepEval Correctness": 0.785,
+    "DeepEval Correctness Error": [
+      0.765,
+      0.805
+    ],
+    "DeepEval EM": 0.617,
+    "DeepEval EM Error": [
+      0.589,
+      0.645
+    ],
+    "DeepEval F1": 0.776,
+    "DeepEval F1 Error": [
+      0.755,
+      0.797
+    ]
+  },
+  {
+    "system": "Cognee Graph Completion",
+    "Human-like Correctness": 0.805,
+    "Human-like Correctness Error": [
+      0.783,
+      0.827
+    ],
+    "DeepEval Correctness": 0.743,
+    "DeepEval Correctness Error": [
+      0.723,
+      0.765
+    ],
+    "DeepEval EM": 0.596,
+    "DeepEval EM Error": [
+      0.569,
+      0.625
+    ],
+    "DeepEval F1": 0.724,
+    "DeepEval F1 Error": [
+      0.698,
+      0.749
+    ]
+  },
+  {
+    "system": "Cognee (Previous Non-Optimized Evaluation)",
+    "Human-like Correctness": 0.738,
+    "Human-like Correctness Error": [
+      0.626,
+      0.842
+    ],
+    "DeepEval Correctness": 0.569,
+    "DeepEval Correctness Error": [
+      0.494,
+      0.642
+    ],
+    "DeepEval EM": 0.04,
+    "DeepEval EM Error": [
+      0.0,
+      0.1
+    ],
+    "DeepEval F1": 0.203,
+    "DeepEval F1 Error": [
+      0.155,
+      0.255
+    ]
+  }
+]
