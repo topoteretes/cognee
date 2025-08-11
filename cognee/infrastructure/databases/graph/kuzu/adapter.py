@@ -41,10 +41,10 @@ class KuzuAdapter(GraphDBInterface):
         self.db: Optional[Database] = None
         self.connection: Optional[Connection] = None
         self.executor = ThreadPoolExecutor()
-        self.initialize_connection()
+        self._initialize_connection()
         self.KUZU_ASYNC_LOCK = asyncio.Lock()
 
-    def initialize_connection(self) -> None:
+    def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
         try:
             if "s3://" in self.db_path:
