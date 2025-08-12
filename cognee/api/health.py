@@ -51,7 +51,7 @@ class HealthChecker:
             engine = get_relational_engine()
 
             # Test connection by creating a session
-            session = await engine.get_session()
+            session = engine.get_session()
             if session:
                 await session.close()
 
@@ -64,6 +64,7 @@ class HealthChecker:
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
+            logger.error(f"Relational DB health check failed: {str(e)}", exc_info=True)
             return ComponentHealth(
                 status=HealthStatus.UNHEALTHY,
                 provider="unknown",
@@ -97,6 +98,7 @@ class HealthChecker:
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
+            logger.error(f"Vector DB health check failed: {str(e)}", exc_info=True)
             return ComponentHealth(
                 status=HealthStatus.UNHEALTHY,
                 provider="unknown",
@@ -118,9 +120,9 @@ class HealthChecker:
             if hasattr(engine, "execute"):
                 # For SQL-like graph DBs (Neo4j, Memgraph)
                 await engine.execute("MATCH () RETURN count(*) LIMIT 1")
-            elif hasattr(engine, "get_nodes"):
-                # For other graph engines - try to get nodes
-                list(engine.get_nodes(limit=1))
+            elif hasattr(engine, "query"):
+                # For other graph engines
+                engine.query("MATCH () RETURN count(*) LIMIT 1", {})
             # If engine exists but no test method, consider it healthy
 
             response_time = int((time.time() - start_time) * 1000)
@@ -132,6 +134,7 @@ class HealthChecker:
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
+            logger.error(f"Graph DB health check failed: {str(e)}", exc_info=True)
             return ComponentHealth(
                 status=HealthStatus.UNHEALTHY,
                 provider="unknown",
@@ -194,7 +197,7 @@ class HealthChecker:
 
             # Test actual API connection with minimal request
             client = get_llm_client()
-            await client.acomplete("test", max_tokens=1)
+            await client.show_prompt("test", "test")
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
@@ -205,6 +208,7 @@ class HealthChecker:
             )
         except Exception as e:
             response_time = int((time.time() - start_time) * 1000)
+            logger.error(f"LLM provider health check failed: {str(e)}", exc_info=True)
             return ComponentHealth(
                 status=HealthStatus.DEGRADED,
                 provider="unknown",
@@ -245,6 +249,15 @@ class HealthChecker:
         components = {}
 
         # Critical services
+        critical_components = [
+            "relational_db",
+            "vector_db",
+            "graph_db",
+            "file_storage",
+            "llm_provider",
+            "embedding_service",
+        ]
+
         critical_checks = [
             ("relational_db", self.check_relational_db()),
             ("vector_db", self.check_vector_db()),
@@ -294,15 +307,7 @@ class HealthChecker:
         critical_unhealthy = any(
             comp.status == HealthStatus.UNHEALTHY
             for name, comp in components.items()
-            if name
-            in [
-                "relational_db",
-                "vector_db",
-                "graph_db",
-                "file_storage",
-                "llm_provider",
-                "embedding_service",
-            ]
+            if name in critical_components
         )
 
         has_degraded = any(comp.status == HealthStatus.DEGRADED for comp in components.values())
