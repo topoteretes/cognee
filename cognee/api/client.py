@@ -342,12 +342,14 @@ async def _check_llm_provider() -> dict:
     except Exception as exc:
         duration = int((time.perf_counter() - started) * 1000)
         # Non-critical -> degraded when failing
-        return {
-            "status": "degraded",
-            "provider": llm_provider,
-            "response_time_ms": duration,
-            "details": f"LLM client initialization failed: {type(exc).__name__}",
-        }
+except Exception as exc:
+    duration = int((time.perf_counter() - started) * 1000)
+    return {
+        "status": "degraded",
+        "provider": emb_provider,
+        "response_time_ms": duration,
+        "details": f"Embedding check failed: {type(exc).__name__}",
+    }
 
 
 async def _check_embedding_service() -> dict:
