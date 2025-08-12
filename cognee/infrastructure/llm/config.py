@@ -1,8 +1,9 @@
 import os
-from typing import Optional
+from typing import Optional, ClassVar
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
+from baml_py import ClientRegistry
 
 
 class LLMConfig(BaseSettings):
@@ -31,6 +32,7 @@ class LLMConfig(BaseSettings):
     - ensure_env_vars_for_ollama
     """
 
+    structured_output_framework: str = "instructor"
     llm_provider: str = "openai"
     llm_model: str = "gpt-4o-mini"
     llm_endpoint: str = ""
@@ -39,6 +41,14 @@ class LLMConfig(BaseSettings):
     llm_temperature: float = 0.0
     llm_streaming: bool = False
     llm_max_tokens: int = 16384
+
+    baml_llm_provider: str = "openai"
+    baml_llm_model: str = "gpt-4o-mini"
+    baml_llm_endpoint: str = ""
+    baml_llm_api_key: Optional[str] = None
+    baml_llm_temperature: float = 0.0
+    baml_llm_api_version: str = ""
+
     transcription_model: str = "whisper-1"
     graph_prompt_path: str = "generate_graph_prompt.txt"
     llm_rate_limit_enabled: bool = False
@@ -52,7 +62,25 @@ class LLMConfig(BaseSettings):
     fallback_endpoint: str = ""
     fallback_model: str = ""
 
+    baml_registry: ClassVar[ClientRegistry] = ClientRegistry()
+
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
+
+    def model_post_init(self, __context) -> None:
+        """Initialize the BAML registry after the model is created."""
+        self.baml_registry.add_llm_client(
+            name=self.baml_llm_provider,
+            provider=self.baml_llm_provider,
+            options={
+                "model": self.baml_llm_model,
+                "temperature": self.baml_llm_temperature,
+                "api_key": self.baml_llm_api_key,
+                "base_url": self.baml_llm_endpoint,
+                "api_version": self.baml_llm_api_version,
+            },
+        )
+        # Sets the primary client
+        self.baml_registry.set_primary(self.baml_llm_provider)
 
     @model_validator(mode="after")
     def ensure_env_vars_for_ollama(self) -> "LLMConfig":

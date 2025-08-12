@@ -30,6 +30,7 @@ class GraphConfig(BaseSettings):
 
     graph_database_provider: str = "kuzu"
     graph_database_url: str = ""
+    graph_database_name: str = ""
     graph_database_username: str = ""
     graph_database_password: str = ""
     graph_database_port: int = 123
@@ -57,6 +58,7 @@ class GraphConfig(BaseSettings):
             values.graph_file_path = os.path.join(databases_directory_path, values.graph_filename)
 
         return values
+
 
 
 @lru_cache

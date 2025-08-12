@@ -115,6 +115,34 @@ def create_vector_engine(
             embedding_engine=embedding_engine,
         )
 
+    elif vector_db_provider == "neptune_analytics":
+        try:
+            from langchain_aws import NeptuneAnalyticsGraph
+        except ImportError:
+            raise ImportError(
+                "langchain_aws is not installed. Please install it with 'pip install langchain_aws'"
+            )
+
+        if not vector_db_url:
+            raise EnvironmentError("Missing Neptune endpoint.")
+
+        from cognee.infrastructure.databases.hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
+            NeptuneAnalyticsAdapter,
+            NEPTUNE_ANALYTICS_ENDPOINT_URL,
+        )
+
+        if not vector_db_url.startswith(NEPTUNE_ANALYTICS_ENDPOINT_URL):
+            raise ValueError(
+                f"Neptune endpoint must have the format '{NEPTUNE_ANALYTICS_ENDPOINT_URL}<GRAPH_ID>'"
+            )
+
+        graph_identifier = vector_db_url.replace(NEPTUNE_ANALYTICS_ENDPOINT_URL, "")
+
+        return NeptuneAnalyticsAdapter(
+            graph_id=graph_identifier,
+            embedding_engine=embedding_engine,
+        )
+
     else:
         from .lancedb.LanceDBAdapter import LanceDBAdapter
 

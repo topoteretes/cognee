@@ -13,7 +13,9 @@ class BaseConfig(BaseSettings):
     default_user_email: Optional[str] = os.getenv("DEFAULT_USER_EMAIL")
     default_user_password: Optional[str] = os.getenv("DEFAULT_USER_PASSWORD")
 
+
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
+
 
 
 @lru_cache

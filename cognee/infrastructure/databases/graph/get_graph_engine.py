@@ -29,6 +29,7 @@ def create_graph_engine(
     graph_database_provider,
     graph_file_path,
     graph_database_url="",
+    graph_database_name="",
     graph_database_username="",
     graph_database_password="",
     graph_database_port=None,
@@ -44,13 +45,13 @@ def create_graph_engine(
     -----------
 
         - graph_database_provider: The type of graph database provider to use (e.g., neo4j,
-          falkordb, kuzu, memgraph).
-        - graph_database_url: The URL for the graph database instance. Required for neo4j,
-          falkordb, and memgraph providers.
+          falkordb, kuzu).
+        - graph_database_url: The URL for the graph database instance. Required for neo4j
+          and falkordb providers.
         - graph_database_username: The username for authentication with the graph database.
-          Required for neo4j and memgraph providers.
+          Required for neo4j provider.
         - graph_database_password: The password for authentication with the graph database.
-          Required for neo4j and memgraph providers.
+          Required for neo4j provider.
         - graph_database_port: The port number for the graph database connection. Required
           for the falkordb provider.
         - graph_file_path: The filesystem path to the graph file. Required for the kuzu
@@ -82,6 +83,7 @@ def create_graph_engine(
             graph_database_url=graph_database_url,
             graph_database_username=graph_database_username or None,
             graph_database_password=graph_database_password or None,
+            graph_database_name=graph_database_name or None,
         )
 
     elif graph_database_provider == "falkordb":
@@ -118,17 +120,61 @@ def create_graph_engine(
             username=graph_database_username,
             password=graph_database_password,
         )
+    elif graph_database_provider == "neptune":
+        try:
+            from langchain_aws import NeptuneAnalyticsGraph
+        except ImportError:
+            raise ImportError(
+                "langchain_aws is not installed. Please install it with 'pip install langchain_aws'"
+            )
 
-    elif graph_database_provider == "memgraph":
         if not graph_database_url:
-            raise EnvironmentError("Missing required Memgraph URL.")
+            raise EnvironmentError("Missing Neptune endpoint.")
 
-        from .memgraph.memgraph_adapter import MemgraphAdapter
+        from .neptune_driver.adapter import NeptuneGraphDB, NEPTUNE_ENDPOINT_URL
 
-        return MemgraphAdapter(
-            graph_database_url=graph_database_url,
-            graph_database_username=graph_database_username or None,
-            graph_database_password=graph_database_password or None,
+        if not graph_database_url.startswith(NEPTUNE_ENDPOINT_URL):
+            raise ValueError(
+                f"Neptune endpoint must have the format {NEPTUNE_ENDPOINT_URL}<GRAPH_ID>"
+            )
+
+        graph_identifier = graph_database_url.replace(NEPTUNE_ENDPOINT_URL, "")
+
+        return NeptuneGraphDB(
+            graph_id=graph_identifier,
+        )
+
+    elif graph_database_provider == "neptune_analytics":
+        """
+        Creates a graph DB from config
+        We want to use a hybrid (graph & vector) DB and we should update this
+        to make a single instance of the hybrid configuration (with embedder)
+        instead of creating the hybrid object twice.
+        """
+        try:
+            from langchain_aws import NeptuneAnalyticsGraph
+        except ImportError:
+            raise ImportError(
+                "langchain_aws is not installed. Please install it with 'pip install langchain_aws'"
+            )
+
+        if not graph_database_url:
+            raise EnvironmentError("Missing Neptune endpoint.")
+
+        from ..hybrid.neptune_analytics.NeptuneAnalyticsAdapter import (
+            NeptuneAnalyticsAdapter,
+            NEPTUNE_ANALYTICS_ENDPOINT_URL,
+        )
+
+        if not graph_database_url.startswith(NEPTUNE_ANALYTICS_ENDPOINT_URL):
+            raise ValueError(
+                f"Neptune endpoint must have the format '{NEPTUNE_ANALYTICS_ENDPOINT_URL}<GRAPH_ID>'"
+            )
+
+        graph_identifier = graph_database_url.replace(NEPTUNE_ANALYTICS_ENDPOINT_URL, "")
+
+        return NeptuneAnalyticsAdapter(
+            graph_id=graph_identifier,
         )
 
     from .networkx.adapter import NetworkXAdapter
