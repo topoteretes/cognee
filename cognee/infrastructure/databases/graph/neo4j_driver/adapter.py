@@ -50,6 +50,7 @@ class Neo4jAdapter(GraphDBInterface):
         graph_database_url: str,
         graph_database_username: Optional[str] = None,
         graph_database_password: Optional[str] = None,
+        graph_database_name: Optional[str] = None,
         driver: Optional[Any] = None,
     ):
         # Only use auth if both username and password are provided
@@ -59,7 +60,7 @@ class Neo4jAdapter(GraphDBInterface):
         elif graph_database_username or graph_database_password:
             logger = get_logger(__name__)
             logger.warning("Neo4j credentials incomplete – falling back to anonymous connection.")
-
+        self.graph_database_name = graph_database_name
         self.driver = driver or AsyncGraphDatabase.driver(
             graph_database_url,
             auth=auth,
@@ -80,7 +81,7 @@ class Neo4jAdapter(GraphDBInterface):
         """
         Get a session for database operations.
         """
-        async with self.driver.session() as session:
+        async with self.driver.session(database=self.graph_database_name) as session:
             yield session
 
     @deadlock_retry()
@@ -1251,7 +1252,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return mandatory_metrics | optional_metrics
 
-    async def get_document_subgraph(self, content_hash: str):
+    async def get_document_subgraph(self, data_id: str):
         """
         Retrieve a subgraph related to a document identified by its content hash, including
         related entities and chunks.
@@ -1270,7 +1271,7 @@ class Neo4jAdapter(GraphDBInterface):
         query = """
         MATCH (doc)
         WHERE (doc:TextDocument OR doc:PdfDocument)
-        AND doc.name = 'text_' + $content_hash
+        AND doc.id = $data_id
 
         OPTIONAL MATCH (doc)<-[:is_part_of]-(chunk:DocumentChunk)
         OPTIONAL MATCH (chunk)-[:contains]->(entity:Entity)
@@ -1294,7 +1295,7 @@ class Neo4jAdapter(GraphDBInterface):
             collect(DISTINCT made_node) as made_from_nodes,
             collect(DISTINCT type) as orphan_types
         """
-        result = await self.query(query, {"content_hash": content_hash})
+        result = await self.query(query, {"data_id": data_id})
         return result[0] if result else None
 
     async def get_degree_one_nodes(self, node_type: str):

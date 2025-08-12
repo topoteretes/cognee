@@ -20,6 +20,7 @@ class BaseConfig(BaseSettings):
     def to_dict(self) -> dict:
         return {
             "data_root_directory": self.data_root_directory,
+            "system_root_directory": self.system_root_directory,
             "monitoring_tool": self.monitoring_tool,
         }
 
