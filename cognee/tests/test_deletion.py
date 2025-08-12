@@ -20,18 +20,11 @@ async def main():
         pathlib.Path(__file__).parent, "test_data/Natural_language_processing_copy.txt"
     )
 
-    audio_document = os.path.join(
-        pathlib.Path(__file__).parent, "test_data/text_to_speech.mp3"
-    )
+    audio_document = os.path.join(pathlib.Path(__file__).parent, "test_data/text_to_speech.mp3")
 
-    image_document = os.path.join(
-        pathlib.Path(__file__).parent, "test_data/example.png"
-    )
+    image_document = os.path.join(pathlib.Path(__file__).parent, "test_data/example.png")
 
-    unstructured_document = os.path.join(
-        pathlib.Path(__file__).parent, "test_data/example.pptx"
-    )
-
+    unstructured_document = os.path.join(pathlib.Path(__file__).parent, "test_data/example.pptx")
 
     text_document_as_literal = """
     1. Audi
@@ -55,7 +48,16 @@ async def main():
     ################### HARD DELETE
 
     # Add documents and get dataset information
-    add_result = await cognee.add([pdf_document, txt_document, text_document_as_literal, unstructured_document, audio_document, image_document])
+    add_result = await cognee.add(
+        [
+            pdf_document,
+            txt_document,
+            text_document_as_literal,
+            unstructured_document,
+            audio_document,
+            image_document,
+        ]
+    )
     dataset_id = add_result.dataset_id
 
     await cognee.cognify()
@@ -81,7 +83,16 @@ async def main():
     ################### SOFT DELETE
 
     # Add documents and get dataset information
-    add_result = await cognee.add([pdf_document, txt_document, text_document_as_literal, unstructured_document, audio_document, image_document])
+    add_result = await cognee.add(
+        [
+            pdf_document,
+            txt_document,
+            text_document_as_literal,
+            unstructured_document,
+            audio_document,
+            image_document,
+        ]
+    )
     dataset_id = add_result.dataset_id
 
     await cognee.cognify()
