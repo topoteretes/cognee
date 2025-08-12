@@ -32,26 +32,6 @@ class RelationalConfig(BaseSettings):
 
         return values
 
-    def to_dict(self) -> dict:
-        """
-        Return the database configuration as a dictionary.
-
-        Returns:
-        --------
-
-            - dict: A dictionary containing database configuration settings including db_path,
-              db_name, db_host, db_port, db_username, db_password, and db_provider.
-        """
-        return {
-            "db_path": self.db_path,
-            "db_name": self.db_name,
-            "db_host": self.db_host,
-            "db_port": self.db_port,
-            "db_username": self.db_username,
-            "db_password": self.db_password,
-            "db_provider": self.db_provider,
-        }
-
 
 @lru_cache
 def get_relational_config():
@@ -75,9 +55,6 @@ class MigrationConfig(BaseSettings):
     """
     Manage and configure migration settings for a database, inheriting from BaseSettings.
 
-    Public methods:
-    - to_dict: Convert the migration configuration to a dictionary format.
-
     Instance variables:
     - migration_db_path: Path to the migration database.
     - migration_db_name: Name of the migration database.
@@ -97,25 +74,6 @@ class MigrationConfig(BaseSettings):
     migration_db_provider: Union[str, None] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
-
-    def to_dict(self) -> dict:
-        """
-        Convert migration configuration to dictionary format.
-
-        Returns:
-        --------
-
-            - dict: A dictionary containing the migration configuration details.
-        """
-        return {
-            "migration_db_path": self.migration_db_path,
-            "migration_db_name": self.migration_db_name,
-            "migration_db_host": self.migration_db_host,
-            "migration_db_port": self.migration_db_port,
-            "migration_db_username": self.migration_db_username,
-            "migration_db_password": self.migration_db_password,
-            "migration_db_provider": self.migration_db_provider,
-        }
 
 
 @lru_cache

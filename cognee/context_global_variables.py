@@ -1,17 +1,19 @@
 import os
 from contextvars import ContextVar
-from typing import Union
+from typing import Optional, Union
 from uuid import UUID
 
 from cognee.base_config import get_base_config
+from cognee.infrastructure.databases.graph.config import GraphConfig
+from cognee.infrastructure.databases.vector.config import VectorConfig
 from cognee.infrastructure.databases.utils import get_or_create_dataset_database
-from cognee.infrastructure.files.storage.config import file_storage_config
+from cognee.infrastructure.files.storage.config import StorageConfig, file_storage_config
 from cognee.modules.users.methods import get_user
 
 # Note: ContextVar allows us to use different graph db configurations in Cognee
 #       for different async tasks, threads and processes
-vector_db_config = ContextVar("vector_db_config", default=None)
-graph_db_config = ContextVar("graph_db_config", default=None)
+vector_db_config = ContextVar[Optional[VectorConfig]]("vector_db_config", default=None)
+graph_db_config = ContextVar[Optional[GraphConfig]]("graph_db_config", default=None)
 
 
 async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):
@@ -51,24 +53,24 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     )
 
     # Set vector and graph database configuration based on dataset database information
-    vector_config = {
-        "vector_db_url": os.path.join(
-            databases_directory_path, dataset_database.vector_database_name
+    vector_config = VectorConfig(
+        vector_db_url=os.path.join(
+            databases_directory_path, str(dataset_database.vector_database_name)
         ),
-        "vector_db_key": "",
-        "vector_db_provider": "lancedb",
-    }
+        vector_db_key="",
+        vector_db_provider="lancedb",
+    )
 
-    graph_config = {
-        "graph_database_provider": "kuzu",
-        "graph_file_path": os.path.join(
-            databases_directory_path, dataset_database.graph_database_name
+    graph_config = GraphConfig(
+        graph_database_provider="kuzu",
+        graph_file_path=os.path.join(
+            databases_directory_path, str(dataset_database.graph_database_name)
         ),
-    }
+    )
 
-    storage_config = {
-        "data_root_directory": data_root_directory,
-    }
+    storage_config = StorageConfig(
+        data_root_directory=data_root_directory,
+    )
 
     # Use ContextVar to use these graph and vector configurations are used
     # in the current async context across Cognee

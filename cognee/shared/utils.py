@@ -1,18 +1,13 @@
 """This module contains utility functions for the cognee."""
 
 import os
+import pathlib
 import requests
-from datetime import datetime, timezone
-import networkx as nx
-import matplotlib.pyplot as plt
 import http.server
 import socketserver
-from threading import Thread
-import pathlib
 from uuid import uuid4
-
-from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.graph import get_graph_engine
+from threading import Thread
+from datetime import datetime, timezone
 
 
 # Analytics Proxy Url, currently hosted by Vercel

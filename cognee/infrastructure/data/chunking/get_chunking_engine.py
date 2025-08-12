@@ -13,4 +13,10 @@ def get_chunk_engine():
         Returns an instance of the chunking engine created based on the configuration
         settings.
     """
-    return create_chunking_engine(get_chunk_config().to_dict())
+    chunk_config = get_chunk_config()
+    return create_chunking_engine(
+        chunk_engine=chunk_config.chunk_engine,
+        chunk_size=chunk_config.chunk_size,
+        chunk_overlap=chunk_config.chunk_overlap,
+        chunk_strategy=chunk_config.chunk_strategy,
+    )

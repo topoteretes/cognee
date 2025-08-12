@@ -113,7 +113,7 @@ async def main():
         )
 
         await cognee.prune.prune_data()
-        data_root_directory = get_storage_config()["data_root_directory"]
+        data_root_directory = get_storage_config().data_root_directory
         assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
         await cognee.prune.prune_system(metadata=True)
