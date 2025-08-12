@@ -34,7 +34,7 @@ class PyPdfLoader(LoaderInterface):
 
         return False
 
-    async def load(self, file_path: str, strict: bool = False, **kwargs) -> Tuple[str, dict]:
+    async def load(self, file_path: str, strict: bool = False, **kwargs) -> str:
         """
         Load PDF file and extract text content.
 
@@ -78,29 +78,7 @@ class PyPdfLoader(LoaderInterface):
                 # Combine all content
                 full_content = "\n".join(content_parts)
 
-                # Gather metadata
-                metadata = {
-                    "name": os.path.basename(file_path),
-                    "size": os.path.getsize(file_path),
-                    "extension": "pdf",
-                    "pages": len(reader.pages),
-                    "pages_with_text": len(page_texts),
-                    "loader": self.loader_name,
-                }
-
-                # Add PDF metadata if available
-                if reader.metadata:
-                    metadata["pdf_metadata"] = {
-                        "title": reader.metadata.get("/Title", ""),
-                        "author": reader.metadata.get("/Author", ""),
-                        "subject": reader.metadata.get("/Subject", ""),
-                        "creator": reader.metadata.get("/Creator", ""),
-                        "producer": reader.metadata.get("/Producer", ""),
-                        "creation_date": str(reader.metadata.get("/CreationDate", "")),
-                        "modification_date": str(reader.metadata.get("/ModDate", "")),
-                    }
-
-                return full_content, metadata
+                return full_content
 
         except Exception as e:
             logger.error(f"Failed to process PDF {file_path}: {e}")

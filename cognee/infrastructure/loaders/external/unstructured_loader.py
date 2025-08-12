@@ -91,13 +91,6 @@ class UnstructuredLoader(LoaderInterface):
         try:
             logger.info(f"Processing document: {file_path}")
 
-            # Determine content type from file extension
-            file_ext = os.path.splitext(file_path)[1].lower()
-
-            # Get file size and basic info
-            file_size = os.path.getsize(file_path)
-            file_name = os.path.basename(file_path)
-
             # Set partitioning parameters
             partition_kwargs = {"filename": file_path, "strategy": strategy, **kwargs}
 
@@ -106,37 +99,16 @@ class UnstructuredLoader(LoaderInterface):
 
             # Process elements into text content
             text_parts = []
-            element_info = []
 
             for element in elements:
                 element_text = str(element).strip()
                 if element_text:
                     text_parts.append(element_text)
-                    element_info.append(
-                        {
-                            "type": type(element).__name__,
-                            "text": element_text[:100] + "..."
-                            if len(element_text) > 100
-                            else element_text,
-                        }
-                    )
 
             # Combine all text content
             full_content = "\n\n".join(text_parts)
 
-            # Gather metadata
-            metadata = {
-                "name": file_name,
-                "size": file_size,
-                "extension": file_ext,
-                "loader": self.loader_name,
-                "elements_count": len(elements),
-                "text_elements_count": len(text_parts),
-                "strategy": strategy,
-                "element_types": list(set(info["type"] for info in element_info)),
-            }
-
-            return full_content, metadata
+            return full_content
 
         except Exception as e:
             logger.error(f"Failed to process document {file_path}: {e}")

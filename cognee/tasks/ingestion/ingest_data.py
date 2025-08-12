@@ -73,6 +73,7 @@ async def ingest_data(
         dataset_data_map = {str(data.id): True for data in dataset_data}
 
         for data_item in data:
+            # Store all input data as text files in Cognee data storage
             file_path = await save_data_item_to_storage(data_item)
 
             # Ingest data and add metadata

@@ -74,16 +74,4 @@ class TextLoader(LoaderInterface):
         with open(file_path, "r", encoding=encoding) as f:
             content = f.read()
 
-        # Extract basic metadata
-        file_stat = os.stat(file_path)
-        metadata = {
-            "name": os.path.basename(file_path),
-            "size": file_stat.st_size,
-            "extension": os.path.splitext(file_path)[1],
-            "encoding": encoding,
-            "loader": self.loader_name,
-            "lines": len(content.splitlines()) if content else 0,
-            "characters": len(content),
-        }
-
-        return content, metadata
+        return content
