@@ -19,21 +19,21 @@ class UnstructuredLoader(LoaderInterface):
     @property
     def supported_extensions(self) -> List[str]:
         return [
-            ".docx",
-            ".doc",
-            ".odt",  # Word documents
-            ".xlsx",
-            ".xls",
-            ".ods",  # Spreadsheets
-            ".pptx",
-            ".ppt",
-            ".odp",  # Presentations
-            ".rtf",
-            ".html",
-            ".htm",  # Rich text and HTML
-            ".eml",
-            ".msg",  # Email formats
-            ".epub",  # eBooks
+            "docx",
+            "doc",
+            "odt",  # Word documents
+            "xlsx",
+            "xls",
+            "ods",  # Spreadsheets
+            "pptx",
+            "ppt",
+            "odp",  # Presentations
+            "rtf",
+            "html",
+            "htm",  # Rich text and HTML
+            "eml",
+            "msg",  # Email formats
+            "epub",  # eBooks
         ]
 
     @property
@@ -61,19 +61,13 @@ class UnstructuredLoader(LoaderInterface):
     def get_dependencies(self) -> List[str]:
         return ["unstructured>=0.10.0"]
 
-    def can_handle(self, file_path: str, mime_type: str = None) -> bool:
+    def can_handle(self, extension: str, mime_type: str) -> bool:
         """Check if file can be handled by this loader."""
         # Check file extension
-        file_ext = os.path.splitext(file_path)[1].lower()
-        if file_ext not in self.supported_extensions:
-            return False
+        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
+            return True
 
-        # Check MIME type if provided
-        if mime_type and mime_type not in self.supported_mime_types:
-            return False
-
-        # Validate dependencies
-        return self.validate_dependencies()
+        return False
 
     async def load(self, file_path: str, strategy: str = "auto", **kwargs) -> LoaderResult:
         """

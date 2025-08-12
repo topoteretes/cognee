@@ -44,13 +44,13 @@ class LoaderInterface(ABC):
         pass
 
     @abstractmethod
-    def can_handle(self, file_path: str, mime_type: str = None) -> bool:
+    def can_handle(self, extension: str, mime_type: str) -> bool:
         """
         Check if this loader can handle the given file.
 
         Args:
-            file_path: Path to the file to be processed
-            mime_type: Optional MIME type of the file
+            extension: File extension
+            mime_type: MIME type of the file
 
         Returns:
             True if this loader can process the file, False otherwise

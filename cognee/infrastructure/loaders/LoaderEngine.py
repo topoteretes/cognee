@@ -1,3 +1,4 @@
+import filetype
 from typing import Dict, List, Optional
 from .LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
@@ -24,7 +25,7 @@ class LoaderEngine:
         self._extension_map: Dict[str, List[LoaderInterface]] = {}
         self._mime_type_map: Dict[str, List[LoaderInterface]] = {}
 
-        self.default_loader_priority = ["text_loader", "pypdf", "unstructured"]
+        self.default_loader_priority = ["text_loader", "pypdf_loader"]
 
     def register_loader(self, loader: LoaderInterface) -> bool:
         """
@@ -56,27 +57,27 @@ class LoaderEngine:
         return True
 
     def get_loader(
-        self, file_path: str, mime_type: str = None, preferred_loaders: List[str] = None
+        self, file_path: str, preferred_loaders: List[str] = None
     ) -> Optional[LoaderInterface]:
         """
         Get appropriate loader for a file.
 
         Args:
             file_path: Path to the file to be processed
-            mime_type: Optional MIME type of the file
             preferred_loaders: List of preferred loader names to try first
 
         Returns:
             LoaderInterface that can handle the file, or None if not found
         """
-        # ext = os.path.splitext(file_path)[1].lower()
+
+        file_info = filetype.guess(file_path)
 
         # Try preferred loaders first
         if preferred_loaders:
             for loader_name in preferred_loaders:
                 if loader_name in self._loaders:
                     loader = self._loaders[loader_name]
-                    if loader.can_handle(file_path, mime_type):
+                    if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
                         return loader
                 else:
                     raise ValueError(f"Loader does not exist: {loader_name}")
@@ -85,22 +86,19 @@ class LoaderEngine:
         for loader_name in self.default_loader_priority:
             if loader_name in self._loaders:
                 loader = self._loaders[loader_name]
-                if loader.can_handle(file_path, mime_type):
+                if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
                     return loader
             else:
                 raise ValueError(f"Loader does not exist: {loader_name}")
 
         return None
 
-    async def load_file(
-        self, file_path: str, mime_type: str = None, preferred_loaders: List[str] = None, **kwargs
-    ):
+    async def load_file(self, file_path: str, preferred_loaders: List[str] = None, **kwargs):
         """
         Load file using appropriate loader.
 
         Args:
             file_path: Path to the file to be processed
-            mime_type: Optional MIME type of the file
             preferred_loaders: List of preferred loader names to try first
             **kwargs: Additional loader-specific configuration
 
@@ -108,7 +106,7 @@ class LoaderEngine:
             ValueError: If no suitable loader is found
             Exception: If file processing fails
         """
-        loader = self.get_loader(file_path, mime_type, preferred_loaders)
+        loader = self.get_loader(file_path, preferred_loaders)
         if not loader:
             raise ValueError(f"No loader found for file: {file_path}")
 

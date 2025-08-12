@@ -17,7 +17,7 @@ class PyPdfLoader(LoaderInterface):
 
     @property
     def supported_extensions(self) -> List[str]:
-        return [".pdf"]
+        return ["pdf"]
 
     @property
     def supported_mime_types(self) -> List[str]:
@@ -27,15 +27,13 @@ class PyPdfLoader(LoaderInterface):
     def loader_name(self) -> str:
         return "pypdf_loader"
 
-    def can_handle(self, file_path: str, mime_type: str = None) -> bool:
+    def can_handle(self, extension: str, mime_type: str) -> bool:
         """Check if file can be handled by this loader."""
         # Check file extension
-        if not file_path.lower().endswith(".pdf"):
-            return False
+        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
+            return True
 
-        # Check MIME type if provided
-        if mime_type and mime_type != "application/pdf":
-            return False
+        return False
 
     async def load(self, file_path: str, strict: bool = False, **kwargs) -> Tuple[str, dict]:
         """
@@ -85,7 +83,7 @@ class PyPdfLoader(LoaderInterface):
                 metadata = {
                     "name": os.path.basename(file_path),
                     "size": os.path.getsize(file_path),
-                    "extension": ".pdf",
+                    "extension": "pdf",
                     "pages": len(reader.pages),
                     "pages_with_text": len(page_texts),
                     "loader": self.loader_name,
