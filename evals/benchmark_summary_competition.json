@@ -1,0 +1,94 @@
+[
+  {
+    "system": "Cognee",
+    "Human-like Correctness": 0.925,
+    "Human-like Correctness Error": [
+      0.911,
+      0.94
+    ],
+    "DeepEval Correctness": 0.846,
+    "DeepEval Correctness Error": [
+      0.83,
+      0.863
+    ],
+    "DeepEval EM": 0.687,
+    "DeepEval EM Error": [
+      0.661,
+      0.717
+    ],
+    "DeepEval F1": 0.841,
+    "DeepEval F1 Error": [
+      0.821,
+      0.861
+    ]
+  },
+  {
+    "system": "LightRAG",
+    "Human-like Correctness": 0.955,
+    "Human-like Correctness Error": [
+      0.944,
+      0.965
+    ],
+    "DeepEval Correctness": 0.673,
+    "DeepEval Correctness Error": [
+      0.661,
+      0.684
+    ],
+    "DeepEval EM": 0.0,
+    "DeepEval EM Error": [
+      0.0,
+      0.0
+    ],
+    "DeepEval F1": 0.09,
+    "DeepEval F1 Error": [
+      0.087,
+      0.094
+    ]
+  },
+  {
+    "system": "Mem0",
+    "Human-like Correctness": 0.722,
+    "Human-like Correctness Error": [
+      0.695,
+      0.747
+    ],
+    "DeepEval Correctness": 0.541,
+    "DeepEval Correctness Error": [
+      0.524,
+      0.559
+    ],
+    "DeepEval EM": 0.0,
+    "DeepEval EM Error": [
+      0.0,
+      0.0
+    ],
+    "DeepEval F1": 0.12,
+    "DeepEval F1 Error": [
+      0.114,
+      0.127
+    ]
+  },
+  {
+    "system": "Graphiti",
+    "Human-like Correctness": 0.884,
+    "Human-like Correctness Error": [
+      0.802,
+      0.954
+    ],
+    "DeepEval Correctness": 0.74,
+    "DeepEval Correctness Error": [
+      0.659,
+      0.816
+    ],
+    "DeepEval EM": 0.46,
+    "DeepEval EM Error": [
+      0.32,
+      0.6
+    ],
+    "DeepEval F1": 0.695,
+    "DeepEval F1 Error": [
+      0.589,
+      0.797
+    ]
+  }
+]

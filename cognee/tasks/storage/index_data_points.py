@@ -1,5 +1,3 @@
-import asyncio
-
 from cognee.shared.logging_utils import get_logger
 
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
@@ -7,9 +5,6 @@ from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 
 logger = get_logger("index_data_points")
-
-# A single lock shared by all coroutines
-vector_index_lock = asyncio.Lock()
 
 
 async def index_data_points(data_points: list[DataPoint]):
@@ -27,11 +22,9 @@ async def index_data_points(data_points: list[DataPoint]):
 
             index_name = f"{data_point_type.__name__}_{field_name}"
 
-            # Add async lock to make sure two different coroutines won't create a table at the same time
-            async with vector_index_lock:
-                if index_name not in created_indexes:
-                    await vector_engine.create_vector_index(data_point_type.__name__, field_name)
-                    created_indexes[index_name] = True
+            if index_name not in created_indexes:
+                await vector_engine.create_vector_index(data_point_type.__name__, field_name)
+                created_indexes[index_name] = True
 
             if index_name not in index_points:
                 index_points[index_name] = []
@@ -45,7 +38,7 @@ async def index_data_points(data_points: list[DataPoint]):
         index_name = index_name_and_field[:first_occurence]
         field_name = index_name_and_field[first_occurence + 1 :]
         try:
-            # In case the ammount if indexable points is too large we need to send them in batches
+            # In case the amount of indexable points is too large we need to send them in batches
             batch_size = 100
             for i in range(0, len(indexable_points), batch_size):
                 batch = indexable_points[i : i + batch_size]

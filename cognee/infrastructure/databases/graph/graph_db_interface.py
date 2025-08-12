@@ -2,7 +2,7 @@ import inspect
 from functools import wraps
 from abc import abstractmethod, ABC
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List, Tuple, Type
+from typing import Optional, Dict, Any, List, Tuple, Type, Union
 from uuid import NAMESPACE_OID, UUID, uuid5
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
@@ -173,28 +173,31 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def add_node(self, node_id: str, properties: Dict[str, Any]) -> None:
+    async def add_node(
+        self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
+    ) -> None:
         """
         Add a single node with specified properties to the graph.
 
         Parameters:
         -----------
 
-            - node_id (str): Unique identifier for the node being added.
-            - properties (Dict[str, Any]): A dictionary of properties associated with the node.
+            - node (Union[DataPoint, str]): Either a DataPoint object or a string identifier for the node being added.
+            - properties (Optional[Dict[str, Any]]): A dictionary of properties associated with the node.
+              Required when node is a string, ignored when node is a DataPoint.
         """
         raise NotImplementedError
 
     @abstractmethod
     @record_graph_changes
-    async def add_nodes(self, nodes: List[Node]) -> None:
+    async def add_nodes(self, nodes: Union[List[Node], List[DataPoint]]) -> None:
         """
         Add multiple nodes to the graph in a single operation.
 
         Parameters:
         -----------
 
-            - nodes (List[Node]): A list of Node objects to be added to the graph.
+            - nodes (Union[List[Node], List[DataPoint]]): A list of Node objects or DataPoint objects to be added to the graph.
         """
         raise NotImplementedError
 
@@ -271,14 +274,16 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     @record_graph_changes
-    async def add_edges(self, edges: List[EdgeData]) -> None:
+    async def add_edges(
+        self, edges: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]
+    ) -> None:
         """
         Add multiple edges to the graph in a single operation.
 
         Parameters:
         -----------
 
-            - edges (List[EdgeData]): A list of EdgeData objects representing edges to be added.
+            - edges (Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]): A list of EdgeData objects or tuples representing edges to be added.
         """
         raise NotImplementedError
 
@@ -377,7 +382,7 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def get_connections(
-        self, node_id: str
+        self, node_id: Union[str, UUID]
     ) -> List[Tuple[NodeData, Dict[str, Any], NodeData]]:
         """
         Get all nodes connected to a specified node and their relationship details.
@@ -385,6 +390,6 @@ class GraphDBInterface(ABC):
         Parameters:
         -----------
 
-            - node_id (str): Unique identifier of the node for which to retrieve connections.
+            - node_id (Union[str, UUID]): Unique identifier of the node for which to retrieve connections.
         """
         raise NotImplementedError
