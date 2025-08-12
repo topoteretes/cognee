@@ -42,6 +42,7 @@ class KuzuAdapter(GraphDBInterface):
         self.connection: Optional[Connection] = None
         self.executor = ThreadPoolExecutor()
         self._initialize_connection()
+        self.KUZU_ASYNC_LOCK = asyncio.Lock()
 
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
@@ -136,6 +137,10 @@ class KuzuAdapter(GraphDBInterface):
             from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
             s3_file_storage = S3FileStorage("")
+
+            async with self.KUZU_ASYNC_LOCK:
+                self.connection.execute("CHECKPOINT;")
+
             s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
 
     async def pull_from_s3(self) -> None:
@@ -145,7 +150,7 @@ class KuzuAdapter(GraphDBInterface):
         try:
             s3_file_storage.s3.get(self.db_path, self.temp_graph_file, recursive=True)
         except FileNotFoundError:
-            pass
+            logger.warning(f"Kuzu S3 storage file not found: {self.db_path}")
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
