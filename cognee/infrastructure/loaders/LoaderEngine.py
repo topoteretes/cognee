@@ -25,7 +25,7 @@ class LoaderEngine:
         self._extension_map: Dict[str, List[LoaderInterface]] = {}
         self._mime_type_map: Dict[str, List[LoaderInterface]] = {}
 
-        self.default_loader_priority = ["text_loader", "pypdf_loader"]
+        self.default_loader_priority = ["text_loader", "pypdf_loader", "unstructured_loader"]
 
     def register_loader(self, loader: LoaderInterface) -> bool:
         """

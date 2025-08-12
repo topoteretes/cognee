@@ -3,6 +3,8 @@ from typing import List, Tuple
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
 
+logger = get_logger(__name__)
+
 
 class PyPdfLoader(LoaderInterface):
     """
@@ -11,9 +13,6 @@ class PyPdfLoader(LoaderInterface):
     Extracts text content from PDF files page by page, providing
     structured page information and handling PDF-specific errors.
     """
-
-    def __init__(self):
-        self.logger = get_logger(__name__)
 
     @property
     def supported_extensions(self) -> List[str]:
@@ -60,7 +59,7 @@ class PyPdfLoader(LoaderInterface):
 
         try:
             with open(file_path, "rb") as file:
-                self.logger.info(f"Reading PDF: {file_path}")
+                logger.info(f"Reading PDF: {file_path}")
                 reader = PdfReader(file, strict=strict)
 
                 content_parts = []
@@ -73,7 +72,7 @@ class PyPdfLoader(LoaderInterface):
                             page_texts.append(page_text)
                             content_parts.append(f"Page {page_num}:\n{page_text}\n")
                     except Exception as e:
-                        self.logger.warning(f"Failed to extract text from page {page_num}: {e}")
+                        logger.warning(f"Failed to extract text from page {page_num}: {e}")
                         continue
 
                 # Combine all content
@@ -104,5 +103,5 @@ class PyPdfLoader(LoaderInterface):
                 return full_content, metadata
 
         except Exception as e:
-            self.logger.error(f"Failed to process PDF {file_path}: {e}")
+            logger.error(f"Failed to process PDF {file_path}: {e}")
             raise Exception(f"PDF processing failed: {e}") from e

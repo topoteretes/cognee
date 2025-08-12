@@ -53,15 +53,15 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
             if settings.accept_local_file_path:
                 # Normalize path separators before creating file URL
-                normalized_path = os.path.normpath(data_item)
+                # normalized_path = os.path.normpath(data_item)
                 # Use forward slashes in file URLs for consistency
-                url_path = normalized_path.replace(os.sep, "/")
-                file_path = "file://" + url_path
+                # url_path = normalized_path.replace(os.sep, "/")
+                # file_path = "file://" + url_path
                 # TODO: Add loader ingestion support
-                # loader = get_loader_engine()
-                # content, metadata = await loader.load_file(data_item)
-                # return await save_data_to_file(file_path)
-                return file_path
+                loader = get_loader_engine()
+                content, metadata = await loader.load_file(data_item)
+                return await save_data_to_file(content)
+                # return file_path
             else:
                 raise IngestionError(message="Local files are not accepted.")
 

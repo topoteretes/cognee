@@ -1,8 +1,9 @@
 import os
 from typing import List
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.infrastructure.loaders.models.LoaderResult import LoaderResult, ContentType
 from cognee.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class UnstructuredLoader(LoaderInterface):
@@ -12,9 +13,6 @@ class UnstructuredLoader(LoaderInterface):
     Handles various document formats including docx, pptx, xlsx, odt, etc.
     Uses the unstructured library's auto-partition functionality.
     """
-
-    def __init__(self):
-        self.logger = get_logger(__name__)
 
     @property
     def supported_extensions(self) -> List[str]:
@@ -58,9 +56,6 @@ class UnstructuredLoader(LoaderInterface):
     def loader_name(self) -> str:
         return "unstructured_loader"
 
-    def get_dependencies(self) -> List[str]:
-        return ["unstructured>=0.10.0"]
-
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """Check if file can be handled by this loader."""
         # Check file extension
@@ -69,7 +64,7 @@ class UnstructuredLoader(LoaderInterface):
 
         return False
 
-    async def load(self, file_path: str, strategy: str = "auto", **kwargs) -> LoaderResult:
+    async def load(self, file_path: str, strategy: str = "auto", **kwargs):
         """
         Load document using unstructured library.
 
@@ -94,7 +89,7 @@ class UnstructuredLoader(LoaderInterface):
             ) from e
 
         try:
-            self.logger.info(f"Processing document: {file_path}")
+            logger.info(f"Processing document: {file_path}")
 
             # Determine content type from file extension
             file_ext = os.path.splitext(file_path)[1].lower()
@@ -129,9 +124,6 @@ class UnstructuredLoader(LoaderInterface):
             # Combine all text content
             full_content = "\n\n".join(text_parts)
 
-            # Determine content type based on structure
-            content_type = ContentType.STRUCTURED if len(element_info) > 1 else ContentType.TEXT
-
             # Gather metadata
             metadata = {
                 "name": file_name,
@@ -144,19 +136,8 @@ class UnstructuredLoader(LoaderInterface):
                 "element_types": list(set(info["type"] for info in element_info)),
             }
 
-            return LoaderResult(
-                content=full_content,
-                metadata=metadata,
-                content_type=content_type,
-                chunks=text_parts,  # Pre-chunked by elements
-                source_info={
-                    "file_path": file_path,
-                    "strategy": strategy,
-                    "elements": element_info[:10],  # First 10 elements for debugging
-                    "total_elements": len(elements),
-                },
-            )
+            return full_content, metadata
 
         except Exception as e:
-            self.logger.error(f"Failed to process document {file_path}: {e}")
+            logger.error(f"Failed to process document {file_path}: {e}")
             raise Exception(f"Document processing failed: {e}") from e
