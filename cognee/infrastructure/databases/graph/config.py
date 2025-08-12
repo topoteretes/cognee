@@ -60,7 +60,6 @@ class GraphConfig(BaseSettings):
         return values
 
 
-
 @lru_cache
 def get_graph_config():
     """

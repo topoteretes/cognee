@@ -212,11 +212,9 @@ async def run_cognify_blocking(
     tasks,
     user,
     datasets,
-
     graph_db_config=None,
     vector_db_config=None,
     incremental_loading: bool = True,
-
 ):
     total_run_info = {}
 
@@ -244,7 +242,6 @@ async def run_cognify_as_background_process(
     graph_db_config=None,
     vector_db_config=None,
     incremental_loading: bool = True,
-
 ):
     # Convert dataset to list if it's a string
     if isinstance(datasets, str):
