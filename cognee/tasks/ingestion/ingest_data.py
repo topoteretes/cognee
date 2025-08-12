@@ -96,11 +96,15 @@ async def ingest_data(
                         await session.execute(select(Data).filter(Data.id == data_id))
                     ).scalar_one_or_none()
 
+                # TODO: Maybe allow getting of external metadata through ingestion loader?
                 ext_metadata = get_external_metadata_dict(data_item)
 
                 if node_set:
                     ext_metadata["node_set"] = node_set
 
+                # TODO: Have a way to define name of ingested data when ingesting data with loader and
+                #       when raw string is sent. So Users have a way to differentiate between files
+                # TODO: Add ingestion loader information regarding Data
                 if data_point is not None:
                     data_point.name = file_metadata["name"]
                     data_point.raw_data_location = file_metadata["file_path"]
