@@ -406,7 +406,7 @@ def setup_logging(log_level=None, name=None):
     if os.getenv("COGNEE_CLI_MODE") == "true":
         # Compact initialization for CLI
         logger.info(f"cognee {COGNEE_VERSION} initialized")
-        log_database_configuration_compact(logger)
+
     else:
         # Detailed initialization for regular usage
         logger.info(
