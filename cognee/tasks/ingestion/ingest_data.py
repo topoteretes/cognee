@@ -1,6 +1,5 @@
 import json
 import inspect
-from os import path
 from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 
