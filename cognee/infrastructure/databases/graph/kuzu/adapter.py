@@ -1550,7 +1550,7 @@ class KuzuAdapter(GraphDBInterface):
         """
         query = """
         MATCH (doc:Node)
-        WHERE (doc.type = 'TextDocument' OR doc.type = 'PdfDocument') AND doc.id = $data_id
+        WHERE (doc.type = 'TextDocument' OR doc.type = 'PdfDocument' OR doc.type = 'AudioDocument' OR doc.type = 'ImageDocument' OR doc.type = 'UnstructuredDocument') AND doc.id = $data_id
 
         OPTIONAL MATCH (doc)<-[e1:EDGE]-(chunk:Node)
         WHERE e1.relationship_name = 'is_part_of' AND chunk.type = 'DocumentChunk'
@@ -1561,7 +1561,7 @@ class KuzuAdapter(GraphDBInterface):
             MATCH (entity)<-[e3:EDGE]-(otherChunk:Node)-[e4:EDGE]->(otherDoc:Node)
             WHERE e3.relationship_name = 'contains'
             AND e4.relationship_name = 'is_part_of'
-            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument')
+            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument' OR otherDoc.type = 'AudioDocument' OR otherDoc.type = 'ImageDocument' OR otherDoc.type = 'UnstructuredDocument')
             AND otherDoc.id <> doc.id
         }
 
@@ -1577,7 +1577,7 @@ class KuzuAdapter(GraphDBInterface):
             AND e9.relationship_name = 'is_part_of'
             AND otherEntity.type = 'Entity'
             AND otherChunk.type = 'DocumentChunk'
-            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument')
+            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument' OR otherDoc.type = 'AudioDocument' OR otherDoc.type = 'ImageDocument' OR otherDoc.type = 'UnstructuredDocument')
             AND otherDoc.id <> doc.id
         }
 
