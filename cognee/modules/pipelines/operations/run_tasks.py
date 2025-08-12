@@ -99,8 +99,7 @@ async def run_tasks(
             ).scalar_one_or_none()
             if data_point:
                 if (
-                    data_point.pipeline_status
-                    and data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
+                    data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
                     == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
                 ):
                     yield {
