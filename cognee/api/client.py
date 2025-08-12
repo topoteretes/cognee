@@ -302,8 +302,13 @@ async def _check_file_storage() -> dict:
         # Attempt to write and remove a tiny temp file to verify permissions
         tmp_name = "healthcheck.tmp"
         await storage.ensure_directory_exists()
-        await storage.store(tmp_name, "ok", overwrite=True)
-        await storage.remove(tmp_name)
+        try:
+            await storage.store(tmp_name, "ok", overwrite=True)
+        finally:
+            try:
+                await storage.remove(tmp_name)
+            except:
+                pass  # Best effort cleanup
         duration = int((time.perf_counter() - started) * 1000)
         return {
             "status": "healthy",
