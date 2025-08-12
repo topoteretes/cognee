@@ -208,6 +208,11 @@ We are committed to making open source an enjoyable and respectful experience fo
   <img alt="contributors" src="https://contrib.rocks/image?repo=topoteretes/cognee"/>
 </a>
 
+## Sponsors
+
+Thanks to the following companies for sponsoring the ongoing development of cognee.
+
+- [GitHub's Secure Open Source Fund](https://resources.github.com/github-secure-open-source-fund/)
 
 ## Star History
 
