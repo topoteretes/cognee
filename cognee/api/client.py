@@ -1,6 +1,9 @@
 """FastAPI server for the Cognee API."""
 
 import os
+import time
+import asyncio
+from datetime import datetime, timezone
 
 import uvicorn
 import sentry_sdk
@@ -13,9 +16,33 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
+from sqlalchemy import text
 
 from cognee.exceptions import CogneeApiError
 from cognee.shared.logging_utils import get_logger, setup_logging
+from cognee.version import get_cognee_version
+
+# Critical deps
+from cognee.infrastructure.databases.relational import (
+    get_relational_engine,
+    get_relational_config,
+)
+from cognee.infrastructure.databases.vector import (
+    get_vector_engine,
+)
+from cognee.infrastructure.databases.vector.config import get_vectordb_config
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.graph import config as graph_config_module
+from cognee.infrastructure.files.storage import get_file_storage
+from cognee.base_config import get_base_config
+
+# Non-critical deps
+from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
+from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
+    get_embedding_engine,
+)
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
@@ -44,6 +71,7 @@ if os.getenv("ENV", "prod") == "prod":
 
 
 app_environment = os.getenv("ENV", "prod")
+app_started_at = datetime.now(timezone.utc)
 
 
 @asynccontextmanager
@@ -166,6 +194,268 @@ def health_check():
     Health check endpoint that returns the server status.
     """
     return Response(status_code=200)
+
+
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _uptime_seconds() -> int:
+    return int((datetime.now(timezone.utc) - app_started_at).total_seconds())
+
+
+async def _check_relational_db() -> dict:
+    started = time.perf_counter()
+    provider = get_relational_config().db_provider or "unknown"
+    try:
+        db = get_relational_engine()
+        # Simple connectivity check
+        async with db.engine.begin() as conn:
+            await conn.execute(text("SELECT 1"))
+        duration = int((time.perf_counter() - started) * 1000)
+        return {
+            "status": "healthy",
+            "provider": provider,
+            "response_time_ms": duration,
+            "details": "Connection successful",
+        }
+    except Exception as exc:
+        duration = int((time.perf_counter() - started) * 1000)
+        return {
+            "status": "unhealthy",
+            "provider": provider,
+            "response_time_ms": duration,
+            "details": f"Relational DB check failed: {type(exc).__name__}",
+        }
+
+
+async def _check_vector_db() -> dict:
+    started = time.perf_counter()
+    provider = get_vectordb_config().vector_db_provider or "unknown"
+    try:
+        engine = get_vector_engine()
+        # Try a lightweight operation that touches the backend
+        if hasattr(engine, "has_collection"):
+            _ = await engine.has_collection("_healthcheck")
+        elif hasattr(engine, "get_connection"):
+            conn = await engine.get_connection()  # noqa: F841
+        duration = int((time.perf_counter() - started) * 1000)
+        return {
+            "status": "healthy",
+            "provider": provider,
+            "response_time_ms": duration,
+            "details": "Vector DB reachable",
+        }
+    except Exception as exc:
+        duration = int((time.perf_counter() - started) * 1000)
+        return {
+            "status": "unhealthy",
+            "provider": provider,
+            "response_time_ms": duration,
+            "details": f"Vector DB check failed: {type(exc).__name__}",
+        }
+
+
+async def _check_graph_db() -> dict:
+    started = time.perf_counter()
+    provider = graph_config_module.get_graph_config().graph_database_provider or "unknown"
+    try:
+        graph = await get_graph_engine()
+        # Use a method defined on the interface to ensure connectivity
+        if hasattr(graph, "get_graph_metrics"):
+            _ = await graph.get_graph_metrics(include_optional=False)
+        duration = int((time.perf_counter() - started) * 1000)
+        return {
+            "status": "healthy",
+            "provider": provider,
+            "response_time_ms": duration,
+            "details": "Graph DB reachable",
+        }
+    except Exception as exc:
+        duration = int((time.perf_counter() - started) * 1000)
+        return {
+            "status": "unhealthy",
+            "provider": provider,
+            "response_time_ms": duration,
+            "details": f"Graph DB check failed: {type(exc).__name__}",
+        }
+
+
+async def _check_file_storage() -> dict:
+    started = time.perf_counter()
+    base_cfg = get_base_config()
+    storage_provider = (
+        "s3"
+        if os.getenv("STORAGE_BACKEND", "").lower() == "s3"
+        or base_cfg.system_root_directory.startswith("s3://")
+        or base_cfg.data_root_directory.startswith("s3://")
+        else "local"
+    )
+    try:
+        storage = get_file_storage(base_cfg.system_root_directory)
+        # Attempt to write and remove a tiny temp file to verify permissions
+        tmp_name = "healthcheck.tmp"
+        await storage.ensure_directory_exists()
+        await storage.store(tmp_name, "ok", overwrite=True)
+        await storage.remove(tmp_name)
+        duration = int((time.perf_counter() - started) * 1000)
+        return {
+            "status": "healthy",
+            "provider": storage_provider,
+            "response_time_ms": duration,
+            "details": "Storage accessible",
+        }
+    except Exception as exc:
+        duration = int((time.perf_counter() - started) * 1000)
+        return {
+            "status": "unhealthy",
+            "provider": storage_provider,
+            "response_time_ms": duration,
+            "details": f"File storage check failed: {type(exc).__name__}",
+        }
+
+
+async def _check_llm_provider() -> dict:
+    started = time.perf_counter()
+    llm_provider = get_llm_config().llm_provider or "unknown"
+    try:
+        # Instantiate client to validate configuration; avoid making a billable call
+        _ = get_llm_client()
+        duration = int((time.perf_counter() - started) * 1000)
+        return {
+            "status": "healthy",
+            "provider": llm_provider,
+            "response_time_ms": duration,
+            "details": "Client configured",
+        }
+    except Exception as exc:
+        duration = int((time.perf_counter() - started) * 1000)
+        # Non-critical -> degraded when failing
+        return {
+            "status": "degraded",
+            "provider": llm_provider,
+            "response_time_ms": duration,
+            "details": f"LLM client initialization failed: {type(exc).__name__}",
+        }
+
+
+async def _check_embedding_service() -> dict:
+    started = time.perf_counter()
+    emb_provider = get_embedding_config().embedding_provider or "unknown"
+    try:
+        engine = get_embedding_engine()
+        # Attempt a tiny embed; if provider is purely local, this stays in-process
+        await engine.embed_text(["ok"])
+        duration = int((time.perf_counter() - started) * 1000)
+        return {
+            "status": "healthy",
+            "provider": emb_provider,
+            "response_time_ms": duration,
+            "details": "Embedding generation working",
+        }
+    except Exception as exc:
+        duration = int((time.perf_counter() - started) * 1000)
+        return {
+            "status": "unhealthy",
+            "provider": emb_provider,
+            "response_time_ms": duration,
+            "details": f"Embedding check failed: {type(exc).__name__}",
+        }
+
+
+def _aggregate_overall_status(components: dict) -> str:
+    critical = [
+        components["relational_db"]["status"],
+        components["vector_db"]["status"],
+        components["graph_db"]["status"],
+        components["file_storage"]["status"],
+    ]
+    if any(status_val == "unhealthy" for status_val in critical):
+        return "unhealthy"
+    non_critical = [
+        components["llm_provider"]["status"],
+        components["embedding_service"]["status"],
+    ]
+    if any(status_val != "healthy" for status_val in non_critical):
+        return "degraded"
+    return "healthy"
+
+
+@app.get("/health/ready")
+async def readiness_check():
+    # Only check critical services for readiness
+    relational_db, vector_db, graph_db, file_storage = await asyncio.gather(
+        _check_relational_db(), _check_vector_db(), _check_graph_db(), _check_file_storage()
+    )
+
+    components = {
+        "relational_db": relational_db,
+        "vector_db": vector_db,
+        "graph_db": graph_db,
+        "file_storage": file_storage,
+        # Non-critical omitted in readiness
+    }
+
+    overall_status = (
+        "unhealthy"
+        if any(c["status"] == "unhealthy" for c in components.values())
+        else "healthy"
+    )
+
+    payload = {
+        "status": overall_status,
+        "timestamp": _now_utc_iso(),
+        "version": get_cognee_version(),
+        "uptime": _uptime_seconds(),
+        "components": components,
+    }
+
+    if overall_status == "unhealthy":
+        return JSONResponse(status_code=503, content=payload)
+    return JSONResponse(status_code=200, content=payload)
+
+
+@app.get("/health/detailed")
+async def detailed_health():
+    # Run all checks in parallel
+    (
+        relational_db,
+        vector_db,
+        graph_db,
+        file_storage,
+        llm_provider,
+        embedding_service,
+    ) = await asyncio.gather(
+        _check_relational_db(),
+        _check_vector_db(),
+        _check_graph_db(),
+        _check_file_storage(),
+        _check_llm_provider(),
+        _check_embedding_service(),
+    )
+
+    components = {
+        "relational_db": relational_db,
+        "vector_db": vector_db,
+        "graph_db": graph_db,
+        "file_storage": file_storage,
+        "llm_provider": llm_provider,
+        "embedding_service": embedding_service,
+    }
+
+    overall_status = _aggregate_overall_status(components)
+    payload = {
+        "status": overall_status,
+        "timestamp": _now_utc_iso(),
+        "version": get_cognee_version(),
+        "uptime": _uptime_seconds(),
+        "components": components,
+    }
+
+    # Non-critical failures should not cause non-200 here per requirements
+    if overall_status == "unhealthy":
+        return JSONResponse(status_code=503, content=payload)
+    return JSONResponse(status_code=200, content=payload)
 
 
 app.include_router(get_auth_router(), prefix="/api/v1/auth", tags=["auth"])
