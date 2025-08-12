@@ -236,9 +236,15 @@ async def _check_vector_db() -> dict:
         engine = get_vector_engine()
         # Try a lightweight operation that touches the backend
         if hasattr(engine, "has_collection"):
+        if hasattr(engine, "has_collection"):
             _ = await engine.has_collection("_healthcheck")
         elif hasattr(engine, "get_connection"):
             conn = await engine.get_connection()  # noqa: F841
+        else:
+            # Fallback: attempt to access a property or raise an error
+            raise AttributeError(
+                f"Vector engine {type(engine).__name__} has no suitable health check method"
+            )
         duration = int((time.perf_counter() - started) * 1000)
         return {
             "status": "healthy",
