@@ -129,9 +129,7 @@ class config:
             if hasattr(relational_db_config, key):
                 object.__setattr__(relational_db_config, key, value)
             else:
-                raise InvalidAttributeError(
-                    message=f"'{key}' is not a valid attribute of the config."
-                )
+                raise InvalidConfigAttributeError(attribute=key)
 
     @staticmethod
     def set_migration_db_config(config_dict: dict):
@@ -143,9 +141,7 @@ class config:
             if hasattr(migration_db_config, key):
                 object.__setattr__(migration_db_config, key, value)
             else:
-                raise InvalidAttributeError(
-                    message=f"'{key}' is not a valid attribute of the config."
-                )
+                raise InvalidConfigAttributeError(attribute=key)
 
     @staticmethod
     def set_graph_db_config(config_dict: dict) -> None:
@@ -169,9 +165,7 @@ class config:
             if hasattr(vector_db_config, key):
                 object.__setattr__(vector_db_config, key, value)
             else:
-                raise InvalidAttributeError(
-                    message=f"'{key}' is not a valid attribute of the config."
-                )
+                InvalidConfigAttributeError(attribute=key)
 
     @staticmethod
     def set_vector_db_key(db_key: str):
