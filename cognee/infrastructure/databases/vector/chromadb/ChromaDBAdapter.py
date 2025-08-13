@@ -230,7 +230,9 @@ class ChromaDBAdapter(VectorDBInterface):
             client = await self.get_connection()
 
             if not await self.has_collection(collection_name):
-                await client.create_collection(name=collection_name, metadata={"hnsw:space": "cosine"})
+                await client.create_collection(
+                    name=collection_name, metadata={"hnsw:space": "cosine"}
+                )
 
     async def get_collection(self, collection_name: str) -> AsyncHttpClient:
         """
