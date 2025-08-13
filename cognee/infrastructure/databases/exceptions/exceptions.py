@@ -1,13 +1,13 @@
 from fastapi import status
-from cognee.exceptions import CogneeApiError, CriticalError
+from cognee.exceptions import CogneeSystemError, CogneeValidationError, CogneeConfigurationError
 
 
-class DatabaseNotCreatedError(CriticalError):
+class DatabaseNotCreatedError(CogneeSystemError):
     """
     Represents an error indicating that the database has not been created. This error should
     be raised when an attempt is made to access the database before it has been initialized.
 
-    Inherits from CriticalError. Overrides the constructor to include a default message and
+    Inherits from CogneeSystemError. Overrides the constructor to include a default message and
     status code.
     """
 
@@ -20,10 +20,10 @@ class DatabaseNotCreatedError(CriticalError):
         super().__init__(message, name, status_code)
 
 
-class EntityNotFoundError(CogneeApiError):
+class EntityNotFoundError(CogneeValidationError):
     """
     Represents an error when a requested entity is not found in the database. This class
-    inherits from CogneeApiError.
+    inherits from CogneeValidationError.
 
     Public methods:
 
@@ -49,11 +49,11 @@ class EntityNotFoundError(CogneeApiError):
         # super().__init__(message, name, status_code) :TODO: This is not an error anymore with the dynamic exception handling therefore we shouldn't log error
 
 
-class EntityAlreadyExistsError(CogneeApiError):
+class EntityAlreadyExistsError(CogneeValidationError):
     """
     Represents an error when an entity creation is attempted but the entity already exists.
 
-    This class is derived from CogneeApiError and is used to signal a conflict in operations
+    This class is derived from CogneeValidationError and is used to signal a conflict in operations
     involving resource creation.
     """
 
@@ -66,11 +66,11 @@ class EntityAlreadyExistsError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
-class NodesetFilterNotSupportedError(CogneeApiError):
+class NodesetFilterNotSupportedError(CogneeConfigurationError):
     """
     Raise an exception when a nodeset filter is not supported by the current database.
 
-    This exception inherits from `CogneeApiError` and is designed to provide information
+    This exception inherits from `CogneeConfigurationError` and is designed to provide information
     about the specific issue of unsupported nodeset filters in the context of graph
     databases.
     """
