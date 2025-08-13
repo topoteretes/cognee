@@ -48,7 +48,7 @@ class TestCogneeServerStart(unittest.TestCase):
         """Test that the server is running and can accept connections."""
         # Test health endpoint
         health_response = requests.get("http://localhost:8000/health", timeout=15)
-        self.assertIn(health_response.status_code, [200, 503])
+        self.assertIn(health_response.status_code, [200])
 
         # Test root endpoint
         root_response = requests.get("http://localhost:8000/", timeout=15)
