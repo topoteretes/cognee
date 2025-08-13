@@ -96,5 +96,7 @@ class ImageLoader(LoaderInterface):
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
+        # async with open_data_file(file_path) as file:
+
         result = await LLMGateway.transcribe_image(file_path)
         return result.choices[0].message.content

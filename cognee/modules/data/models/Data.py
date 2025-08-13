@@ -18,6 +18,7 @@ class Data(Base):
     extension = Column(String)
     mime_type = Column(String)
     raw_data_location = Column(String)
+    original_data_location = Column(String)
     owner_id = Column(UUID, index=True)
     tenant_id = Column(UUID, index=True, nullable=True)
     content_hash = Column(String)

@@ -10,6 +10,7 @@ from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
+from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.modules.data.methods import (
     get_authorized_existing_datasets,
     get_dataset_data,
@@ -17,6 +18,7 @@ from cognee.modules.data.methods import (
 )
 
 from .save_data_item_to_storage import save_data_item_to_storage
+from .data_item_to_text_file import data_item_to_text_file
 
 
 async def ingest_data(
@@ -25,6 +27,7 @@ async def ingest_data(
     user: User,
     node_set: Optional[List[str]] = None,
     dataset_id: UUID = None,
+    preferred_loaders: List[str] = None,
 ):
     if not user:
         user = await get_default_user()
@@ -41,6 +44,7 @@ async def ingest_data(
         user: User,
         node_set: Optional[List[str]] = None,
         dataset_id: UUID = None,
+        preferred_loaders: List[str] = None,
     ):
         new_datapoints = []
         existing_data_points = []
@@ -73,12 +77,18 @@ async def ingest_data(
         dataset_data_map = {str(data.id): True for data in dataset_data}
 
         for data_item in data:
-            # Store all input data as text files in Cognee data storage
-            # TODO: Add forwarding of preferred loaders
-            file_path = await save_data_item_to_storage(data_item)
+            # Get file path of data item or create a file it doesn't exist
+            original_file_path = await save_data_item_to_storage(data_item)
 
-            # Ingest data and add metadata
-            async with open_data_file(file_path) as file:
+            # Transform file path to be OS usable
+            actual_file_path = get_data_file_path(original_file_path)
+            # Store all input data as text files in Cognee data storage
+            cognee_storage_file_path = await data_item_to_text_file(
+                actual_file_path, preferred_loaders
+            )
+
+            # Find metadata from original file
+            async with open_data_file(original_file_path) as file:
                 classified_data = ingestion.classify(file)
 
                 # data_id is the hash of file contents + owner id to avoid duplicate data
@@ -107,7 +117,8 @@ async def ingest_data(
                 # TODO: Add ingestion loader information regarding Data
                 if data_point is not None:
                     data_point.name = file_metadata["name"]
-                    data_point.raw_data_location = file_metadata["file_path"]
+                    data_point.raw_data_location = cognee_storage_file_path
+                    data_point.original_data_location = file_metadata["file_path"]
                     data_point.extension = file_metadata["extension"]
                     data_point.mime_type = file_metadata["mime_type"]
                     data_point.owner_id = user.id
@@ -130,7 +141,8 @@ async def ingest_data(
                     data_point = Data(
                         id=data_id,
                         name=file_metadata["name"],
-                        raw_data_location=file_metadata["file_path"],
+                        raw_data_location=cognee_storage_file_path,
+                        original_data_location=file_metadata["file_path"],
                         extension=file_metadata["extension"],
                         mime_type=file_metadata["mime_type"],
                         owner_id=user.id,
@@ -166,4 +178,6 @@ async def ingest_data(
 
         return existing_data_points + dataset_new_data_points + new_datapoints
 
-    return await store_data_to_dataset(data, dataset_name, user, node_set, dataset_id)
+    return await store_data_to_dataset(
+        data, dataset_name, user, node_set, dataset_id, preferred_loaders
+    )
