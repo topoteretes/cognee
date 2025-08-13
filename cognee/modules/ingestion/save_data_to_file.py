@@ -11,6 +11,8 @@ async def save_data_to_file(data: Union[str, BinaryIO], filename: str = None):
     file_metadata = classified_data.get_metadata()
 
     storage = get_file_storage(data_root_directory)
+    # TODO: Check if content hash is different, this content_hash value probably needs to be forwarded from original file
+    #       because hash is different between processed pdf and original pdf file (original content_hash might need to be used)
     full_file_path = await storage.store("text_" + file_metadata["content_hash"] + ".txt", data)
 
     return full_file_path
