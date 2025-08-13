@@ -17,6 +17,7 @@ class Data(Base):
     name = Column(String)
     extension = Column(String)
     mime_type = Column(String)
+    loader_engine = Column(String)
     raw_data_location = Column(String)
     original_data_location = Column(String)
     owner_id = Column(UUID, index=True)

@@ -19,6 +19,7 @@ from cognee.modules.data.methods import (
 
 from .save_data_item_to_storage import save_data_item_to_storage
 from .data_item_to_text_file import data_item_to_text_file
+from cognee.infrastructure.loaders import get_loader_engine
 
 
 async def ingest_data(
@@ -82,10 +83,13 @@ async def ingest_data(
 
             # Transform file path to be OS usable
             actual_file_path = get_data_file_path(original_file_path)
+
             # Store all input data as text files in Cognee data storage
             cognee_storage_file_path = await data_item_to_text_file(
                 actual_file_path, preferred_loaders
             )
+            # Get info regrading which loader engine has transformed data to text
+            loader_engine = get_loader_engine().get_loader(actual_file_path, preferred_loaders)
 
             # Find metadata from original file
             async with open_data_file(original_file_path) as file:
@@ -112,15 +116,13 @@ async def ingest_data(
                 if node_set:
                     ext_metadata["node_set"] = node_set
 
-                # TODO: Have a way to define name of ingested data when ingesting data with loader and
-                #       when raw string is sent. So Users have a way to differentiate between files
-                # TODO: Add ingestion loader information regarding Data
                 if data_point is not None:
                     data_point.name = file_metadata["name"]
                     data_point.raw_data_location = cognee_storage_file_path
                     data_point.original_data_location = file_metadata["file_path"]
                     data_point.extension = file_metadata["extension"]
                     data_point.mime_type = file_metadata["mime_type"]
+                    data_point.loader_engine = loader_engine.loader_name
                     data_point.owner_id = user.id
                     data_point.content_hash = file_metadata["content_hash"]
                     data_point.file_size = file_metadata["file_size"]
@@ -145,6 +147,7 @@ async def ingest_data(
                         original_data_location=file_metadata["file_path"],
                         extension=file_metadata["extension"],
                         mime_type=file_metadata["mime_type"],
+                        loader_engine=loader_engine.loader_name,
                         owner_id=user.id,
                         content_hash=file_metadata["content_hash"],
                         external_metadata=ext_metadata,
