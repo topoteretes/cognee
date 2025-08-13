@@ -13,7 +13,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods import create_dataset, get_datasets_by_name
 from cognee.shared.logging_utils import get_logger
-from cognee.api.v1.delete.exceptions import DataNotFoundError, DatasetNotFoundError
+from cognee.api.v1.exceptions import DataNotFoundError, DatasetNotFoundError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.permissions.methods import (
