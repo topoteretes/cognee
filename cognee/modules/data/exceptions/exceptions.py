@@ -45,11 +45,11 @@ class DatasetTypeError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
-class InvalidAttributeError(CogneeValidationError):
+class InvalidTableAttributeError(CogneeValidationError):
     def __init__(
         self,
         message: str = "The provided data object is missing the required '__tablename__' attribute.",
-        name: str = "InvalidAttributeError",
+        name: str = "InvalidTableAttributeError",
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         super().__init__(message, name, status_code)
