@@ -4,6 +4,7 @@ import pytest
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.graph.exceptions import InvalidDimensionsError, DimensionOutOfRangeError
 
+
 def test_node_initialization():
     """Test that a Node is initialized correctly."""
     node = Node("node1", {"attr1": "value1"}, dimension=2)

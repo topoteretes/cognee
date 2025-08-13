@@ -89,4 +89,3 @@ class CogneeTransientError(CogneeApiError):
         log_level="ERROR",
     ):
         super().__init__(message, name, status_code, log, log_level)
-

@@ -10,5 +10,5 @@ from .exceptions import (
     DatabaseNotCreatedError,
     EmbeddingException,
     MissingQueryParameterError,
-    MutuallyExclusiveQueryParametersError
+    MutuallyExclusiveQueryParametersError,
 )

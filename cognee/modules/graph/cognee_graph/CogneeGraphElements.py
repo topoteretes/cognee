@@ -2,6 +2,7 @@ import numpy as np
 from typing import List, Dict, Optional, Any, Union
 from cognee.modules.graph.exceptions import InvalidDimensionsError, DimensionOutOfRangeError
 
+
 class Node:
     """
     Represents a node in a graph.

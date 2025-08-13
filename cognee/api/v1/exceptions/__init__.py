@@ -9,5 +9,5 @@ from .exceptions import (
     DocumentNotFoundError,
     DatasetNotFoundError,
     DataNotFoundError,
-    DocumentSubgraphNotFoundError
+    DocumentSubgraphNotFoundError,
 )

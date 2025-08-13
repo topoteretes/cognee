@@ -25,6 +25,7 @@ class EntityAlreadyExistsError(CogneeValidationError):
     ):
         super().__init__(message, name, status_code)
 
+
 class InvalidDimensionsError(CogneeValidationError):
     def __init__(
         self,
@@ -33,6 +34,7 @@ class InvalidDimensionsError(CogneeValidationError):
     ):
         message = "Dimensions must be positive integers."
         super().__init__(message, name, status_code)
+
 
 class DimensionOutOfRangeError(CogneeValidationError):
     def __init__(

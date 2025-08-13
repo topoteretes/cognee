@@ -1,7 +1,4 @@
-from cognee.exceptions import (
-    CogneeConfigurationError,
-    CogneeValidationError
-)
+from cognee.exceptions import CogneeConfigurationError, CogneeValidationError
 from fastapi import status
 
 
@@ -15,6 +12,7 @@ class InvalidConfigAttributeError(CogneeConfigurationError):
         message = f"'{attribute}' is not a valid attribute of the configuration."
         super().__init__(message, name, status_code)
 
+
 class DocumentNotFoundError(CogneeValidationError):
     def __init__(
         self,
@@ -23,6 +21,7 @@ class DocumentNotFoundError(CogneeValidationError):
         status_code: int = status.HTTP_404_NOT_FOUND,
     ):
         super().__init__(message, name, status_code)
+
 
 class DatasetNotFoundError(CogneeValidationError):
     def __init__(
@@ -33,6 +32,7 @@ class DatasetNotFoundError(CogneeValidationError):
     ):
         super().__init__(message, name, status_code)
 
+
 class DataNotFoundError(CogneeValidationError):
     def __init__(
         self,
@@ -41,6 +41,7 @@ class DataNotFoundError(CogneeValidationError):
         status_code: int = status.HTTP_404_NOT_FOUND,
     ):
         super().__init__(message, name, status_code)
+
 
 class DocumentSubgraphNotFoundError(CogneeValidationError):
     def __init__(
