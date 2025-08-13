@@ -3,7 +3,6 @@
 import os
 import requests
 from datetime import datetime, timezone
-import networkx as nx
 import matplotlib.pyplot as plt
 import http.server
 import socketserver
