@@ -30,7 +30,7 @@ async def data_item_to_text_file(data_item_path: str, preferred_loaders: List[st
         elif parsed_url.scheme == "file":
             if settings.accept_local_file_path:
                 loader = get_loader_engine()
-                content = await loader.load_file(data_item_path)
+                content = await loader.load_file(data_item_path, preferred_loaders)
                 return await save_data_to_file(content)
             else:
                 raise IngestionError(message="Local files are not accepted.")
@@ -42,7 +42,7 @@ async def data_item_to_text_file(data_item_path: str, preferred_loaders: List[st
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
             if settings.accept_local_file_path:
                 loader = get_loader_engine()
-                content = await loader.load_file(data_item_path)
+                content = await loader.load_file(data_item_path, preferred_loaders)
                 return await save_data_to_file(content)
             else:
                 raise IngestionError(message="Local files are not accepted.")
