@@ -1,8 +1,6 @@
 import numpy as np
 from typing import List, Dict, Optional, Any, Union
-
-from cognee.exceptions import InvalidValueError
-
+from cognee.modules.graph.exceptions import InvalidDimensionsError, DimensionOutOfRangeError
 
 class Node:
     """
@@ -24,7 +22,7 @@ class Node:
         self, node_id: str, attributes: Optional[Dict[str, Any]] = None, dimension: int = 1
     ):
         if dimension <= 0:
-            raise InvalidValueError(message="Dimension must be a positive integer")
+            raise InvalidDimensionsError()
         self.id = node_id
         self.attributes = attributes if attributes is not None else {}
         self.attributes["vector_distance"] = float("inf")
@@ -58,9 +56,7 @@ class Node:
 
     def is_node_alive_in_dimension(self, dimension: int) -> bool:
         if dimension < 0 or dimension >= len(self.status):
-            raise InvalidValueError(
-                message=f"Dimension {dimension} is out of range. Valid range is 0 to {len(self.status) - 1}."
-            )
+            raise DimensionOutOfRangeError(dimension=dimension, max_index=len(self.status) - 1)
         return self.status[dimension] == 1
 
     def add_attribute(self, key: str, value: Any) -> None:
@@ -110,7 +106,7 @@ class Edge:
         dimension: int = 1,
     ):
         if dimension <= 0:
-            raise InvalidValueError(message="Dimensions must be a positive integer.")
+            InvalidDimensionsError()
         self.node1 = node1
         self.node2 = node2
         self.attributes = attributes if attributes is not None else {}
@@ -120,9 +116,7 @@ class Edge:
 
     def is_edge_alive_in_dimension(self, dimension: int) -> bool:
         if dimension < 0 or dimension >= len(self.status):
-            raise InvalidValueError(
-                message=f"Dimension {dimension} is out of range. Valid range is 0 to {len(self.status) - 1}."
-            )
+            raise DimensionOutOfRangeError(dimension=dimension, max_index=len(self.status) - 1)
         return self.status[dimension] == 1
 
     def add_attribute(self, key: str, value: Any) -> None:
