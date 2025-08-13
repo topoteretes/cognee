@@ -106,7 +106,7 @@ class Edge:
         dimension: int = 1,
     ):
         if dimension <= 0:
-            InvalidDimensionsError()
+            raise InvalidDimensionsError()
         self.node1 = node1
         self.node2 = node2
         self.attributes = attributes if attributes is not None else {}
