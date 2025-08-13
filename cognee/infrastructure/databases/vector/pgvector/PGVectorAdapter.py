@@ -9,7 +9,7 @@ from sqlalchemy.exc import ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 
-from cognee.exceptions import InvalidValueError
+
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
@@ -275,7 +275,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 return metadata.tables[collection_name]
             else:
                 raise CollectionNotFoundError(
-                    f"Collection '{collection_name}' not found!", log_level="DEBUG"
+                    f"Collection '{collection_name}' not found!",
                 )
 
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):

@@ -20,3 +20,11 @@ class UnsupportedLLMProviderError(CogneeValidationError):
     def __init__(self, provider: str):
         message = f"Unsupported LLM provider: {provider}"
         super().__init__(message=message, name="UnsupportedLLMProviderError")
+
+class MissingSystemPromptPathError(CogneeValidationError):
+    def __init__(
+        self,
+        name: str = "MissingSystemPromptPathError",
+    ):
+        message = "No system prompt path provided."
+        super().__init__(message, name)

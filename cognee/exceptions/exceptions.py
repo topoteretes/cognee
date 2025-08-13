@@ -43,8 +43,10 @@ class CogneeSystemError(CogneeApiError):
         message: str = "A system error occurred.",
         name: str = "CogneeSystemError",
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        log=True,
+        log_level="ERROR",
     ):
-        super().__init__(message, name, status_code)
+        super().__init__(message, name, status_code, log, log_level)
 
 
 class CogneeValidationError(CogneeApiError):
@@ -55,8 +57,10 @@ class CogneeValidationError(CogneeApiError):
         message: str = "A validation error occurred.",
         name: str = "CogneeValidationError",
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        log=True,
+        log_level="ERROR",
     ):
-        super().__init__(message, name, status_code)
+        super().__init__(message, name, status_code, log, log_level)
 
 
 class CogneeConfigurationError(CogneeApiError):
@@ -67,8 +71,10 @@ class CogneeConfigurationError(CogneeApiError):
         message: str = "A system configuration error occurred.",
         name: str = "CogneeConfigurationError",
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        log=True,
+        log_level="ERROR",
     ):
-        super().__init__(message, name, status_code)
+        super().__init__(message, name, status_code, log, log_level)
 
 
 class CogneeTransientError(CogneeApiError):
@@ -79,6 +85,8 @@ class CogneeTransientError(CogneeApiError):
         message: str = "A transient error occurred.",
         name: str = "CogneeTransientError",
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        log=True,
+        log_level="ERROR",
     ):
-        super().__init__(message, name, status_code)
+        super().__init__(message, name, status_code, log, log_level)
 

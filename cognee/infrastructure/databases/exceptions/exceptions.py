@@ -84,3 +84,21 @@ class NodesetFilterNotSupportedError(CogneeConfigurationError):
         self.message = message
         self.name = name
         self.status_code = status_code
+
+
+class EmbeddingException(CogneeConfigurationError):
+    """
+    Custom exception for handling embedding-related errors.
+
+    This exception class is designed to indicate issues specifically related to embeddings
+    within the application. It extends the base exception class CogneeConfigurationError allows
+    for customization of the error message, name, and status code.
+    """
+
+    def __init__(
+        self,
+        message: str = "Embedding Exception.",
+        name: str = "EmbeddingException",
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+    ):
+        super().__init__(message, name, status_code)
