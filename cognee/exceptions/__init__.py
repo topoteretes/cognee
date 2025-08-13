@@ -7,8 +7,7 @@ such as service failures, resource conflicts, and invalid operations.
 
 from .exceptions import (
     CogneeApiError,
-    ServiceError,
-    InvalidValueError,
-    InvalidAttributeError,
-    CriticalError,
+    CogneeSystemError,
+    CogneeValidationError,
+    CogneeConfigurationError,
 )
