@@ -102,3 +102,31 @@ class EmbeddingException(CogneeConfigurationError):
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
     ):
         super().__init__(message, name, status_code)
+
+class MissingQueryParameterError(CogneeValidationError):
+    """
+    Raised when neither 'query_text' nor 'query_vector' is provided,
+    and at least one is required to perform the operation.
+    """
+    def __init__(
+        self,
+        name: str = "MissingQueryParameterError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        message = "One of query_text or query_vector must be provided!"
+        super().__init__(message, name, status_code)
+
+class MutuallyExclusiveQueryParametersError(CogneeValidationError):
+    """
+    Raised when both 'text' and 'embedding' are provided to the search function,
+    but only one type of input is allowed at a time.
+    """
+    def __init__(
+        self,
+        name: str = "MutuallyExclusiveQueryParametersError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        message = (
+            "The search function accepts either text or embedding as input, but not both."
+        )
+        super().__init__(message, name, status_code)

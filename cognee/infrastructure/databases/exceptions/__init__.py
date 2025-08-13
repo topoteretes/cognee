@@ -9,4 +9,6 @@ from .exceptions import (
     EntityAlreadyExistsError,
     DatabaseNotCreatedError,
     EmbeddingException,
+    MissingQueryParameterError,
+    MutuallyExclusiveQueryParametersError
 )

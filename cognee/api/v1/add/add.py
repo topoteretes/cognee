@@ -133,11 +133,6 @@ async def add(
         - VECTOR_DB_PROVIDER: "lancedb" (default), "chromadb", "qdrant", "weaviate"
         - GRAPH_DATABASE_PROVIDER: "kuzu" (default), "neo4j", "networkx"
 
-    Raises:
-        FileNotFoundError: If specified file paths don't exist
-        PermissionError: If user lacks access to files or dataset
-        UnsupportedFileTypeError: If file format cannot be processed
-        InvalidValueError: If LLM_API_KEY is not set or invalid
     """
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),

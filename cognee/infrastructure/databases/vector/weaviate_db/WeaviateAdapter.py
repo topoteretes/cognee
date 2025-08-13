@@ -3,7 +3,7 @@ from typing import List, Optional
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from cognee.shared.logging_utils import get_logger
-from cognee.exceptions import InvalidValueError
+from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
@@ -390,7 +390,7 @@ class WeaviateAdapter(VectorDBInterface):
         """
         Perform a search on a collection using either a text query or a vector query.
 
-        Return scored results based on the search criteria provided. Raise InvalidValueError if
+        Return scored results based on the search criteria provided. Raise MissingQueryParameterError if
         no query is provided.
 
         Parameters:
@@ -413,7 +413,7 @@ class WeaviateAdapter(VectorDBInterface):
         import weaviate.exceptions
 
         if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
+            raise MissingQueryParameterError()
 
         if query_vector is None:
             query_vector = (await self.embed_data([query_text]))[0]

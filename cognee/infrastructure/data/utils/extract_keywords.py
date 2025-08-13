@@ -8,7 +8,7 @@ def extract_keywords(text: str) -> list[str]:
     """
     Extract keywords from the provided text string.
 
-    This function raises an InvalidValueError if the input text is empty. It processes the
+    This function raises an KeyWordExtractionError if the input text is empty. It processes the
     text to extract parts of speech, focusing on nouns, and uses TF-IDF to identify the most
     relevant keywords based on their frequency. The function returns a list of up to 15
     keywords, each having more than 3 characters.

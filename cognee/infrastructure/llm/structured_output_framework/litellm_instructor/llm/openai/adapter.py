@@ -307,7 +307,7 @@ class OpenAIAdapter(LLMInterface):
         Format and display the prompt for a user query.
 
         This method formats the prompt using the provided user input and system prompt,
-        returning a string representation. Raises InvalidValueError if the system prompt is not
+        returning a string representation. Raises MissingSystemPromptPathError if the system prompt is not
         provided.
 
         Parameters:

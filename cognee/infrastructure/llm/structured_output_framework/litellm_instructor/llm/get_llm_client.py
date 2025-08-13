@@ -38,7 +38,7 @@ def get_llm_client():
 
     This function retrieves the configuration for the LLM provider and model, and
     initializes the appropriate LLM client adapter accordingly. It raises an
-    InvalidValueError if the LLM API key is not set for certain providers or if the provider
+    LLMAPIKeyNotSetError if the LLM API key is not set for certain providers or if the provider
     is unsupported.
 
     Returns:
@@ -62,7 +62,7 @@ def get_llm_client():
 
     if provider == LLMProvider.OPENAI:
         if llm_config.llm_api_key is None:
-            raise InvalidValueError(message="LLM API key is not set.")
+            raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
             OpenAIAdapter,

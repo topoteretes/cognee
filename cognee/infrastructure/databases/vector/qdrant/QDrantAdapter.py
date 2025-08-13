@@ -4,7 +4,7 @@ from qdrant_client import AsyncQdrantClient, models
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine.utils import parse_id
-from cognee.exceptions import InvalidValueError
+from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
@@ -363,7 +363,7 @@ class QDrantAdapter(VectorDBInterface):
         Search for data points in a collection based on either a textual query or a vector
         query.
 
-        Raises InvalidValueError if both query_text and query_vector are None.
+        Raises MissingQueryParameterError if both query_text and query_vector are None.
 
         Returns a list of scored results that match the search criteria.
 
@@ -388,7 +388,7 @@ class QDrantAdapter(VectorDBInterface):
         from qdrant_client.http.exceptions import UnexpectedResponse
 
         if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
+            raise MissingQueryParameterError()
 
         if not await self.has_collection(collection_name):
             return []

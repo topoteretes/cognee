@@ -3,13 +3,13 @@ from uuid import UUID
 from typing import List, Optional
 from chromadb import AsyncHttpClient, Settings
 
-from cognee.exceptions import InvalidValueError
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.storage.utils import get_own_properties
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
+from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
 from ..vector_db_interface import VectorDBInterface
@@ -373,7 +373,7 @@ class ChromaDBAdapter(VectorDBInterface):
             Returns a list of ScoredResult instances representing the search results.
         """
         if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
+            raise MissingQueryParameterError()
 
         if query_text and not query_vector:
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
