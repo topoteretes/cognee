@@ -2,10 +2,13 @@
 
 from enum import Enum
 
-from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter import (
     OllamaAPIAdapter,
+)
+from cognee.infrastructure.llm.exceptions import (
+    LLMAPIKeyNotSetError,
+    UnsupportedLLMProviderError,
 )
 
 
