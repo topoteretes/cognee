@@ -1,8 +1,11 @@
-from cognee.exceptions import CogneeApiError
+from cognee.exceptions import (
+    CogneeValidationError,
+    CogneeConfigurationError,
+)
 from fastapi import status
 
 
-class UnstructuredLibraryImportError(CogneeApiError):
+class UnstructuredLibraryImportError(CogneeConfigurationError):
     def __init__(
         self,
         message: str = "Import error. Unstructured library is not installed.",
@@ -12,7 +15,7 @@ class UnstructuredLibraryImportError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
-class UnauthorizedDataAccessError(CogneeApiError):
+class UnauthorizedDataAccessError(CogneeValidationError):
     def __init__(
         self,
         message: str = "User does not have permission to access this data.",
@@ -22,7 +25,7 @@ class UnauthorizedDataAccessError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
-class DatasetNotFoundError(CogneeApiError):
+class DatasetNotFoundError(CogneeValidationError):
     def __init__(
         self,
         message: str = "Dataset not found.",
@@ -32,7 +35,7 @@ class DatasetNotFoundError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
-class DatasetTypeError(CogneeApiError):
+class DatasetTypeError(CogneeValidationError):
     def __init__(
         self,
         message: str = "Dataset type not supported.",
