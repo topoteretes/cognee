@@ -83,7 +83,7 @@ def get_llm_client():
 
     elif provider == LLMProvider.OLLAMA:
         if llm_config.llm_api_key is None:
-            raise InvalidValueError(message="LLM API key is not set.")
+            raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
             GenericAPIAdapter,
@@ -106,7 +106,7 @@ def get_llm_client():
 
     elif provider == LLMProvider.CUSTOM:
         if llm_config.llm_api_key is None:
-            raise InvalidValueError(message="LLM API key is not set.")
+            raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
             GenericAPIAdapter,
@@ -125,7 +125,7 @@ def get_llm_client():
 
     elif provider == LLMProvider.GEMINI:
         if llm_config.llm_api_key is None:
-            raise InvalidValueError(message="LLM API key is not set.")
+            raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter import (
             GeminiAdapter,
@@ -141,4 +141,4 @@ def get_llm_client():
         )
 
     else:
-        raise InvalidValueError(message=f"Unsupported LLM provider: {provider}")
+        raise UnsupportedLLMProviderError(provider)
