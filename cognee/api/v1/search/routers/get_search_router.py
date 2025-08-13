@@ -118,6 +118,10 @@ def get_search_router() -> APIRouter:
                 top_k=payload.top_k,
             )
 
+            # Ensure response conforms to response_model=list
+            if not isinstance(results, list):
+                results = [results]
+
             return results
         except PermissionDeniedError:
             return []
