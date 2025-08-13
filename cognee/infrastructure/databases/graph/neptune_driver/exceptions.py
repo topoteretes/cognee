@@ -3,11 +3,11 @@
 This module defines custom exceptions for Neptune Analytics operations.
 """
 
-from cognee.exceptions import CogneeApiError
+from cognee.exceptions import CogneeSystemError
 from fastapi import status
 
 
-class NeptuneAnalyticsError(CogneeApiError):
+class NeptuneAnalyticsError(CogneeSystemError):
     """Base exception for Neptune Analytics operations."""
 
     def __init__(

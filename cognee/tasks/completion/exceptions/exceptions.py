@@ -1,8 +1,8 @@
-from cognee.exceptions import CogneeApiError
+from cognee.exceptions import CogneeValidationError
 from fastapi import status
 
 
-class NoRelevantDataError(CogneeApiError):
+class NoRelevantDataError(CogneeValidationError):
     """
     Represents an error when no relevant data is found during a search. This class is a
     subclass of CogneeApiError.
