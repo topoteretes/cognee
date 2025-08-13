@@ -3,7 +3,12 @@
 This module defines custom exceptions for Neptune Analytics operations.
 """
 
-from cognee.exceptions import CogneeSystemError
+from cognee.exceptions import (
+    CogneeSystemError,
+    CogneeTransientError,
+    CogneeValidationError,
+    CogneeConfigurationError,
+)
 from fastapi import status
 
 
@@ -19,7 +24,7 @@ class NeptuneAnalyticsError(CogneeSystemError):
         super().__init__(message, name, status_code)
 
 
-class NeptuneAnalyticsConnectionError(NeptuneAnalyticsError):
+class NeptuneAnalyticsConnectionError(CogneeTransientError):
     """Exception raised when connection to Neptune Analytics fails."""
 
     def __init__(
@@ -31,7 +36,7 @@ class NeptuneAnalyticsConnectionError(NeptuneAnalyticsError):
         super().__init__(message, name, status_code)
 
 
-class NeptuneAnalyticsQueryError(NeptuneAnalyticsError):
+class NeptuneAnalyticsQueryError(CogneeValidationError):
     """Exception raised when a query execution fails."""
 
     def __init__(
@@ -43,7 +48,7 @@ class NeptuneAnalyticsQueryError(NeptuneAnalyticsError):
         super().__init__(message, name, status_code)
 
 
-class NeptuneAnalyticsAuthenticationError(NeptuneAnalyticsError):
+class NeptuneAnalyticsAuthenticationError(CogneeConfigurationError):
     """Exception raised when authentication with Neptune Analytics fails."""
 
     def __init__(
@@ -55,7 +60,7 @@ class NeptuneAnalyticsAuthenticationError(NeptuneAnalyticsError):
         super().__init__(message, name, status_code)
 
 
-class NeptuneAnalyticsConfigurationError(NeptuneAnalyticsError):
+class NeptuneAnalyticsConfigurationError(CogneeConfigurationError):
     """Exception raised when Neptune Analytics configuration is invalid."""
 
     def __init__(
@@ -67,7 +72,7 @@ class NeptuneAnalyticsConfigurationError(NeptuneAnalyticsError):
         super().__init__(message, name, status_code)
 
 
-class NeptuneAnalyticsTimeoutError(NeptuneAnalyticsError):
+class NeptuneAnalyticsTimeoutError(CogneeTransientError):
     """Exception raised when a Neptune Analytics operation times out."""
 
     def __init__(
@@ -79,7 +84,7 @@ class NeptuneAnalyticsTimeoutError(NeptuneAnalyticsError):
         super().__init__(message, name, status_code)
 
 
-class NeptuneAnalyticsThrottlingError(NeptuneAnalyticsError):
+class NeptuneAnalyticsThrottlingError(CogneeTransientError):
     """Exception raised when requests are throttled by Neptune Analytics."""
 
     def __init__(
@@ -91,7 +96,7 @@ class NeptuneAnalyticsThrottlingError(NeptuneAnalyticsError):
         super().__init__(message, name, status_code)
 
 
-class NeptuneAnalyticsResourceNotFoundError(NeptuneAnalyticsError):
+class NeptuneAnalyticsResourceNotFoundError(CogneeValidationError):
     """Exception raised when a Neptune Analytics resource is not found."""
 
     def __init__(
@@ -103,7 +108,7 @@ class NeptuneAnalyticsResourceNotFoundError(NeptuneAnalyticsError):
         super().__init__(message, name, status_code)
 
 
-class NeptuneAnalyticsInvalidParameterError(NeptuneAnalyticsError):
+class NeptuneAnalyticsInvalidParameterError(CogneeValidationError):
     """Exception raised when invalid parameters are provided to Neptune Analytics."""
 
     def __init__(
