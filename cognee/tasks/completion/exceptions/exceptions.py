@@ -5,7 +5,7 @@ from fastapi import status
 class NoRelevantDataError(CogneeValidationError):
     """
     Represents an error when no relevant data is found during a search. This class is a
-    subclass of CogneeApiError.
+    subclass of CogneeValidationError.
 
     Public methods:
 
