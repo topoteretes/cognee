@@ -12,7 +12,21 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    text_1 = """
+    pdf_document = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/artificial-intelligence.pdf"
+    )
+
+    txt_document = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Natural_language_processing_copy.txt"
+    )
+
+    audio_document = os.path.join(pathlib.Path(__file__).parent, "test_data/text_to_speech.mp3")
+
+    image_document = os.path.join(pathlib.Path(__file__).parent, "test_data/example.png")
+
+    unstructured_document = os.path.join(pathlib.Path(__file__).parent, "test_data/example.pptx")
+
+    text_document_as_literal = """
     1. Audi
     Audi is known for its modern designs and advanced technology. Founded in the early 1900s, the brand has earned a reputation for precision engineering and innovation. With features like the Quattro all-wheel-drive system, Audi offers a range of vehicles from stylish sedans to high-performance sports cars.
 
@@ -31,27 +45,19 @@ async def main():
     Each of these car manufacturer contributes to Germany's reputation as a leader in the global automotive industry, showcasing a blend of innovation, performance, and design excellence.
     """
 
-    text_2 = """
-    1. Apple
-    Apple is renowned for its innovative consumer electronics and software. Its product lineup includes the iPhone, iPad, Mac computers, and wearables like the Apple Watch. Known for its emphasis on sleek design and user-friendly interfaces, Apple has built a loyal customer base and created a seamless ecosystem that integrates hardware, software, and services.
-
-    2. Google
-    Founded in 1998, Google started as a search engine and quickly became the go-to resource for finding information online. Over the years, the company has diversified its offerings to include digital advertising, cloud computing, mobile operating systems (Android), and various web services like Gmail and Google Maps. Google's innovations have played a major role in shaping the internet landscape.
-
-    3. Microsoft
-    Microsoft Corporation has been a dominant force in software for decades. Its Windows operating system and Microsoft Office suite are staples in both business and personal computing. In recent years, Microsoft has expanded into cloud computing with Azure, gaming with the Xbox platform, and even hardware through products like the Surface line. This evolution has helped the company maintain its relevance in a rapidly changing tech world.
-
-    4. Amazon
-    What began as an online bookstore has grown into one of the largest e-commerce platforms globally. Amazon is known for its vast online marketplace, but its influence extends far beyond retail. With Amazon Web Services (AWS), the company has become a leader in cloud computing, offering robust solutions that power websites, applications, and businesses around the world. Amazon's constant drive for innovation continues to reshape both retail and technology sectors.
-
-    5. Meta
-    Meta, originally known as Facebook, revolutionized social media by connecting billions of people worldwide. Beyond its core social networking service, Meta is investing in the next generation of digital experiences through virtual and augmented reality technologies, with projects like Oculus. The company's efforts signal a commitment to evolving digital interaction and building the metaverse—a shared virtual space where users can connect and collaborate.
-
-    Each of these companies has significantly impacted the technology landscape, driving innovation and transforming everyday life through their groundbreaking products and services.
-    """
+    ################### HARD DELETE
 
     # Add documents and get dataset information
-    add_result = await cognee.add([text_1, text_2])
+    add_result = await cognee.add(
+        [
+            pdf_document,
+            txt_document,
+            text_document_as_literal,
+            unstructured_document,
+            audio_document,
+            image_document,
+        ]
+    )
     dataset_id = add_result.dataset_id
 
     await cognee.cognify()
@@ -72,7 +78,42 @@ async def main():
 
     nodes, edges = await graph_engine.get_graph_data()
 
-    assert len(nodes) == 0 and len(edges) == 0, "Document is not deleted."
+    assert len(nodes) == 0 and len(edges) == 0, "Document is not deleted with hard delete."
+
+    ################### SOFT DELETE
+
+    # Add documents and get dataset information
+    add_result = await cognee.add(
+        [
+            pdf_document,
+            txt_document,
+            text_document_as_literal,
+            unstructured_document,
+            audio_document,
+            image_document,
+        ]
+    )
+    dataset_id = add_result.dataset_id
+
+    await cognee.cognify()
+
+    from cognee.infrastructure.databases.graph import get_graph_engine
+
+    graph_engine = await get_graph_engine()
+    nodes, edges = await graph_engine.get_graph_data()
+    assert len(nodes) > 10 and len(edges) > 10, "Graph database is not loaded."
+
+    # Get the data IDs from the dataset
+    dataset_data = await get_dataset_data(dataset_id)
+    assert len(dataset_data) > 0, "Dataset should contain data"
+
+    # Delete each document using its ID
+    for data_item in dataset_data:
+        await cognee.delete(data_item.id, dataset_id, mode="soft")
+
+    nodes, edges = await graph_engine.get_graph_data()
+
+    assert len(nodes) == 0 and len(edges) == 0, "Document is not deleted with soft delete."
 
 
 if __name__ == "__main__":

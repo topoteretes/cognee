@@ -510,12 +510,12 @@ class NeptuneGraphDB(GraphDBInterface):
 
             query = f"""
             MATCH (source:{self._GRAPH_NODE_LABEL})
-            WHERE id(source) = $source_id 
-            MATCH (target:{self._GRAPH_NODE_LABEL}) 
-            WHERE id(target) = $target_id 
-            MERGE (source)-[r:{relationship_name}]->(target) 
-            ON CREATE SET r = $properties, r.updated_at = timestamp() 
-            ON MATCH SET r = $properties, r.updated_at = timestamp() 
+            WHERE id(source) = $source_id
+            MATCH (target:{self._GRAPH_NODE_LABEL})
+            WHERE id(target) = $target_id
+            MERGE (source)-[r:{relationship_name}]->(target)
+            ON CREATE SET r = $properties, r.updated_at = timestamp()
+            ON MATCH SET r = $properties, r.updated_at = timestamp()
             RETURN r
             """
 
@@ -565,9 +565,9 @@ class NeptuneGraphDB(GraphDBInterface):
                     WHERE id(source) = edge.from_node
                     MATCH (target:{self._GRAPH_NODE_LABEL})
                     WHERE id(target) = edge.to_node
-                    MERGE (source)-[r:{relationship_name}]->(target) 
-                    ON CREATE SET r = edge.properties, r.updated_at = timestamp() 
-                    ON MATCH SET r = edge.properties, r.updated_at = timestamp() 
+                    MERGE (source)-[r:{relationship_name}]->(target)
+                    ON CREATE SET r = edge.properties, r.updated_at = timestamp()
+                    ON MATCH SET r = edge.properties, r.updated_at = timestamp()
                     RETURN count(*) AS edges_processed
                     """
 
@@ -817,7 +817,7 @@ class NeptuneGraphDB(GraphDBInterface):
             query = f"""
             MATCH (n:{self._GRAPH_NODE_LABEL})-[r]-(m:{self._GRAPH_NODE_LABEL})
             WHERE id(n) = $node_id
-            RETURN 
+            RETURN
                 id(n) AS source_id,
                 id(m) AS target_id,
                 type(r) AS relationship_name,
@@ -1034,7 +1034,7 @@ class NeptuneGraphDB(GraphDBInterface):
             query = f"""
             MATCH (source:{self._GRAPH_NODE_LABEL})-[r]->(target:{self._GRAPH_NODE_LABEL})
             WHERE id(source) = $node_id OR id(target) = $node_id
-            RETURN 
+            RETURN
                 id(source) AS source_id,
                 properties(source) AS source_props,
                 id(target) AS target_id,
@@ -1284,14 +1284,14 @@ class NeptuneGraphDB(GraphDBInterface):
 
         query = f"""
                 MATCH (n :{self._GRAPH_NODE_LABEL})
-                WHERE size((n)--()) = 1 
+                WHERE size((n)--()) = 1
                 AND n.type = $node_type
                 RETURN n
                 """
         result = await self.query(query, {"node_type": node_type})
         return [record["n"] for record in result] if result else []
 
-    async def get_document_subgraph(self, content_hash: str):
+    async def get_document_subgraph(self, data_id: str):
         """
         Retrieve a subgraph related to a document identified by its content hash, including
         related entities and chunks.
@@ -1299,7 +1299,7 @@ class NeptuneGraphDB(GraphDBInterface):
         Parameters:
         -----------
 
-            - content_hash (str): The hash identifying the document whose subgraph should be
+            - data_id (str): The document_id identifying the document whose subgraph should be
               retrieved.
 
         Returns:
@@ -1312,10 +1312,10 @@ class NeptuneGraphDB(GraphDBInterface):
         MATCH (doc)
         WHERE (doc:{self._GRAPH_NODE_LABEL})
         AND doc.type in ['TextDocument', 'PdfDocument']
-        AND doc.name = 'text_' + $content_hash
+        AND doc.id = $data_id
 
         OPTIONAL MATCH (doc)<-[:is_part_of]-(chunk {{type: 'DocumentChunk'}})
-        
+
         // Alternative to WHERE NOT EXISTS
         OPTIONAL MATCH (chunk)-[:contains]->(entity {{type: 'Entity'}})
         OPTIONAL MATCH (entity)<-[:contains]-(otherChunk {{type: 'DocumentChunk'}})-[:is_part_of]->(otherDoc)
@@ -1330,7 +1330,7 @@ class NeptuneGraphDB(GraphDBInterface):
         OPTIONAL MATCH (type)<-[:is_a]-(otherEntity {{type: 'Entity'}})<-[:contains]-(otherChunk {{type: 'DocumentChunk'}})-[:is_part_of]->(otherDoc)
           WHERE otherDoc.type in ['TextDocument', 'PdfDocument']
           AND otherDoc.id <> doc.id
-        
+
         // Alternative to WHERE NOT EXISTS
         WITH doc, entity, chunk, made_node, type, otherDoc
         WHERE otherDoc IS NULL
@@ -1342,7 +1342,7 @@ class NeptuneGraphDB(GraphDBInterface):
             collect(DISTINCT made_node) as made_from_nodes,
             collect(DISTINCT type) as orphan_types
         """
-        result = await self.query(query, {"content_hash": content_hash})
+        result = await self.query(query, {"data_id": data_id})
         return result[0] if result else None
 
     async def _get_model_independent_graph_data(self):
@@ -1388,7 +1388,7 @@ class NeptuneGraphDB(GraphDBInterface):
         CALL neptune.algo.wcc(n,{{}})
         YIELD node, component
         RETURN component, count(*) AS size
-        ORDER BY size DESC 
+        ORDER BY size DESC
         """
 
         result = await self.query(query)

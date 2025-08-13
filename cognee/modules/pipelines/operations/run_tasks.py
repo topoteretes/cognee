@@ -2,7 +2,7 @@ import os
 
 import asyncio
 from uuid import UUID
-from typing import Any
+from typing import Any, List
 from functools import wraps
 from sqlalchemy import select
 
@@ -60,9 +60,9 @@ def override_run_tasks(new_gen):
 
 @override_run_tasks(run_tasks_distributed)
 async def run_tasks(
-    tasks: list[Task],
+    tasks: List[Task],
     dataset_id: UUID,
-    data: Any = None,
+    data: List[Any] = None,
     user: User = None,
     pipeline_name: str = "unknown_pipeline",
     context: dict = None,
@@ -263,24 +263,49 @@ async def run_tasks(
         if incremental_loading:
             data = await resolve_data_directories(data)
 
-        # Create async tasks per data item that will run the pipeline for the data item
-        data_item_tasks = [
-            asyncio.create_task(
-                _run_tasks_data_item(
-                    data_item,
-                    dataset,
-                    tasks,
-                    pipeline_name,
-                    pipeline_id,
-                    pipeline_run_id,
-                    context,
-                    user,
-                    incremental_loading,
-                )
+        # TODO: Return to using async.gather for data items after Cognee release
+        # # Create async tasks per data item that will run the pipeline for the data item
+        # data_item_tasks = [
+        #     asyncio.create_task(
+        #         _run_tasks_data_item(
+        #             data_item,
+        #             dataset,
+        #             tasks,
+        #             pipeline_name,
+        #             pipeline_id,
+        #             pipeline_run_id,
+        #             context,
+        #             user,
+        #             incremental_loading,
+        #         )
+        #     )
+        #     for data_item in data
+        # ]
+        # results = await asyncio.gather(*data_item_tasks)
+        # # Remove skipped data items from results
+        # results = [result for result in results if result]
+
+        ### TEMP sync data item handling
+        results = []
+        # Run the pipeline for each data_item sequentially, one after the other
+        for data_item in data:
+            result = await _run_tasks_data_item(
+                data_item,
+                dataset,
+                tasks,
+                pipeline_name,
+                pipeline_id,
+                pipeline_run_id,
+                context,
+                user,
+                incremental_loading,
             )
-            for data_item in data
-        ]
-        results = await asyncio.gather(*data_item_tasks)
+
+            # Skip items that returned a false-y value
+            if result:
+                results.append(result)
+        ### END
+
         # Remove skipped data items from results
         results = [result for result in results if result]
 

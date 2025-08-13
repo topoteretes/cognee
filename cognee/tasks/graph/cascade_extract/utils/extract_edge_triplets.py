@@ -1,6 +1,6 @@
-from typing import List, Tuple
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
-from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
+from typing import List
+
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.root_dir import get_absolute_path
 
@@ -9,7 +9,6 @@ async def extract_edge_triplets(
     content: str, nodes: List[str], relationship_names: List[str], n_rounds: int = 2
 ) -> KnowledgeGraph:
     """Creates a knowledge graph by identifying relationships between the provided nodes."""
-    llm_client = get_llm_client()
     final_graph = KnowledgeGraph(nodes=[], edges=[])
     existing_nodes = set()
     existing_node_ids = set()
@@ -27,13 +26,13 @@ async def extract_edge_triplets(
         }
 
         base_directory = get_absolute_path("./tasks/graph/cascade_extract/prompts")
-        text_input = render_prompt(
+        text_input = LLMGateway.render_prompt(
             "extract_graph_edge_triplets_prompt_input.txt", context, base_directory=base_directory
         )
-        system_prompt = read_query_prompt(
+        system_prompt = LLMGateway.read_query_prompt(
             "extract_graph_edge_triplets_prompt_system.txt", base_directory=base_directory
         )
-        extracted_graph = await llm_client.acreate_structured_output(
+        extracted_graph = await LLMGateway.acreate_structured_output(
             text_input=text_input, system_prompt=system_prompt, response_model=KnowledgeGraph
         )
 
