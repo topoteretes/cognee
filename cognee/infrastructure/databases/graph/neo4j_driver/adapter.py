@@ -1270,21 +1270,21 @@ class Neo4jAdapter(GraphDBInterface):
         """
         query = """
         MATCH (doc)
-        WHERE (doc:TextDocument OR doc:PdfDocument)
+        WHERE (doc:TextDocument OR doc:PdfDocument OR doc:UnstructuredDocument OR doc:AudioDocument or doc:ImageDocument)
         AND doc.id = $data_id
 
         OPTIONAL MATCH (doc)<-[:is_part_of]-(chunk:DocumentChunk)
         OPTIONAL MATCH (chunk)-[:contains]->(entity:Entity)
         WHERE NOT EXISTS {
             MATCH (entity)<-[:contains]-(otherChunk:DocumentChunk)-[:is_part_of]->(otherDoc)
-            WHERE (otherDoc:TextDocument OR otherDoc:PdfDocument)
+            WHERE (otherDoc:TextDocument OR otherDoc:PdfDocument OR otherDoc:UnstructuredDocument OR otherDoc:AudioDocument or otherDoc:ImageDocument)
             AND otherDoc.id <> doc.id
         }
         OPTIONAL MATCH (chunk)<-[:made_from]-(made_node:TextSummary)
         OPTIONAL MATCH (entity)-[:is_a]->(type:EntityType)
         WHERE NOT EXISTS {
             MATCH (type)<-[:is_a]-(otherEntity:Entity)<-[:contains]-(otherChunk:DocumentChunk)-[:is_part_of]->(otherDoc)
-            WHERE (otherDoc:TextDocument OR otherDoc:PdfDocument)
+            WHERE (otherDoc:TextDocument OR otherDoc:PdfDocument OR otherDoc:UnstructuredDocument OR otherDoc:AudioDocument or otherDoc:ImageDocument)
             AND otherDoc.id <> doc.id
         }
 

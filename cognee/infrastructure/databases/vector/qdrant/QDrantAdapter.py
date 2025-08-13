@@ -132,7 +132,6 @@ class QDrantAdapter(VectorDBInterface):
 
     def __init__(self, url, api_key, embedding_engine: EmbeddingEngine, qdrant_path=None):
         self.embedding_engine = embedding_engine
-
         if qdrant_path is not None:
             self.qdrant_path = qdrant_path
         else:
