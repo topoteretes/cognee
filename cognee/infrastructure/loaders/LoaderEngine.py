@@ -117,6 +117,7 @@ class LoaderEngine:
             raise ValueError(f"No loader found for file: {file_path}")
 
         logger.debug(f"Loading {file_path} with {loader.loader_name}")
+        # TODO: loading needs to be reworked to work with both file streams and file locations
         return await loader.load(file_path, **kwargs)
 
     def get_available_loaders(self) -> List[str]:
