@@ -1,8 +1,8 @@
 from fastapi import status
-from cognee.exceptions import CriticalError
+from cognee.exceptions import CogneeValidationError
 
 
-class CollectionNotFoundError(CriticalError):
+class CollectionNotFoundError(CogneeValidationError):
     """
     Represents an error that occurs when a requested collection cannot be found.
 
@@ -16,7 +16,5 @@ class CollectionNotFoundError(CriticalError):
         message,
         name: str = "CollectionNotFoundError",
         status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
-        log=True,
-        log_level="DEBUG",
     ):
-        super().__init__(message, name, status_code, log, log_level)
+        super().__init__(message, name, status_code)
