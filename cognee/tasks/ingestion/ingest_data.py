@@ -117,10 +117,8 @@ async def ingest_data(
                     data_point.name = file_metadata["name"]
                     data_point.raw_data_location = cognee_storage_file_path
                     data_point.original_data_location = file_metadata["file_path"]
-                    data_point.extension = (
-                        "txt",
-                    )  # All data will be text inside Cognee from now on
-                    data_point.mime_type = ("text/plain",)
+                    data_point.extension = "txt"  # All data will be text inside Cognee from now on
+                    data_point.mime_type = "text/plain"
                     data_point.loader_engine = loader_engine.loader_name
                     data_point.owner_id = user.id
                     data_point.content_hash = file_metadata["content_hash"]
