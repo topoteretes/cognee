@@ -16,6 +16,7 @@ from fastapi.openapi.utils import get_openapi
 
 from cognee.exceptions import CogneeApiError
 from cognee.shared.logging_utils import get_logger, setup_logging
+from cognee.api.health import health_checker, HealthStatus
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
@@ -161,11 +162,48 @@ async def root():
 
 
 @app.get("/health")
-def health_check():
+async def health_check():
     """
-    Health check endpoint that returns the server status.
+    Health check endpoint for liveness/readiness probes.
     """
-    return Response(status_code=200)
+    try:
+        health_status = await health_checker.get_health_status(detailed=False)
+        status_code = 503 if health_status.status == HealthStatus.UNHEALTHY else 200
+
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "status": "ready" if status_code == 200 else "not ready",
+                "health": health_status.status,
+                "version": health_status.version,
+            },
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not ready", "reason": f"health check failed: {str(e)}"},
+        )
+
+
+@app.get("/health/detailed")
+async def detailed_health_check():
+    """
+    Comprehensive health status with component details.
+    """
+    try:
+        health_status = await health_checker.get_health_status(detailed=True)
+        status_code = 200
+        if health_status.status == HealthStatus.UNHEALTHY:
+            status_code = 503
+        elif health_status.status == HealthStatus.DEGRADED:
+            status_code = 200  # Degraded is still operational
+
+        return JSONResponse(status_code=status_code, content=health_status.model_dump())
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "error": f"Health check system failure: {str(e)}"},
+        )
 
 
 app.include_router(get_auth_router(), prefix="/api/v1/auth", tags=["auth"])
