@@ -28,9 +28,8 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
-      - name: Install specific db dependency
-        run: |
-          uv sync
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
 
       - name: Run Kuzu search Tests
         env:

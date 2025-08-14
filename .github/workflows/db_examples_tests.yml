@@ -86,9 +86,8 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
-      - name: Install Kuzu extra
-        run: |
-          uv sync
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
 
       - name: Run Kuzu Example
         env:

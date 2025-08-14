@@ -221,9 +221,8 @@ jobs:
         with:
           python-version: '3.11.x'
 
-      - name: Install specific graph db dependency
-        run: |
-          uv sync
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
 
       - name: Run parallel databases test
         env:
@@ -250,9 +249,8 @@ jobs:
         with:
           python-version: '3.11.x'
 
-      - name: Install specific graph db dependency
-        run: |
-          uv sync
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
 
       - name: Run parallel databases test
         env:
@@ -279,9 +277,8 @@ jobs:
         with:
           python-version: '3.11.x'
 
-      - name: Install specific graph db dependency
-        run: |
-          uv sync
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
 
       - name: Run graph edges test
         env:

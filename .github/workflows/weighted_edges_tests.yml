@@ -61,10 +61,8 @@ jobs:
         database: ['kuzu', 'neo4j']
         include:
           - database: kuzu
-            install_extra: ""
             graph_db_provider: "kuzu"
           - database: neo4j
-            install_extra: "--extra neo4j"
             graph_db_provider: "neo4j"
     env:
       LLM_PROVIDER: openai
@@ -88,9 +86,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Database Dependencies
-        run: |
-          uv sync ${{ matrix.install_extra }}
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
 
       - name: Run Weighted Edges Tests
         env:
