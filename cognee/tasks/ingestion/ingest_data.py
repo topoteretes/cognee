@@ -92,71 +92,81 @@ async def ingest_data(
             async with open_data_file(original_file_path) as file:
                 classified_data = ingestion.classify(file)
 
-                # data_id is the hash of file contents + owner id to avoid duplicate data
+                # data_id is the hash of original file contents + owner id to avoid duplicate data
                 data_id = ingestion.identify(classified_data, user)
+                original_file_metadata = classified_data.get_metadata()
 
-                file_metadata = classified_data.get_metadata()
+            # Find metadata from Cognee data storage text file
+            async with open_data_file(cognee_storage_file_path) as file:
+                classified_data = ingestion.classify(file)
+                storage_file_metadata = classified_data.get_metadata()
 
-                from sqlalchemy import select
+            from sqlalchemy import select
 
-                db_engine = get_relational_engine()
+            db_engine = get_relational_engine()
 
-                # Check to see if data should be updated
-                async with db_engine.get_async_session() as session:
-                    data_point = (
-                        await session.execute(select(Data).filter(Data.id == data_id))
-                    ).scalar_one_or_none()
+            # Check to see if data should be updated
+            async with db_engine.get_async_session() as session:
+                data_point = (
+                    await session.execute(select(Data).filter(Data.id == data_id))
+                ).scalar_one_or_none()
 
-                # TODO: Maybe allow getting of external metadata through ingestion loader?
-                ext_metadata = get_external_metadata_dict(data_item)
+            # TODO: Maybe allow getting of external metadata through ingestion loader?
+            ext_metadata = get_external_metadata_dict(data_item)
 
-                if node_set:
-                    ext_metadata["node_set"] = node_set
-                # TODO: Dont hardcode txt and text/plain values
-                if data_point is not None:
-                    data_point.name = file_metadata["name"]
-                    data_point.raw_data_location = cognee_storage_file_path
-                    data_point.original_data_location = file_metadata["file_path"]
-                    data_point.extension = "txt"  # All data will be text inside Cognee from now on
-                    data_point.mime_type = "text/plain"
-                    data_point.loader_engine = loader_engine.loader_name
-                    data_point.owner_id = user.id
-                    data_point.content_hash = file_metadata["content_hash"]
-                    data_point.file_size = file_metadata["file_size"]
-                    data_point.external_metadata = ext_metadata
-                    data_point.node_set = json.dumps(node_set) if node_set else None
-                    data_point.tenant_id = user.tenant_id if user.tenant_id else None
+            if node_set:
+                ext_metadata["node_set"] = node_set
 
-                    # Check if data is already in dataset
-                    if str(data_point.id) in dataset_data_map:
-                        existing_data_points.append(data_point)
-                    else:
-                        dataset_new_data_points.append(data_point)
-                        dataset_data_map[str(data_point.id)] = True
+            if data_point is not None:
+                data_point.name = original_file_metadata["name"]
+                data_point.raw_data_location = cognee_storage_file_path
+                data_point.original_data_location = original_file_metadata["file_path"]
+                data_point.extension = storage_file_metadata["extension"]
+                data_point.mime_type = storage_file_metadata["mime_type"]
+                data_point.original_extension = original_file_metadata["extension"]
+                data_point.original_mime_type = original_file_metadata["mime_type"]
+                data_point.loader_engine = loader_engine.loader_name
+                data_point.owner_id = user.id
+                data_point.content_hash = original_file_metadata["content_hash"]
+                data_point.raw_content_hash = storage_file_metadata["content_hash"]
+                data_point.file_size = original_file_metadata["file_size"]
+                data_point.external_metadata = ext_metadata
+                data_point.node_set = json.dumps(node_set) if node_set else None
+                data_point.tenant_id = user.tenant_id if user.tenant_id else None
+
+                # Check if data is already in dataset
+                if str(data_point.id) in dataset_data_map:
+                    existing_data_points.append(data_point)
                 else:
-                    if str(data_id) in dataset_data_map:
-                        continue
-
-                    data_point = Data(
-                        id=data_id,
-                        name=file_metadata["name"],
-                        raw_data_location=cognee_storage_file_path,
-                        original_data_location=file_metadata["file_path"],
-                        extension="txt",  # All data will be text inside Cognee from now on
-                        mime_type="text/plain",
-                        loader_engine=loader_engine.loader_name,
-                        owner_id=user.id,
-                        content_hash=file_metadata["content_hash"],
-                        external_metadata=ext_metadata,
-                        node_set=json.dumps(node_set) if node_set else None,
-                        data_size=file_metadata["file_size"],
-                        tenant_id=user.tenant_id if user.tenant_id else None,
-                        pipeline_status={},
-                        token_count=-1,
-                    )
-
-                    new_datapoints.append(data_point)
+                    dataset_new_data_points.append(data_point)
                     dataset_data_map[str(data_point.id)] = True
+            else:
+                if str(data_id) in dataset_data_map:
+                    continue
+
+                data_point = Data(
+                    id=data_id,
+                    name=original_file_metadata["name"],
+                    raw_data_location=cognee_storage_file_path,
+                    original_data_location=original_file_metadata["file_path"],
+                    extension="txt",  # All data will be text inside Cognee from now on
+                    mime_type="text/plain",
+                    original_extension=original_file_metadata["extension"],
+                    original_mime_type=original_file_metadata["mime_type"],
+                    loader_engine=loader_engine.loader_name,
+                    owner_id=user.id,
+                    content_hash=original_file_metadata["content_hash"],
+                    raw_content_hash=storage_file_metadata["content_hash"],
+                    external_metadata=ext_metadata,
+                    node_set=json.dumps(node_set) if node_set else None,
+                    data_size=original_file_metadata["file_size"],
+                    tenant_id=user.tenant_id if user.tenant_id else None,
+                    pipeline_status={},
+                    token_count=-1,
+                )
+
+                new_datapoints.append(data_point)
+                dataset_data_map[str(data_point.id)] = True
 
         async with db_engine.get_async_session() as session:
             if dataset not in session:

@@ -3,7 +3,7 @@ from urllib.parse import urlparse
 from typing import List, Tuple
 import tempfile
 
-from cognee.infrastructure.loaders.LoaderEngine import LoaderEngine
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
 from cognee.infrastructure.loaders import get_loader_engine
@@ -35,7 +35,7 @@ async def pull_from_s3(file_path, destination_file) -> None:
 
 async def data_item_to_text_file(
     data_item_path: str, preferred_loaders: List[str]
-) -> Tuple[str, LoaderEngine]:
+) -> Tuple[str, LoaderInterface]:
     if isinstance(data_item_path, str):
         parsed_url = urlparse(data_item_path)
 

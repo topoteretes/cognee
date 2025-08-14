@@ -1,4 +1,3 @@
-from typing import List
 from .LoaderEngine import LoaderEngine
 from .supported_loaders import supported_loaders
 from cognee.shared.logging_utils import get_logger

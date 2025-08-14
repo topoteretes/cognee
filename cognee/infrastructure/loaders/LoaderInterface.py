@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional, Any
 
 
 class LoaderInterface(ABC):
@@ -58,12 +58,13 @@ class LoaderInterface(ABC):
         pass
 
     @abstractmethod
-    async def load(self, file_path: str, **kwargs):
+    async def load(self, file_path: str, file_stream: Optional[Any] = None, **kwargs):
         """
         Load and process the file, returning standardized result.
 
         Args:
             file_path: Path to the file to be processed
+            file_stream: If file stream is provided it will be used to process file instead
             **kwargs: Additional loader-specific configuration
 
         Raises:

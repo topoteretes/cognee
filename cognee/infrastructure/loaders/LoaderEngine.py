@@ -1,5 +1,5 @@
 import filetype
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from .LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
 
@@ -99,7 +99,13 @@ class LoaderEngine:
 
         return None
 
-    async def load_file(self, file_path: str, preferred_loaders: List[str] = None, **kwargs):
+    async def load_file(
+        self,
+        file_path: str,
+        file_stream: Optional[Any],
+        preferred_loaders: Optional[List[str]] = None,
+        **kwargs,
+    ):
         """
         Load file using appropriate loader.
 

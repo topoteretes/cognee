@@ -163,6 +163,9 @@ async def run_tasks(
                 "data_id": data_id,
             }
 
+            if os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true":
+                raise error
+
     async def _run_tasks_data_item_regular(
         data_item,
         dataset,
