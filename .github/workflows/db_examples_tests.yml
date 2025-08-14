@@ -54,10 +54,6 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
-      - name: Install Neo4j extra
-        run: |
-          uv sync --extra neo4j
-
       - name: Run Neo4j Example
         env:
           ENV: dev
@@ -138,10 +134,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
-
-      - name: Install PGVector extra
-        run: |
-          uv sync --extra postgres
+          extra-dependencies: "postgres"
 
       - name: Run PGVector Example
         env:

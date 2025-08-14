@@ -140,10 +140,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-
-      - name: Install specific db dependency
-        run: |
-          uv sync --extra postgres
+          extra-dependencies: "postgres"
 
       - name: Run Deduplication Example
         env:
@@ -192,10 +189,10 @@ jobs:
           uses: ./.github/actions/cognee_setup
           with:
             python-version: '3.11.x'
+            extra-dependencies: "aws"
 
-        - name: Install specific S3 dependency
-          run: |
-            uv sync --extra aws
+        - name: Dependencies already installed
+          run: echo "Dependencies already installed in setup"
 
         - name: Run S3 Bucket Test
           env:

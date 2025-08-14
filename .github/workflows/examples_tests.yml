@@ -33,10 +33,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-
-      - name: Install specific eval dependency
-        run: |
-          uv sync --extra deepeval
+          extra-dependencies: "deepeval"
 
       - name: Run Evaluation Framework Example
         env:

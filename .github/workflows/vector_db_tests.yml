@@ -87,10 +87,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
-
-      - name: Install specific db dependency
-        run: |
-          uv sync --extra postgres
+          extra-dependencies: "postgres"
 
       - name: Run PGVector Tests
         env:

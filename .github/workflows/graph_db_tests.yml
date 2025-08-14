@@ -72,10 +72,6 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
-      - name: Install specific db dependency
-        run: |
-          uv sync --extra neo4j
-
       - name: Run default Neo4j
         env:
           ENV: 'dev'

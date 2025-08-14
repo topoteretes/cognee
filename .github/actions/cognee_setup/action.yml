@@ -6,6 +6,10 @@ inputs:
     description: "Which Python version to use"
     required: false
     default: "3.11.x"
+  extra-dependencies:
+    description: "Additional extra dependencies to install (space-separated)"
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -23,4 +27,12 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: uv sync --extra api --extra docs --extra evals --extra gemini --extra codegraph --extra ollama --extra dev --extra neo4j
+      run: |
+        EXTRA_ARGS=""
+        if [ -n "${{ inputs.extra-dependencies }}" ]; then
+          IFS=' ' read -r -a deps <<< "${{ inputs.extra-dependencies }}"
+          for extra in "${deps[@]}"; do
+            EXTRA_ARGS="$EXTRA_ARGS --extra $extra"
+          done
+        fi
+        uv sync --extra api --extra docs --extra evals --extra gemini --extra codegraph --extra ollama --extra dev --extra neo4j $EXTRA_ARGS

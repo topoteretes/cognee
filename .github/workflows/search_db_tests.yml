@@ -78,9 +78,8 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
-      - name: Install specific db dependency
-        run: |
-          uv sync --extra neo4j
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
 
       - name: Run Neo4j search Tests
         env:
@@ -129,9 +128,10 @@ jobs:
           uses: ./.github/actions/cognee_setup
           with:
             python-version: ${{ inputs.python-version }}
+            extra-dependencies: "postgres"
 
-        - name: Install dependencies
-          run: uv sync --extra postgres
+        - name: Dependencies already installed
+          run: echo "Dependencies already installed in setup"
 
         - name: Run Kuzu/PGVector/Postgres Tests
           env:
@@ -195,10 +195,10 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
+          extra-dependencies: "postgres"
 
-      - name: Install dependencies
-        run: |
-          uv sync --extra neo4j --extra postgres
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
 
       - name: Run Neo4j + PGVector + Postgres search Tests
         env:
