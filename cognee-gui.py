@@ -23,10 +23,10 @@ except ImportError as e:
     print(
         "\nPlease install Cognee with optional gui dependencies or manually install missing dependencies.\n"
     )
-    print("\nTo install with poetry use:")
-    print("\npoetry install -E gui\n")
-    print("\nOr to install with poetry and all dependencies use:")
-    print("\npoetry install --all-extras\n")
+    print("\nTo install with uv use:")
+    print("\nuv sync --extra gui\n")
+    print("\nOr to install with uv and all dependencies use:")
+    print("\nuv sync --all-extras\n")
     print("\nTo install with pip use: ")
     print('\npip install ".[gui]"\n')
     raise e

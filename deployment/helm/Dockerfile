@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
-# Define Poetry extras to install
-ARG POETRY_EXTRAS="\
+# Define uv extras to install
+ARG UV_EXTRAS="\
 # Storage & Databases \
 postgres neo4j falkordb kuzu \
 # Notebooks & Interactive Environments \
@@ -21,7 +21,6 @@ ARG DEBUG
 # Set environment variable based on the build argument
 ENV DEBUG=${DEBUG}
 ENV PIP_NO_CACHE_DIR=true
-ENV PATH="${PATH}:/root/.poetry/bin"
 
 
 RUN apt-get install -y \
@@ -30,16 +29,12 @@ RUN apt-get install -y \
 
 
 WORKDIR /app
-COPY pyproject.toml poetry.lock /app/
+COPY pyproject.toml uv.lock /app/
 
+RUN pip install uv
 
-RUN pip install poetry
-
-# Don't create virtualenv since docker is already isolated
-RUN poetry config virtualenvs.create false
-
-# Install the dependencies
-RUN poetry install --extras "${POETRY_EXTRAS}" --no-root --without dev
+# Install the dependencies with uv
+RUN uv sync --no-dev
 
 
 # Set the PYTHONPATH environment variable to include the /app directory
