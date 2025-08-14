@@ -10,6 +10,7 @@ from cognee.modules.data.processing.document_types import (
 )
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.utils.generate_node_id import generate_node_id
+from cognee.tasks.documents.exceptions import WrongDataDocumentInputError
 
 EXTENSION_TO_DOCUMENT_CLASS = {
     "pdf": PdfDocument,  # Text documents
@@ -111,8 +112,12 @@ async def classify_documents(data_documents: list[Data]) -> list[Document]:
         - list[Document]: A list of Document objects created based on the classified data
           documents.
     """
+    if not isinstance(data_documents, list):
+        raise WrongDataDocumentInputError("data_documents")
+
     documents = []
     for data_item in data_documents:
+
         document = EXTENSION_TO_DOCUMENT_CLASS[data_item.extension](
             id=data_item.id,
             title=f"{data_item.name}.{data_item.extension}",
