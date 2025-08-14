@@ -56,7 +56,7 @@ jobs:
   #         EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
   #         EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
   #         EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-  #       run: poetry run python ./cognee/tests/test_chromadb.py
+  #       run: uv run python ./cognee/tests/test_chromadb.py
 
 
   run_qdrant_integration_test:
@@ -88,7 +88,7 @@ jobs:
 
       - name: Install specific db dependency
         run: |
-          poetry install -E qdrant
+          uv sync --extra qdrant
 
       - name: Wait for Qdrant to be healthy
         run: |
@@ -116,7 +116,7 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           VECTOR_DB_URL: 127.0.0.1
           VECTOR_DB_KEY: qdrant_api_key
-        run: poetry run python ./cognee/tests/test_qdrant.py
+        run: uv run python ./cognee/tests/test_qdrant.py
 
   run-postgres-tests:
     name: PostgreSQL Tests
@@ -149,7 +149,7 @@ jobs:
 
       - name: Install specific db dependency
         run: |
-          poetry install -E postgres
+          uv sync --extra postgres
 
       - name: Run PGVector Tests
         env:
@@ -162,4 +162,4 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_pgvector.py
+        run: uv run python ./cognee/tests/test_pgvector.py

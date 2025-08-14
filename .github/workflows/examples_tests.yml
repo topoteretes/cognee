@@ -20,7 +20,7 @@ jobs:
         env:
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: poetry run python ./examples/python/multimedia_example.py
+        run: uv run python ./examples/python/multimedia_example.py
 
   test-eval-example:
     name: Run Eval Example
@@ -36,7 +36,7 @@ jobs:
 
       - name: Install specific eval dependency
         run: |
-          poetry install -E deepeval
+          uv sync --extra deepeval
 
       - name: Run Evaluation Framework Example
         env:
@@ -49,7 +49,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/eval_framework/run_eval.py
+        run: uv run python ./cognee/eval_framework/run_eval.py
 
   test-descriptive-metrics:
     name: Run Descriptive Metrics Example
@@ -74,7 +74,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/tasks/descriptive_metrics/networkx_metrics_test.py
+        run: uv run python ./cognee/tests/tasks/descriptive_metrics/networkx_metrics_test.py
 
 
   test-dynamic-steps-metrics:
@@ -100,4 +100,4 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./examples/python/dynamic_steps_example.py
+        run: uv run python ./examples/python/dynamic_steps_example.py
