@@ -66,7 +66,7 @@ async def run_tasks(
     user: User = None,
     pipeline_name: str = "unknown_pipeline",
     context: dict = None,
-    incremental_loading: bool = True,
+    incremental_loading: bool = False,
 ):
     async def _run_tasks_data_item_incremental(
         data_item,

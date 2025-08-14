@@ -12,7 +12,6 @@ async def save_data_to_file(data: Union[str, BinaryIO], filename: str = None):
 
     storage = get_file_storage(data_root_directory)
 
-    # Note: content_hash should be forwarded and not calculated
     full_file_path = await storage.store("text_" + file_metadata["content_hash"] + ".txt", data)
 
     return full_file_path

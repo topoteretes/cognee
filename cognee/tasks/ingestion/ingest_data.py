@@ -149,8 +149,8 @@ async def ingest_data(
                     name=original_file_metadata["name"],
                     raw_data_location=cognee_storage_file_path,
                     original_data_location=original_file_metadata["file_path"],
-                    extension="txt",  # All data will be text inside Cognee from now on
-                    mime_type="text/plain",
+                    extension=storage_file_metadata["extension"],
+                    mime_type=storage_file_metadata["mime_type"],
                     original_extension=original_file_metadata["extension"],
                     original_mime_type=original_file_metadata["mime_type"],
                     loader_engine=loader_engine.loader_name,
