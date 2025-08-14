@@ -13,6 +13,7 @@ class InvalidDataChunksError(CogneeValidationError):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
+
 class InvalidGraphModelError(CogneeValidationError):
     def __init__(self, got):
         super().__init__(
@@ -21,12 +22,14 @@ class InvalidGraphModelError(CogneeValidationError):
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
+
 class InvalidOntologyAdapterError(CogneeConfigurationError):
     def __init__(self, got):
         super().__init__(
             message=f"ontology_adapter lacks required interface (got {got}).",
             name="InvalidOntologyAdapterError",
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
 class InvalidChunkGraphInputError(CogneeValidationError):
@@ -34,4 +37,5 @@ class InvalidChunkGraphInputError(CogneeValidationError):
         super().__init__(
             message=f"Invalid chunk inputs or LLM Chunkgraphs: {detail}",
             name="InvalidChunkGraphInputError",
-            status_code=status.HTTP_400_BAD_REQUEST)
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )

@@ -8,5 +8,5 @@ from .exceptions import (
     InvalidDataChunksError,
     InvalidGraphModelError,
     InvalidOntologyAdapterError,
-    InvalidChunkGraphInputError
+    InvalidChunkGraphInputError,
 )

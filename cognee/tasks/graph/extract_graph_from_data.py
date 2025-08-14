@@ -19,6 +19,7 @@ from cognee.tasks.graph.exceptions import (
     InvalidOntologyAdapterError,
 )
 
+
 async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
@@ -30,11 +31,15 @@ async def integrate_chunk_graphs(
     if not isinstance(data_chunks, list) or not isinstance(chunk_graphs, list):
         raise InvalidChunkGraphInputError("data_chunks and chunk_graphs must be lists.")
     if len(data_chunks) != len(chunk_graphs):
-        raise InvalidChunkGraphInputError(f"length mismatch: {len(data_chunks)} chunks vs {len(chunk_graphs)} graphs.")
+        raise InvalidChunkGraphInputError(
+            f"length mismatch: {len(data_chunks)} chunks vs {len(chunk_graphs)} graphs."
+        )
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
     if ontology_adapter is None or not hasattr(ontology_adapter, "get_subgraph"):
-        raise InvalidOntologyAdapterError(type(ontology_adapter).__name__ if ontology_adapter else "None")
+        raise InvalidOntologyAdapterError(
+            type(ontology_adapter).__name__ if ontology_adapter else "None"
+        )
 
     graph_engine = await get_graph_engine()
 

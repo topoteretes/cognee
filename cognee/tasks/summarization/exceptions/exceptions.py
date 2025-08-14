@@ -10,4 +10,5 @@ class InvalidSummaryInputsError(CogneeValidationError):
         super().__init__(
             message=f"Invalid summarize_text inputs: {detail}",
             name="InvalidSummaryInputsError",
-            status_code=status.HTTP_400_BAD_REQUEST)
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )

@@ -11,7 +11,6 @@ from cognee.tasks.storage.exceptions import (
 
 
 async def add_data_points(data_points: List[DataPoint]) -> List[DataPoint]:
-
     if not isinstance(data_points, list):
         raise InvalidDataPointsInAddDataPointsError("data_points must be a list.")
     if not all(isinstance(dp, DataPoint) for dp in data_points):

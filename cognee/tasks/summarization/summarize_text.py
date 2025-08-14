@@ -42,7 +42,6 @@ async def summarize_text(
     if not all(hasattr(c, "text") for c in data_chunks):
         raise InvalidSummaryInputsError("each DocumentChunk must have a 'text' attribute.")
 
-
     if len(data_chunks) == 0:
         return data_chunks
 

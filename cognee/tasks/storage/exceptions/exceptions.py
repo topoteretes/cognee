@@ -9,5 +9,5 @@ class InvalidDataPointsInAddDataPointsError(CogneeValidationError):
         super().__init__(
             message=f"Invalid data_points: {detail}",
             name="InvalidDataPointsInAddDataPointsError",
-            status_code=status.HTTP_400_BAD_REQUEST)
-
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
