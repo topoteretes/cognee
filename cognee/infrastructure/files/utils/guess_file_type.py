@@ -109,8 +109,8 @@ def guess_file_type(file: BinaryIO) -> filetype.Type:
     """
     Guess the file type from the given binary file stream.
 
-    If the file type cannot be determined, raise a FileTypeException with an appropriate
-    message.
+    If the file type cannot be determined from content, attempts to infer from extension.
+    If still unable to determine, raise a FileTypeException with an appropriate message.
 
     Parameters:
     -----------
