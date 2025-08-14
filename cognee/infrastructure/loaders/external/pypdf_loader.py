@@ -61,6 +61,8 @@ class PyPdfLoader(LoaderInterface):
         try:
             with open(file_path, "rb") as file:
                 file_metadata = await get_file_metadata(file)
+                # Name ingested file of current loader based on original file content hash
+                storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
                 logger.info(f"Reading PDF: {file_path}")
                 reader = PdfReader(file, strict=strict)
@@ -85,9 +87,7 @@ class PyPdfLoader(LoaderInterface):
                 data_root_directory = storage_config["data_root_directory"]
                 storage = get_file_storage(data_root_directory)
 
-                full_file_path = await storage.store(
-                    "text_" + file_metadata["content_hash"] + ".txt", full_content
-                )
+                full_file_path = await storage.store(storage_file_name, full_content)
 
                 return full_file_path
 
