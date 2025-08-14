@@ -2,6 +2,8 @@ import os
 from typing import List
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 
 
 class AudioLoader(LoaderInterface):
@@ -80,5 +82,17 @@ class AudioLoader(LoaderInterface):
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
+        with open(file_path, "rb") as f:
+            file_metadata = await get_file_metadata(f)
+
         result = await LLMGateway.create_transcript(file_path)
-        return result.text
+
+        storage_config = get_storage_config()
+        data_root_directory = storage_config["data_root_directory"]
+        storage = get_file_storage(data_root_directory)
+
+        full_file_path = await storage.store(
+            "text_" + file_metadata["content_hash"] + ".txt", result.text
+        )
+
+        return full_file_path

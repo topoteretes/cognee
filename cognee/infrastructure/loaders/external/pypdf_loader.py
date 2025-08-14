@@ -1,7 +1,8 @@
-import os
-from typing import List, Tuple
+from typing import List
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 
 logger = get_logger(__name__)
 
@@ -59,6 +60,8 @@ class PyPdfLoader(LoaderInterface):
 
         try:
             with open(file_path, "rb") as file:
+                file_metadata = await get_file_metadata(file)
+
                 logger.info(f"Reading PDF: {file_path}")
                 reader = PdfReader(file, strict=strict)
 
@@ -78,7 +81,15 @@ class PyPdfLoader(LoaderInterface):
                 # Combine all content
                 full_content = "\n".join(content_parts)
 
-                return full_content
+                storage_config = get_storage_config()
+                data_root_directory = storage_config["data_root_directory"]
+                storage = get_file_storage(data_root_directory)
+
+                full_file_path = await storage.store(
+                    "text_" + file_metadata["content_hash"] + ".txt", full_content
+                )
+
+                return full_file_path
 
         except Exception as e:
             logger.error(f"Failed to process PDF {file_path}: {e}")

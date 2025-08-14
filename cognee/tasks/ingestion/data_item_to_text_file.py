@@ -46,8 +46,7 @@ async def data_item_to_text_file(
                 await pull_from_s3(data_item_path, temp_file)
                 temp_file.flush()  # Data needs to be saved to local storage
                 loader = get_loader_engine()
-                content = await loader.load_file(temp_file.name, preferred_loaders)
-                return await save_data_to_file(content), loader.get_loader(
+                return await loader.load_file(temp_file.name, preferred_loaders), loader.get_loader(
                     temp_file.name, preferred_loaders
                 )
 
@@ -55,8 +54,7 @@ async def data_item_to_text_file(
         elif parsed_url.scheme == "file":
             if settings.accept_local_file_path:
                 loader = get_loader_engine()
-                content = await loader.load_file(data_item_path, preferred_loaders)
-                return await save_data_to_file(content), loader.get_loader(
+                return await loader.load_file(data_item_path, preferred_loaders), loader.get_loader(
                     data_item_path, preferred_loaders
                 )
             else:
@@ -69,8 +67,7 @@ async def data_item_to_text_file(
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
             if settings.accept_local_file_path:
                 loader = get_loader_engine()
-                content = await loader.load_file(data_item_path, preferred_loaders)
-                return await save_data_to_file(content), loader.get_loader(
+                return await loader.load_file(data_item_path, preferred_loaders), loader.get_loader(
                     data_item_path, preferred_loaders
                 )
             else:

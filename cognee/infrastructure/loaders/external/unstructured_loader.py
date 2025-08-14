@@ -1,7 +1,8 @@
-import os
 from typing import List
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 
 logger = get_logger(__name__)
 
@@ -91,6 +92,9 @@ class UnstructuredLoader(LoaderInterface):
         try:
             logger.info(f"Processing document: {file_path}")
 
+            with open(file_path, "rb") as f:
+                file_metadata = await get_file_metadata(f)
+
             # Set partitioning parameters
             partition_kwargs = {"filename": file_path, "strategy": strategy, **kwargs}
 
@@ -108,7 +112,15 @@ class UnstructuredLoader(LoaderInterface):
             # Combine all text content
             full_content = "\n\n".join(text_parts)
 
-            return full_content
+            storage_config = get_storage_config()
+            data_root_directory = storage_config["data_root_directory"]
+            storage = get_file_storage(data_root_directory)
+
+            full_file_path = await storage.store(
+                "text_" + file_metadata["content_hash"] + ".txt", full_content
+            )
+
+            return full_file_path
 
         except Exception as e:
             logger.error(f"Failed to process document {file_path}: {e}")

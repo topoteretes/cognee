@@ -1,6 +1,8 @@
 import os
 from typing import List
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
+from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 
 
 class TextLoader(LoaderInterface):
@@ -71,7 +73,18 @@ class TextLoader(LoaderInterface):
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
+        with open(file_path, "rb") as f:
+            file_metadata = await get_file_metadata(f)
+
         with open(file_path, "r", encoding=encoding) as f:
             content = f.read()
 
-        return content
+        storage_config = get_storage_config()
+        data_root_directory = storage_config["data_root_directory"]
+        storage = get_file_storage(data_root_directory)
+
+        full_file_path = await storage.store(
+            "text_" + file_metadata["content_hash"] + ".txt", content
+        )
+
+        return full_file_path
