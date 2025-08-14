@@ -1,6 +1,7 @@
 from typing import BinaryIO
 import filetype
 from .is_text_content import is_text_content
+from .get_data_file_path import get_data_file_path
 
 
 class FileTypeException(Exception):
@@ -109,8 +110,8 @@ def guess_file_type(file: BinaryIO) -> filetype.Type:
     """
     Guess the file type from the given binary file stream.
 
-    If the file type cannot be determined, raise a FileTypeException with an appropriate
-    message.
+    If the file type cannot be determined from content, attempts to infer from extension.
+    If still unable to determine, raise a FileTypeException with an appropriate message.
 
     Parameters:
     -----------
@@ -125,6 +126,48 @@ def guess_file_type(file: BinaryIO) -> filetype.Type:
     file_type = filetype.guess(file)
 
     if file_type is None:
+        # Try to extract file extension from file name (handle file:// URIs and other paths)
+        file_name = getattr(file, "name", "")
+        if file_name:
+            # Use existing function to transform file path to be OS usable
+            actual_file_path = get_data_file_path(file_name)
+
+            # Extract extension from the cleaned path
+            if "." in actual_file_path:
+                extension = actual_file_path.split(".")[-1].lower()
+
+                # Map common extensions to our custom file types
+                if extension == "txt":
+                    return txt_file_type
+                elif extension == "pdf":
+                    return custom_pdf_matcher
+                # Add other common extensions that might not be detected by filetype
+                elif extension in ["md", "markdown"]:
+                    return txt_file_type
+                elif extension in ["csv", "tsv"]:
+                    return txt_file_type
+                elif extension in ["json", "xml", "yaml", "yml"]:
+                    return txt_file_type
+                elif extension in ["log"]:
+                    return txt_file_type
+                elif extension in [
+                    "py",
+                    "js",
+                    "ts",
+                    "tsx",
+                    "jsx",
+                    "java",
+                    "cpp",
+                    "c",
+                    "h",
+                    "cs",
+                    "go",
+                    "rs",
+                    "rb",
+                    "php",
+                ]:
+                    return txt_file_type
+
         raise FileTypeException(f"Unknown file detected: {file.name}.")
 
     return file_type
