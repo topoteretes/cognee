@@ -15,6 +15,8 @@ async def add(
     vector_db_config: dict = None,
     graph_db_config: dict = None,
     dataset_id: Optional[UUID] = None,
+    preferred_loaders: List[str] = None,
+    incremental_loading: bool = True,
 ):
     """
     Add data to Cognee for knowledge graph processing.
@@ -129,7 +131,7 @@ async def add(
         - LLM_MODEL: Model name (default: "gpt-4o-mini")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
-        - VECTOR_DB_PROVIDER: "lancedb" (default), "chromadb", "qdrant", "weaviate"
+        - VECTOR_DB_PROVIDER: "lancedb" (default), "chromadb", "pgvector"
         - GRAPH_DATABASE_PROVIDER: "kuzu" (default), "neo4j", "networkx"
 
     Raises:
@@ -140,7 +142,7 @@ async def add(
     """
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),
-        Task(ingest_data, dataset_name, user, node_set, dataset_id),
+        Task(ingest_data, dataset_name, user, node_set, dataset_id, preferred_loaders),
     ]
 
     pipeline_run_info = None
@@ -153,6 +155,7 @@ async def add(
         pipeline_name="add_pipeline",
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
+        incremental_loading=incremental_loading,
     ):
         pipeline_run_info = run_info
 

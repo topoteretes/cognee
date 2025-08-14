@@ -826,7 +826,7 @@ class NetworkXAdapter(GraphDBInterface):
 
         return mandatory_metrics | optional_metrics
 
-    async def get_document_subgraph(self, content_hash: str):
+    async def get_document_subgraph(self, data_id: str):
         """
         Retrieve all relevant nodes when a document is being deleted, including chunks and
         orphaned entities.
@@ -834,7 +834,7 @@ class NetworkXAdapter(GraphDBInterface):
         Parameters:
         -----------
 
-            - content_hash (str): The hash identifying the content of the document to fetch
+            - data_id(str): The data id identifying the document to fetch
               related nodes for.
 
         Returns:
@@ -853,7 +853,7 @@ class NetworkXAdapter(GraphDBInterface):
         for node_id, attrs in self.graph.nodes(data=True):
             if (
                 attrs.get("type") in ["TextDocument", "PdfDocument"]
-                and attrs.get("name") == f"text_{content_hash}"
+                and attrs.get("id") == f"{data_id}"
             ):
                 document = {"id": str(node_id), **attrs}  # Convert UUID to string for consistency
                 document_node_id = node_id  # Keep the original UUID

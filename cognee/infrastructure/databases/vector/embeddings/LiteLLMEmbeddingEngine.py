@@ -7,11 +7,19 @@ import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
-from cognee.infrastructure.llm.tokenizer.Gemini import GeminiTokenizer
-from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
-from cognee.infrastructure.llm.tokenizer.Mistral import MistralTokenizer
-from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
-from cognee.infrastructure.llm.embedding_rate_limiter import (
+from cognee.infrastructure.llm.tokenizer.Gemini import (
+    GeminiTokenizer,
+)
+from cognee.infrastructure.llm.tokenizer.HuggingFace import (
+    HuggingFaceTokenizer,
+)
+from cognee.infrastructure.llm.tokenizer.Mistral import (
+    MistralTokenizer,
+)
+from cognee.infrastructure.llm.tokenizer.TikToken import (
+    TikTokenTokenizer,
+)
+from cognee.infrastructure.databases.vector.embeddings.embedding_rate_limiter import (
     embedding_rate_limit_async,
     embedding_sleep_and_retry_async,
 )
@@ -177,7 +185,14 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         elif "mistral" in self.provider.lower():
             tokenizer = MistralTokenizer(model=model, max_tokens=self.max_tokens)
         else:
-            tokenizer = HuggingFaceTokenizer(model=self.model, max_tokens=self.max_tokens)
+            try:
+                tokenizer = HuggingFaceTokenizer(
+                    model=self.model.replace("hosted_vllm/", ""), max_tokens=self.max_tokens
+                )
+            except Exception as e:
+                logger.warning(f"Could not get tokenizer from HuggingFace due to: {e}")
+                logger.info("Switching to TikToken default tokenizer.")
+                tokenizer = TikTokenTokenizer(model=None, max_tokens=self.max_tokens)
 
         logger.debug(f"Tokenizer loaded for model: {self.model}")
         return tokenizer

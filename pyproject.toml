@@ -1,6 +1,7 @@
 [project]
 name = "cognee"
-version = "0.2.1"
+
+version = "0.2.2"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -55,6 +56,7 @@ dependencies = [
     "dlt[sqlalchemy]>=1.9.0,<2",
     "sentry-sdk[fastapi]>=2.9.0,<3",
     "structlog>=25.2.0,<26",
+    "baml-py (>=0.201.0,<0.202.0)",
     "pympler>=1.1,<2.0.0",
     "onnxruntime>=1.0.0,<2.0.0",
     "pylance>=0.22.0,<1.0.0",
@@ -71,7 +73,6 @@ distributed = [
     "modal>=1.0.5,<2.0.0",
 ]
 
-qdrant = ["qdrant-client>=1.14.2,<2"]
 neo4j = ["neo4j>=5.28.0,<6"]
 neptune = ["langchain_aws>=0.2.22"]
 postgres = [
@@ -155,6 +156,7 @@ exclude = [
   "/.data",
   "/.github",
   "/alembic",
+  "/distributed",
   "/deployment",
   "/cognee-mcp",
   "/cognee-frontend",
