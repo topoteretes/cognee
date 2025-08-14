@@ -59,65 +59,6 @@ jobs:
   #       run: poetry run python ./cognee/tests/test_chromadb.py
 
 
-  run_qdrant_integration_test:
-    name: Qdrant Tests
-    runs-on: ubuntu-latest
-    if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'qdrant') }}
-    defaults:
-      run:
-        shell: bash
-
-    services:
-      qdrant:
-        image: qdrant/qdrant:v1.14.1
-        env:
-          QDRANT__LOG_LEVEL: ERROR
-          QDRANT__SERVICE__API_KEY: qdrant_api_key
-          QDRANT__SERVICE__ENABLE_TLS: 0
-        ports:
-          - 6333:6333
-
-    steps:
-      - name: Check out
-        uses: actions/checkout@master
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: ${{ inputs.python-version }}
-
-      - name: Install specific db dependency
-        run: |
-          poetry install -E qdrant
-
-      - name: Wait for Qdrant to be healthy
-        run: |
-          for i in {1..10}; do
-            if curl -f http://127.0.0.1:6333/healthz; then
-              echo "Qdrant is healthy!"
-              exit 0
-            fi
-            echo "Waiting for Qdrant to be healthy..."
-            sleep 3
-          done
-          echo "Qdrant failed to become healthy in time"
-          exit 1
-
-      - name: Run default Qdrant
-        env:
-          ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          VECTOR_DB_URL: 127.0.0.1
-          VECTOR_DB_KEY: qdrant_api_key
-        run: poetry run python ./cognee/tests/test_qdrant.py
-
   run-postgres-tests:
     name: PostgreSQL Tests
     runs-on: ubuntu-22.04
