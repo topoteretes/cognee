@@ -56,7 +56,7 @@ jobs:
   #         EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
   #         EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
   #         EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-  #       run: poetry run python ./cognee/tests/test_chromadb.py
+  #       run: uv run python ./cognee/tests/test_chromadb.py
 
 
   run-postgres-tests:
@@ -90,7 +90,7 @@ jobs:
 
       - name: Install specific db dependency
         run: |
-          poetry install -E postgres
+          uv sync --extra postgres
 
       - name: Run PGVector Tests
         env:
@@ -103,4 +103,4 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_pgvector.py
+        run: uv run python ./cognee/tests/test_pgvector.py

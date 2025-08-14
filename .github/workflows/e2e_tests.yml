@@ -57,7 +57,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_cognee_server_start.py
+        run: uv run python ./cognee/tests/test_cognee_server_start.py
 
   run-telemetry-test:
     name: Run Telemetry Test
@@ -81,7 +81,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_telemetry.py
+        run: uv run python ./cognee/tests/test_telemetry.py
 
   run-telemetry-pipeline-test:
     name: Run Telemetry Pipeline Test
@@ -110,7 +110,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_library.py
+        run: uv run python ./cognee/tests/test_library.py
 
   run-deduplication-test:
     name: Deduplication Test
@@ -143,7 +143,7 @@ jobs:
 
       - name: Install specific db dependency
         run: |
-          poetry install -E postgres
+          uv sync --extra postgres
 
       - name: Run Deduplication Example
         env:
@@ -154,7 +154,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_deduplication.py
+        run: uv run python ./cognee/tests/test_deduplication.py
 
   run-deletion-test:
     name: Deletion Test
@@ -179,7 +179,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_deletion.py
+        run: uv run python ./cognee/tests/test_deletion.py
 
   run-s3-bucket-test:
       name: S3 Bucket Test
@@ -195,7 +195,7 @@ jobs:
 
         - name: Install specific S3 dependency
           run: |
-            poetry install -E aws
+            uv sync --extra aws
 
         - name: Run S3 Bucket Test
           env:
@@ -210,7 +210,7 @@ jobs:
             EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
             AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
             AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          run: poetry run python ./cognee/tests/test_s3.py
+          run: uv run python ./cognee/tests/test_s3.py
 
   test-parallel-databases:
     name: Test using different async databases in parallel in Cognee
@@ -226,7 +226,7 @@ jobs:
 
       - name: Install specific graph db dependency
         run: |
-          poetry install
+          uv sync
 
       - name: Run parallel databases test
         env:
@@ -239,7 +239,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_parallel_databases.py
+        run: uv run python ./cognee/tests/test_parallel_databases.py
 
   test-permissions:
     name: Test permissions with different situations in Cognee
@@ -255,7 +255,7 @@ jobs:
 
       - name: Install specific graph db dependency
         run: |
-          poetry install
+          uv sync
 
       - name: Run parallel databases test
         env:
@@ -268,7 +268,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_permissions.py
+        run: uv run python ./cognee/tests/test_permissions.py
 
   test-graph-edges:
     name: Test graph edge ingestion
@@ -284,7 +284,7 @@ jobs:
 
       - name: Install specific graph db dependency
         run: |
-          poetry install
+          uv sync
 
       - name: Run graph edges test
         env:
@@ -297,4 +297,4 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_edge_ingestion.py
+        run: uv run python ./cognee/tests/test_edge_ingestion.py

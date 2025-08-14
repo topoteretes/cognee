@@ -1,5 +1,5 @@
 name: cognee-setup
-description: "Sets up Python, installs Poetry, loads venv from cache, and installs dependencies for Cognee."
+description: "Sets up Python, installs uv, and installs dependencies for Cognee."
 
 inputs:
   python-version:
@@ -16,18 +16,11 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
 
-    - name: Install Poetry
-      shell: bash
-      run: |
-        python -m pip install --upgrade pip
-        pip install poetry
-
-    - name: Rebuild Poetry lock file
-      shell: bash
-      run: |
-        rm poetry.lock
-        poetry lock
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
 
     - name: Install dependencies
       shell: bash
-      run: poetry install --no-interaction -E api -E docs -E evals -E gemini -E codegraph -E ollama -E dev -E neo4j
+      run: uv sync --extra api --extra docs --extra evals --extra gemini --extra codegraph --extra ollama --extra dev --extra neo4j

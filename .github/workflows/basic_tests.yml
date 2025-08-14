@@ -98,7 +98,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Run Unit Tests
-        run: poetry run pytest cognee/tests/unit/
+        run: uv run pytest cognee/tests/unit/
 
   integration-tests:
     name: Run Integration Tests
@@ -115,7 +115,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Run Integration Tests
-        run: poetry run pytest cognee/tests/integration/
+        run: uv run pytest cognee/tests/integration/
 
   simple-examples:
     name: Run Simple Examples
@@ -144,7 +144,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Run Simple Examples
-        run: poetry run python ./examples/python/simple_example.py
+        run: uv run python ./examples/python/simple_example.py
 
   simple-examples-baml:
     name: Run Simple Examples BAML
@@ -180,7 +180,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Run Simple Examples
-        run: poetry run python ./examples/python/simple_example.py
+        run: uv run python ./examples/python/simple_example.py
 
   graph-tests:
     name: Run Basic Graph Tests
@@ -209,4 +209,4 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Run Graph Tests
-        run: poetry run python ./examples/python/code_graph_example.py --repo_path ./cognee/tasks/graph
+        run: uv run python ./examples/python/code_graph_example.py --repo_path ./cognee/tasks/graph
