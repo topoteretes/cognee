@@ -30,7 +30,7 @@ class InvalidChunkSizeError(CogneeValidationError):
 class InvalidChunkerError(CogneeValidationError):
     def __init__(self):
         super().__init__(
-            message=f"chunker must be a valid Chunker class.",
+            message="chunker must be a valid Chunker class.",
             name="InvalidChunkerError",
             status_code=status.HTTP_400_BAD_REQUEST,
         )
