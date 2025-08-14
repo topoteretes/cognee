@@ -1,11 +1,11 @@
 import os
 from urllib.parse import urlparse
 from typing import List, Tuple
+from pathlib import Path
 import tempfile
 
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.modules.ingestion.exceptions import IngestionError
-from cognee.modules.ingestion import save_data_to_file
 from cognee.infrastructure.loaders import get_loader_engine
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
@@ -42,7 +42,9 @@ async def data_item_to_text_file(
         # data is s3 file path
         if parsed_url.scheme == "s3":
             # TODO: Rework this to work with file streams and not saving data to temp storage
-            with tempfile.NamedTemporaryFile(mode="wb") as temp_file:
+            # Note: proper suffix information is needed for OpenAI to handle mp3 files
+            path_info = Path(parsed_url.path)
+            with tempfile.NamedTemporaryFile(mode="wb", suffix=path_info.suffix) as temp_file:
                 await pull_from_s3(data_item_path, temp_file)
                 temp_file.flush()  # Data needs to be saved to local storage
                 loader = get_loader_engine()
