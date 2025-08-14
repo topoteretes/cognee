@@ -1,4 +1,5 @@
 import json
+import asyncio
 from uuid import UUID
 from typing import List, Optional
 from chromadb import AsyncHttpClient, Settings
@@ -161,6 +162,7 @@ class ChromaDBAdapter(VectorDBInterface):
         self.embedding_engine = embedding_engine
         self.url = url
         self.api_key = api_key
+        self.VECTOR_DB_LOCK = asyncio.Lock()
 
     async def get_connection(self) -> AsyncHttpClient:
         """
@@ -224,10 +226,13 @@ class ChromaDBAdapter(VectorDBInterface):
             - collection_name (str): The name of the collection to create.
             - payload_schema: The schema for the payload; can be None. (default None)
         """
-        client = await self.get_connection()
+        async with self.VECTOR_DB_LOCK:
+            client = await self.get_connection()
 
-        if not await self.has_collection(collection_name):
-            await client.create_collection(name=collection_name, metadata={"hnsw:space": "cosine"})
+            if not await self.has_collection(collection_name):
+                await client.create_collection(
+                    name=collection_name, metadata={"hnsw:space": "cosine"}
+                )
 
     async def get_collection(self, collection_name: str) -> AsyncHttpClient:
         """

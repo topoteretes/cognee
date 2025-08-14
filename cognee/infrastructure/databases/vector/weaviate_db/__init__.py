@@ -1,1 +1,0 @@
-from .WeaviateAdapter import WeaviateAdapter
