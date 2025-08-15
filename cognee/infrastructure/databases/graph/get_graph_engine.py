@@ -21,7 +21,6 @@ async def get_graph_engine() -> GraphDBInterface:
     if hasattr(graph_client, "initialize"):
         await graph_client.initialize()
 
-
     return graph_client
 
 
