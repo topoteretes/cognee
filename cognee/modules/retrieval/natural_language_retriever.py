@@ -122,9 +122,6 @@ class NaturalLanguageRetriever(BaseRetriever):
         """
         graph_engine = await get_graph_engine()
 
-        if isinstance(graph_engine, (NetworkXAdapter)):
-            raise SearchTypeNotSupported("Natural language search type not supported.")
-
         return await self._execute_cypher_query(query, graph_engine)
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
