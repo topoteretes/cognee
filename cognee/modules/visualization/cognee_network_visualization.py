@@ -1,5 +1,6 @@
 import os
 import json
+import networkx
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
@@ -7,37 +8,7 @@ from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorag
 logger = get_logger()
 
 
-def _import_networkx():
-    """Dynamically import networkx with helpful error message if not available."""
-    try:
-        import networkx
-        return networkx
-    except ImportError:
-        raise ImportError(
-            "NetworkX is required for graph visualization but is not installed. "
-            "Please install it with: pip install 'cognee[visualization]' or pip install networkx"
-        )
-
-
 async def cognee_network_visualization(graph_data, destination_file_path: str = None):
-    """
-    Generate an interactive HTML visualization of the graph data.
-    
-    This function requires NetworkX to be installed. If you don't have NetworkX installed,
-    you can install it with: pip install 'cognee[visualization]' or pip install networkx
-    
-    Args:
-        graph_data: Tuple of (nodes_data, edges_data)
-        destination_file_path: Optional path to save the HTML file
-        
-    Returns:
-        str: Path to the generated HTML file
-        
-    Raises:
-        ImportError: If NetworkX is not installed
-    """
-    networkx = _import_networkx()
-    
     nodes_data, edges_data = graph_data
 
     G = networkx.DiGraph()
