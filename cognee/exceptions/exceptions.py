@@ -35,37 +35,57 @@ class CogneeApiError(Exception):
         return f"{self.name}: {self.message} (Status code: {self.status_code})"
 
 
-class ServiceError(CogneeApiError):
-    """Failures in external services or APIs, like a database or a third-party service"""
+class CogneeSystemError(CogneeApiError):
+    """System error"""
 
     def __init__(
         self,
-        message: str = "Service is unavailable.",
-        name: str = "ServiceError",
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        message: str = "A system error occurred.",
+        name: str = "CogneeSystemError",
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        log=True,
+        log_level="ERROR",
     ):
-        super().__init__(message, name, status_code)
+        super().__init__(message, name, status_code, log, log_level)
 
 
-class InvalidValueError(CogneeApiError):
+class CogneeValidationError(CogneeApiError):
+    """Validation error"""
+
     def __init__(
         self,
-        message: str = "Invalid Value.",
-        name: str = "InvalidValueError",
+        message: str = "A validation error occurred.",
+        name: str = "CogneeValidationError",
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        log=True,
+        log_level="ERROR",
     ):
-        super().__init__(message, name, status_code)
+        super().__init__(message, name, status_code, log, log_level)
 
 
-class InvalidAttributeError(CogneeApiError):
+class CogneeConfigurationError(CogneeApiError):
+    """SystemConfigError"""
+
     def __init__(
         self,
-        message: str = "Invalid attribute.",
-        name: str = "InvalidAttributeError",
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        message: str = "A system configuration error occurred.",
+        name: str = "CogneeConfigurationError",
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        log=True,
+        log_level="ERROR",
     ):
-        super().__init__(message, name, status_code)
+        super().__init__(message, name, status_code, log, log_level)
 
 
-class CriticalError(CogneeApiError):
-    pass
+class CogneeTransientError(CogneeApiError):
+    """TransientError"""
+
+    def __init__(
+        self,
+        message: str = "A transient error occurred.",
+        name: str = "CogneeTransientError",
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        log=True,
+        log_level="ERROR",
+    ):
+        super().__init__(message, name, status_code, log, log_level)

@@ -1,8 +1,8 @@
-from cognee.exceptions import CogneeApiError
+from cognee.exceptions import CogneeValidationError
 from fastapi import status
 
 
-class IngestionError(CogneeApiError):
+class IngestionError(CogneeValidationError):
     def __init__(
         self,
         message: str = "Type of data sent to classify not supported.",
