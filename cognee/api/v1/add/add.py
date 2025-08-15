@@ -15,6 +15,7 @@ async def add(
     vector_db_config: dict = None,
     graph_db_config: dict = None,
     dataset_id: Optional[UUID] = None,
+    preferred_loaders: List[str] = None,
     incremental_loading: bool = True,
 ):
     """
@@ -136,7 +137,7 @@ async def add(
     """
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),
-        Task(ingest_data, dataset_name, user, node_set, dataset_id),
+        Task(ingest_data, dataset_name, user, node_set, dataset_id, preferred_loaders),
     ]
 
     pipeline_run_info = None

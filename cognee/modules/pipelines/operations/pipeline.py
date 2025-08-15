@@ -52,7 +52,7 @@ async def cognee_pipeline(
     pipeline_name: str = "custom_pipeline",
     vector_db_config: dict = None,
     graph_db_config: dict = None,
-    incremental_loading: bool = True,
+    incremental_loading: bool = False,
 ):
     # Note: These context variables allow different value assignment for databases in Cognee
     #       per async task, thread, process and etc.
@@ -122,7 +122,7 @@ async def run_pipeline(
     data=None,
     pipeline_name: str = "custom_pipeline",
     context: dict = None,
-    incremental_loading=True,
+    incremental_loading=False,
 ):
     check_dataset_name(dataset.name)
 
