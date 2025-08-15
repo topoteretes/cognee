@@ -71,7 +71,11 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./cognee/tests/tasks/descriptive_metrics/networkx_metrics_test.py
+          GRAPH_DATABASE_PROVIDER: "neo4j"
+          GRAPH_DATABASE_URL: ${{ secrets.NEO4J_API_URL }}
+          GRAPH_DATABASE_USERNAME: "neo4j"
+          GRAPH_DATABASE_PASSWORD: ${{ secrets.NEO4J_API_KEY }}
+        run: uv run python ./cognee/tests/tasks/descriptive_metrics/neo4j_metrics_test.py
 
 
   test-dynamic-steps-metrics:
