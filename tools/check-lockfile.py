@@ -1,7 +1,7 @@
 import sys
 
 # File and string to search for
-lockfile_name = "uv.lock"
+lockfile_name = "poetry.lock"
 hash_string = "hash = "
 threshold = 100
 
@@ -19,7 +19,7 @@ try:
 
     # If the loop completes without early exit, it means the threshold was not reached
     print(
-        f"Error: The string '{hash_string}' appears less than {threshold} times in {lockfile_name}, please make sure you are using an up to date uv version."
+        f"Error: The string '{hash_string}' appears less than {threshold} times in {lockfile_name}, please make sure you are using an up to date poetry version."
     )
     sys.exit(1)
 

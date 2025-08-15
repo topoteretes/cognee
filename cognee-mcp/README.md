@@ -211,7 +211,7 @@ Open inspector with timeout passed:
 
 To apply new changes while developing cognee you need to do:
 
-1. `uv lock` in cognee folder
+1. `poetry lock` in cognee folder
 2. `uv sync --dev --all-extras --reinstall`
 3. `mcp dev src/server.py`
 
