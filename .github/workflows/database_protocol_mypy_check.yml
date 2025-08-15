@@ -1,3 +1,5 @@
+permissions:
+  contents: read
 name: Database Adapter MyPy Check
 
 on:
