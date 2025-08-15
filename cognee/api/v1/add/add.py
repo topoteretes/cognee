@@ -132,7 +132,7 @@ async def add(
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
         - VECTOR_DB_PROVIDER: "lancedb" (default), "chromadb", "pgvector"
-        - GRAPH_DATABASE_PROVIDER: "kuzu" (default), "neo4j", "networkx"
+        - GRAPH_DATABASE_PROVIDER: "kuzu" (default), "neo4j"
 
     """
     tasks = [

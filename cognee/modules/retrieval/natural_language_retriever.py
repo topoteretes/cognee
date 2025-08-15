@@ -1,7 +1,6 @@
 from typing import Any, Optional
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.graph.networkx.adapter import NetworkXAdapter
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
@@ -122,9 +121,6 @@ class NaturalLanguageRetriever(BaseRetriever):
               query.
         """
         graph_engine = await get_graph_engine()
-
-        if isinstance(graph_engine, (NetworkXAdapter)):
-            raise SearchTypeNotSupported("Natural language search type not supported.")
 
         return await self._execute_cypher_query(query, graph_engine)
 
