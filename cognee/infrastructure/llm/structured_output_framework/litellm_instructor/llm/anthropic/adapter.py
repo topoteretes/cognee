@@ -2,7 +2,7 @@ from typing import Type
 from pydantic import BaseModel
 import instructor
 
-from cognee.exceptions import InvalidValueError
+from cognee.infrastructure.llm.exceptions import MissingSystemPromptPathError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
@@ -89,7 +89,7 @@ class AnthropicAdapter(LLMInterface):
         if not text_input:
             text_input = "No user input provided."
         if not system_prompt:
-            raise InvalidValueError(message="No system prompt path provided.")
+            raise MissingSystemPromptPathError()
 
         system_prompt = LLMGateway.read_query_prompt(system_prompt)
 

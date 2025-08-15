@@ -1,8 +1,8 @@
-from cognee.exceptions import CogneeApiError
+from cognee.exceptions import CogneeSystemError
 from fastapi import status
 
 
-class PipelineRunFailedError(CogneeApiError):
+class PipelineRunFailedError(CogneeSystemError):
     def __init__(
         self,
         message: str = "Pipeline run failed.",

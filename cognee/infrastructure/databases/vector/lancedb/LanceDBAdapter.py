@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
 from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
 
-from cognee.exceptions import InvalidValueError
+from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
@@ -228,7 +228,7 @@ class LanceDBAdapter(VectorDBInterface):
         normalized: bool = True,
     ):
         if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
+            raise MissingQueryParameterError()
 
         if query_text and not query_vector:
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]

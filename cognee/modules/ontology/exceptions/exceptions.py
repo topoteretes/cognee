@@ -1,8 +1,8 @@
-from cognee.exceptions import CogneeApiError
+from cognee.exceptions import CogneeSystemError
 from fastapi import status
 
 
-class OntologyInitializationError(CogneeApiError):
+class OntologyInitializationError(CogneeSystemError):
     def __init__(
         self,
         message: str = "Ontology initialization failed",
@@ -12,7 +12,7 @@ class OntologyInitializationError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
-class FindClosestMatchError(CogneeApiError):
+class FindClosestMatchError(CogneeSystemError):
     def __init__(
         self,
         message: str = "Error in find_closest_match",
@@ -22,7 +22,7 @@ class FindClosestMatchError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
-class GetSubgraphError(CogneeApiError):
+class GetSubgraphError(CogneeSystemError):
     def __init__(
         self,
         message: str = "Failed to retrieve subgraph",

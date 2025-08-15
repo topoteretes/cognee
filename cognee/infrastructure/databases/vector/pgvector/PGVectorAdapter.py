@@ -9,7 +9,7 @@ from sqlalchemy.exc import ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 
-from cognee.exceptions import InvalidValueError
+
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
@@ -17,6 +17,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 
 from distributed.utils import override_distributed
 from distributed.tasks.queued_add_data_points import queued_add_data_points
+from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 
 from ...relational.ModelBase import Base
 from ...relational.sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
@@ -275,7 +276,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 return metadata.tables[collection_name]
             else:
                 raise CollectionNotFoundError(
-                    f"Collection '{collection_name}' not found!", log_level="DEBUG"
+                    f"Collection '{collection_name}' not found!",
                 )
 
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
@@ -302,7 +303,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         with_vector: bool = False,
     ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
+            raise MissingQueryParameterError()
 
         if query_text and not query_vector:
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]

@@ -7,12 +7,14 @@ from openai import ContentFilterFinishReasonError
 from litellm.exceptions import ContentPolicyViolationError
 from instructor.exceptions import InstructorRetryException
 
-from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
-from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
+from cognee.infrastructure.llm.exceptions import (
+    ContentPolicyFilterError,
+    MissingSystemPromptPathError,
+)
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
     rate_limit_async,
@@ -308,7 +310,7 @@ class OpenAIAdapter(LLMInterface):
         Format and display the prompt for a user query.
 
         This method formats the prompt using the provided user input and system prompt,
-        returning a string representation. Raises InvalidValueError if the system prompt is not
+        returning a string representation. Raises MissingSystemPromptPathError if the system prompt is not
         provided.
 
         Parameters:
@@ -325,7 +327,7 @@ class OpenAIAdapter(LLMInterface):
         if not text_input:
             text_input = "No user input provided."
         if not system_prompt:
-            raise InvalidValueError(message="No system prompt path provided.")
+            raise MissingSystemPromptPathError()
         system_prompt = LLMGateway.read_query_prompt(system_prompt)
 
         formatted_prompt = (
