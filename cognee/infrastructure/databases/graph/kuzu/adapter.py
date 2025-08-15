@@ -1,26 +1,27 @@
 """Adapter for Kuzu graph database."""
 
-import os
-import json
 import asyncio
+import json
+import os
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 from uuid import UUID
+
 from kuzu import Connection
 from kuzu.database import Database
-from datetime import datetime, timezone
-from contextlib import asynccontextmanager
-from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Any, List, Union, Optional, Tuple, Type
 
-from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.utils.run_sync import run_sync
-from cognee.infrastructure.files.storage import get_file_storage
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
     record_graph_changes,
 )
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.modules.storage.utils import JSONEncoder
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
@@ -48,16 +49,16 @@ class KuzuAdapter(GraphDBInterface):
         """Initialize the Kuzu database connection and schema."""
         try:
             if "s3://" in self.db_path:
+                # Stage S3 DB to a local temp file
                 with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
                     self.temp_graph_file = temp_file.name
 
                 run_sync(self.pull_from_s3())
 
-                self.db = Database(
-                    self.temp_graph_file,
-                    buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                    max_db_size=4096 * 1024 * 1024,
-                )
+                # Open DB; on version mismatch auto-migrate and then push back to S3
+                self.db, migrated = self._open_or_migrate(self.temp_graph_file)
+                if migrated:
+                    run_sync(self.push_to_s3())
             else:
                 # Ensure the parent directory exists before creating the database
                 db_dir = os.path.dirname(self.db_path)
@@ -73,36 +74,8 @@ class KuzuAdapter(GraphDBInterface):
 
                 run_sync(file_storage.ensure_directory_exists())
 
-                try:
-                    self.db = Database(
-                        self.db_path,
-                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                        max_db_size=4096 * 1024 * 1024,
-                    )
-                except RuntimeError:
-                    from .kuzu_migrate import read_kuzu_storage_version
-                    import kuzu
-
-                    kuzu_db_version = read_kuzu_storage_version(self.db_path)
-                    if (
-                        kuzu_db_version == "0.9.0" or kuzu_db_version == "0.8.2"
-                    ) and kuzu_db_version != kuzu.__version__:
-                        # Try to migrate kuzu database to latest version
-                        from .kuzu_migrate import kuzu_migration
-
-                        kuzu_migration(
-                            new_db=self.db_path + "_new",
-                            old_db=self.db_path,
-                            new_version=kuzu.__version__,
-                            old_version=kuzu_db_version,
-                            overwrite=True,
-                        )
-
-                    self.db = Database(
-                        self.db_path,
-                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                        max_db_size=4096 * 1024 * 1024,
-                    )
+                # Open DB; on version mismatch auto-migrate and then retry
+                self.db, _ = self._open_or_migrate(self.db_path)
 
             self.db.init_database()
             self.connection = Connection(self.db)
@@ -131,6 +104,45 @@ class KuzuAdapter(GraphDBInterface):
         except Exception as e:
             logger.error(f"Failed to initialize Kuzu database: {e}")
             raise e
+
+    def _open_or_migrate(self, path: str) -> Tuple[Database, bool]:
+        """
+        Try to open the Kuzu database at path. If it fails due to a version mismatch,
+        detect the on-disk version and migrate in-place to the current installed Kuzu
+        version. Returns the opened Database instance and a flag indicating whether a
+        migration was performed.
+        """
+        did_migrate = False
+        try:
+            db = Database(
+                path,
+                buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
+                max_db_size=4096 * 1024 * 1024,
+            )
+            return db, did_migrate
+        except RuntimeError:
+            import kuzu
+            from .kuzu_migrate import kuzu_migration, read_kuzu_storage_version
+
+            kuzu_db_version = read_kuzu_storage_version(path)
+            # Only migrate known legacy versions and when different from the installed one
+            if kuzu_db_version in ("0.9.0", "0.8.2") and kuzu_db_version != str(kuzu.__version__):
+                kuzu_migration(
+                    new_db=path + "_new",
+                    old_db=path,
+                    new_version=str(kuzu.__version__),
+                    old_version=kuzu_db_version,
+                    overwrite=True,
+                )
+                did_migrate = True
+
+            # Retry opening after potential migration (or re-attempt if other transient issue)
+            db = Database(
+                path,
+                buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
+                max_db_size=4096 * 1024 * 1024,
+            )
+            return db, did_migrate
 
     async def push_to_s3(self) -> None:
         if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file"):
@@ -217,7 +229,8 @@ class KuzuAdapter(GraphDBInterface):
         """Convert a raw node result (with JSON properties) into a dictionary."""
         if data.get("properties"):
             try:
-                props = json.loads(data["properties"])
+                # Parse JSON properties into a dict
+                props: Dict[str, Any] = json.loads(data["properties"])
                 # Remove the JSON field and merge its contents
                 data.pop("properties")
                 data.update(props)
