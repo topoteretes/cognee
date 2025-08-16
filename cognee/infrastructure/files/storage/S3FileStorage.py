@@ -1,15 +1,17 @@
 import os
-import s3fs
 from typing import BinaryIO, Union
 from contextlib import asynccontextmanager
+import s3fs
 
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.utils.run_async import run_async
 from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
-from .storage import Storage
+from .storage_provider import CloudStorageProvider
+from .registry import StorageProviderRegistry
 
 
-class S3FileStorage(Storage):
+@StorageProviderRegistry.register("s3")
+class S3FileStorage(CloudStorageProvider):
     """
     Manage local file storage operations such as storing, retrieving, and managing files on
     the filesystem.

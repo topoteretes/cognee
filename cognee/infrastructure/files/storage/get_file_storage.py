@@ -1,23 +1,18 @@
-import os
-
-from cognee.base_config import get_base_config
-
 from .StorageManager import StorageManager
+from .registry import StorageProviderRegistry
+from .storage_config import get_cloud_storage_config
 
 
 def get_file_storage(storage_path: str) -> StorageManager:
-    base_config = get_base_config()
+    config = get_cloud_storage_config()
+    storage_backend = config.get("storage_backend")
 
-    # Use S3FileStorage if the storage_path is an S3 URL or if configured for S3
-    if storage_path.startswith("s3://") or (
-        os.getenv("STORAGE_BACKEND") == "s3"
-        and "s3://" in base_config.system_root_directory
-        and "s3://" in base_config.data_root_directory
-    ):
-        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-
-        return StorageManager(S3FileStorage(storage_path))
-    else:
+    if storage_backend == "local":
         from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 
         return StorageManager(LocalFileStorage(storage_path))
+
+    else:
+        provider_name = config.get(storage_backend)
+        provider_class = StorageProviderRegistry.get(provider_name)
+        return StorageManager(provider_class(storage_path))
