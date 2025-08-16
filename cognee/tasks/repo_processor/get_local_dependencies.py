@@ -180,6 +180,7 @@ async def get_local_script_dependencies(
             name=file_path_relative_to_repo,
             source_code=source_code,
             file_path=script_path,
+            language="python",
         )
         return code_file_node
 
@@ -188,6 +189,7 @@ async def get_local_script_dependencies(
         name=file_path_relative_to_repo,
         source_code=None,
         file_path=script_path,
+        language="python",
     )
 
     async for part in extract_code_parts(source_code_tree.root_node, script_path=script_path):
