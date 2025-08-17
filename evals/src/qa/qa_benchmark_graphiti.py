@@ -43,7 +43,7 @@ class QABenchmarkGraphiti(QABenchmarkRAG):
 
     async def initialize_rag(self) -> Any:
         """Initialize Graphiti and LLM."""
-        llm_config = LLMConfig(model=self.config.model_name, max_tokens=65536)
+        llm_config = LLMConfig(model=self.config.model_name, max_completion_tokens=65536)
         llm_client = OpenAIClient(config=llm_config)
         graphiti = Graphiti(
             self.config.db_url,

@@ -23,7 +23,7 @@ class AnthropicAdapter(LLMInterface):
     name = "Anthropic"
     model: str
 
-    def __init__(self, max_tokens: int, model: str = None):
+    def __init__(self, max_completion_tokens: int, model: str = None):
         import anthropic
 
         self.aclient = instructor.patch(
@@ -31,7 +31,7 @@ class AnthropicAdapter(LLMInterface):
         )
 
         self.model = model
-        self.max_tokens = max_tokens
+        self.max_completion_tokens = max_completion_tokens
 
     @sleep_and_retry_async()
     @rate_limit_async
@@ -57,7 +57,7 @@ class AnthropicAdapter(LLMInterface):
 
         return await self.aclient(
             model=self.model,
-            max_tokens=4096,
+            max_completion_tokens=4096,
             max_retries=5,
             messages=[
                 {

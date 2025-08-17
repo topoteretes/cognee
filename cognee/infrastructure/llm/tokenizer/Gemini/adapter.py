@@ -17,10 +17,10 @@ class GeminiTokenizer(TokenizerInterface):
     def __init__(
         self,
         model: str,
-        max_tokens: int = 3072,
+        max_completion_tokens: int = 3072,
     ):
         self.model = model
-        self.max_tokens = max_tokens
+        self.max_completion_tokens = max_completion_tokens
 
         # Get LLM API key from config
         from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config

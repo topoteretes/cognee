@@ -91,7 +91,7 @@ async def cognify(
                 - LangchainChunker: Recursive character splitting with overlap
                 Determines how documents are segmented for processing.
         chunk_size: Maximum tokens per chunk. Auto-calculated based on LLM if None.
-                   Formula: min(embedding_max_tokens, llm_max_tokens // 2)
+                   Formula: min(embedding_max_completion_tokens, llm_max_completion_tokens // 2)
                    Default limits: ~512-8192 tokens depending on models.
                    Smaller chunks = more granular but potentially fragmented knowledge.
         ontology_file_path: Path to RDF/OWL ontology file for domain-specific entity types.

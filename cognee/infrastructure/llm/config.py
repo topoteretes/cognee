@@ -18,7 +18,7 @@ class LLMConfig(BaseSettings):
     - llm_api_version
     - llm_temperature
     - llm_streaming
-    - llm_max_tokens
+    - llm_max_completion_tokens
     - transcription_model
     - graph_prompt_path
     - llm_rate_limit_enabled
@@ -41,7 +41,7 @@ class LLMConfig(BaseSettings):
     llm_api_version: Optional[str] = None
     llm_temperature: float = 0.0
     llm_streaming: bool = False
-    llm_max_tokens: int = 16384
+    llm_max_completion_tokens: int = 16384
 
     baml_llm_provider: str = "openai"
     baml_llm_model: str = "gpt-5-mini"
@@ -171,7 +171,7 @@ class LLMConfig(BaseSettings):
             "api_version": self.llm_api_version,
             "temperature": self.llm_temperature,
             "streaming": self.llm_streaming,
-            "max_tokens": self.llm_max_tokens,
+            "max_completion_tokens": self.llm_max_completion_tokens,
             "transcription_model": self.transcription_model,
             "graph_prompt_path": self.graph_prompt_path,
             "rate_limit_enabled": self.llm_rate_limit_enabled,

@@ -54,11 +54,15 @@ def get_llm_client():
     # Check if max_token value is defined in liteLLM for given model
     # if not use value from cognee configuration
     from cognee.infrastructure.llm.utils import (
-        get_model_max_tokens,
+        get_model_max_completion_tokens,
     )  # imported here to avoid circular imports
 
-    model_max_tokens = get_model_max_tokens(llm_config.llm_model)
-    max_tokens = model_max_tokens if model_max_tokens else llm_config.llm_max_tokens
+    model_max_completion_tokens = get_model_max_completion_tokens(llm_config.llm_model)
+    max_completion_tokens = (
+        model_max_completion_tokens
+        if model_max_completion_tokens
+        else llm_config.llm_max_completion_tokens
+    )
 
     if provider == LLMProvider.OPENAI:
         if llm_config.llm_api_key is None:
@@ -74,7 +78,7 @@ def get_llm_client():
             api_version=llm_config.llm_api_version,
             model=llm_config.llm_model,
             transcription_model=llm_config.transcription_model,
-            max_tokens=max_tokens,
+            max_completion_tokens=max_completion_tokens,
             streaming=llm_config.llm_streaming,
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=llm_config.fallback_endpoint,
@@ -94,7 +98,7 @@ def get_llm_client():
             llm_config.llm_api_key,
             llm_config.llm_model,
             "Ollama",
-            max_tokens=max_tokens,
+            max_completion_tokens=max_completion_tokens,
         )
 
     elif provider == LLMProvider.ANTHROPIC:
@@ -102,7 +106,9 @@ def get_llm_client():
             AnthropicAdapter,
         )
 
-        return AnthropicAdapter(max_tokens=max_tokens, model=llm_config.llm_model)
+        return AnthropicAdapter(
+            max_completion_tokens=max_completion_tokens, model=llm_config.llm_model
+        )
 
     elif provider == LLMProvider.CUSTOM:
         if llm_config.llm_api_key is None:
@@ -117,7 +123,7 @@ def get_llm_client():
             llm_config.llm_api_key,
             llm_config.llm_model,
             "Custom",
-            max_tokens=max_tokens,
+            max_completion_tokens=max_completion_tokens,
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=llm_config.fallback_endpoint,
             fallback_model=llm_config.fallback_model,
@@ -134,7 +140,7 @@ def get_llm_client():
         return GeminiAdapter(
             api_key=llm_config.llm_api_key,
             model=llm_config.llm_model,
-            max_tokens=max_tokens,
+            max_completion_tokens=max_completion_tokens,
             endpoint=llm_config.llm_endpoint,
             api_version=llm_config.llm_api_version,
             streaming=llm_config.llm_streaming,
