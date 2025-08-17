@@ -26,7 +26,7 @@ class GraphitiConfig(QABenchmarkConfig):
     db_password: str = os.getenv("NEO4J_PASSWORD")
 
     # Model parameters
-    # model_name: str = "gpt-4o-mini"
+    # model_name: str = "gpt-5-mini"
     model_name: str = "gpt-4o"
 
     # Default results file

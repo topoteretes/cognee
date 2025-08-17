@@ -31,7 +31,7 @@ jobs:
         python-version: ['3.11', '3.12']
     env:
       LLM_PROVIDER: openai
-      LLM_MODEL: gpt-4o-mini
+      LLM_MODEL: gpt-5-mini
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
 
     steps:
@@ -68,7 +68,7 @@ jobs:
             graph_db_provider: "neo4j"
     env:
       LLM_PROVIDER: openai
-      LLM_MODEL: gpt-4o-mini
+      LLM_MODEL: gpt-5-mini
       LLM_ENDPOINT: https://api.openai.com/v1/
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
       LLM_API_VERSION: "2024-02-01"
@@ -103,7 +103,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       LLM_PROVIDER: openai
-      LLM_MODEL: gpt-4o-mini
+      LLM_MODEL: gpt-5-mini
       LLM_ENDPOINT: https://api.openai.com/v1/
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
       LLM_API_VERSION: "2024-02-01"
