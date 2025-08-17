@@ -20,7 +20,7 @@ jobs:
         env:
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: poetry run python ./examples/python/multimedia_example.py
+        run: uv run python ./examples/python/multimedia_example.py
 
   test-eval-example:
     name: Run Eval Example
@@ -33,10 +33,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-
-      - name: Install specific eval dependency
-        run: |
-          poetry install -E deepeval
+          extra-dependencies: "deepeval"
 
       - name: Run Evaluation Framework Example
         env:
@@ -49,7 +46,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/eval_framework/run_eval.py
+        run: uv run python ./cognee/eval_framework/run_eval.py
 
   test-descriptive-metrics:
     name: Run Descriptive Metrics Example
@@ -63,6 +60,10 @@ jobs:
         with:
           python-version: '3.11.x'
 
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
+
       - name: Run Descriptive Graph Metrics Example
         env:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -74,7 +75,11 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/tasks/descriptive_metrics/networkx_metrics_test.py
+          GRAPH_DATABASE_PROVIDER: "neo4j"
+          GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
+          GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
+          GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
+        run: uv run python ./cognee/tests/tasks/descriptive_metrics/neo4j_metrics_test.py
 
 
   test-dynamic-steps-metrics:
@@ -100,4 +105,4 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./examples/python/dynamic_steps_example.py
+        run: uv run python ./examples/python/dynamic_steps_example.py

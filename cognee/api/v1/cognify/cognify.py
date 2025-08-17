@@ -177,14 +177,6 @@ async def cognify(
         - LLM_PROVIDER, LLM_MODEL, VECTOR_DB_PROVIDER, GRAPH_DATABASE_PROVIDER
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
-
-    Raises:
-        DatasetNotFoundError: If specified datasets don't exist
-        PermissionError: If user lacks processing rights
-        InvalidValueError: If LLM_API_KEY is not set
-        OntologyParsingError: If ontology file is malformed
-        ValueError: If chunks exceed max token limits (reduce chunk_size)
-        DatabaseNotCreatedError: If databases are not properly initialized
     """
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 

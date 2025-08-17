@@ -28,9 +28,8 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
-      - name: Install specific db dependency
-        run: |
-          poetry install
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
 
       - name: Run Kuzu Tests
         env:
@@ -43,7 +42,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_kuzu.py
+        run: uv run python ./cognee/tests/test_kuzu.py
 
       - name: Run Weighted Edges Tests with Kuzu
         env:
@@ -57,7 +56,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v
+        run: uv run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v
 
   run-neo4j-tests:
     name: Neo4j Tests
@@ -71,10 +70,6 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
-
-      - name: Install specific db dependency
-        run: |
-          poetry install -E neo4j
 
       - name: Run default Neo4j
         env:
@@ -91,7 +86,7 @@ jobs:
           GRAPH_DATABASE_URL: ${{ secrets.NEO4J_API_URL }}
           GRAPH_DATABASE_PASSWORD: ${{ secrets.NEO4J_API_KEY }}
           GRAPH_DATABASE_USERNAME: "neo4j"
-        run: poetry run python ./cognee/tests/test_neo4j.py
+        run: uv run python ./cognee/tests/test_neo4j.py
 
       - name: Run Weighted Edges Tests with Neo4j
         env:
@@ -108,4 +103,4 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v
+        run: uv run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v

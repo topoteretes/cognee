@@ -221,14 +221,6 @@ async def cognify(data: str, graph_model_file: str = None, graph_model_name: str
     - The actual cognify process may take significant time depending on text length
     - Use the cognify_status tool to check the progress of the operation
 
-    Raises
-    ------
-    InvalidValueError
-        If LLM_API_KEY is not set
-    ValueError
-        If chunks exceed max token limits (reduce chunk_size)
-    DatabaseNotCreatedError
-        If databases are not properly initialized
     """
 
     async def cognify_task(
@@ -512,14 +504,6 @@ async def search(search_query: str, search_type: str) -> list:
     - Different search types produce different output formats
     - The function handles the conversion between Cognee's internal result format and MCP's output format
 
-    Raises
-    ------
-    InvalidValueError
-        If LLM_API_KEY is not set (for LLM-based search types)
-    ValueError
-        If query_text is empty or search parameters are invalid
-    NoDataError
-        If no relevant data found for the search query
     """
 
     async def search_task(search_query: str, search_type: str) -> str:

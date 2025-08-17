@@ -47,11 +47,11 @@ jobs:
 
       - name: Run Weighted Edges Unit Tests
         run: |
-          poetry run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v --tb=short
+          uv run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v --tb=short
 
       - name: Run Standard Graph Tests (Regression)
         run: |
-          poetry run pytest cognee/tests/unit/interfaces/graph/get_graph_from_model_unit_test.py -v --tb=short
+          uv run pytest cognee/tests/unit/interfaces/graph/get_graph_from_model_unit_test.py -v --tb=short
 
   test-with-different-databases:
     name: Test Weighted Edges with Different Graph Databases
@@ -61,10 +61,8 @@ jobs:
         database: ['kuzu', 'neo4j']
         include:
           - database: kuzu
-            install_extra: ""
             graph_db_provider: "kuzu"
           - database: neo4j
-            install_extra: "-E neo4j"
             graph_db_provider: "neo4j"
     env:
       LLM_PROVIDER: openai
@@ -88,15 +86,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Database Dependencies
-        run: |
-          poetry install ${{ matrix.install_extra }}
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
 
       - name: Run Weighted Edges Tests
         env:
           GRAPH_DATABASE_PROVIDER: ${{ matrix.graph_db_provider }}
         run: |
-          poetry run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v --tb=short
+          uv run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v --tb=short
 
   test-examples:
     name: Test Weighted Edges Examples
@@ -125,7 +122,7 @@ jobs:
 
       - name: Test Weighted Edges Example
         run: |
-          poetry run python examples/python/weighted_edges_example.py
+          uv run python examples/python/weighted_edges_example.py
 
       - name: Verify Visualization File Created
         run: |

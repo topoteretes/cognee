@@ -1,10 +1,19 @@
-from cognee.exceptions import CogneeApiError
+from cognee.exceptions import CogneeConfigurationError, CogneeValidationError
 from fastapi import status
 
 
-class DocumentNotFoundError(CogneeApiError):
-    """Raised when a document cannot be found in the database."""
+class InvalidConfigAttributeError(CogneeConfigurationError):
+    def __init__(
+        self,
+        attribute: str,
+        name: str = "InvalidConfigAttributeError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        message = f"'{attribute}' is not a valid attribute of the configuration."
+        super().__init__(message, name, status_code)
 
+
+class DocumentNotFoundError(CogneeValidationError):
     def __init__(
         self,
         message: str = "Document not found in database.",
@@ -14,9 +23,7 @@ class DocumentNotFoundError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
-class DatasetNotFoundError(CogneeApiError):
-    """Raised when a dataset cannot be found."""
-
+class DatasetNotFoundError(CogneeValidationError):
     def __init__(
         self,
         message: str = "Dataset not found.",
@@ -26,9 +33,7 @@ class DatasetNotFoundError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
-class DataNotFoundError(CogneeApiError):
-    """Raised when a dataset cannot be found."""
-
+class DataNotFoundError(CogneeValidationError):
     def __init__(
         self,
         message: str = "Data not found.",
@@ -38,9 +43,7 @@ class DataNotFoundError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
-class DocumentSubgraphNotFoundError(CogneeApiError):
-    """Raised when a document's subgraph cannot be found in the graph database."""
-
+class DocumentSubgraphNotFoundError(CogneeValidationError):
     def __init__(
         self,
         message: str = "Document subgraph not found in graph database.",

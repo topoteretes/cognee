@@ -5,7 +5,7 @@ from litellm import acompletion, JSONSchemaValidationError
 
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.observability.get_observe import get_observe
-from cognee.exceptions import InvalidValueError
+from cognee.infrastructure.llm.exceptions import MissingSystemPromptPathError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
@@ -118,7 +118,7 @@ class GeminiAdapter(LLMInterface):
         """
         Format and display the prompt for a user query.
 
-        Raises an InvalidValueError if no system prompt is provided.
+        Raises an MissingQueryParameterError if no system prompt is provided.
 
         Parameters:
         -----------
@@ -135,7 +135,7 @@ class GeminiAdapter(LLMInterface):
         if not text_input:
             text_input = "No user input provided."
         if not system_prompt:
-            raise InvalidValueError(message="No system prompt path provided.")
+            raise MissingSystemPromptPathError()
         system_prompt = LLMGateway.read_query_prompt(system_prompt)
 
         formatted_prompt = (
