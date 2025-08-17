@@ -64,7 +64,7 @@ class OpenAIAdapter(LLMInterface):
         api_version: str,
         model: str,
         transcription_model: str,
-        max_tokens: int,
+        max_completion_tokens: int,
         streaming: bool = False,
         fallback_model: str = None,
         fallback_api_key: str = None,
@@ -77,7 +77,7 @@ class OpenAIAdapter(LLMInterface):
         self.api_key = api_key
         self.endpoint = endpoint
         self.api_version = api_version
-        self.max_tokens = max_tokens
+        self.max_completion_tokens = max_completion_tokens
         self.streaming = streaming
 
         self.fallback_model = fallback_model
@@ -301,7 +301,7 @@ class OpenAIAdapter(LLMInterface):
             api_key=self.api_key,
             api_base=self.endpoint,
             api_version=self.api_version,
-            max_tokens=300,
+            max_completion_tokens=300,
             max_retries=self.MAX_RETRIES,
         )
 

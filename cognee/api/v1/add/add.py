@@ -128,7 +128,7 @@ async def add(
 
         Optional:
         - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama"
-        - LLM_MODEL: Model name (default: "gpt-4o-mini")
+        - LLM_MODEL: Model name (default: "gpt-5-mini")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
         - VECTOR_DB_PROVIDER: "lancedb" (default), "chromadb", "pgvector"

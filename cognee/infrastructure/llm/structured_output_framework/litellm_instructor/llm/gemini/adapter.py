@@ -34,7 +34,7 @@ class GeminiAdapter(LLMInterface):
         self,
         api_key: str,
         model: str,
-        max_tokens: int,
+        max_completion_tokens: int,
         endpoint: Optional[str] = None,
         api_version: Optional[str] = None,
         streaming: bool = False,
@@ -44,7 +44,7 @@ class GeminiAdapter(LLMInterface):
         self.endpoint = endpoint
         self.api_version = api_version
         self.streaming = streaming
-        self.max_tokens = max_tokens
+        self.max_completion_tokens = max_completion_tokens
 
     @observe(as_type="generation")
     @sleep_and_retry_async()
@@ -90,7 +90,7 @@ class GeminiAdapter(LLMInterface):
                     model=f"{self.model}",
                     messages=messages,
                     api_key=self.api_key,
-                    max_tokens=self.max_tokens,
+                    max_completion_tokens=self.max_completion_tokens,
                     temperature=0.1,
                     response_format=response_schema,
                     timeout=100,
