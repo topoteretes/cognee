@@ -44,10 +44,6 @@ def get_settings() -> SettingsDict:
 
     vector_dbs = [
         {
-            "value": "qdrant",
-            "label": "Qdrant",
-        },
-        {
             "value": "lancedb",
             "label": "LanceDB",
         },

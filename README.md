@@ -92,7 +92,7 @@ Your contributions are at the core of making this a true open source project. An
 ## 📦 Installation
 
 You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager.
-Cognee supports Python 3.8 to 3.12
+Cognee supports Python 3.10 to 3.13
 
 ### With pip
 
@@ -208,6 +208,11 @@ We are committed to making open source an enjoyable and respectful experience fo
   <img alt="contributors" src="https://contrib.rocks/image?repo=topoteretes/cognee"/>
 </a>
 
+## Sponsors
+
+Thanks to the following companies for sponsoring the ongoing development of cognee.
+
+- [GitHub's Secure Open Source Fund](https://resources.github.com/github-secure-open-source-fund/)
 
 ## Star History
 

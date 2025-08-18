@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 from sqlalchemy import UUID, Column, DateTime, String, JSON, Integer
+from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import relationship
 
 from cognee.infrastructure.databases.relational import Base
@@ -16,12 +17,21 @@ class Data(Base):
     name = Column(String)
     extension = Column(String)
     mime_type = Column(String)
+    original_extension = Column(String, nullable=True)
+    original_mime_type = Column(String, nullable=True)
+    loader_engine = Column(String)
     raw_data_location = Column(String)
+    original_data_location = Column(String)
     owner_id = Column(UUID, index=True)
     tenant_id = Column(UUID, index=True, nullable=True)
     content_hash = Column(String)
+    raw_content_hash = Column(String)
     external_metadata = Column(JSON)
-    node_set = Column(JSON, nullable=True)  # Store NodeSet as JSON list of strings
+    # Store NodeSet as JSON list of strings
+    node_set = Column(JSON, nullable=True)
+    # MutableDict allows SQLAlchemy to notice key-value pair changes, without it changing a value for a key
+    # wouldn't be noticed when commiting a database session
+    pipeline_status = Column(MutableDict.as_mutable(JSON))
     token_count = Column(Integer)
     data_size = Column(Integer, nullable=True)  # File size in bytes
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

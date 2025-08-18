@@ -38,7 +38,7 @@ async def index_data_points(data_points: list[DataPoint]):
         index_name = index_name_and_field[:first_occurence]
         field_name = index_name_and_field[first_occurence + 1 :]
         try:
-            # In case the ammount if indexable points is too large we need to send them in batches
+            # In case the amount of indexable points is too large we need to send them in batches
             batch_size = 100
             for i in range(0, len(indexable_points), batch_size):
                 batch = indexable_points[i : i + batch_size]
