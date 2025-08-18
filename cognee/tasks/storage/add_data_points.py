@@ -42,7 +42,7 @@ async def add_data_points(
         - Optionally updates the edge index via `index_graph_edges`.
     """
     
-async def add_data_points(data_points: List[DataPoint]) -> List[DataPoint]:
+async def add_data_points(data_points: List[DataPoint], update_edge_collection: bool = True) -> List[DataPoint]:
     if not isinstance(data_points, list):
         raise InvalidDataPointsInAddDataPointsError("data_points must be a list.")
     if not all(isinstance(dp, DataPoint) for dp in data_points):
