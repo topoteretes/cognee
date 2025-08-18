@@ -68,7 +68,7 @@ async def search(
             system_prompt_path=system_prompt_path,
             top_k=top_k,
             save_interaction=save_interaction,
-            last_k=last_k
+            last_k=last_k,
         )
 
     query = await log_query(query_text, query_type.value, user.id)
@@ -82,7 +82,7 @@ async def search(
         node_type=node_type,
         node_name=node_name,
         save_interaction=save_interaction,
-        last_k=last_k
+        last_k=last_k,
     )
 
     await log_result(
@@ -188,7 +188,14 @@ async def authorized_search(
 
     # Searches all provided datasets and handles setting up of appropriate database context based on permissions
     search_results = await specific_search_by_context(
-        search_datasets, query_text, query_type, user, system_prompt_path, top_k, save_interaction, last_k=last_k
+        search_datasets,
+        query_text,
+        query_type,
+        user,
+        system_prompt_path,
+        top_k,
+        save_interaction,
+        last_k=last_k,
     )
 
     await log_result(query.id, json.dumps(search_results, cls=JSONEncoder), user.id)
@@ -211,7 +218,9 @@ async def specific_search_by_context(
     Not to be used outside of active access control mode.
     """
 
-    async def _search_by_context(dataset, user, query_type, query_text, system_prompt_path, top_k, last_k):
+    async def _search_by_context(
+        dataset, user, query_type, query_text, system_prompt_path, top_k, last_k
+    ):
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)
         search_results = await specific_search(
@@ -233,7 +242,9 @@ async def specific_search_by_context(
     tasks = []
     for dataset in search_datasets:
         tasks.append(
-            _search_by_context(dataset, user, query_type, query_text, system_prompt_path, top_k, last_k)
+            _search_by_context(
+                dataset, user, query_type, query_text, system_prompt_path, top_k, last_k
+            )
         )
 
     return await asyncio.gather(*tasks)

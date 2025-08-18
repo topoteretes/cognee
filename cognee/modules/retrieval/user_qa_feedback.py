@@ -26,7 +26,6 @@ class UserQAFeedback(BaseFeedback):
         self.last_k = last_k
 
     async def add_feedback(self, feedback_text: str) -> List[str]:
-
         feedback_sentiment = await LLMGateway.acreate_structured_output(
             text_input=feedback_text,
             system_prompt="You are a sentiment analysis assistant. For each piece of user feedback you receive, return exactly one of: Positive, Negative, or Neutral classification",
