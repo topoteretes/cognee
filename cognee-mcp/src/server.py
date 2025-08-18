@@ -21,16 +21,16 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.storage.utils import JSONEncoder
 
 
-try:
-    from codingagents.coding_rule_associations import (
-        add_rule_associations,
-        get_existing_rules,
-    )
-except ModuleNotFoundError:
-    from .codingagents.coding_rule_associations import (
-        add_rule_associations,
-        get_existing_rules,
-    )
+# try:
+#     from codingagents.coding_rule_associations import (
+#         add_rule_associations,
+#         get_existing_rules,
+#     )
+# except ModuleNotFoundError:
+#     from .codingagents.coding_rule_associations import (
+#         add_rule_associations,
+#         get_existing_rules,
+#     )
 
 
 mcp = FastMCP("Cognee")
@@ -221,14 +221,6 @@ async def cognify(data: str, graph_model_file: str = None, graph_model_name: str
     - The actual cognify process may take significant time depending on text length
     - Use the cognify_status tool to check the progress of the operation
 
-    Raises
-    ------
-    InvalidValueError
-        If LLM_API_KEY is not set
-    ValueError
-        If chunks exceed max token limits (reduce chunk_size)
-    DatabaseNotCreatedError
-        If databases are not properly initialized
     """
 
     async def cognify_task(
@@ -306,7 +298,7 @@ async def save_interaction(data: str) -> list:
                 logger.info("Save interaction process finished.")
                 logger.info("Generating associated rules from interaction data.")
 
-                await add_rule_associations(data=data, rules_nodeset_name="coding_agent_rules")
+                # await add_rule_associations(data=data, rules_nodeset_name="coding_agent_rules")
 
                 logger.info("Associated rules generated from interaction data.")
 
@@ -512,14 +504,6 @@ async def search(search_query: str, search_type: str) -> list:
     - Different search types produce different output formats
     - The function handles the conversion between Cognee's internal result format and MCP's output format
 
-    Raises
-    ------
-    InvalidValueError
-        If LLM_API_KEY is not set (for LLM-based search types)
-    ValueError
-        If query_text is empty or search parameters are invalid
-    NoDataError
-        If no relevant data found for the search query
     """
 
     async def search_task(search_query: str, search_type: str) -> str:
@@ -576,8 +560,10 @@ async def get_developer_rules() -> list:
     async def fetch_rules_from_cognee() -> str:
         """Collect all developer rules from Cognee"""
         with redirect_stdout(sys.stderr):
-            developer_rules = await get_existing_rules(rules_nodeset_name="coding_agent_rules")
-            return developer_rules
+            note = "This is broken in 0.2.2"
+            return note
+            # developer_rules = await get_existing_rules(rules_nodeset_name="coding_agent_rules")
+            # return developer_rules
 
     rules_text = await fetch_rules_from_cognee()
 
