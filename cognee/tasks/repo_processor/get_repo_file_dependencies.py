@@ -53,14 +53,20 @@ async def get_source_code_files(repo_path, language_config: dict[str, list[str]]
             lang = _get_language_from_extension(file, language_config)
             if lang is None:
                 continue
-            #Exclude common test files and virtual/env folders
+            # Exclude tests and common build/venv directories
+            excluded_dirs = {
+                ".venv", "venv", "env", ".env", "site-packages",
+                "node_modules", "dist", "build", ".git",
+                "tests", "test",
+            }
+            root_parts = set(os.path.normpath(root).split(os.sep))
+            base_name, _ext = os.path.splitext(file)
             if (
-                file.startswith("test_")
-                or file.endswith("_test")
+                base_name.startswith("test_")
+                or base_name.endswith("_test")  # catches Go's *_test.go and similar
                 or ".test." in file
                 or ".spec." in file
-                or any(x in root for x in (".venv", "venv", "env", ".env", "site-packages"))
-                or any(x in root for x in ("node_modules", "dist", "build", ".git"))
+                or (excluded_dirs & root_parts)
             ):
                 continue
             file_path = os.path.abspath(os.path.join(root, file))
