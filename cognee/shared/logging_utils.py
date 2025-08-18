@@ -173,29 +173,16 @@ def log_database_configuration(logger):
     from cognee.infrastructure.databases.graph.config import get_graph_config
 
     try:
-        # Log relational database configuration
-        relational_config = get_relational_config()
-        if relational_config.db_provider == "postgres":
-            logger.info(f"Postgres host: {relational_config.db_host}:{relational_config.db_port}")
-        elif relational_config.db_provider == "sqlite":
-            logger.info(f"SQLite path: {relational_config.db_path}")
-
-        # Log vector database configuration
-        vector_config = get_vectordb_config()
-        if vector_config.vector_db_provider == "lancedb":
-            logger.info(f"Vector database path: {vector_config.vector_db_url}")
-        else:
-            logger.info(f"Vector database URL: {vector_config.vector_db_url}")
-
-        # Log graph database configuration
-        graph_config = get_graph_config()
-        if graph_config.graph_database_provider == "kuzu":
-            logger.info(f"Graph database path: {graph_config.graph_file_path}")
-        else:
-            logger.info(f"Graph database URL: {graph_config.graph_database_url}")
+        # Get base database directory path
+        from cognee.base_config import get_base_config
+        base_config = get_base_config()
+        databases_path = os.path.join(base_config.system_root_directory, "databases")
+        
+        # Log concise database info
+        logger.info(f"Database storage: {databases_path}")
 
     except Exception as e:
-        logger.warning(f"Could not retrieve database configuration: {str(e)}")
+        logger.debug(f"Could not retrieve database configuration: {str(e)}")
 
 
 def cleanup_old_logs(logs_dir, max_files):
@@ -312,10 +299,6 @@ def setup_logging(log_level=None, name=None):
         # Hand back to the original hook → prints traceback and exits
         sys.__excepthook__(exc_type, exc_value, traceback)
 
-        logger.info("Want to learn more? Visit the Cognee documentation: https://docs.cognee.ai")
-        logger.info(
-            "Need help? Reach out to us on our Discord server: https://discord.gg/NQPKmU5CCg"
-        )
 
     # Install exception handlers
     sys.excepthook = handle_exception
@@ -399,8 +382,16 @@ def setup_logging(log_level=None, name=None):
 
     # Provide compact logging for CLI mode, detailed for regular mode
     if os.getenv("COGNEE_CLI_MODE") == "true":
-        # Compact initialization for CLI
-        logger.info(f"cognee {COGNEE_VERSION} initialized")
+        # Compact initialization for CLI - just basic info
+        logger.info(f"cognee {COGNEE_VERSION} ready")
+        # Log basic database path only
+        try:
+            from cognee.base_config import get_base_config
+            base_config = get_base_config()
+            databases_path = os.path.join(base_config.system_root_directory, "databases")
+            logger.info(f"Storage: {databases_path}")
+        except Exception:
+            pass  # Silent fail for CLI mode
 
     else:
         # Detailed initialization for regular usage
@@ -412,7 +403,7 @@ def setup_logging(log_level=None, name=None):
             os_info=OS_INFO,
         )
 
-        logger.info("Want to learn more? Visit the Cognee documentation: https://docs.cognee.ai")
+
 
         # Log database configuration
         log_database_configuration(logger)

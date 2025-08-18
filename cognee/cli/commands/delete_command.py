@@ -9,7 +9,7 @@ from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 
 
 class DeleteCommand(SupportsCliCommand):
-    command = "delete"
+    command_string = "delete"
     help_string = "Delete data from cognee knowledge base"
     docs_url = DEFAULT_DOCS_URL
     description = """

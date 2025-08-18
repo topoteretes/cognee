@@ -11,7 +11,7 @@ from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 
 
 class SearchCommand(SupportsCliCommand):
-    command = "search"
+    command_string = "search"
     help_string = "Search and query the knowledge graph for insights, information, and connections"
     docs_url = DEFAULT_DOCS_URL
     description = """

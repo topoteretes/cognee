@@ -106,16 +106,16 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
 
     for command_class in command_classes:
         command = command_class()
-        if command.command in installed_commands:
+        if command.command_string in installed_commands:
             continue
 
         command_parser = subparsers.add_parser(
-            command.command,
+            command.command_string,
             help=command.help_string,
             description=command.description if hasattr(command, "description") else None,
         )
         command.configure_parser(command_parser)
-        installed_commands[command.command] = command
+        installed_commands[command.command_string] = command
 
     # Add rich formatting if available
     if HAS_RICH:

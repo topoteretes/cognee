@@ -10,7 +10,7 @@ from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 
 
 class CognifyCommand(SupportsCliCommand):
-    command = "cognify"
+    command_string = "cognify"
     help_string = "Transform ingested data into a structured knowledge graph"
     docs_url = DEFAULT_DOCS_URL
     description = """

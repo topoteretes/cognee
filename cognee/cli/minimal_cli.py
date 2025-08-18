@@ -10,6 +10,7 @@ from typing import Any, Sequence
 # CRITICAL: Prevent verbose logging initialization for CLI-only usage
 # This must be set before any cognee imports to be effective
 os.environ["COGNEE_MINIMAL_LOGGING"] = "true"
+os.environ["COGNEE_CLI_MODE"] = "true"
 
 
 def get_version() -> str:

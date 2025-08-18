@@ -9,7 +9,7 @@ from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 
 
 class AddCommand(SupportsCliCommand):
-    command = "add"
+    command_string = "add"
     help_string = "Add data to Cognee for knowledge graph processing"
     docs_url = DEFAULT_DOCS_URL
     description = """
