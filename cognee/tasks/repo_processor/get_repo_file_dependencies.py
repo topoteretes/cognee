@@ -180,7 +180,7 @@ async def get_repo_file_dependencies(
             else:
                 # Placeholder: create a minimal CodeFile for other languages
                 async def make_codefile_stub(file_path=file_path, lang=lang):
-                    async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+                    async with aiofiles.open(file_path, "r", encoding="utf-8", errors="replace") as f:
                         source = await f.read()
                     return CodeFile(
                         id=uuid5(NAMESPACE_OID, file_path),
