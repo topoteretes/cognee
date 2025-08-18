@@ -1,8 +1,8 @@
-from cognee.exceptions import CogneeApiError
+from cognee.exceptions import CogneeValidationError
 from fastapi import status
 
 
-class RoleNotFoundError(CogneeApiError):
+class RoleNotFoundError(CogneeValidationError):
     """User group not found"""
 
     def __init__(
@@ -14,7 +14,7 @@ class RoleNotFoundError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
-class TenantNotFoundError(CogneeApiError):
+class TenantNotFoundError(CogneeValidationError):
     """User group not found"""
 
     def __init__(
@@ -26,7 +26,7 @@ class TenantNotFoundError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
-class UserNotFoundError(CogneeApiError):
+class UserNotFoundError(CogneeValidationError):
     """User not found"""
 
     def __init__(
@@ -38,7 +38,7 @@ class UserNotFoundError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
-class PermissionDeniedError(CogneeApiError):
+class PermissionDeniedError(CogneeValidationError):
     def __init__(
         self,
         message: str = "User does not have permission on documents.",
@@ -48,7 +48,7 @@ class PermissionDeniedError(CogneeApiError):
         super().__init__(message, name, status_code)
 
 
-class PermissionNotFoundError(CogneeApiError):
+class PermissionNotFoundError(CogneeValidationError):
     def __init__(
         self,
         message: str = "Permission type does not exist.",

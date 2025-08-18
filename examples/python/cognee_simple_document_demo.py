@@ -3,7 +3,7 @@ import cognee
 
 import os
 
-# By default cognee uses OpenAI's gpt-4o-mini LLM model
+# By default cognee uses OpenAI's gpt-5-mini LLM model
 # Provide your OpenAI LLM API KEY
 os.environ["LLM_API_KEY"] = ""
 

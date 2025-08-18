@@ -25,7 +25,7 @@ class EvalConfig(BaseSettings):
         "EM",
         "f1",
     ]  # Use only 'correctness' for DirectLLM
-    deepeval_model: str = "gpt-4o-mini"
+    deepeval_model: str = "gpt-5-mini"
 
     # Metrics params
     calculate_metrics: bool = True

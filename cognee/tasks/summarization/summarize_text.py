@@ -3,10 +3,11 @@ from typing import Type
 from uuid import uuid5
 from pydantic import BaseModel
 
+from cognee.tasks.summarization.exceptions import InvalidSummaryInputsError
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.cognify.config import get_cognify_config
-from .models import TextSummary
+from cognee.tasks.summarization.models import TextSummary
 
 
 async def summarize_text(
@@ -35,6 +36,12 @@ async def summarize_text(
         A list of TextSummary objects, each containing the summary of a corresponding
         DocumentChunk.
     """
+
+    if not isinstance(data_chunks, list):
+        raise InvalidSummaryInputsError("data_chunks must be a list.")
+    if not all(hasattr(c, "text") for c in data_chunks):
+        raise InvalidSummaryInputsError("each DocumentChunk must have a 'text' attribute.")
+
     if len(data_chunks) == 0:
         return data_chunks
 

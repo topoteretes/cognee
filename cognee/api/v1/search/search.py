@@ -161,13 +161,6 @@ async def search(
         - VECTOR_DB_PROVIDER: Must match what was used during cognify
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
-    Raises:
-        DatasetNotFoundError: If specified datasets don't exist or aren't accessible
-        PermissionDeniedError: If user lacks read access to requested datasets
-        NoDataError: If no relevant data found for the search query
-        InvalidValueError: If LLM_API_KEY is not set (for LLM-based search types)
-        ValueError: If query_text is empty or search parameters are invalid
-        CollectionNotFoundError: If vector collection not found (data not processed)
     """
     # We use lists from now on for datasets
     if isinstance(datasets, UUID) or isinstance(datasets, str):

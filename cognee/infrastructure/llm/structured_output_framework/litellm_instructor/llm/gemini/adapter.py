@@ -5,7 +5,7 @@ from litellm import acompletion, JSONSchemaValidationError
 
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.observability.get_observe import get_observe
-from cognee.exceptions import InvalidValueError
+from cognee.infrastructure.llm.exceptions import MissingSystemPromptPathError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
@@ -34,7 +34,7 @@ class GeminiAdapter(LLMInterface):
         self,
         api_key: str,
         model: str,
-        max_tokens: int,
+        max_completion_tokens: int,
         endpoint: Optional[str] = None,
         api_version: Optional[str] = None,
         streaming: bool = False,
@@ -44,7 +44,7 @@ class GeminiAdapter(LLMInterface):
         self.endpoint = endpoint
         self.api_version = api_version
         self.streaming = streaming
-        self.max_tokens = max_tokens
+        self.max_completion_tokens = max_completion_tokens
 
     @observe(as_type="generation")
     @sleep_and_retry_async()
@@ -90,7 +90,7 @@ class GeminiAdapter(LLMInterface):
                     model=f"{self.model}",
                     messages=messages,
                     api_key=self.api_key,
-                    max_tokens=self.max_tokens,
+                    max_completion_tokens=self.max_completion_tokens,
                     temperature=0.1,
                     response_format=response_schema,
                     timeout=100,
@@ -118,7 +118,7 @@ class GeminiAdapter(LLMInterface):
         """
         Format and display the prompt for a user query.
 
-        Raises an InvalidValueError if no system prompt is provided.
+        Raises an MissingQueryParameterError if no system prompt is provided.
 
         Parameters:
         -----------
@@ -135,7 +135,7 @@ class GeminiAdapter(LLMInterface):
         if not text_input:
             text_input = "No user input provided."
         if not system_prompt:
-            raise InvalidValueError(message="No system prompt path provided.")
+            raise MissingSystemPromptPathError()
         system_prompt = LLMGateway.read_query_prompt(system_prompt)
 
         formatted_prompt = (

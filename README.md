@@ -92,7 +92,8 @@ Your contributions are at the core of making this a true open source project. An
 ## 📦 Installation
 
 You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager.
-Cognee supports Python 3.8 to 3.12
+
+Cognee supports Python 3.10 to 3.13
 
 ### With pip
 
@@ -102,7 +103,7 @@ pip install cognee
 
 ## Local Cognee installation
 
-You can install the local Cognee repo using **pip**, **poetry** and **uv**.
+You can install the local Cognee repo using **uv**, **pip** and **poetry**.
 For local pip installation please make sure your pip version is above version 21.3.
 
 ### with UV with all optional dependencies

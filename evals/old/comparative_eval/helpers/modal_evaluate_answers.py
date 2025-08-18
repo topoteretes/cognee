@@ -121,7 +121,7 @@ async def main():
         evaluation_metrics=["correctness", "EM", "f1"],
         calculate_metrics=True,
         dashboard=True,
-        deepeval_model="gpt-4o-mini",
+        deepeval_model="gpt-5-mini",
     ).to_dict()
 
     logger.info(f"Starting evaluation of {len(json_file_paths)} JSON files")

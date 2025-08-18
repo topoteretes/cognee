@@ -128,17 +128,12 @@ async def add(
 
         Optional:
         - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama"
-        - LLM_MODEL: Model name (default: "gpt-4o-mini")
+        - LLM_MODEL: Model name (default: "gpt-5-mini")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
         - VECTOR_DB_PROVIDER: "lancedb" (default), "chromadb", "pgvector"
-        - GRAPH_DATABASE_PROVIDER: "kuzu" (default), "neo4j", "networkx"
+        - GRAPH_DATABASE_PROVIDER: "kuzu" (default), "neo4j"
 
-    Raises:
-        FileNotFoundError: If specified file paths don't exist
-        PermissionError: If user lacks access to files or dataset
-        UnsupportedFileTypeError: If file format cannot be processed
-        InvalidValueError: If LLM_API_KEY is not set or invalid
     """
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),

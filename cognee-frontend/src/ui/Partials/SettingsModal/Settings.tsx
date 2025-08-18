@@ -34,8 +34,8 @@
 // };
 
 // const defaultModel = {
-//   label: 'gpt-4o-mini',
-//   value: 'gpt-4o-mini',
+//   label: 'gpt-5-mini',
+//   value: 'gpt-5-mini',
 // };
 
 // export default function Settings({ onDone = () => {}, submitButtonText = 'Save' }) {
