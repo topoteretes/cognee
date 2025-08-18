@@ -1631,3 +1631,26 @@ class KuzuAdapter(GraphDBInterface):
         """
         result = await self.query(query)
         return [record[0] for record in result] if result else []
+
+    async def get_last_user_interaction_ids(self, limit: int) -> List[str]:
+        """
+        Retrieve the IDs of the most recent CogneeUserInteraction nodes.
+        Parameters:
+        -----------
+        - limit (int): The maximum number of interaction IDs to return.
+        Returns:
+        --------
+        - List[str]: A list of interaction IDs, sorted by created_at descending.
+        """
+
+        query = """
+        MATCH (n)
+        WHERE n.type = 'CogneeUserInteraction'
+        RETURN n.id as id
+        ORDER BY n.created_at DESC
+        LIMIT $limit
+        """
+        rows = await self.query(query, {"limit": limit})
+
+        id_list = [row[0] for row in rows]
+        return id_list

@@ -20,6 +20,7 @@ async def search(
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
     save_interaction: bool = False,
+    last_k: Optional[int] = None,
 ) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -186,6 +187,7 @@ async def search(
         node_type=node_type,
         node_name=node_name,
         save_interaction=save_interaction,
+        last_k=last_k,
     )
 
     return filtered_search_results
