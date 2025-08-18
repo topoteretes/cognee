@@ -10,7 +10,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.shared.CodeGraphEntities import CodeFile, Repository
 
 
-async def get_source_code_files(repo_path):
+async def get_source_code_files(repo_path, language_config: dict[str, list[str]] | None = None):
     """
     Retrieve source code files from the specified repository path for multiple languages.
 
@@ -32,10 +32,6 @@ async def get_source_code_files(repo_path):
         return None
 
     # Default config if not provided
-    import inspect
-    frame = inspect.currentframe()
-    args, _, _, values = inspect.getargvalues(frame)
-    language_config = values.get('language_config', None)
     if language_config is None:
         language_config = {
             'python': ['.py'],
@@ -57,15 +53,22 @@ async def get_source_code_files(repo_path):
             lang = _get_language_from_extension(file, language_config)
             if lang is None:
                 continue
-            # Exclude test files and venv for all languages
-            if file.startswith("test_") or file.endswith("_test") or ".venv" in file:
+            #Exclude common test files and virtual/env folders
+            if (
+                file.startswith("test_")
+                or file.endswith("_test")
+                or ".test." in file
+                or ".spec." in file
+                or any(x in root for x in (".venv", "venv", "env", ".env", "site-packages"))
+                or any(x in root for x in ("node_modules", "dist", "build", ".git"))
+            ):
                 continue
             file_path = os.path.abspath(os.path.join(root, file))
             if os.path.getsize(file_path) == 0:
                 continue
             source_code_files.add((file_path, lang))
 
-    return list(source_code_files)
+    return sorted(list(source_code_files))
 
 
 def run_coroutine(coroutine_func, *args, **kwargs):
@@ -100,19 +103,20 @@ async def get_repo_file_dependencies(
     repo_path: str, detailed_extraction: bool = False, supported_languages: list = None
 ) -> AsyncGenerator[DataPoint, None]:
     """
-    Generate a dependency graph for Python files in the given repository path.
+    Generate a dependency graph for source files (multi-language) in the given repository path.
 
     Check the validity of the repository path and yield a repository object followed by the
-    dependencies of Python files within that repository. Raise a FileNotFoundError if the
+    dependencies of source files within that repository. Raise a FileNotFoundError if the
     provided path does not exist. The extraction of detailed dependencies can be controlled
-    via the `detailed_extraction` argument.
+    via the `detailed_extraction` argument. Languages considered can be restricted via
+    the `supported_languages` argument.
 
     Parameters:
     -----------
 
-        - repo_path (str): The file path to the repository where Python files are located.
-        - detailed_extraction (bool): A flag indicating whether to perform a detailed
-          extraction of dependencies (default is False). (default False)
+        - repo_path (str): The file path to the repository to process.
+        - detailed_extraction (bool): Whether to perform a detailed extraction of code parts.
+        - supported_languages (list | None): Subset of languages to include; if None, use defaults.
     """
 
     if isinstance(repo_path, list) and len(repo_path) == 1:
@@ -158,6 +162,7 @@ async def get_repo_file_dependencies(
 
     # Import dependency extractors for each language (Python for now, extend later)
     from cognee.tasks.repo_processor.get_local_dependencies import get_local_script_dependencies
+    import aiofiles
     # TODO: Add other language extractors here
 
     for start_range, end_range in chunk_ranges:
@@ -168,9 +173,7 @@ async def get_repo_file_dependencies(
                 tasks.append(get_local_script_dependencies(repo_path, file_path, detailed_extraction))
             else:
                 # Placeholder: create a minimal CodeFile for other languages
-                from cognee.shared.CodeGraphEntities import CodeFile
-                import aiofiles
-                async def make_codefile_stub():
+                async def make_codefile_stub(file_path=file_path, lang=lang):
                     async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
                         source = await f.read()
                     return CodeFile(
@@ -186,8 +189,6 @@ async def get_repo_file_dependencies(
 
         for source_code_file in results:
             source_code_file.part_of = repo
-            if not hasattr(source_code_file, 'language') or source_code_file.language is None:
-                # Set language for python files if not set
-                if source_code_file.file_path.endswith('.py'):
-                    source_code_file.language = 'python'
+            if (getattr(source_code_file, 'language', None) is None and source_code_file.file_path.endswith('.py')):
+                source_code_file.language = 'python'
             yield source_code_file

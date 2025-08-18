@@ -42,9 +42,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
 
 
     # Multi-language support: allow passing supported_languages
-    supported_languages = [
-        'python', 'javascript', 'typescript', 'java', 'csharp', 'go', 'rust', 'cpp'
-    ]
+    supported_languages = None # defer to task defaults
     tasks = [
         Task(get_repo_file_dependencies, detailed_extraction=detailed_extraction, supported_languages=supported_languages),
         # Task(summarize_code, task_config={"batch_size": 500}), # This task takes a long time to complete
