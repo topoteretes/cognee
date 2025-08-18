@@ -94,7 +94,9 @@ Configuration changes will affect how cognee processes and stores data.
                         fmt.echo(f"{args.key}: {value}")
                     else:
                         fmt.error("Configuration retrieval not implemented yet")
-                        fmt.note("The config system currently only supports setting values, not retrieving them")
+                        fmt.note(
+                            "The config system currently only supports setting values, not retrieving them"
+                        )
                         fmt.note(f"To set this value: 'cognee config set {args.key} <value>'")
                 except Exception:
                     fmt.error(f"Configuration key '{args.key}' not found or retrieval failed")
@@ -111,7 +113,9 @@ Configuration changes will affect how cognee processes and stores data.
                             fmt.echo("No configuration settings found")
                     else:
                         fmt.error("Configuration viewing not implemented yet")
-                        fmt.note("The config system currently only supports setting values, not retrieving them")
+                        fmt.note(
+                            "The config system currently only supports setting values, not retrieving them"
+                        )
                         fmt.note("Available commands: 'cognee config set <key> <value>'")
                 except Exception:
                     fmt.error("Failed to retrieve configuration")
@@ -157,13 +161,11 @@ Configuration changes will affect how cognee processes and stores data.
                 "llm_model": ("set_llm_model", "gpt-5-mini"),
                 "llm_api_key": ("set_llm_api_key", ""),
                 "llm_endpoint": ("set_llm_endpoint", ""),
-                
-                # Database configuration  
+                # Database configuration
                 "graph_database_provider": ("set_graph_database_provider", "kuzu"),
                 "vector_db_provider": ("set_vector_db_provider", "lancedb"),
                 "vector_db_url": ("set_vector_db_url", ""),
                 "vector_db_key": ("set_vector_db_key", ""),
-                
                 # Chunking configuration
                 "chunk_size": ("set_chunk_size", 1500),
                 "chunk_overlap": ("set_chunk_overlap", 10),
@@ -171,7 +173,7 @@ Configuration changes will affect how cognee processes and stores data.
 
             if args.key in config_key_mappings:
                 method_name, default_value = config_key_mappings[args.key]
-                
+
                 try:
                     # Get the method and call it with the default value
                     method = getattr(cognee.config, method_name)

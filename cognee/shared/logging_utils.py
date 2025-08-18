@@ -175,9 +175,10 @@ def log_database_configuration(logger):
     try:
         # Get base database directory path
         from cognee.base_config import get_base_config
+
         base_config = get_base_config()
         databases_path = os.path.join(base_config.system_root_directory, "databases")
-        
+
         # Log concise database info
         logger.info(f"Database storage: {databases_path}")
 
@@ -299,7 +300,6 @@ def setup_logging(log_level=None, name=None):
         # Hand back to the original hook → prints traceback and exits
         sys.__excepthook__(exc_type, exc_value, traceback)
 
-
     # Install exception handlers
     sys.excepthook = handle_exception
 
@@ -387,6 +387,7 @@ def setup_logging(log_level=None, name=None):
         # Log basic database path only
         try:
             from cognee.base_config import get_base_config
+
             base_config = get_base_config()
             databases_path = os.path.join(base_config.system_root_directory, "databases")
             logger.info(f"Storage: {databases_path}")
@@ -402,8 +403,6 @@ def setup_logging(log_level=None, name=None):
             cognee_version=COGNEE_VERSION,
             os_info=OS_INFO,
         )
-
-
 
         # Log database configuration
         log_database_configuration(logger)
