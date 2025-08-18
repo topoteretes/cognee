@@ -26,7 +26,7 @@ class GraphitiConfig(QABenchmarkConfig):
     db_password: str = os.getenv("NEO4J_PASSWORD")
 
     # Model parameters
-    # model_name: str = "gpt-4o-mini"
+    # model_name: str = "gpt-5-mini"
     model_name: str = "gpt-4o"
 
     # Default results file
@@ -43,7 +43,7 @@ class QABenchmarkGraphiti(QABenchmarkRAG):
 
     async def initialize_rag(self) -> Any:
         """Initialize Graphiti and LLM."""
-        llm_config = LLMConfig(model=self.config.model_name, max_tokens=65536)
+        llm_config = LLMConfig(model=self.config.model_name, max_completion_tokens=65536)
         llm_client = OpenAIClient(config=llm_config)
         graphiti = Graphiti(
             self.config.db_url,

@@ -26,7 +26,7 @@ jobs:
 
       - name: Install torch dependency
         run: |
-          poetry add torch
+          uv add torch
 
 #      - name: Install ollama
 #        run: curl -fsSL https://ollama.com/install.sh | sh
@@ -101,4 +101,4 @@ jobs:
           EMBEDDING_ENDPOINT: "http://localhost:11434/api/embeddings"
           EMBEDDING_DIMENSIONS: "4096"
           HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
-        run: poetry run python ./examples/python/simple_example.py
+        run: uv run python ./examples/python/simple_example.py

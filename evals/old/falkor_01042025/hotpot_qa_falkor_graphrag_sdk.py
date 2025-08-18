@@ -35,7 +35,7 @@ def _get_sources_from_corpus_json(corpus_file, limit=None, batch_size=None):
 def create_ontology(
     corpus_file="hotpot_50_corpus.json",
     output_file="hotpot_qa_ontology.json",
-    model_name="gpt-4o-mini",
+    model_name="gpt-5-mini",
 ):
     """Creates ontology from corpus data."""
     print(f"Loading corpus from {corpus_file}...")
@@ -67,7 +67,7 @@ def create_knowledge_graph(
     ontology_file="hotpot_qa_ontology.json",
     corpus_file="hotpot_50_corpus.json",
     kg_name="hotpot_qa_kg",
-    model_name="gpt-4o-mini",
+    model_name="gpt-5-mini",
     host="127.0.0.1",
     port=6379,
     username=None,
@@ -208,11 +208,11 @@ if __name__ == "__main__":
         # Ontology parameters
         corpus_file: str = "hotpot_50_corpus.json"
         ontology_file: str = "hotpot_qa_ontology.json"
-        ontology_model: str = "gpt-4o-mini"
+        ontology_model: str = "gpt-5-mini"
 
         # Knowledge graph parameters
         kg_name: str = "hotpot_qa"
-        kg_model: str = "gpt-4o-mini"
+        kg_model: str = "gpt-5-mini"
         kg_host: str = "127.0.0.1"
         kg_port: int = 6379
         kg_recreate: bool = False

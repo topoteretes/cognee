@@ -1,7 +1,7 @@
-import hashlib
 from typing import BinaryIO, Union
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from .classify import classify
+import hashlib
 
 
 async def save_data_to_file(data: Union[str, BinaryIO], filename: str = None):

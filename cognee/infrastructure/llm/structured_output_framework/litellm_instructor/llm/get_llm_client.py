@@ -2,10 +2,13 @@
 
 from enum import Enum
 
-from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm import get_llm_config
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.ollama.adapter import (
     OllamaAPIAdapter,
+)
+from cognee.infrastructure.llm.exceptions import (
+    LLMAPIKeyNotSetError,
+    UnsupportedLLMProviderError,
 )
 
 
@@ -35,7 +38,7 @@ def get_llm_client():
 
     This function retrieves the configuration for the LLM provider and model, and
     initializes the appropriate LLM client adapter accordingly. It raises an
-    InvalidValueError if the LLM API key is not set for certain providers or if the provider
+    LLMAPIKeyNotSetError if the LLM API key is not set for certain providers or if the provider
     is unsupported.
 
     Returns:
@@ -51,15 +54,19 @@ def get_llm_client():
     # Check if max_token value is defined in liteLLM for given model
     # if not use value from cognee configuration
     from cognee.infrastructure.llm.utils import (
-        get_model_max_tokens,
+        get_model_max_completion_tokens,
     )  # imported here to avoid circular imports
 
-    model_max_tokens = get_model_max_tokens(llm_config.llm_model)
-    max_tokens = model_max_tokens if model_max_tokens else llm_config.llm_max_tokens
+    model_max_completion_tokens = get_model_max_completion_tokens(llm_config.llm_model)
+    max_completion_tokens = (
+        model_max_completion_tokens
+        if model_max_completion_tokens
+        else llm_config.llm_max_completion_tokens
+    )
 
     if provider == LLMProvider.OPENAI:
         if llm_config.llm_api_key is None:
-            raise InvalidValueError(message="LLM API key is not set.")
+            raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
             OpenAIAdapter,
@@ -71,7 +78,7 @@ def get_llm_client():
             api_version=llm_config.llm_api_version,
             model=llm_config.llm_model,
             transcription_model=llm_config.transcription_model,
-            max_tokens=max_tokens,
+            max_completion_tokens=max_completion_tokens,
             streaming=llm_config.llm_streaming,
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=llm_config.fallback_endpoint,
@@ -80,7 +87,7 @@ def get_llm_client():
 
     elif provider == LLMProvider.OLLAMA:
         if llm_config.llm_api_key is None:
-            raise InvalidValueError(message="LLM API key is not set.")
+            raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
             GenericAPIAdapter,
@@ -91,7 +98,7 @@ def get_llm_client():
             llm_config.llm_api_key,
             llm_config.llm_model,
             "Ollama",
-            max_tokens=max_tokens,
+            max_completion_tokens=max_completion_tokens,
         )
 
     elif provider == LLMProvider.ANTHROPIC:
@@ -99,11 +106,13 @@ def get_llm_client():
             AnthropicAdapter,
         )
 
-        return AnthropicAdapter(max_tokens=max_tokens, model=llm_config.llm_model)
+        return AnthropicAdapter(
+            max_completion_tokens=max_completion_tokens, model=llm_config.llm_model
+        )
 
     elif provider == LLMProvider.CUSTOM:
         if llm_config.llm_api_key is None:
-            raise InvalidValueError(message="LLM API key is not set.")
+            raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
             GenericAPIAdapter,
@@ -114,7 +123,7 @@ def get_llm_client():
             llm_config.llm_api_key,
             llm_config.llm_model,
             "Custom",
-            max_tokens=max_tokens,
+            max_completion_tokens=max_completion_tokens,
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=llm_config.fallback_endpoint,
             fallback_model=llm_config.fallback_model,
@@ -122,7 +131,7 @@ def get_llm_client():
 
     elif provider == LLMProvider.GEMINI:
         if llm_config.llm_api_key is None:
-            raise InvalidValueError(message="LLM API key is not set.")
+            raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter import (
             GeminiAdapter,
@@ -131,11 +140,11 @@ def get_llm_client():
         return GeminiAdapter(
             api_key=llm_config.llm_api_key,
             model=llm_config.llm_model,
-            max_tokens=max_tokens,
+            max_completion_tokens=max_completion_tokens,
             endpoint=llm_config.llm_endpoint,
             api_version=llm_config.llm_api_version,
             streaming=llm_config.llm_streaming,
         )
 
     else:
-        raise InvalidValueError(message=f"Unsupported LLM provider: {provider}")
+        raise UnsupportedLLMProviderError(provider)

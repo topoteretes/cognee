@@ -14,17 +14,17 @@ class HuggingFaceTokenizer(TokenizerInterface):
 
     Instance variables include:
     - model: str
-    - max_tokens: int
+    - max_completion_tokens: int
     - tokenizer: AutoTokenizer
     """
 
     def __init__(
         self,
         model: str,
-        max_tokens: int = 512,
+        max_completion_tokens: int = 512,
     ):
         self.model = model
-        self.max_tokens = max_tokens
+        self.max_completion_tokens = max_completion_tokens
 
         # Import here to make it an optional dependency
         from transformers import AutoTokenizer

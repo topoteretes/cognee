@@ -55,7 +55,7 @@ jobs:
 
       - name: Run unit tests
         shell: bash
-        run: poetry run pytest cognee/tests/unit/
+        run: uv run pytest cognee/tests/unit/
         env:
           PYTHONUTF8: 1
           LLM_PROVIDER: openai
@@ -73,7 +73,7 @@ jobs:
       - name: Run integration tests
         if: ${{ !contains(matrix.os, 'windows') }}
         shell: bash
-        run: poetry run pytest cognee/tests/integration/
+        run: uv run pytest cognee/tests/integration/
         env:
           PYTHONUTF8: 1
           LLM_PROVIDER: openai
@@ -103,11 +103,11 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_library.py
+        run: uv run python ./cognee/tests/test_library.py
 
-      - name: Build with Poetry
+      - name: Build with uv
         shell: bash
-        run: poetry build
+        run: uv build
 
       - name: Install Package
         if: ${{ !contains(matrix.os, 'windows') }}

@@ -90,4 +90,4 @@ class CompletionRetriever(BaseRetriever):
         completion = await generate_completion(
             query, context, self.user_prompt_path, self.system_prompt_path
         )
-        return completion
+        return [completion]

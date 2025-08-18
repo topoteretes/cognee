@@ -74,7 +74,7 @@ def read_kuzu_storage_version(kuzu_db_path: str) -> int:
     if kuzu_version_mapping.get(version_code):
         return kuzu_version_mapping[version_code]
     else:
-        ValueError("Could not map version_code to proper Kuzu version.")
+        raise ValueError("Could not map version_code to proper Kuzu version.")
 
 
 def ensure_env(version: str, export_dir) -> str:
