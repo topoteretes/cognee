@@ -39,6 +39,7 @@ async def search(
     top_k: int = 10,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
+    save_interaction: bool = False,
 ):
     """
 
@@ -58,7 +59,7 @@ async def search(
     # Use search function filtered by permissions if access control is enabled
     if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
         return await authorized_search(
-            query_text, query_type, user, dataset_ids, system_prompt_path, top_k
+            query_text, query_type, user, dataset_ids, system_prompt_path, top_k, save_interaction
         )
 
     query = await log_query(query_text, query_type.value, user.id)
@@ -71,6 +72,7 @@ async def search(
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
+        save_interaction=save_interaction,
     )
 
     await log_result(
@@ -92,6 +94,7 @@ async def specific_search(
     top_k: int = 10,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
+    save_interaction: bool = False,
 ) -> list:
     search_tasks: dict[SearchType, Callable] = {
         SearchType.SUMMARIES: SummariesRetriever(top_k=top_k).get_completion,
@@ -105,24 +108,28 @@ async def specific_search(
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
+            save_interaction=save_interaction,
         ).get_completion,
         SearchType.GRAPH_COMPLETION_COT: GraphCompletionCotRetriever(
             system_prompt_path=system_prompt_path,
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
+            save_interaction=save_interaction,
         ).get_completion,
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: GraphCompletionContextExtensionRetriever(
             system_prompt_path=system_prompt_path,
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
+            save_interaction=save_interaction,
         ).get_completion,
         SearchType.GRAPH_SUMMARY_COMPLETION: GraphSummaryCompletionRetriever(
             system_prompt_path=system_prompt_path,
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
+            save_interaction=save_interaction,
         ).get_completion,
         SearchType.CODE: CodeRetriever(top_k=top_k).get_completion,
         SearchType.CYPHER: CypherSearchRetriever().get_completion,
@@ -154,6 +161,7 @@ async def authorized_search(
     dataset_ids: Optional[list[UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
     top_k: int = 10,
+    save_interaction: bool = False,
 ) -> list:
     """
     Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
@@ -167,7 +175,7 @@ async def authorized_search(
 
     # Searches all provided datasets and handles setting up of appropriate database context based on permissions
     search_results = await specific_search_by_context(
-        search_datasets, query_text, query_type, user, system_prompt_path, top_k
+        search_datasets, query_text, query_type, user, system_prompt_path, top_k, save_interaction
     )
 
     await log_result(query.id, json.dumps(search_results, cls=JSONEncoder), user.id)
@@ -182,6 +190,7 @@ async def specific_search_by_context(
     user: User,
     system_prompt_path: str,
     top_k: int,
+    save_interaction: bool = False,
 ):
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
@@ -192,7 +201,12 @@ async def specific_search_by_context(
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)
         search_results = await specific_search(
-            query_type, query_text, user, system_prompt_path=system_prompt_path, top_k=top_k
+            query_type,
+            query_text,
+            user,
+            system_prompt_path=system_prompt_path,
+            top_k=top_k,
+            save_interaction=save_interaction,
         )
         return {
             "search_result": search_results,
