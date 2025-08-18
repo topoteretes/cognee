@@ -388,11 +388,8 @@ class TestDeleteCommandEdgeCases:
         command = DeleteCommand()
         args = argparse.Namespace(dataset_name="test_dataset", user_id=None, all=False, force=True)
 
-        # Mock async function that raises exception
-        async def failing_delete(*args, **kwargs):
-            raise ValueError("Database connection failed")
-
-        mock_asyncio_run.side_effect = lambda coro: asyncio.run(failing_delete())
+        # Mock asyncio.run to raise exception directly
+        mock_asyncio_run.side_effect = ValueError("Database connection failed")
 
         with pytest.raises(CliCommandException):
             command.execute(args)
