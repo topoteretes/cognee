@@ -65,6 +65,7 @@ async def test_search(
         top_k=10,
         node_type=None,
         node_name=None,
+        save_interaction=False,
     )
 
     # Verify result logging

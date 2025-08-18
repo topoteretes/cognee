@@ -145,7 +145,7 @@ class GraphCompletionRetriever(BaseRetriever):
 
         if len(triplets) == 0:
             logger.warning("Empty context was provided to the completion")
-            return ""
+            return "", triplets
 
         context = await self.resolve_edges_to_text(triplets)
 
