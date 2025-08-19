@@ -4,6 +4,7 @@ import sys
 import types
 from types import ModuleType
 
+import pytest
 
 class _DBOpenError(RuntimeError):
     pass
@@ -38,13 +39,16 @@ class _FakeConnection:
         return _Res()
 
 
-def _install_stub(name: str, module: ModuleType | None = None) -> ModuleType:
-    mod = module or ModuleType(name)
-    # Mark as package so submodule imports succeed when needed
-    if not hasattr(mod, "__path__"):
-        mod.__path__ = []  # type: ignore[attr-defined]
-    sys.modules[name] = mod
-    return mod
+@pytest.fixture
+def stub_import(monkeypatch):
+    def _install_stub(name: str, module: ModuleType | None = None) -> ModuleType:
+        mod = module or ModuleType(name)
+        # Mark as package so submodule imports succeed when needed
+        if not hasattr(mod, "__path__"):
+            mod.__path__ = []  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, name, mod)
+        return mod
+    return _install_stub
 
 
 def _find_repo_root(start_path: str) -> str:
@@ -59,9 +63,9 @@ def _find_repo_root(start_path: str) -> str:
         cur = parent
 
 
-def _load_adapter_with_stubs(monkeypatch):
+def _load_adapter_with_stubs(monkeypatch, stub_import):
     # Provide fake 'kuzu' and submodules used by adapter imports
-    kuzu_mod = _install_stub("kuzu")
+    kuzu_mod = stub_import("kuzu")
     kuzu_mod.__dict__["__version__"] = "0.11.0"
 
     # Placeholders to satisfy adapter's "from kuzu import Connection" and "from kuzu.database import Database"
@@ -69,7 +73,7 @@ def _load_adapter_with_stubs(monkeypatch):
         pass
 
     kuzu_mod.Connection = _PlaceholderConn
-    kuzu_db_mod = _install_stub("kuzu.database")
+    kuzu_db_mod = stub_import("kuzu.database")
 
     class _PlaceholderDB:
         pass
@@ -77,14 +81,14 @@ def _load_adapter_with_stubs(monkeypatch):
     kuzu_db_mod.Database = _PlaceholderDB
 
     # Create minimal stub tree for required cognee imports to avoid executing package __init__
-    _install_stub("cognee")
-    _install_stub("cognee.infrastructure")
-    _install_stub("cognee.infrastructure.databases")
-    _install_stub("cognee.infrastructure.databases.graph")
-    _install_stub("cognee.infrastructure.databases.graph.kuzu")
+    stub_import("cognee")
+    stub_import("cognee.infrastructure")
+    stub_import("cognee.infrastructure.databases")
+    stub_import("cognee.infrastructure.databases.graph")
+    stub_import("cognee.infrastructure.databases.graph.kuzu")
 
     # graph_db_interface stub
-    gdi_mod = _install_stub("cognee.infrastructure.databases.graph.graph_db_interface")
+    gdi_mod = stub_import("cognee.infrastructure.databases.graph.graph_db_interface")
 
     class _GraphDBInterface:  # bare minimum
         pass
@@ -96,7 +100,7 @@ def _load_adapter_with_stubs(monkeypatch):
     gdi_mod.record_graph_changes = record_graph_changes
 
     # engine.DataPoint stub
-    engine_mod = _install_stub("cognee.infrastructure.engine")
+    engine_mod = stub_import("cognee.infrastructure.engine")
 
     class _DataPoint:
         def __init__(self, **kwargs):
@@ -105,21 +109,21 @@ def _load_adapter_with_stubs(monkeypatch):
     engine_mod.DataPoint = _DataPoint
 
     # files.storage.get_file_storage stub
-    storage_pkg = _install_stub("cognee.infrastructure.files.storage")
+    storage_pkg = stub_import("cognee.infrastructure.files.storage")
     storage_pkg.get_file_storage = lambda path: types.SimpleNamespace(
         ensure_directory_exists=lambda: None
     )
 
     # utils.run_sync stub
-    run_sync_mod = _install_stub("cognee.infrastructure.utils.run_sync")
+    run_sync_mod = stub_import("cognee.infrastructure.utils.run_sync")
     run_sync_mod.run_sync = lambda coro: None
 
     # modules.storage.utils JSONEncoder stub
-    utils_mod2 = _install_stub("cognee.modules.storage.utils")
+    utils_mod2 = stub_import("cognee.modules.storage.utils")
     utils_mod2.JSONEncoder = object
 
     # shared.logging_utils.get_logger stub
-    logging_utils_mod = _install_stub("cognee.shared.logging_utils")
+    logging_utils_mod = stub_import("cognee.shared.logging_utils")
 
     class _Logger:
         def debug(self, *a, **k):
@@ -175,8 +179,8 @@ def _load_adapter_with_stubs(monkeypatch):
     return mod, calls
 
 
-def test_adapter_s3_auto_migration(monkeypatch):
-    mod, calls = _load_adapter_with_stubs(monkeypatch)
+def test_adapter_s3_auto_migration(monkeypatch, stub_import):
+    mod, calls = _load_adapter_with_stubs(monkeypatch, stub_import)
 
     # ensure pull/push do not touch real S3
     monkeypatch.setattr(mod.KuzuAdapter, "pull_from_s3", lambda self: None)
