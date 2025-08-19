@@ -28,7 +28,7 @@ class UserQAFeedback(BaseFeedback):
     async def add_feedback(self, feedback_text: str) -> List[str]:
         feedback_sentiment = await LLMGateway.acreate_structured_output(
             text_input=feedback_text,
-            system_prompt="You are a sentiment analysis assistant. For each piece of user feedback you receive, return exactly one of: Positive, Negative, or Neutral classification",
+            system_prompt="You are a sentiment analysis assistant. For each piece of user feedback you receive, return exactly one of: Positive, Negative, or Neutral classification and a corresponding score from -5 (worst negative) to 5 (best positive)",
             response_model=UserFeedbackEvaluation,
         )
 
@@ -43,6 +43,7 @@ class UserQAFeedback(BaseFeedback):
             id=feedback_id,
             feedback=feedback_text,
             sentiment=feedback_sentiment.evaluation.value,
+            score=feedback_sentiment.score,
             belongs_to_set=feedbacks_node_set,
         )
 

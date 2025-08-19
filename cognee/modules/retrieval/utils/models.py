@@ -2,8 +2,7 @@ from typing import Optional
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.modules.engine.models.node_set import NodeSet
 from enum import Enum
-from pydantic import BaseModel, ValidationError
-
+from pydantic import BaseModel, Field, confloat
 
 class CogneeUserInteraction(DataPoint):
     """User - Cognee interaction"""
@@ -19,6 +18,7 @@ class CogneeUserFeedback(DataPoint):
 
     feedback: str
     sentiment: str
+    score: float
     belongs_to_set: Optional[NodeSet] = None
 
 
@@ -32,5 +32,8 @@ class UserFeedbackSentiment(str, Enum):
 
 class UserFeedbackEvaluation(BaseModel):
     """User - User feedback evaluation"""
-
+    score: confloat(ge=-5, le=5) = Field(
+        ...,
+        description="Sentiment score from -5 (negative) to +5 (positive)"
+    )
     evaluation: UserFeedbackSentiment
