@@ -127,7 +127,7 @@ async def main():
         save_interaction=True,
     )
 
-    feedback_sum_1 = await cognee.search(
+    await cognee.search(
         query_type=SearchType.FEEDBACK, query_text="This was not the best answer", last_k=1
     )
 
@@ -137,7 +137,7 @@ async def main():
         save_interaction=True,
     )
 
-    feedback_sum_2 = await cognee.search(
+    await cognee.search(
         query_type=SearchType.FEEDBACK,
         query_text="This answer was great",
         last_k=1,
