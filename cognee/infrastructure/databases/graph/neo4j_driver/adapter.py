@@ -1347,9 +1347,9 @@ class Neo4jAdapter(GraphDBInterface):
         return id_list
 
     async def apply_feedback_weight(
-            self,
-            node_ids: List[str],
-            weight: float,
+        self,
+        node_ids: List[str],
+        weight: float,
     ) -> None:
         """
         Increment `feedback_weight` on relationships `:used_graph_element_to_answer`

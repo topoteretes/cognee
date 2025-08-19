@@ -1656,15 +1656,15 @@ class KuzuAdapter(GraphDBInterface):
         return id_list
 
     async def apply_feedback_weight(
-            self,
-            node_ids: List[str],
-            weight: float,
+        self,
+        node_ids: List[str],
+        weight: float,
     ) -> None:
         """
-            Increment `feedback_weight` inside r.properties JSON for edges where
-            relationship_name = 'used_graph_element_to_answer'.
+        Increment `feedback_weight` inside r.properties JSON for edges where
+        relationship_name = 'used_graph_element_to_answer'.
 
-            """
+        """
         # Step 1: fetch matching edges
         query = """
             MATCH (n:Node)-[r:EDGE]->()
