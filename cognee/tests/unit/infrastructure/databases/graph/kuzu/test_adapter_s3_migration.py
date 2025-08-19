@@ -115,8 +115,6 @@ def _load_adapter_with_stubs(monkeypatch):
     run_sync_mod.run_sync = lambda coro: None
 
     # modules.storage.utils JSONEncoder stub
-    modules_pkg = _install_stub("cognee.modules")
-    storage_pkg2 = _install_stub("cognee.modules.storage")
     utils_mod2 = _install_stub("cognee.modules.storage.utils")
     utils_mod2.JSONEncoder = object
 
