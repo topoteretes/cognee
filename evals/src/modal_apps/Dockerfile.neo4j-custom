@@ -1,0 +1,83 @@
+# Stage 1: Build the 'su-exec' utility
+# This stage contains build-time dependencies that will be discarded.
+FROM python:3.11-slim-bookworm as builder
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git gcc libc-dev make ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN git clone https://github.com/ncopa/su-exec.git /tmp/su-exec && \
+    cd /tmp/su-exec && \
+    git checkout 4c3bb42b093f14da70d8ab924b487ccfbb1397af && \
+    make && \
+    mv /tmp/su-exec/su-exec /usr/bin/su-exec
+
+
+# Stage 2: Final Neo4j image
+# This stage assembles the final image with only runtime dependencies.
+FROM python:3.11-slim-bookworm
+
+# Copy the su-exec binary from the builder stage
+COPY --from=builder /usr/bin/su-exec /usr/bin/su-exec
+
+# Install runtime dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    tini \
+    procps \
+    curl \
+    ca-certificates \
+    wget && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Eclipse Temurin JRE 21 manually
+RUN mkdir -p /opt/java/openjdk && \
+    wget -O /tmp/openjdk.tar.gz https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.7%2B6/OpenJDK21U-jre_x64_linux_hotspot_21.0.7_6.tar.gz && \
+    tar -xzf /tmp/openjdk.tar.gz -C /opt/java/openjdk --strip-components=1 && \
+    rm /tmp/openjdk.tar.gz
+
+# Set up Neo4j environment
+ENV JAVA_HOME=/opt/java/openjdk
+ENV NEO4J_HOME=/var/lib/neo4j
+ENV NEO4J_EDITION=community
+ENV NEO4J_TARBALL=neo4j-community-5.26.0-unix.tar.gz
+ENV NEO4J_URI=https://dist.neo4j.org/neo4j-community-5.26.0-unix.tar.gz
+
+# Create neo4j user and group
+RUN addgroup --gid 7474 --system neo4j && \
+    adduser --uid 7474 --system --no-create-home --home "${NEO4J_HOME}" --ingroup neo4j neo4j
+
+# Download, extract, and set up Neo4j
+RUN set -x && \
+    curl --fail --silent --show-error --location --remote-name ${NEO4J_URI} && \
+    tar --extract --file ${NEO4J_TARBALL} --directory /var/lib && \
+    mv /var/lib/neo4j-community-* "${NEO4J_HOME}" && \
+    rm ${NEO4J_TARBALL} && \
+    # Move and link data/logs directories
+    mv "${NEO4J_HOME}"/data /data && \
+    mv "${NEO4J_HOME}"/logs /logs && \
+    ln -s /data "${NEO4J_HOME}"/data && \
+    ln -s /logs "${NEO4J_HOME}"/logs && \
+    # Set ownership and permissions
+    chown -R neo4j:neo4j /data /logs "${NEO4J_HOME}" && \
+    chmod -R 777 /data /logs "${NEO4J_HOME}" && \
+    # Explicitly set the server to listen on all network interfaces.
+    echo "server.default_listen_address=0.0.0.0" >> "${NEO4J_HOME}/conf/neo4j.conf" && \
+    # Enable Java Vector API for optimal vector performance
+    echo "server.jvm.additional=--add-modules=jdk.incubator.vector" >> "${NEO4J_HOME}/conf/neo4j.conf"
+
+# Install required Neo4j plugins compatible with 5.26.0
+RUN NEO4J_PLUGINS_DIR="${NEO4J_HOME}/plugins" && \
+    mkdir -p "${NEO4J_PLUGINS_DIR}" && \
+    wget -q -O "${NEO4J_PLUGINS_DIR}/apoc-core.jar" "https://github.com/neo4j/apoc/releases/download/5.26.0/apoc-5.26.0-core.jar" && \
+    chown -R neo4j:neo4j "${NEO4J_PLUGINS_DIR}"
+
+# Install Python packages needed for Modal
+RUN pip install --no-cache-dir modal python-dotenv graphiti-core==0.17.8 langchain-openai>=0.3.28 neo4j>=5.28.1 openai>=1.97.0
+
+# Set path and working directory
+ENV PATH=$NEO4J_HOME/bin:$JAVA_HOME/bin:$PATH
+WORKDIR $NEO4J_HOME
+
+# Expose ports, but do not set ENTRYPOINT or CMD
+EXPOSE 7474 7687

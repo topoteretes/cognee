@@ -42,6 +42,7 @@ class KuzuAdapter(GraphDBInterface):
         self.connection: Optional[Connection] = None
         self.executor = ThreadPoolExecutor()
         self._initialize_connection()
+        self.KUZU_ASYNC_LOCK = asyncio.Lock()
 
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
@@ -136,6 +137,11 @@ class KuzuAdapter(GraphDBInterface):
             from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
             s3_file_storage = S3FileStorage("")
+
+            if self.connection:
+                async with self.KUZU_ASYNC_LOCK:
+                    self.connection.execute("CHECKPOINT;")
+
             s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
 
     async def pull_from_s3(self) -> None:
@@ -145,7 +151,7 @@ class KuzuAdapter(GraphDBInterface):
         try:
             s3_file_storage.s3.get(self.db_path, self.temp_graph_file, recursive=True)
         except FileNotFoundError:
-            pass
+            logger.warning(f"Kuzu S3 storage file not found: {self.db_path}")
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
@@ -1524,7 +1530,7 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Error during database clearing: {e}")
             raise
 
-    async def get_document_subgraph(self, content_hash: str):
+    async def get_document_subgraph(self, data_id: str):
         """
         Get all nodes that should be deleted when removing a document.
 
@@ -1535,7 +1541,7 @@ class KuzuAdapter(GraphDBInterface):
         Parameters:
         -----------
 
-            - content_hash (str): The identifier for the document to query against.
+            - data_id (str): The identifier for the document to query against.
 
         Returns:
         --------
@@ -1545,7 +1551,7 @@ class KuzuAdapter(GraphDBInterface):
         """
         query = """
         MATCH (doc:Node)
-        WHERE (doc.type = 'TextDocument' OR doc.type = 'PdfDocument') AND doc.name = $content_hash
+        WHERE (doc.type = 'TextDocument' OR doc.type = 'PdfDocument' OR doc.type = 'AudioDocument' OR doc.type = 'ImageDocument' OR doc.type = 'UnstructuredDocument') AND doc.id = $data_id
 
         OPTIONAL MATCH (doc)<-[e1:EDGE]-(chunk:Node)
         WHERE e1.relationship_name = 'is_part_of' AND chunk.type = 'DocumentChunk'
@@ -1556,7 +1562,7 @@ class KuzuAdapter(GraphDBInterface):
             MATCH (entity)<-[e3:EDGE]-(otherChunk:Node)-[e4:EDGE]->(otherDoc:Node)
             WHERE e3.relationship_name = 'contains'
             AND e4.relationship_name = 'is_part_of'
-            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument')
+            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument' OR otherDoc.type = 'AudioDocument' OR otherDoc.type = 'ImageDocument' OR otherDoc.type = 'UnstructuredDocument')
             AND otherDoc.id <> doc.id
         }
 
@@ -1572,7 +1578,7 @@ class KuzuAdapter(GraphDBInterface):
             AND e9.relationship_name = 'is_part_of'
             AND otherEntity.type = 'Entity'
             AND otherChunk.type = 'DocumentChunk'
-            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument')
+            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument' OR otherDoc.type = 'AudioDocument' OR otherDoc.type = 'ImageDocument' OR otherDoc.type = 'UnstructuredDocument')
             AND otherDoc.id <> doc.id
         }
 
@@ -1583,7 +1589,7 @@ class KuzuAdapter(GraphDBInterface):
             COLLECT(DISTINCT made_node) as made_from_nodes,
             COLLECT(DISTINCT type) as orphan_types
         """
-        result = await self.query(query, {"content_hash": f"text_{content_hash}"})
+        result = await self.query(query, {"data_id": f"{data_id}"})
         if not result or not result[0]:
             return None
 

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pylint.checkers.utils import node_type
 
-from cognee.exceptions import InvalidValueError
+from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.methods.search import search, specific_search
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.models import User
@@ -156,13 +156,68 @@ async def test_specific_search_chunks(mock_send_telemetry, mock_chunks_retriever
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "selected_type, retriever_name, expected_content, top_k",
+    [
+        (SearchType.RAG_COMPLETION, "CompletionRetriever", "RAG result from lucky search", 10),
+        (SearchType.CHUNKS, "ChunksRetriever", "Chunk result from lucky search", 5),
+        (SearchType.SUMMARIES, "SummariesRetriever", "Summary from lucky search", 15),
+        (SearchType.INSIGHTS, "InsightsRetriever", "Insight result from lucky search", 20),
+    ],
+)
+@patch.object(search_module, "select_search_type")
+@patch.object(search_module, "send_telemetry")
+async def test_specific_search_feeling_lucky(
+    mock_send_telemetry,
+    mock_select_search_type,
+    selected_type,
+    retriever_name,
+    expected_content,
+    top_k,
+    mock_user,
+):
+    with patch.object(search_module, retriever_name) as mock_retriever_class:
+        # Setup
+        query = f"test query for {retriever_name}"
+        query_type = SearchType.FEELING_LUCKY
+
+        # Mock the intelligent search type selection
+        mock_select_search_type.return_value = selected_type
+
+        # Mock the retriever
+        mock_retriever_instance = MagicMock()
+        mock_retriever_instance.get_completion = AsyncMock(
+            return_value=[{"content": expected_content}]
+        )
+        mock_retriever_class.return_value = mock_retriever_instance
+
+        # Execute
+        results = await specific_search(query_type, query, mock_user, top_k=top_k)
+
+        # Verify
+        mock_select_search_type.assert_called_once_with(query)
+
+        if retriever_name == "CompletionRetriever":
+            mock_retriever_class.assert_called_once_with(
+                system_prompt_path="answer_simple_question.txt", top_k=top_k
+            )
+        else:
+            mock_retriever_class.assert_called_once_with(top_k=top_k)
+
+        mock_retriever_instance.get_completion.assert_called_once_with(query)
+        mock_send_telemetry.assert_called()
+        assert len(results) == 1
+        assert results[0]["content"] == expected_content
+
+
+@pytest.mark.asyncio
 async def test_specific_search_invalid_type(mock_user):
     # Setup
     query = "test query"
     query_type = "INVALID_TYPE"  # Not a valid SearchType
 
     # Execute and verify
-    with pytest.raises(InvalidValueError) as excinfo:
+    with pytest.raises(UnsupportedSearchTypeError) as excinfo:
         await specific_search(query_type, query, mock_user)
 
     assert "Unsupported search type" in str(excinfo.value)

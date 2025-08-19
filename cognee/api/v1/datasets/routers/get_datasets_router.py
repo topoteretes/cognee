@@ -13,7 +13,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods import create_dataset, get_datasets_by_name
 from cognee.shared.logging_utils import get_logger
-from cognee.api.v1.delete.exceptions import DataNotFoundError, DatasetNotFoundError
+from cognee.api.v1.exceptions import DataNotFoundError, DatasetNotFoundError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.permissions.methods import (
@@ -283,14 +283,8 @@ def get_datasets_router() -> APIRouter:
         - **404 Not Found**: Dataset doesn't exist or user doesn't have access
         - **500 Internal Server Error**: Error retrieving graph data
         """
-        from cognee.modules.data.methods import get_dataset
 
-        dataset = await get_dataset(user.id, dataset_id)
-
-        if dataset is None:
-            raise DatasetNotFoundError(message=f"Dataset ({str(dataset_id)}) not found.")
-
-        graph_data = await get_formatted_graph_data(dataset.id, user.id)
+        graph_data = await get_formatted_graph_data(dataset_id, user.id)
 
         return graph_data
 
@@ -353,7 +347,7 @@ def get_datasets_router() -> APIRouter:
 
     @router.get("/status", response_model=dict[str, PipelineRunStatus])
     async def get_dataset_status(
-        datasets: Annotated[List[UUID], Query(alias="dataset")] = None,
+        datasets: Annotated[List[UUID], Query(alias="dataset")] = [],
         user: User = Depends(get_authenticated_user),
     ):
         """

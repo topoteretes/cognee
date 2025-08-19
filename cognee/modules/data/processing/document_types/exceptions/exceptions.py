@@ -1,8 +1,8 @@
-from cognee.exceptions import CogneeApiError
+from cognee.exceptions import CogneeSystemError
 from fastapi import status
 
 
-class PyPdfInternalError(CogneeApiError):
+class PyPdfInternalError(CogneeSystemError):
     """Internal pypdf error"""
 
     def __init__(

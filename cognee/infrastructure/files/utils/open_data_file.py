@@ -3,6 +3,7 @@ from os import path
 from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 
+from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 
@@ -11,22 +12,8 @@ from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorag
 async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None, **kwargs):
     # Check if this is a file URI BEFORE normalizing (which corrupts URIs)
     if file_path.startswith("file://"):
-        # Normalize the file URI for Windows - replace backslashes with forward slashes
-        normalized_file_uri = os.path.normpath(file_path)
-
-        parsed_url = urlparse(normalized_file_uri)
-
-        # Convert URI path to file system path
-        if os.name == "nt":  # Windows
-            # Handle Windows drive letters correctly
-            fs_path = parsed_url.path
-            if fs_path.startswith("/") and len(fs_path) > 1 and fs_path[2] == ":":
-                fs_path = fs_path[1:]  # Remove leading slash for Windows drive paths
-        else:  # Unix-like systems
-            fs_path = parsed_url.path
-
         # Now split the actual filesystem path
-        actual_fs_path = os.path.normpath(fs_path)
+        actual_fs_path = get_data_file_path(file_path)
         file_dir_path = path.dirname(actual_fs_path)
         file_name = path.basename(actual_fs_path)
 
@@ -36,13 +23,7 @@ async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None,
             yield file
 
     elif file_path.startswith("s3://"):
-        # Handle S3 URLs without normalization (which corrupts them)
-        parsed_url = urlparse(file_path)
-
-        normalized_url = (
-            f"s3://{parsed_url.netloc}{os.sep}{os.path.normpath(parsed_url.path).lstrip(os.sep)}"
-        )
-
+        normalized_url = get_data_file_path(file_path)
         s3_dir_path = os.path.dirname(normalized_url)
         s3_filename = os.path.basename(normalized_url)
 
@@ -66,7 +47,7 @@ async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None,
 
     else:
         # Regular file path - normalize separators
-        normalized_path = os.path.normpath(file_path)
+        normalized_path = get_data_file_path(file_path)
         file_dir_path = path.dirname(normalized_path)
         file_name = path.basename(normalized_path)
 

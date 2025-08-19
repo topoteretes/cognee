@@ -7,7 +7,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_default_user, create_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
 from cognee.modules.data.methods import get_dataset_data, get_datasets_by_name
-from cognee.api.v1.delete.exceptions import DocumentNotFoundError, DatasetNotFoundError
+from cognee.api.v1.exceptions import DocumentNotFoundError, DatasetNotFoundError
 
 logger = get_logger()
 

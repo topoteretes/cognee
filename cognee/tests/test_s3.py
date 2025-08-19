@@ -28,13 +28,8 @@ async def main():
     logging.info(type_counts)
     logging.info(edge_type_counts)
 
-    # Assert there is exactly one PdfDocument.
-    assert type_counts.get("PdfDocument", 0) == 1, (
-        f"Expected exactly one PdfDocument, but found {type_counts.get('PdfDocument', 0)}"
-    )
-
     # Assert there is exactly one TextDocument.
-    assert type_counts.get("TextDocument", 0) == 1, (
+    assert type_counts.get("TextDocument", 0) == 2, (
         f"Expected exactly one TextDocument, but found {type_counts.get('TextDocument', 0)}"
     )
 

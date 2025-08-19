@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
 from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
 
-from cognee.exceptions import InvalidValueError
+from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
 from cognee.infrastructure.files.storage import get_file_storage
@@ -51,6 +51,7 @@ class LanceDBAdapter(VectorDBInterface):
         self.url = url
         self.api_key = api_key
         self.embedding_engine = embedding_engine
+        self.VECTOR_DB_LOCK = asyncio.Lock()
 
     async def get_connection(self):
         """
@@ -127,12 +128,14 @@ class LanceDBAdapter(VectorDBInterface):
             payload: payload_schema
 
         if not await self.has_collection(collection_name):
-            connection = await self.get_connection()
-            return await connection.create_table(
-                name=collection_name,
-                schema=LanceDataPoint,
-                exist_ok=True,
-            )
+            async with self.VECTOR_DB_LOCK:
+                if not await self.has_collection(collection_name):
+                    connection = await self.get_connection()
+                    return await connection.create_table(
+                        name=collection_name,
+                        schema=LanceDataPoint,
+                        exist_ok=True,
+                    )
 
     async def get_collection(self, collection_name: str):
         if not await self.has_collection(collection_name):
@@ -145,10 +148,12 @@ class LanceDBAdapter(VectorDBInterface):
         payload_schema = type(data_points[0])
 
         if not await self.has_collection(collection_name):
-            await self.create_collection(
-                collection_name,
-                payload_schema,
-            )
+            async with self.VECTOR_DB_LOCK:
+                if not await self.has_collection(collection_name):
+                    await self.create_collection(
+                        collection_name,
+                        payload_schema,
+                    )
 
         collection = await self.get_collection(collection_name)
 
@@ -188,12 +193,13 @@ class LanceDBAdapter(VectorDBInterface):
             for (data_point_index, data_point) in enumerate(data_points)
         ]
 
-        await (
-            collection.merge_insert("id")
-            .when_matched_update_all()
-            .when_not_matched_insert_all()
-            .execute(lance_data_points)
-        )
+        async with self.VECTOR_DB_LOCK:
+            await (
+                collection.merge_insert("id")
+                .when_matched_update_all()
+                .when_not_matched_insert_all()
+                .execute(lance_data_points)
+            )
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
         collection = await self.get_collection(collection_name)
@@ -222,7 +228,7 @@ class LanceDBAdapter(VectorDBInterface):
         normalized: bool = True,
     ):
         if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
+            raise MissingQueryParameterError()
 
         if query_text and not query_vector:
             query_vector = (await self.embedding_engine.embed_text([query_text]))[0]

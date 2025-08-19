@@ -3,9 +3,8 @@ import json
 import asyncio
 from uuid import UUID
 from typing import Callable, List, Optional, Type, Union
-
+from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.exceptions import InvalidValueError
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.insights_retriever import InsightsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
@@ -27,7 +26,7 @@ from cognee.modules.users.models import User
 from cognee.modules.data.models import Dataset
 from cognee.shared.utils import send_telemetry
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
-from cognee.modules.search.operations import log_query, log_result
+from cognee.modules.search.operations import log_query, log_result, select_search_type
 
 
 async def search(
@@ -129,10 +128,14 @@ async def specific_search(
         SearchType.NATURAL_LANGUAGE: NaturalLanguageRetriever().get_completion,
     }
 
+    # If the query type is FEELING_LUCKY, select the search type intelligently
+    if query_type is SearchType.FEELING_LUCKY:
+        query_type = await select_search_type(query)
+
     search_task = search_tasks.get(query_type)
 
     if search_task is None:
-        raise InvalidValueError(message=f"Unsupported search type: {query_type}")
+        raise UnsupportedSearchTypeError(str(query_type))
 
     send_telemetry("cognee.search EXECUTION STARTED", user.id)
 

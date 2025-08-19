@@ -39,6 +39,7 @@ async def cognify(
     vector_db_config: dict = None,
     graph_db_config: dict = None,
     run_in_background: bool = False,
+    incremental_loading: bool = True,
 ):
     """
     Transform ingested data into a structured knowledge graph.
@@ -90,7 +91,7 @@ async def cognify(
                 - LangchainChunker: Recursive character splitting with overlap
                 Determines how documents are segmented for processing.
         chunk_size: Maximum tokens per chunk. Auto-calculated based on LLM if None.
-                   Formula: min(embedding_max_tokens, llm_max_tokens // 2)
+                   Formula: min(embedding_max_completion_tokens, llm_max_completion_tokens // 2)
                    Default limits: ~512-8192 tokens depending on models.
                    Smaller chunks = more granular but potentially fragmented knowledge.
         ontology_file_path: Path to RDF/OWL ontology file for domain-specific entity types.
@@ -176,14 +177,6 @@ async def cognify(
         - LLM_PROVIDER, LLM_MODEL, VECTOR_DB_PROVIDER, GRAPH_DATABASE_PROVIDER
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
-
-    Raises:
-        DatasetNotFoundError: If specified datasets don't exist
-        PermissionError: If user lacks processing rights
-        InvalidValueError: If LLM_API_KEY is not set
-        OntologyParsingError: If ontology file is malformed
-        ValueError: If chunks exceed max token limits (reduce chunk_size)
-        DatabaseNotCreatedError: If databases are not properly initialized
     """
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 
@@ -194,6 +187,7 @@ async def cognify(
             datasets=datasets,
             vector_db_config=vector_db_config,
             graph_db_config=graph_db_config,
+            incremental_loading=incremental_loading,
         )
     else:
         return await run_cognify_blocking(
@@ -202,6 +196,7 @@ async def cognify(
             datasets=datasets,
             vector_db_config=vector_db_config,
             graph_db_config=graph_db_config,
+            incremental_loading=incremental_loading,
         )
 
 
@@ -211,6 +206,7 @@ async def run_cognify_blocking(
     datasets,
     graph_db_config: dict = None,
     vector_db_config: dict = False,
+    incremental_loading: bool = True,
 ):
     total_run_info = {}
 
@@ -221,6 +217,7 @@ async def run_cognify_blocking(
         pipeline_name="cognify_pipeline",
         graph_db_config=graph_db_config,
         vector_db_config=vector_db_config,
+        incremental_loading=incremental_loading,
     ):
         if run_info.dataset_id:
             total_run_info[run_info.dataset_id] = run_info
@@ -236,6 +233,7 @@ async def run_cognify_as_background_process(
     datasets,
     graph_db_config: dict = None,
     vector_db_config: dict = False,
+    incremental_loading: bool = True,
 ):
     # Convert dataset to list if it's a string
     if isinstance(datasets, str):
@@ -246,6 +244,7 @@ async def run_cognify_as_background_process(
 
     async def handle_rest_of_the_run(pipeline_list):
         # Execute all provided pipelines one by one to avoid database write conflicts
+        # TODO: Convert to async gather task instead of for loop when Queue mechanism for database is created
         for pipeline in pipeline_list:
             while True:
                 try:
@@ -270,6 +269,7 @@ async def run_cognify_as_background_process(
             pipeline_name="cognify_pipeline",
             graph_db_config=graph_db_config,
             vector_db_config=vector_db_config,
+            incremental_loading=incremental_loading,
         )
 
         # Save dataset Pipeline run started info
