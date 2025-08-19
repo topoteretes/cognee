@@ -6,6 +6,7 @@ from types import ModuleType
 
 import pytest
 
+
 class _DBOpenError(RuntimeError):
     pass
 
@@ -48,6 +49,7 @@ def stub_import(monkeypatch):
             mod.__path__ = []  # type: ignore[attr-defined]
         monkeypatch.setitem(sys.modules, name, mod)
         return mod
+
     return _install_stub
 
 
