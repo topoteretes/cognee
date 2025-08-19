@@ -238,10 +238,6 @@ def setup_logging(log_level=None, name=None):
     """
     global _is_structlog_configured
 
-    # Check if we should use minimal logging (for CLI)
-    if os.getenv("COGNEE_MINIMAL_LOGGING") == "true":
-        return _setup_minimal_logging(log_level, name)
-
     # Regular detailed logging for non-CLI usage
     log_level = log_level if log_level else log_levels[os.getenv("LOG_LEVEL", "INFO")]
 
@@ -377,66 +373,42 @@ def setup_logging(log_level=None, name=None):
     # Mark logging as configured
     _is_structlog_configured = True
 
+    from cognee.infrastructure.databases.relational.config import get_relational_config
+    from cognee.infrastructure.databases.vector.config import get_vectordb_config
+    from cognee.infrastructure.databases.graph.config import get_graph_config
+
+    graph_config = get_graph_config()
+    vector_config = get_vectordb_config()
+    relational_config = get_relational_config()
+
+    try:
+        # Get base database directory path
+        from cognee.base_config import get_base_config
+
+        base_config = get_base_config()
+        databases_path = os.path.join(base_config.system_root_directory, "databases")
+    except:
+        raise ValueError
+
     # Get a configured logger and log system information
     logger = structlog.get_logger(name if name else __name__)
+    # Detailed initialization for regular usage
+    logger.info(
+        "Logging initialized",
+        python_version=PYTHON_VERSION,
+        structlog_version=STRUCTLOG_VERSION,
+        cognee_version=COGNEE_VERSION,
+        os_info=OS_INFO,
+        database_path=databases_path,
+        graph_database_name=graph_config.graph_database_name,
+        vector_config=vector_config.vector_db_provider,
+        relational_config=relational_config.db_name,
+    )
 
-    # Provide compact logging for CLI mode, detailed for regular mode
-    if os.getenv("COGNEE_CLI_MODE") == "true":
-        # Compact initialization for CLI - just basic info
-        logger.info(f"cognee {COGNEE_VERSION} ready")
-        # Log basic database path only
-        try:
-            from cognee.base_config import get_base_config
-
-            base_config = get_base_config()
-            databases_path = os.path.join(base_config.system_root_directory, "databases")
-            logger.info(f"Storage: {databases_path}")
-        except Exception:
-            pass  # Silent fail for CLI mode
-
-    else:
-        # Detailed initialization for regular usage
-        logger.info(
-            "Logging initialized",
-            python_version=PYTHON_VERSION,
-            structlog_version=STRUCTLOG_VERSION,
-            cognee_version=COGNEE_VERSION,
-            os_info=OS_INFO,
-        )
-
-        # Log database configuration
-        log_database_configuration(logger)
+    # Log database configuration
+    log_database_configuration(logger)
 
     # Return the configured logger
-    return logger
-
-
-def _setup_minimal_logging(log_level=None, name=None):
-    """Setup minimal logging for CLI usage - based on dlt patterns"""
-    global _is_structlog_configured
-
-    # Use ERROR level for minimal logging, or user-specified level
-    log_level = log_level if log_level else log_levels.get("ERROR", logging.ERROR)
-
-    # Configure external library logging to be quiet
-    configure_external_library_logging()
-
-    # Create a simple logger without verbose initialization
-    logger = logging.getLogger(name if name else __name__)
-
-    if not logger.handlers:
-        # Simple console handler for errors only
-        handler = logging.StreamHandler(sys.stderr)
-        formatter = logging.Formatter(fmt="%(levelname)s: %(message)s", style="%")
-        handler.setFormatter(formatter)
-        handler.setLevel(log_level)
-        logger.addHandler(handler)
-        logger.setLevel(log_level)
-
-    # Skip all the verbose initialization, file handlers, cleanup, etc.
-    # Just return a basic logger that only shows important messages
-    _is_structlog_configured = True  # Prevent double initialization
-
     return logger
 
 
