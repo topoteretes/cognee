@@ -51,6 +51,7 @@ class UserQAFeedback(BaseFeedback):
 
         relationships = []
         relationship_name = "gives_feedback_to"
+        to_node_ids = []
 
         for interaction_id in last_interaction_ids:
             target_id_1 = feedback_id
@@ -70,9 +71,16 @@ class UserQAFeedback(BaseFeedback):
                         },
                     )
                 )
+                to_node_ids.append(str(target_id_2))
+
 
         if len(relationships) > 0:
             graph_engine = await get_graph_engine()
             await graph_engine.add_edges(relationships)
+            await graph_engine.apply_feedback_weight(
+                node_ids=to_node_ids,
+                weight=feedback_sentiment.score
+            )
+
 
         return [feedback_text]

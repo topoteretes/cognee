@@ -248,6 +248,7 @@ class GraphCompletionRetriever(BaseRetriever):
                             "source_node_id": source_id,
                             "target_node_id": target_id_1,
                             "ontology_valid": False,
+                            "feedback_weight": 0,
                         },
                     )
                 )
@@ -262,6 +263,7 @@ class GraphCompletionRetriever(BaseRetriever):
                             "source_node_id": source_id,
                             "target_node_id": target_id_2,
                             "ontology_valid": False,
+                            "feedback_weight": 0,
                         },
                     )
                 )

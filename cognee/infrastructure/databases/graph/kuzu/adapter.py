@@ -1654,3 +1654,41 @@ class KuzuAdapter(GraphDBInterface):
 
         id_list = [row[0] for row in rows]
         return id_list
+
+    async def apply_feedback_weight(
+            self,
+            node_ids: List[str],
+            weight: float,
+    ) -> None:
+        """
+            Increment `feedback_weight` inside r.properties JSON for edges where
+            relationship_name = 'used_graph_element_to_answer'.
+
+            """
+        # Step 1: fetch matching edges
+        query = """
+            MATCH (n:Node)-[r:EDGE]->()
+            WHERE n.id IN $node_ids AND r.relationship_name = 'used_graph_element_to_answer'
+            RETURN r.properties, n.id
+            """
+        results = await self.query(query, {"node_ids": node_ids})
+
+        # Step 2: update JSON client-side
+        updates = []
+        for props_json, source_id in results:
+            try:
+                props = json.loads(props_json) if props_json else {}
+            except json.JSONDecodeError:
+                props = {}
+
+            props["feedback_weight"] = props.get("feedback_weight", 0) + weight
+            updates.append((source_id, json.dumps(props)))
+
+        # Step 3: write back
+        for node_id, new_props in updates:
+            update_query = """
+                MATCH (n:Node)-[r:EDGE]->()
+                WHERE n.id = $node_id AND r.relationship_name = 'used_graph_element_to_answer'
+                SET r.properties = $props
+                """
+            await self.query(update_query, {"node_id": node_id, "props": new_props})
