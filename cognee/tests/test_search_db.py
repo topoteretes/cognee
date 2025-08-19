@@ -200,7 +200,7 @@ async def main():
     required_fields_user_interaction = {"question", "answer", "context"}
     required_fields_feedback = {"feedback", "sentiment"}
 
-    for node_id, data in nodes:  # nodes = your list
+    for node_id, data in nodes:
         if data.get("type") == "CogneeUserInteraction":
             assert required_fields_user_interaction.issubset(data.keys()), (
                 f"Node {node_id} is missing fields: {required_fields_user_interaction - set(data.keys())}"
@@ -222,6 +222,43 @@ async def main():
                 assert isinstance(value, str) and value.strip(), (
                     f"Node {node_id} has invalid value for '{field}': {value!r}"
                 )
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    await cognee.add(text_1, dataset_name)
+
+    await cognee.add([text], dataset_name)
+
+    await cognee.cognify([dataset_name])
+
+    await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="Next to which country is Germany located?",
+        save_interaction=True,
+    )
+
+    await cognee.search(
+        query_type=SearchType.FEEDBACK,
+        query_text="This was the best answer I've ever seen",
+        last_k=1,
+    )
+
+    await cognee.search(
+        query_type=SearchType.FEEDBACK,
+        query_text="Wow the correctness of this answer blows my mind",
+        last_k=1,
+    )
+
+    graph = await graph_engine.get_graph_data()
+
+    edges = graph[1]
+
+    for from_node, to_node, relationship_name, properties in edges:
+        if relationship_name == "used_graph_element_to_answer":
+            assert properties["feedback_weight"] >= 6, (
+                "Feedback weight calculation is not correct, it should be more then 6."
+            )
 
 
 if __name__ == "__main__":
