@@ -138,8 +138,9 @@ class KuzuAdapter(GraphDBInterface):
 
             s3_file_storage = S3FileStorage("")
 
-            async with self.KUZU_ASYNC_LOCK:
-                self.connection.execute("CHECKPOINT;")
+            if self.connection:
+                async with self.KUZU_ASYNC_LOCK:
+                    self.connection.execute("CHECKPOINT;")
 
             s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
 
