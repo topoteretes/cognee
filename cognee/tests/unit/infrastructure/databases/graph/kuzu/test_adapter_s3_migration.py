@@ -111,7 +111,6 @@ def _load_adapter_with_stubs(monkeypatch):
     )
 
     # utils.run_sync stub
-    utils_pkg = _install_stub("cognee.infrastructure.utils")
     run_sync_mod = _install_stub("cognee.infrastructure.utils.run_sync")
     run_sync_mod.run_sync = lambda coro: None
 
