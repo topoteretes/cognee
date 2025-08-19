@@ -77,11 +77,11 @@ def _load_adapter_with_stubs(monkeypatch):
     kuzu_db_mod.Database = _PlaceholderDB
 
     # Create minimal stub tree for required cognee imports to avoid executing package __init__
-    root = _install_stub("cognee")
-    infra = _install_stub("cognee.infrastructure")
-    databases = _install_stub("cognee.infrastructure.databases")
-    graph = _install_stub("cognee.infrastructure.databases.graph")
-    kuzu_pkg = _install_stub("cognee.infrastructure.databases.graph.kuzu")
+    _install_stub("cognee")
+    _install_stub("cognee.infrastructure")
+    _install_stub("cognee.infrastructure.databases")
+    _install_stub("cognee.infrastructure.databases.graph")
+    _install_stub("cognee.infrastructure.databases.graph.kuzu")
 
     # graph_db_interface stub
     gdi_mod = _install_stub("cognee.infrastructure.databases.graph.graph_db_interface")
@@ -182,5 +182,5 @@ def test_adapter_s3_auto_migration(monkeypatch):
     monkeypatch.setattr(mod.KuzuAdapter, "pull_from_s3", lambda self: None)
     monkeypatch.setattr(mod.KuzuAdapter, "push_to_s3", lambda self: None)
 
-    adapter = mod.KuzuAdapter("s3://bucket/db")
+    mod.KuzuAdapter("s3://bucket/db")
     assert calls["migrated"] is True
