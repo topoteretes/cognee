@@ -105,7 +105,6 @@ def _load_adapter_with_stubs(monkeypatch):
     engine_mod.DataPoint = _DataPoint
 
     # files.storage.get_file_storage stub
-    files_storage_pkg = _install_stub("cognee.infrastructure.files")
     storage_pkg = _install_stub("cognee.infrastructure.files.storage")
     storage_pkg.get_file_storage = lambda path: types.SimpleNamespace(
         ensure_directory_exists=lambda: None
