@@ -119,7 +119,6 @@ def _load_adapter_with_stubs(monkeypatch):
     utils_mod2.JSONEncoder = object
 
     # shared.logging_utils.get_logger stub
-    shared_pkg = _install_stub("cognee.shared")
     logging_utils_mod = _install_stub("cognee.shared.logging_utils")
 
     class _Logger:
