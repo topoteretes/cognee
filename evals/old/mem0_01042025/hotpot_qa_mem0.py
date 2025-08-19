@@ -41,7 +41,7 @@ def load_corpus_to_memory(
 def answer_questions(
     memory: Memory,
     openai_client: OpenAI,
-    model_name: str = "gpt-4o-mini",
+    model_name: str = "gpt-5-mini",
     user_id: str = "hotpot_qa_user",
     qa_pairs_file: str = "hotpot_50_qa_pairs.json",
     print_results: bool = True,
@@ -150,7 +150,7 @@ if __name__ == "__main__":
         user_id: str = "hotpot_qa_user"
 
         # Model parameters
-        model_name: str = "gpt-4o-mini"
+        model_name: str = "gpt-5-mini"
 
         # QA parameters
         qa_pairs_file: str = "hotpot_50_qa_pairs.json"

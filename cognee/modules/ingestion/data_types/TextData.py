@@ -1,5 +1,6 @@
 from typing import BinaryIO
 from contextlib import asynccontextmanager
+import hashlib
 from cognee.infrastructure.data.utils.extract_keywords import extract_keywords
 from .IngestionData import IngestionData
 
@@ -16,9 +17,9 @@ class TextData(IngestionData):
         self.data = data
 
     def get_identifier(self):
-        keywords = extract_keywords(self.data)
+        metadata = self.get_metadata()
 
-        return "text/plain" + "_" + "|".join(keywords)
+        return metadata["content_hash"]
 
     def get_metadata(self):
         self.ensure_metadata()
@@ -28,6 +29,11 @@ class TextData(IngestionData):
     def ensure_metadata(self):
         if self.metadata is None:
             self.metadata = {}
+
+        data_contents = self.data.encode("utf-8")
+        hash_contents = hashlib.md5(data_contents).hexdigest()
+        self.metadata["name"] = "text_" + hash_contents + ".txt"
+        self.metadata["content_hash"] = hash_contents
 
     @asynccontextmanager
     async def get_data(self):

@@ -57,7 +57,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_cognee_server_start.py
+        run: uv run python ./cognee/tests/test_cognee_server_start.py
 
   run-telemetry-test:
     name: Run Telemetry Test
@@ -81,7 +81,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_telemetry.py
+        run: uv run python ./cognee/tests/test_telemetry.py
 
   run-telemetry-pipeline-test:
     name: Run Telemetry Pipeline Test
@@ -110,7 +110,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_library.py
+        run: uv run python ./cognee/tests/test_library.py
 
   run-deduplication-test:
     name: Deduplication Test
@@ -140,23 +140,18 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-
-      - name: Install specific db dependency
-        run: |
-          poetry install -E postgres
+          extra-dependencies: "postgres"
 
       - name: Run Deduplication Example
         env:
           ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Test needs OpenAI endpoint to handle multimedia
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_deduplication.py
+        run: uv run python ./cognee/tests/test_deduplication.py
 
   run-deletion-test:
     name: Deletion Test
@@ -175,15 +170,13 @@ jobs:
       - name: Run Deletion Tests
         env:
           ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Test needs OpenAI endpoint to handle multimedia
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_deletion.py
+        run: uv run python ./cognee/tests/test_deletion.py
 
   run-s3-bucket-test:
       name: S3 Bucket Test
@@ -196,10 +189,10 @@ jobs:
           uses: ./.github/actions/cognee_setup
           with:
             python-version: '3.11.x'
+            extra-dependencies: "aws"
 
-        - name: Install specific S3 dependency
-          run: |
-            poetry install -E aws
+        - name: Dependencies already installed
+          run: echo "Dependencies already installed in setup"
 
         - name: Run S3 Bucket Test
           env:
@@ -214,7 +207,7 @@ jobs:
             EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
             AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
             AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          run: poetry run python ./cognee/tests/test_s3.py
+          run: uv run python ./cognee/tests/test_s3.py
 
   test-parallel-databases:
     name: Test using different async databases in parallel in Cognee
@@ -228,9 +221,8 @@ jobs:
         with:
           python-version: '3.11.x'
 
-      - name: Install specific graph db dependency
-        run: |
-          poetry install
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
 
       - name: Run parallel databases test
         env:
@@ -243,7 +235,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_parallel_databases.py
+        run: uv run python ./cognee/tests/test_parallel_databases.py
 
   test-permissions:
     name: Test permissions with different situations in Cognee
@@ -257,9 +249,8 @@ jobs:
         with:
           python-version: '3.11.x'
 
-      - name: Install specific graph db dependency
-        run: |
-          poetry install
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
 
       - name: Run parallel databases test
         env:
@@ -272,7 +263,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_permissions.py
+        run: uv run python ./cognee/tests/test_permissions.py
 
   test-graph-edges:
     name: Test graph edge ingestion
@@ -286,9 +277,8 @@ jobs:
         with:
           python-version: '3.11.x'
 
-      - name: Install specific graph db dependency
-        run: |
-          poetry install
+      - name: Dependencies already installed
+        run: echo "Dependencies already installed in setup"
 
       - name: Run graph edges test
         env:
@@ -301,4 +291,4 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_edge_ingestion.py
+        run: uv run python ./cognee/tests/test_edge_ingestion.py

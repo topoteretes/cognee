@@ -44,10 +44,6 @@ def get_settings() -> SettingsDict:
 
     vector_dbs = [
         {
-            "value": "qdrant",
-            "label": "Qdrant",
-        },
-        {
             "value": "lancedb",
             "label": "LanceDB",
         },
@@ -92,8 +88,8 @@ def get_settings() -> SettingsDict:
                 "models": {
                     "openai": [
                         {
-                            "value": "gpt-4o-mini",
-                            "label": "gpt-4o-mini",
+                            "value": "gpt-5-mini",
+                            "label": "gpt-5-mini",
                         },
                         {
                             "value": "gpt-4o",

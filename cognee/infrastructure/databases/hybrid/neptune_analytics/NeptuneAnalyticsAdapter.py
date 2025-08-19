@@ -5,7 +5,8 @@ import json
 from typing import List, Optional, Any, Dict, Type, Tuple
 from uuid import UUID
 
-from cognee.exceptions import InvalidValueError
+from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
+from cognee.infrastructure.databases.exceptions import MutuallyExclusiveQueryParametersError
 from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.infrastructure.engine import DataPoint
@@ -274,11 +275,9 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             limit = self._TOPK_UPPER_BOUND
 
         if query_vector and query_text:
-            raise InvalidValueError(
-                message="The search function accepts either text or embedding as input, but not both."
-            )
+            raise MutuallyExclusiveQueryParametersError()
         elif query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
+            raise MissingQueryParameterError()
         elif query_vector:
             embedding = query_vector
         else:

@@ -30,7 +30,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
     Instance variables:
     - model
     - dimensions
-    - max_tokens
+    - max_completion_tokens
     - endpoint
     - mock
     - huggingface_tokenizer_name
@@ -39,7 +39,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
 
     model: str
     dimensions: int
-    max_tokens: int
+    max_completion_tokens: int
     endpoint: str
     mock: bool
     huggingface_tokenizer_name: str
@@ -50,13 +50,13 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         self,
         model: Optional[str] = "avr/sfr-embedding-mistral:latest",
         dimensions: Optional[int] = 1024,
-        max_tokens: int = 512,
+        max_completion_tokens: int = 512,
         endpoint: Optional[str] = "http://localhost:11434/api/embeddings",
         huggingface_tokenizer: str = "Salesforce/SFR-Embedding-Mistral",
     ):
         self.model = model
         self.dimensions = dimensions
-        self.max_tokens = max_tokens
+        self.max_completion_tokens = max_completion_tokens
         self.endpoint = endpoint
         self.huggingface_tokenizer_name = huggingface_tokenizer
         self.tokenizer = self.get_tokenizer()
@@ -132,7 +132,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         """
         logger.debug("Loading HuggingfaceTokenizer for OllamaEmbeddingEngine...")
         tokenizer = HuggingFaceTokenizer(
-            model=self.huggingface_tokenizer_name, max_tokens=self.max_tokens
+            model=self.huggingface_tokenizer_name, max_completion_tokens=self.max_completion_tokens
         )
         logger.debug("Tokenizer loaded for OllamaEmbeddingEngine")
         return tokenizer

@@ -91,7 +91,7 @@ async def cognify(
                 - LangchainChunker: Recursive character splitting with overlap
                 Determines how documents are segmented for processing.
         chunk_size: Maximum tokens per chunk. Auto-calculated based on LLM if None.
-                   Formula: min(embedding_max_tokens, llm_max_tokens // 2)
+                   Formula: min(embedding_max_completion_tokens, llm_max_completion_tokens // 2)
                    Default limits: ~512-8192 tokens depending on models.
                    Smaller chunks = more granular but potentially fragmented knowledge.
         ontology_file_path: Path to RDF/OWL ontology file for domain-specific entity types.
@@ -177,14 +177,6 @@ async def cognify(
         - LLM_PROVIDER, LLM_MODEL, VECTOR_DB_PROVIDER, GRAPH_DATABASE_PROVIDER
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
-
-    Raises:
-        DatasetNotFoundError: If specified datasets don't exist
-        PermissionError: If user lacks processing rights
-        InvalidValueError: If LLM_API_KEY is not set
-        OntologyParsingError: If ontology file is malformed
-        ValueError: If chunks exceed max token limits (reduce chunk_size)
-        DatabaseNotCreatedError: If databases are not properly initialized
     """
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 

@@ -26,4 +26,4 @@ jobs:
           EMBEDDING_MODEL: "gemini/text-embedding-004"
           EMBEDDING_DIMENSIONS: "768"
           EMBEDDING_MAX_TOKENS: "8076"
-        run: poetry run python ./examples/python/simple_example.py
+        run: uv run python ./examples/python/simple_example.py

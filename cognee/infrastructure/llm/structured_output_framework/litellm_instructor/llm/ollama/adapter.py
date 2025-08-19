@@ -30,16 +30,18 @@ class OllamaAPIAdapter(LLMInterface):
     - model
     - api_key
     - endpoint
-    - max_tokens
+    - max_completion_tokens
     - aclient
     """
 
-    def __init__(self, endpoint: str, api_key: str, model: str, name: str, max_tokens: int):
+    def __init__(
+        self, endpoint: str, api_key: str, model: str, name: str, max_completion_tokens: int
+    ):
         self.name = name
         self.model = model
         self.api_key = api_key
         self.endpoint = endpoint
-        self.max_tokens = max_tokens
+        self.max_completion_tokens = max_completion_tokens
 
         self.aclient = instructor.from_openai(
             OpenAI(base_url=self.endpoint, api_key=self.api_key), mode=instructor.Mode.JSON
@@ -159,7 +161,7 @@ class OllamaAPIAdapter(LLMInterface):
                     ],
                 }
             ],
-            max_tokens=300,
+            max_completion_tokens=300,
         )
 
         # Ensure response is valid before accessing .choices[0].message.content

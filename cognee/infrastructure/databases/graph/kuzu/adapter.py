@@ -43,6 +43,7 @@ class KuzuAdapter(GraphDBInterface):
         self.connection: Optional[Connection] = None
         self.executor = ThreadPoolExecutor()
         self._initialize_connection()
+        self.KUZU_ASYNC_LOCK = asyncio.Lock()
 
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
@@ -148,6 +149,10 @@ class KuzuAdapter(GraphDBInterface):
             from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
             s3_file_storage = S3FileStorage("")
+
+            async with self.KUZU_ASYNC_LOCK:
+                self.connection.execute("CHECKPOINT;")
+
             s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
 
     async def pull_from_s3(self) -> None:
@@ -157,7 +162,7 @@ class KuzuAdapter(GraphDBInterface):
         try:
             s3_file_storage.s3.get(self.db_path, self.temp_graph_file, recursive=True)
         except FileNotFoundError:
-            pass
+            logger.warning(f"Kuzu S3 storage file not found: {self.db_path}")
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
@@ -1558,7 +1563,7 @@ class KuzuAdapter(GraphDBInterface):
         """
         query = """
         MATCH (doc:Node)
-        WHERE (doc.type = 'TextDocument' OR doc.type = 'PdfDocument') AND doc.id = $data_id
+        WHERE (doc.type = 'TextDocument' OR doc.type = 'PdfDocument' OR doc.type = 'AudioDocument' OR doc.type = 'ImageDocument' OR doc.type = 'UnstructuredDocument') AND doc.id = $data_id
 
         OPTIONAL MATCH (doc)<-[e1:EDGE]-(chunk:Node)
         WHERE e1.relationship_name = 'is_part_of' AND chunk.type = 'DocumentChunk'
@@ -1569,7 +1574,7 @@ class KuzuAdapter(GraphDBInterface):
             MATCH (entity)<-[e3:EDGE]-(otherChunk:Node)-[e4:EDGE]->(otherDoc:Node)
             WHERE e3.relationship_name = 'contains'
             AND e4.relationship_name = 'is_part_of'
-            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument')
+            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument' OR otherDoc.type = 'AudioDocument' OR otherDoc.type = 'ImageDocument' OR otherDoc.type = 'UnstructuredDocument')
             AND otherDoc.id <> doc.id
         }
 
@@ -1585,7 +1590,7 @@ class KuzuAdapter(GraphDBInterface):
             AND e9.relationship_name = 'is_part_of'
             AND otherEntity.type = 'Entity'
             AND otherChunk.type = 'DocumentChunk'
-            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument')
+            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument' OR otherDoc.type = 'AudioDocument' OR otherDoc.type = 'ImageDocument' OR otherDoc.type = 'UnstructuredDocument')
             AND otherDoc.id <> doc.id
         }
 

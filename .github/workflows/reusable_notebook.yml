@@ -46,10 +46,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
-
-      - name: Install specific db dependency
-        run: |
-          poetry install -E notebook
+          extra-dependencies: "notebook"
 
       - name: Execute Jupyter Notebook
         env:
@@ -64,7 +61,7 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: |
-          poetry run jupyter nbconvert \
+          uv run jupyter nbconvert \
           --to notebook \
           --execute ${{ inputs.notebook-location }} \
           --output executed_notebook.ipynb \
