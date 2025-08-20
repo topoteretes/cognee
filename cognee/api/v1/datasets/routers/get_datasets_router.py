@@ -114,7 +114,8 @@ def get_datasets_router() -> APIRouter:
 
     @router.post("", response_model=DatasetDTO)
     async def create_new_dataset(
-        dataset_data: DatasetCreationPayload, user: User = Depends(get_conditional_authenticated_user)
+        dataset_data: DatasetCreationPayload,
+        user: User = Depends(get_conditional_authenticated_user),
     ):
         """
         Create a new dataset or return existing dataset with the same name.
@@ -175,7 +176,9 @@ def get_datasets_router() -> APIRouter:
     @router.delete(
         "/{dataset_id}", response_model=None, responses={404: {"model": ErrorResponseDTO}}
     )
-    async def delete_dataset(dataset_id: UUID, user: User = Depends(get_conditional_authenticated_user)):
+    async def delete_dataset(
+        dataset_id: UUID, user: User = Depends(get_conditional_authenticated_user)
+    ):
         """
         Delete a dataset by its ID.
 
@@ -263,7 +266,9 @@ def get_datasets_router() -> APIRouter:
         await delete_data(data)
 
     @router.get("/{dataset_id}/graph", response_model=GraphDTO)
-    async def get_dataset_graph(dataset_id: UUID, user: User = Depends(get_conditional_authenticated_user)):
+    async def get_dataset_graph(
+        dataset_id: UUID, user: User = Depends(get_conditional_authenticated_user)
+    ):
         """
         Get the knowledge graph visualization for a dataset.
 
@@ -293,7 +298,9 @@ def get_datasets_router() -> APIRouter:
         response_model=list[DataDTO],
         responses={404: {"model": ErrorResponseDTO}},
     )
-    async def get_dataset_data(dataset_id: UUID, user: User = Depends(get_conditional_authenticated_user)):
+    async def get_dataset_data(
+        dataset_id: UUID, user: User = Depends(get_conditional_authenticated_user)
+    ):
         """
         Get all data items in a dataset.
 

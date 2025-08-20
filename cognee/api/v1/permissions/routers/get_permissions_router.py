@@ -183,7 +183,9 @@ def get_permissions_router() -> APIRouter:
         return JSONResponse(status_code=200, content={"message": "User added to tenant"})
 
     @permissions_router.post("/tenants")
-    async def create_tenant(tenant_name: str, user: User = Depends(get_conditional_authenticated_user)):
+    async def create_tenant(
+        tenant_name: str, user: User = Depends(get_conditional_authenticated_user)
+    ):
         """
         Create a new tenant.
 
