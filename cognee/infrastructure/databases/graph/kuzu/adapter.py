@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import tempfile
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -48,15 +49,21 @@ class KuzuAdapter(GraphDBInterface):
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
         try:
-            if "s3://" in self.db_path:
-                # Stage S3 DB to a local temp file
-                with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
-                    self.temp_graph_file = temp_file.name
+            # Track whether this adapter works against an S3-backed graph
+            self._is_s3: bool = "s3://" in self.db_path
 
+            if self._is_s3:
+                # Create a staging directory for the remote Kuzu DB (file or directory)
+                # Use remote basename so migration logic works for both single-file and dir layouts
+                self._staging_root = tempfile.mkdtemp(prefix="kuzu_s3_stage_")
+                remote_base = os.path.basename(self.db_path.rstrip("/")) or "graph.db"
+                self._local_db_path = os.path.join(self._staging_root, remote_base)
+
+                # Pull remote contents (best-effort)
                 run_sync(self.pull_from_s3())
 
-                # Open DB; on version mismatch auto-migrate and then push back to S3
-                self.db, migrated = self._open_or_migrate(self.temp_graph_file)
+                # Open / migrate locally; if migrated push changes back to S3 so remote reflects new format
+                self.db, migrated = self._open_or_migrate(self._local_db_path)
                 if migrated:
                     run_sync(self.push_to_s3())
             else:
@@ -145,25 +152,87 @@ class KuzuAdapter(GraphDBInterface):
             return db, did_migrate
 
     async def push_to_s3(self) -> None:
-        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file"):
-            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+        """Upload the staged local graph DB back to S3 (only if using S3 backend)."""
+        if not getattr(self, "_is_s3", False):  # Not an S3-backed adapter
+            return
 
-            s3_file_storage = S3FileStorage("")
-
-            if self.connection:
-                async with self.KUZU_ASYNC_LOCK:
-                    self.connection.execute("CHECKPOINT;")
-
-            s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
-
-    async def pull_from_s3(self) -> None:
         from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
+        # Ensure data flushed to disk first
+        if self.connection:
+            async with self.KUZU_ASYNC_LOCK:
+                try:
+                    self.connection.execute("CHECKPOINT;")
+                except Exception as e:
+                    logger.error(f"Failed to checkpoint before S3 push: {e}")
+
         s3_file_storage = S3FileStorage("")
+
+        # Remove potential lock file before upload (kuzu creates <db>.lock next to file)
+        lock_candidate = self._local_db_path + ".lock"
+        if os.path.exists(lock_candidate):
+            try:
+                os.remove(lock_candidate)
+            except OSError:
+                pass
+
+        # Upload local staged path recursively to remote path
         try:
-            s3_file_storage.s3.get(self.db_path, self.temp_graph_file, recursive=True)
+            # Upload primary DB file or directory
+            s3_file_storage.s3.put(self._local_db_path, self.db_path, recursive=True)
+            # Also upload write-ahead log if present
+            wal_candidate = self._local_db_path + ".wal"
+            if os.path.exists(wal_candidate):
+                s3_file_storage.s3.put(wal_candidate, self.db_path + ".wal", recursive=True)
+        except Exception as e:
+            logger.error(f"Failed to push migrated Kuzu DB to S3: {e}")
+            raise
+
+    async def pull_from_s3(self) -> None:
+        """Download remote DB (file or directory) into the local staging path.
+
+        If the remote DB does not yet exist we silently continue; a new empty DB
+        will be created locally and later uploaded when first persisted/migrated.
+        """
+        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+
+        if not getattr(self, "_is_s3", False):
+            return
+
+        s3_file_storage = S3FileStorage("")
+        # If staging root not prepared something went wrong earlier
+        if not hasattr(self, "_local_db_path"):
+            self._staging_root = tempfile.mkdtemp(prefix="kuzu_s3_stage_")
+            self._local_db_path = os.path.join(self._staging_root, "graph.db")
+        try:
+            # Download primary DB file/directory
+            s3_file_storage.s3.get(self.db_path, self._local_db_path, recursive=True)
+            # Download WAL if exists remotely
+            try:
+                s3_file_storage.s3.get(self.db_path + ".wal", self._local_db_path + ".wal")
+            except FileNotFoundError:
+                pass
         except FileNotFoundError:
-            logger.warning(f"Kuzu S3 storage file not found: {self.db_path}")
+            logger.warning(
+                f"Kuzu S3 storage not found (creating new DB on first use): {self.db_path}"
+            )
+
+    async def close(self):  # type: ignore[override]
+        """Close connection and cleanup any staging resources."""
+        try:
+            if self.connection:
+                try:
+                    self.connection.close()  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+            if getattr(self, "_is_s3", False) and hasattr(self, "_staging_root"):
+                try:
+                    shutil.rmtree(self._staging_root, ignore_errors=True)
+                except Exception:
+                    pass
+        finally:
+            self.connection = None
+            self.db = None
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
