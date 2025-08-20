@@ -291,8 +291,6 @@ delete(data_id="data-uuid", dataset_id="dataset-uuid", mode="soft")
 delete(data_id="data-uuid", dataset_id="dataset-uuid", mode="hard")
 ```
 
-Remember – use the CODE search type to query your code graph. For huge repos, run codify on modules incrementally and cache results.
-
 
 ## Development and Debugging
 
