@@ -1,6 +1,6 @@
 import os
 from typing import Optional
-from fastapi import Depends
+from fastapi import Depends, HTTPException
 from ..models import User
 from ..get_fastapi_users import get_fastapi_users
 from .get_default_user import get_default_user
@@ -30,6 +30,13 @@ async def get_conditional_authenticated_user(user: Optional[User] = Depends(_aut
     """
     if user is None and not REQUIRE_AUTHENTICATION:
         # When authentication is optional and user is None, use default user
-        user = await get_default_user()
+        try:
+            user = await get_default_user()
+        except Exception as e:
+            # Convert any get_default_user failure into a proper HTTP 500 error
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create default user: {str(e)}"
+            )
     
     return user
