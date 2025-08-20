@@ -110,7 +110,8 @@ def custom_openapi():
         },
     }
 
-    openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
+    # Remove global security requirement - let individual endpoints specify their own security
+    # openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
 
     app.openapi_schema = openapi_schema
 

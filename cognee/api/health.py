@@ -53,7 +53,7 @@ class HealthChecker:
             # Test connection by creating a session
             session = engine.get_session()
             if session:
-                await session.close()
+                session.close()
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
@@ -190,14 +190,13 @@ class HealthChecker:
         """Check LLM provider health (non-critical)."""
         start_time = time.time()
         try:
-            from cognee.infrastructure.llm.get_llm_client import get_llm_client
+            from cognee.infrastructure.llm.LLMGateway import LLMGateway
             from cognee.infrastructure.llm.config import get_llm_config
 
             config = get_llm_config()
 
             # Test actual API connection with minimal request
-            client = get_llm_client()
-            await client.show_prompt("test", "test")
+            LLMGateway.show_prompt("test", "test")
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
