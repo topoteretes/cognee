@@ -5,3 +5,4 @@ from .get_default_user import get_default_user
 from .get_user_by_email import get_user_by_email
 from .create_default_user import create_default_user
 from .get_authenticated_user import get_authenticated_user
+from .get_optional_authenticated_user import get_optional_authenticated_user

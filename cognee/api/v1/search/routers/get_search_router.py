@@ -9,7 +9,7 @@ from cognee.api.DTO import InDTO, OutDTO
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
 from cognee.modules.users.models import User
 from cognee.modules.search.operations import get_history
-from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.methods import get_optional_authenticated_user, get_default_user
 from cognee.shared.utils import send_telemetry
 
 
@@ -33,7 +33,7 @@ def get_search_router() -> APIRouter:
         created_at: datetime
 
     @router.get("", response_model=list[SearchHistoryItem])
-    async def get_search_history(user: User = Depends(get_authenticated_user)):
+    async def get_search_history(user: Optional[User] = Depends(get_optional_authenticated_user)):
         """
         Get search history for the authenticated user.
 
@@ -50,6 +50,10 @@ def get_search_router() -> APIRouter:
         ## Error Codes
         - **500 Internal Server Error**: Error retrieving search history
         """
+        # Use default user for anonymous requests
+        if user is None:
+            user = await get_default_user()
+            
         send_telemetry(
             "Search API Endpoint Invoked",
             user.id,
@@ -66,7 +70,7 @@ def get_search_router() -> APIRouter:
             return JSONResponse(status_code=500, content={"error": str(error)})
 
     @router.post("", response_model=list)
-    async def search(payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)):
+    async def search(payload: SearchPayloadDTO, user: Optional[User] = Depends(get_optional_authenticated_user)):
         """
         Search for nodes in the graph database.
 
@@ -93,6 +97,10 @@ def get_search_router() -> APIRouter:
         - To search datasets not owned by the request sender, dataset UUID is needed
         - If permission is denied, returns empty list instead of error
         """
+        # Use default user for anonymous requests
+        if user is None:
+            user = await get_default_user()
+            
         send_telemetry(
             "Search API Endpoint Invoked",
             user.id,

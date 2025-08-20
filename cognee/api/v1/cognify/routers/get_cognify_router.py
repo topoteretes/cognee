@@ -10,7 +10,7 @@ from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
 from cognee.api.DTO import InDTO
 from cognee.modules.pipelines.methods import get_pipeline_run
 from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.methods import get_optional_authenticated_user, get_default_user
 from cognee.modules.users.get_user_db import get_user_db_context
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.users.get_user_manager import get_user_manager_context
@@ -46,7 +46,7 @@ def get_cognify_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("", response_model=dict)
-    async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
+    async def cognify(payload: CognifyPayloadDTO, user: Optional[User] = Depends(get_optional_authenticated_user)):
         """
         Transform datasets into structured knowledge graphs through cognitive processing.
 
@@ -92,6 +92,10 @@ def get_cognify_router() -> APIRouter:
         ## Next Steps
         After successful processing, use the search endpoints to query the generated knowledge graph for insights, relationships, and semantic search.
         """
+        # Use default user for anonymous requests
+        if user is None:
+            user = await get_default_user()
+            
         send_telemetry(
             "Cognify API Endpoint Invoked",
             user.id,
