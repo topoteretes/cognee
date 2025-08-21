@@ -29,6 +29,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        save_interaction: bool = False,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -36,6 +37,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
+            save_interaction=save_interaction,
         )
 
     async def get_completion(
@@ -105,11 +107,16 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
             round_idx += 1
 
-        answer = await generate_completion(
+        completion = await generate_completion(
             query=query,
             context=context,
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
         )
 
-        return [answer]
+        if self.save_interaction and context and triplets and completion:
+            await self.save_qa(
+                question=query, answer=completion, context=context, triplets=triplets
+            )
+
+        return [completion]

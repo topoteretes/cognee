@@ -67,7 +67,7 @@ class TestGraphCompletionRetriever:
 
         retriever = GraphCompletionRetriever()
 
-        context = await retriever.get_context("Who works at Canva?")
+        context, _ = await retriever.get_context("Who works at Canva?")
 
         # Ensure the top-level sections are present
         assert "Nodes:" in context, "Missing 'Nodes:' section in context"
@@ -191,7 +191,7 @@ class TestGraphCompletionRetriever:
 
         retriever = GraphCompletionRetriever(top_k=20)
 
-        context = await retriever.get_context("Who works at Figma?")
+        context, _ = await retriever.get_context("Who works at Figma?")
 
         print(context)
 
@@ -222,5 +222,5 @@ class TestGraphCompletionRetriever:
 
         await setup()
 
-        context = await retriever.get_context("Who works at Figma?")
+        context, _ = await retriever.get_context("Who works at Figma?")
         assert context == "", "Context should be empty on an empty graph"
