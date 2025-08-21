@@ -2,7 +2,7 @@ name: Test Suites
 
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ main, dev, chore/windows_support ]
   pull_request:
     branches: [ main, dev ]
     types: [opened, synchronize, reopened, labeled]
