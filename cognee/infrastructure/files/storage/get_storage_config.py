@@ -1,5 +1,4 @@
 from cognee.base_config import get_base_config
-from .config import file_storage_config
 
 
 def get_global_storage_config():
@@ -11,6 +10,8 @@ def get_global_storage_config():
 
 
 def get_storage_config():
+    from cognee.context_global_variables import file_storage_config
+
     context_config = file_storage_config.get()
     if context_config:
         return context_config

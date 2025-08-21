@@ -5,13 +5,13 @@ from uuid import UUID
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.utils import get_or_create_dataset_database
-from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.modules.users.methods import get_user
 
 # Note: ContextVar allows us to use different graph db configurations in Cognee
 #       for different async tasks, threads and processes
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
+file_storage_config = ContextVar("file_storage_config", default=None)
 
 
 async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):

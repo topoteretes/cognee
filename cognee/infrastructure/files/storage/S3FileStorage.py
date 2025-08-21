@@ -1,15 +1,17 @@
 import os
-import s3fs
 from typing import BinaryIO, Union
 from contextlib import asynccontextmanager
+import s3fs
 
-from cognee.infrastructure.files.storage.s3_config import get_s3_config
+from cognee.infrastructure.files.storage.cloud_storage_config import get_cloud_storage_config
+from cognee.infrastructure.files.storage.cloud_storage_interface import CloudStorageInterface
 from cognee.infrastructure.utils.run_async import run_async
 from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
-from .storage import Storage
+from .storage_provider_registry import StorageProviderRegistry
 
 
-class S3FileStorage(Storage):
+@StorageProviderRegistry.register("s3")
+class S3FileStorage(CloudStorageInterface):
     """
     Manage local file storage operations such as storing, retrieving, and managing files on
     the filesystem.
@@ -20,7 +22,7 @@ class S3FileStorage(Storage):
 
     def __init__(self, storage_path: str):
         self.storage_path = storage_path
-        s3_config = get_s3_config()
+        s3_config = get_cloud_storage_config()
         if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
             self.s3 = s3fs.S3FileSystem(
                 key=s3_config.aws_access_key_id,
