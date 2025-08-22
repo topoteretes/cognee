@@ -1,4 +1,4 @@
-from typing import Type
+from typing import Type, Optional
 from pydantic import BaseModel
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.shared.logging_utils import get_logger, setup_logging
@@ -6,7 +6,10 @@ from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.asyn
 
 
 async def extract_content_graph(
-    content: str, response_model: Type[BaseModel], mode: str = "simple"
+    content: str,
+    response_model: Type[BaseModel],
+    mode: str = "simple",
+    custom_prompt: Optional[str] = None,
 ):
     config = get_llm_config()
     setup_logging()
@@ -26,8 +29,16 @@ async def extract_content_graph(
     #     return graph
 
     # else:
-    graph = await b.ExtractContentGraphGeneric(
-        content, mode=mode, baml_options={"client_registry": config.baml_registry}
-    )
+    if custom_prompt:
+        graph = await b.ExtractContentGraphGeneric(
+            content,
+            mode="custom",
+            custom_prompt_content=custom_prompt,
+            baml_options={"client_registry": config.baml_registry},
+        )
+    else:
+        graph = await b.ExtractContentGraphGeneric(
+            content, mode=mode, baml_options={"client_registry": config.baml_registry}
+        )
 
     return graph

@@ -40,6 +40,7 @@ async def cognify(
     graph_db_config: dict = None,
     run_in_background: bool = False,
     incremental_loading: bool = True,
+    custom_prompt: Optional[str] = None,
 ):
     """
     Transform ingested data into a structured knowledge graph.
@@ -102,6 +103,10 @@ async def cognify(
                           If False, waits for completion before returning.
                           Background mode recommended for large datasets (>100MB).
                           Use pipeline_run_id from return value to monitor progress.
+        custom_prompt: Optional custom prompt string to use for entity extraction and graph generation.
+                      If provided, this prompt will be used instead of the default prompts for
+                      knowledge graph extraction. The prompt should guide the LLM on how to
+                      extract entities and relationships from the text content.
 
     Returns:
         Union[dict, list[PipelineRunInfo]]:
@@ -178,7 +183,9 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
-    tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
+    tasks = await get_default_tasks(
+        user, graph_model, chunker, chunk_size, ontology_file_path, custom_prompt
+    )
 
     if run_in_background:
         return await run_cognify_as_background_process(
@@ -295,6 +302,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunker=TextChunker,
     chunk_size: int = None,
     ontology_file_path: Optional[str] = None,
+    custom_prompt: Optional[str] = None,
 ) -> list[Task]:
     default_tasks = [
         Task(classify_documents),
@@ -308,6 +316,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             extract_graph_from_data,
             graph_model=graph_model,
             ontology_adapter=OntologyResolver(ontology_file=ontology_file_path),
+            custom_prompt=custom_prompt,
             task_config={"batch_size": 10},
         ),  # Generate knowledge graphs from the document chunks.
         Task(

@@ -37,6 +37,9 @@ class CognifyPayloadDTO(InDTO):
     datasets: Optional[List[str]] = Field(default=None)
     dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
+    custom_prompt: Optional[str] = Field(
+        default=None, description="Custom prompt for entity extraction and graph generation"
+    )
 
 
 def get_cognify_router() -> APIRouter:
@@ -63,6 +66,7 @@ def get_cognify_router() -> APIRouter:
         - **datasets** (Optional[List[str]]): List of dataset names to process. Dataset names are resolved to datasets owned by the authenticated user.
         - **dataset_ids** (Optional[List[UUID]]): List of existing dataset UUIDs to process. UUIDs allow processing of datasets not owned by the user (if permitted).
         - **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).
+        - **custom_prompt** (Optional[str]): Custom prompt for entity extraction and graph generation. If provided, this prompt will be used instead of the default prompts for knowledge graph extraction.
 
         ## Response
         - **Blocking execution**: Complete pipeline run information with entity counts, processing duration, and success/failure status
@@ -76,7 +80,8 @@ def get_cognify_router() -> APIRouter:
         ```json
         {
             "datasets": ["research_papers", "documentation"],
-            "run_in_background": false
+            "run_in_background": false,
+            "custom_prompt": "Extract entities focusing on technical concepts and their relationships. Identify key technologies, methodologies, and their interconnections."
         }
         ```
 
@@ -106,7 +111,10 @@ def get_cognify_router() -> APIRouter:
             datasets = payload.dataset_ids if payload.dataset_ids else payload.datasets
 
             cognify_run = await cognee_cognify(
-                datasets, user, run_in_background=payload.run_in_background
+                datasets,
+                user,
+                run_in_background=payload.run_in_background,
+                custom_prompt=payload.custom_prompt,
             )
 
             # If any cognify run errored return JSONResponse with proper error status code

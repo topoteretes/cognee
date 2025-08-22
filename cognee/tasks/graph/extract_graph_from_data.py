@@ -1,5 +1,5 @@
 import asyncio
-from typing import Type, List
+from typing import Type, List, Optional
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -71,6 +71,7 @@ async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     graph_model: Type[BaseModel],
     ontology_adapter: OntologyResolver = None,
+    custom_prompt: Optional[str] = None,
 ) -> List[DocumentChunk]:
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
@@ -84,7 +85,10 @@ async def extract_graph_from_data(
         raise InvalidGraphModelError(graph_model)
 
     chunk_graphs = await asyncio.gather(
-        *[LLMGateway.extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
+        *[
+            LLMGateway.extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt)
+            for chunk in data_chunks
+        ]
     )
 
     # Note: Filter edges with missing source or target nodes
