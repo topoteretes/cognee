@@ -1,11 +1,13 @@
-from typing import Optional
 from uuid import UUID
-from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
+from typing import Optional
+
+from cognee.modules.users.models import User
+from cognee.modules.data.methods import get_authorized_existing_datasets
 from ..models import Dataset
 
 
 async def get_authorized_dataset(
-    user_id: UUID, dataset_id: UUID, permission_type="read"
+    user: User, dataset_id: UUID, permission_type="read"
 ) -> Optional[Dataset]:
     """
     Get a specific dataset with permissions for a user.
@@ -18,6 +20,8 @@ async def get_authorized_dataset(
     Returns:
         Optional[Dataset]: dataset with permissions
     """
-    datasets = await get_specific_user_permission_datasets(user_id, permission_type, [dataset_id])
+    authorized_datasets = await get_authorized_existing_datasets(
+        [dataset_id], permission_type, user
+    )
 
-    return datasets[0] if datasets else None
+    return authorized_datasets[0] if authorized_datasets else None

@@ -10,14 +10,12 @@ from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
 from cognee.modules.pipelines.models import PipelineRunStatus
-from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.methods import get_pipeline_run_by_dataset
 
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
-from cognee.modules.pipelines.operations import log_pipeline_run_initiated
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.data.methods import (
@@ -96,26 +94,6 @@ async def run_pipeline(
 
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
-
-    # Ugly hack, but no easier way to do this.
-    if pipeline_name == "add_pipeline":
-        pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
-        # Refresh the add pipeline status so data is added to a dataset.
-        # Without this the app_pipeline status will be DATASET_PROCESSING_COMPLETED and will skip the execution.
-
-        await log_pipeline_run_initiated(
-            pipeline_id=pipeline_id,
-            pipeline_name="add_pipeline",
-            dataset_id=dataset.id,
-        )
-
-        # Refresh the cognify pipeline status after we add new files.
-        # Without this the cognify_pipeline status will be DATASET_PROCESSING_COMPLETED and will skip the execution.
-        await log_pipeline_run_initiated(
-            pipeline_id=pipeline_id,
-            pipeline_name="cognify_pipeline",
-            dataset_id=dataset.id,
-        )
 
     dataset_id = dataset.id
 
