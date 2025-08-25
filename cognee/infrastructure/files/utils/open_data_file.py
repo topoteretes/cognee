@@ -1,6 +1,8 @@
+from nturl2path import url2pathname
 import os
 from os import path
-from urllib.parse import urlparse
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 from contextlib import asynccontextmanager
 
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
@@ -12,15 +14,20 @@ from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorag
 async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None, **kwargs):
     # Check if this is a file URI BEFORE normalizing (which corrupts URIs)
     if file_path.startswith("file://"):
-        # Now split the actual filesystem path
-        actual_fs_path = get_data_file_path(file_path)
-        file_dir_path = path.dirname(actual_fs_path)
-        file_name = path.basename(actual_fs_path)
+        # Use pathlib.Path.from_uri() when bump Python to 3.13
+        # See https://github.com/python/cpython/issues/107465
+        p = urlparse(file_path)
+        raw = unquote(p.path)
 
-        file_storage = LocalFileStorage(file_dir_path)
+        # Windows: file:///C:/dir/file.txt -> "/C:/dir/file.txt" -> "C:/dir/file.txt"
+        if os.name == "nt" and raw.startswith("/") and len(raw) > 2 and raw[2] == ":":
+            raw = raw[1:]
 
-        with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
-            yield file
+        fs_path = Path(raw)
+
+        file_storage = LocalFileStorage(str(fs_path.parent))
+        with file_storage.open(fs_path.name, mode=mode, encoding=encoding, **kwargs) as f:
+            yield f
 
     elif file_path.startswith("s3://"):
         normalized_url = get_data_file_path(file_path)
@@ -46,16 +53,13 @@ async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None,
             yield file
 
     else:
-        # Regular file path - normalize separators
-        normalized_path = get_data_file_path(file_path)
-        file_dir_path = path.dirname(normalized_path)
-        file_name = path.basename(normalized_path)
+        fs_path = Path(file_path).resolve(strict=False)
 
-        # Validate that we have a proper filename
-        if not file_name or file_name == "." or file_name == "..":
-            raise ValueError(f"Invalid filename extracted: '{file_name}' from path: '{file_path}'")
+        if not fs_path.name or fs_path.name in (".", ".."):
+            raise ValueError(
+                f"Invalid filename extracted: '{fs_path.name}' from path: '{file_path}'"
+            )
 
-        file_storage = LocalFileStorage(file_dir_path)
-
-        with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
+        file_storage = LocalFileStorage(str(fs_path.parent))
+        with file_storage.open(fs_path.name, mode=mode, encoding=encoding, **kwargs) as file:
             yield file
