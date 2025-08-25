@@ -79,15 +79,9 @@ class TestCliIntegration:
                 capture_output=True,
                 text=True,
                 cwd=Path(__file__).parent.parent.parent,  # Go to project root
-                env=os.environ,
             )
 
-            # Note: This might fail due to dependencies, but we're testing the CLI structure
-            # The important thing is that it doesn't crash with argument parsing errors
-            assert (
-                "error" not in result.stderr.lower()
-                or "failed to add data" in result.stderr.lower()
-            )
+            assert result.returncode == 0, f"Add command failed"
 
         finally:
             os.unlink(temp_file)

@@ -73,11 +73,6 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Run CLI Integration Tests
-        env:
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
         run: uv run pytest cognee/tests/integration/cli/ -v
 
   cli-functionality-tests:
