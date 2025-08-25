@@ -67,7 +67,7 @@ async def cognee_pipeline(
         await test_embedding_connection()
         cognee_pipeline.first_run = False  # Update flag after first run
 
-    user, authorized_datasets = await authorized_user_datasets(user, datasets)
+    user, authorized_datasets = await authorized_user_datasets(datasets, user)
 
     for dataset in authorized_datasets:
         async for run_info in run_pipeline(
