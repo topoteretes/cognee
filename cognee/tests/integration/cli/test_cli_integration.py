@@ -78,7 +78,8 @@ class TestCliIntegration:
                 [sys.executable, "-m", "cognee.cli._cognee", "add", temp_file],
                 capture_output=True,
                 text=True,
-                cwd=Path(__file__).parent.parent.parent.parent,  # Go to project root
+                cwd=Path(__file__).parent.parent.parent,  # Go to project root
+                env=os.environ,
             )
 
             # Note: This might fail due to dependencies, but we're testing the CLI structure
