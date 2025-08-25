@@ -1,4 +1,5 @@
 from cognee.modules.data.models import Dataset
+from cognee.modules.data.models import Data
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.methods import get_pipeline_run_by_dataset
@@ -12,7 +13,23 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 logger = get_logger(__name__)
 
 
-async def pipeline_status_check(dataset, data, pipeline_name):
+async def process_pipeline_check(
+    dataset: Dataset, data: list[Data], pipeline_name: str
+) -> [None, PipelineRunStarted, PipelineRunCompleted]:
+    """
+    Function used to determine if pipeline is currently being processed or was already processed.
+    In case pipeline was or is being processed return value is returned and current pipline execution should be stopped.
+    In case pipeline is not or was not processed there will be no return value and pipeline processing can start.
+
+    Args:
+        dataset: Dataset object
+        data: List of Data
+        pipeline_name: pipeline name
+
+    Returns: Pipeline state if it is being processed or was already processed
+
+    """
+
     # async with update_status_lock: TODO: Add UI lock to prevent multiple backend requests
     if isinstance(dataset, Dataset):
         task_status = await get_pipeline_status([dataset.id], pipeline_name)
@@ -25,19 +42,19 @@ async def pipeline_status_check(dataset, data, pipeline_name):
         if task_status[str(dataset.id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED:
             logger.info("Dataset %s is already being processed.", dataset.id)
             pipeline_run = await get_pipeline_run_by_dataset(dataset.id, pipeline_name)
-            yield PipelineRunStarted(
+            return PipelineRunStarted(
                 pipeline_run_id=pipeline_run.pipeline_run_id,
                 dataset_id=dataset.id,
                 dataset_name=dataset.name,
                 payload=data,
             )
-            return
         elif task_status[str(dataset.id)] == PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
             logger.info("Dataset %s is already processed.", dataset.id)
             pipeline_run = await get_pipeline_run_by_dataset(dataset.id, pipeline_name)
-            yield PipelineRunCompleted(
+            return PipelineRunCompleted(
                 pipeline_run_id=pipeline_run.pipeline_run_id,
                 dataset_id=dataset.id,
                 dataset_name=dataset.name,
             )
-            return
+
+    return

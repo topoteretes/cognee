@@ -13,7 +13,7 @@ from cognee.modules.users.models import User
 from cognee.modules.pipelines.operations import log_pipeline_run_initiated
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.modules.pipelines.layers.authorized_user_datasets import authorized_user_datasets
-from cognee.modules.pipelines.layers.pipeline_status_check import pipeline_status_check
+from cognee.modules.pipelines.layers.process_pipeline_check import process_pipeline_check
 
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
@@ -117,8 +117,12 @@ async def run_pipeline(
     if not data:
         data: list[Data] = await get_dataset_data(dataset_id=dataset.id)
 
-    async for pipeline_status in pipeline_status_check(dataset, data, pipeline_name):
-        yield pipeline_status
+    process_pipeline_status = await process_pipeline_check(dataset, data, pipeline_name)
+    if process_pipeline_status:
+        # If pipeline was already processed or is currently being processed
+        # return status information to async generator and finish execution
+        yield process_pipeline_status
+        return
 
     if not isinstance(tasks, list):
         raise ValueError("Tasks must be a list")
