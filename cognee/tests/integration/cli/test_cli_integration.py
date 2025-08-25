@@ -2,7 +2,6 @@
 Integration tests for CLI commands that test end-to-end functionality.
 """
 
-import pytest
 import tempfile
 import os
 import sys
