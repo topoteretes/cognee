@@ -1,0 +1,3 @@
+"""
+CLI integration tests package.
+"""
