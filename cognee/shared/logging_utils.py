@@ -387,8 +387,8 @@ def setup_logging(log_level=None, name=None):
 
         base_config = get_base_config()
         databases_path = os.path.join(base_config.system_root_directory, "databases")
-    except:
-        raise ValueError
+    except Exception as e:
+        raise ValueError from e
 
     # Get a configured logger and log system information
     logger = structlog.get_logger(name if name else __name__)
