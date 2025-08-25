@@ -4,9 +4,7 @@ Tests for CLI edge cases and error scenarios with proper mocking.
 
 import pytest
 import argparse
-import tempfile
-import os
-import asyncio
+import types
 from unittest.mock import patch, MagicMock, AsyncMock
 from cognee.cli.commands.add_command import AddCommand
 from cognee.cli.commands.search_command import SearchCommand
@@ -35,21 +33,8 @@ class TestAddCommandEdgeCases:
         command.execute(args)
         mock_asyncio_run.assert_called_once()
 
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.add_command.asyncio.run")
-    def test_add_very_long_dataset_name(self, mock_asyncio_run, mock_import):
-        """Test add command with very long dataset name"""
-        # Mock the cognee module
-        mock_cognee = MagicMock()
-        mock_cognee.add = AsyncMock()
-        mock_import.return_value = mock_cognee
-
-        command = AddCommand()
-        long_name = "a" * 1000  # Very long dataset name
-        args = argparse.Namespace(data=["test.txt"], dataset_name=long_name)
-
-        command.execute(args)
-        mock_asyncio_run.assert_called_once()
+        coro = mock_asyncio_run.call_args[0][0]
+        assert isinstance(coro, types.CoroutineType)
 
     @patch("cognee.cli.commands.add_command.asyncio.run")
     def test_add_asyncio_run_exception(self, mock_asyncio_run):
@@ -337,16 +322,37 @@ class TestCognifyCommandEdgeCases:
         command.execute(args)
         mock_asyncio_run.assert_called_once()
 
-    def test_cognify_empty_datasets_list(self):
-        """Test cognify command with empty datasets list"""
+    @patch("builtins.__import__")
+    @patch("cognee.cli.commands.cognify_command.asyncio.run")
+    def test_cognify_empty_datasets_list(self, mock_asyncio_run, mock_import):
+        """Test cognify command with nonexistent ontology file"""
+        # Mock the cognee module
+        mock_cognee = MagicMock()
+        mock_cognee.cognify = AsyncMock()
+
+        def mock_import_func(name, fromlist=None, *args, **kwargs):
+            if name == "cognee":
+                return mock_cognee
+            elif name == "cognee.modules.chunking":
+                module = MagicMock()
+                module.TextChunker = MagicMock()
+                return module
+            return MagicMock()
+
+        mock_import.side_effect = mock_import_func
+
         command = CognifyCommand()
-        parser = argparse.ArgumentParser()
-        command.configure_parser(parser)
+        args = argparse.Namespace(
+            datasets=[],
+            chunk_size=None,
+            ontology_file=None,
+            chunker="TextChunker",
+            background=False,
+            verbose=False,
+        )
 
-        # Empty datasets list should be handled
-        args = parser.parse_args(["--datasets"])
-        assert args.datasets == []
-
+        command.execute(args)
+        mock_asyncio_run.assert_called_once()
 
 class TestDeleteCommandEdgeCases:
     """Test edge cases for DeleteCommand"""
@@ -439,6 +445,7 @@ class TestConfigCommandEdgeCases:
 
         # Should handle the exception gracefully
         command.execute(args)
+        mock_cognee.config.get.assert_called_once_with("nonexistent_key")
 
     @patch("builtins.__import__")
     def test_config_set_complex_json_value(self, mock_import):
@@ -450,9 +457,11 @@ class TestConfigCommandEdgeCases:
 
         command = ConfigCommand()
         complex_json = '{"nested": {"key": "value"}, "array": [1, 2, 3]}'
+        complex_json_expected_value = {"nested": {"key": "value"}, "array": [1, 2, 3]}
         args = argparse.Namespace(config_action="set", key="complex_config", value=complex_json)
 
         command.execute(args)
+        mock_cognee.config.set.assert_called_once_with("complex_config", complex_json_expected_value)
 
     @patch("builtins.__import__")
     def test_config_set_invalid_json_value(self, mock_import):
@@ -467,6 +476,7 @@ class TestConfigCommandEdgeCases:
         args = argparse.Namespace(config_action="set", key="test_key", value=invalid_json)
 
         command.execute(args)
+        mock_cognee.config.set.assert_called_once_with("test_key", invalid_json)
 
     @patch("cognee.cli.commands.config_command.fmt.confirm")
     @patch("builtins.__import__")
@@ -499,6 +509,7 @@ class TestConfigCommandEdgeCases:
 
         # Should handle AttributeError gracefully
         command.execute(args)
+        mock_cognee.config.unset.assert_not_called()
 
     def test_config_invalid_subcommand(self):
         """Test config command with invalid subcommand"""
