@@ -1,4 +1,4 @@
-from typing import Any, Optional, Type, List, Coroutine
+from typing import Any, Optional, Type, List
 from collections import Counter
 from uuid import NAMESPACE_OID, uuid5
 import string
