@@ -1,14 +1,65 @@
-from typing import Optional, Dict, Any, List
-from uuid import UUID
+import asyncio
+import uuid
+from typing import List, Optional
+from datetime import datetime
 
+from pydantic import BaseModel
+from cognee.modules.data.models import Data
+from cognee.modules.data.models.Dataset import Dataset
 from cognee.modules.users.models import User
+from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+
+
+class DataEntryContent(BaseModel):
+    """Model for individual data entry with content."""
+    id: str
+    name: str
+    mime_type: Optional[str]
+    extension: Optional[str]
+    raw_data_location: str
+    content: bytes
+    node_set: Optional[str] = None
+    class Config:
+        arbitrary_types_allowed = True  # Allow bytes type
+
+
+class DatasetMetadata(BaseModel):
+    """Model for dataset metadata."""
+    id: str
+    name: str
+    owner_id: str
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class DatasetSyncPayload(BaseModel):
+    """Model for the complete sync payload sent to cloud."""
+    user_id: str
+    dataset_metadata: DatasetMetadata
+    data_entries: List[DataEntryContent]
+    total_entries: int
+    total_size: int
+    total_tokens: int
+
+    class Config:
+        arbitrary_types_allowed = True  # Allow bytes in nested models
+
+
+class SyncResponse(BaseModel):
+    """Response model for sync operations."""
+    run_id: str
+    status: str  # "started" for immediate response
+    dataset_id: str
+    dataset_name: str
+    message: str
+    timestamp: str
+    user_id: str
 
 
 async def sync(
-    source: str,
-    user: User = None,
-    dataset_id: Optional[UUID] = None,
-) -> Dict[str, Any]:
+    dataset: Dataset,
+    user: User,
+) -> SyncResponse:
     """
     Sync local Cognee data to Cognee Cloud.
     
@@ -17,115 +68,87 @@ async def sync(
     cloud-based processing, backup, and sharing.
     
     Args:
-        source: Local data source identifier (e.g., "dataset:main_dataset", "dataset:uuid")
+        dataset: Dataset object to sync (permissions already verified)
         user: User object for authentication and permissions
-        dataset_id: Optional specific dataset UUID for the operation
         
     Returns:
-        Dict containing cloud sync operation results:
-            - sync_id: Unique identifier for tracking this sync operation
-            - status: Current status ("started", "completed", "failed")
-            - source: Information about the local data source
-            - records_processed: Number of records synchronized to cloud
-            - bytes_transferred: Amount of data uploaded to cloud
-            - errors: List of any errors encountered
+        SyncResponse model with immediate response:
+            - run_id: Unique identifier for tracking this sync operation
+            - status: Always "started" (sync runs in background)
+            - dataset_id: ID of the dataset being synced
+            - dataset_name: Name of the dataset being synced
+            - message: Description of what's happening
             - timestamp: When the sync was initiated
-            - duration: How long the sync took
+            - user_id: User who initiated the sync
             
     Raises:
-        ValueError: If source is invalid or missing required parameters
-        PermissionError: If user doesn't have required dataset permissions
         ConnectionError: If Cognee Cloud service is unreachable
         Exception: For other sync-related errors
     """
-    if not source:
-        raise ValueError("Source must be provided for sync operation")
+    if not dataset:
+        raise ValueError("Dataset must be provided for sync operation")
     
-    # Generate a unique sync ID
-    import uuid
-    sync_id = str(uuid.uuid4())
+    # Generate a unique run ID
+    run_id = str(uuid.uuid4())
     
     # Get current timestamp
-    from datetime import datetime
-    start_time = datetime.utcnow()
-    timestamp = start_time.isoformat()
+    timestamp = datetime.now(datetime.UTC).isoformat()
     
-    # Initialize tracking variables
-    records_processed = 0
-    bytes_transferred = 0
-    errors = []
-    status = "started"
-    
-    try:
-        from cognee.shared.logging_utils import get_logger
-        logger = get_logger()
-        logger.info(f"Starting cloud sync operation {sync_id}: {source}")
-        
-        # Validate user permissions for source dataset
-        if user and source.startswith("dataset:"):
-            source_identifier = source.replace("dataset:", "")
-            await _validate_dataset_permissions(source_identifier, user, dataset_id)
-        
-        # Sync to Cognee Cloud
-        records_processed, bytes_transferred = await _sync_to_cognee_cloud(source, user, dataset_id)
-        
-        status = "completed"
-        end_time = datetime.utcnow()
-        duration = (end_time - start_time).total_seconds()
-        
-        logger.info(f"Sync operation {sync_id} completed successfully. Records: {records_processed}, Bytes: {bytes_transferred}, Duration: {duration}s")
-        
-    except PermissionError as e:
-        status = "failed"
-        errors = [f"Permission denied: {str(e)}"]
-        logger.error(f"Sync operation {sync_id} failed due to permissions: {str(e)}")
-        
-    except ConnectionError as e:
-        status = "failed"
-        errors = [f"Connection failed: {str(e)}"]
-        logger.error(f"Sync operation {sync_id} failed due to connection error: {str(e)}")
-        
-    except Exception as e:
-        status = "failed"
-        errors = [str(e)]
-        logger.error(f"Sync operation {sync_id} failed: {str(e)}")
-    
-    # Calculate duration if operation completed or failed
-    end_time = datetime.utcnow()
-    duration = (end_time - start_time).total_seconds()
-    
-    return {
-        "sync_id": sync_id,
-        "status": status,
-        "source": source,
-        "records_processed": records_processed,
-        "bytes_transferred": bytes_transferred,
-        "errors": errors,
-        "timestamp": timestamp,
-        "duration": duration,
-        "user_id": user.id if user else None,
-        "dataset_id": str(dataset_id) if dataset_id else None
-    }
-
-
-async def _validate_dataset_permissions(source_identifier: str, user: User, dataset_id: Optional[UUID]) -> None:
-    """Validate user has permissions to access the dataset."""
-    # TODO: Implement actual permission validation
-    # For now, this is a placeholder that allows all operations
     from cognee.shared.logging_utils import get_logger
     logger = get_logger()
-    logger.info(f"Validating permissions for user {user.id} on dataset {source_identifier}")
+    logger.info(f"Starting cloud sync operation {run_id}: dataset {dataset.name} ({dataset.id})")
+    
+    # Start the sync operation in the background
+    asyncio.create_task(_perform_background_sync(run_id, dataset, user))
+    
+    # Return immediately with run_id
+    return SyncResponse(
+        run_id=run_id,
+        status="started",
+        dataset_id=str(dataset.id),
+        dataset_name=dataset.name,
+        message=f"Sync operation started in background. Use run_id '{run_id}' to track progress.",
+        timestamp=timestamp,
+        user_id=str(user.id)
+    )
 
 
-async def _sync_to_cognee_cloud(source: str, user: User, dataset_id: Optional[UUID]) -> tuple[int, int]:
+async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) -> None:
+    """Perform the actual sync operation in the background."""
+    from cognee.shared.logging_utils import get_logger
+    logger = get_logger()
+    
+    start_time = datetime.now(datetime.UTC)
+    
+    try:
+        logger.info(f"Background sync {run_id}: Starting sync for dataset {dataset.name} ({dataset.id})")
+        
+        # Perform the actual sync operation
+        records_processed, bytes_transferred = await _sync_to_cognee_cloud(dataset, user)
+        
+        end_time = datetime.now(datetime.UTC)
+        duration = (end_time - start_time).total_seconds()
+        
+        logger.info(f"Background sync {run_id}: Completed successfully. Records: {records_processed}, Bytes: {bytes_transferred}, Duration: {duration}s")
+        
+        # TODO: Store completion status in database or cache for status checking
+        # This would allow users to check the status of their sync operation later
+        
+    except Exception as e:
+        end_time = datetime.now(datetime.UTC)
+        duration = (end_time - start_time).total_seconds()
+        
+        logger.error(f"Background sync {run_id}: Failed after {duration}s with error: {str(e)}")
+        
+        # TODO: Store failure status in database or cache for status checking
+
+
+async def _sync_to_cognee_cloud(dataset: Dataset, user: User) -> tuple[int, int]:
     """Sync local data to Cognee Cloud."""
     from cognee.shared.logging_utils import get_logger
     logger = get_logger()
     
-    logger.info(f"Starting sync to Cognee Cloud: {source}")
-    
-    # Extract dataset information
-    source_identifier = source.replace("dataset:", "")
+    logger.info(f"Starting sync to Cognee Cloud: dataset {dataset.name} ({dataset.id})")
     
     try:
         # TODO: Implement actual Cognee Cloud sync logic
@@ -136,12 +159,11 @@ async def _sync_to_cognee_cloud(source: str, user: User, dataset_id: Optional[UU
         # 4. Uploading to cloud with proper authentication
         # 5. Verifying data integrity after upload
         
-        records_processed = await _extract_and_upload_dataset(
-            source_identifier, user, dataset_id
-        )
+        records_processed = await _extract_and_upload_dataset(dataset, user)
         
-        # Simulate bytes transferred (would be actual in real implementation)
-        bytes_transferred = records_processed * 1024  # Rough estimate
+        # TODO: Calculate actual bytes transferred from the extracted content
+        # For now using estimate, but this should be the actual size of sync payload sent to cloud
+        bytes_transferred = records_processed * 2048
         
         logger.info(f"Successfully synced {records_processed} records ({bytes_transferred} bytes) to Cognee Cloud")
         
@@ -152,70 +174,115 @@ async def _sync_to_cognee_cloud(source: str, user: User, dataset_id: Optional[UU
         raise ConnectionError(f"Cloud sync failed: {str(e)}")
 
 
-async def _extract_and_upload_dataset(
-    source_identifier: str, 
-    user: User, 
-    dataset_id: Optional[UUID]
-) -> int:
+async def _extract_and_upload_dataset(dataset: Dataset, user: User) -> int:
     """Extract local dataset data and upload to Cognee Cloud."""
     from cognee.shared.logging_utils import get_logger
     logger = get_logger()
     
-    # TODO: Implement actual data extraction and upload
-    # This is a placeholder implementation
-    
     try:
-        # Step 1: Load dataset from local storage
-        if dataset_id:
-            logger.info(f"Loading dataset by ID: {dataset_id}")
-            # Load by UUID
-            dataset = await _load_dataset_by_id(dataset_id)
-        else:
-            logger.info(f"Loading dataset by name: {source_identifier}")
-            # Load by name
-            dataset = await _load_dataset_by_name(source_identifier, user)
+        logger.info(f"Extracting data from dataset: {dataset.name} ({dataset.id})")
         
-        if not dataset:
-            raise ValueError(f"Dataset not found: {source_identifier}")
+        # Step 1: Get all data entries linked to this dataset
+        data_entries = await get_dataset_data(dataset.id)
+        logger.info(f"Found {len(data_entries)} data entries in dataset")
         
-        # Step 2: Extract data components
-        # - Raw documents
-        # - Processed chunks
-        # - Vector embeddings
-        # - Knowledge graph nodes/edges
-        # - Metadata
+        # Step 2: Read contents from each data entry's raw_data_location
+        extracted_contents: List[DataEntryContent] = []
+        for data_entry in data_entries:
+            try:
+                logger.info(f"Reading content from: {data_entry.name} ({data_entry.raw_data_location})")
+                content = await _read_data_content(data_entry)
+                
+                extracted_contents.append(DataEntryContent(
+                    id=str(data_entry.id),
+                    name=data_entry.name,
+                    mime_type=data_entry.mime_type,
+                    extension=data_entry.extension,
+                    raw_data_location=data_entry.raw_data_location,
+                    content=content,
+                    node_set=data_entry.node_set
+                ))
+                
+            except Exception as e:
+                logger.warning(f"Failed to read content from {data_entry.name}: {str(e)}")
+                # Continue with other entries even if one fails
+                continue
+        
+        logger.info(f"Successfully extracted content from {len(extracted_contents)} data entries")
         
         # Step 3: Prepare data for cloud upload
-        # - Serialize data
+        # - Serialize extracted contents
         # - Compress if enabled
-        # - Create manifest
+        # - Create manifest with dataset and content metadata
         
-        # Step 4: Upload to cloud
+        dataset_metadata = DatasetMetadata(
+            id=str(dataset.id),
+            name=dataset.name,
+            owner_id=str(dataset.owner_id),
+            created_at=dataset.created_at.isoformat(),
+            updated_at=dataset.updated_at.isoformat() if dataset.updated_at else None,
+        )
+        
+        sync_payload = DatasetSyncPayload(
+            user_id=str(user.id),
+            dataset_metadata=dataset_metadata,
+            data_entries=extracted_contents,
+            total_entries=len(extracted_contents),
+            total_size=sum(len(entry.content) for entry in extracted_contents),
+            total_tokens=sum(len(entry.content) for entry in extracted_contents)
+        )
+        
+        # Step 4: Upload to cloud (placeholder implementation)
+        # TODO: Implement actual cloud upload logic
         # - Authenticate with cloud service
-        # - Upload data chunks
+        # - Upload sync payload
         # - Verify upload integrity
         
-        # Placeholder: Return mock record count
-        records_processed = 42  # Mock value
+        logger.info(f"Prepared sync payload: {sync_payload.total_entries} entries, {sync_payload.total_size} bytes, {sync_payload.total_tokens} tokens")
+        
+        # For now, just log the payload structure (remove in production)
+        logger.debug(f"Sync payload dataset: {sync_payload.dataset_metadata.name} (ID: {sync_payload.dataset_metadata.id})")
+        
+        # Return actual count of processed records
+        records_processed = len(extracted_contents)
+        
+        # TODO: Also return actual bytes transferred for more accurate reporting
+        # actual_bytes_transferred = sync_payload['total_size']  # This would be the real size
         
         logger.info(f"Extracted and prepared {records_processed} records for cloud upload")
         
         return records_processed
         
     except Exception as e:
-        logger.error(f"Failed to extract dataset {source_identifier}: {str(e)}")
+        logger.error(f"Failed to extract dataset {dataset.name}: {str(e)}")
         raise
 
 
-async def _load_dataset_by_id(dataset_id: UUID):
-    """Load dataset by UUID."""
-    # TODO: Implement dataset loading by ID
-    # This would query the local database for the dataset
-    return {"id": dataset_id, "name": "mock_dataset", "records": 42}
-
-
-async def _load_dataset_by_name(dataset_name: str, user: User):
-    """Load dataset by name for the given user."""
-    # TODO: Implement dataset loading by name
-    # This would query the local database for the user's dataset
-    return {"name": dataset_name, "user_id": user.id, "records": 42}
+async def _read_data_content(data_entry: Data) -> bytes:
+    """Read content from a data entry's raw_data_location as bytes."""
+    import os
+    import aiofiles
+    from cognee.shared.logging_utils import get_logger
+    
+    logger = get_logger()
+    
+    try:
+        # Handle different types of raw_data_location paths
+        raw_location = data_entry.raw_data_location
+        
+        # Check if file exists
+        if not os.path.exists(raw_location):
+            logger.warning(f"File not found at raw_data_location: {raw_location}")
+            return b""
+        
+        # Read file content as bytes (works for all file types)
+        async with aiofiles.open(raw_location, mode='rb') as file:
+            content = await file.read()
+            
+        logger.debug(f"Successfully read {len(content)} bytes from {raw_location}")
+        return content
+        
+    except Exception as e:
+        logger.error(f"Error reading content from {data_entry.raw_data_location}: {str(e)}")
+        # Return empty bytes instead of failing completely
+        return b""
