@@ -13,6 +13,7 @@ from cognee.cli.config import (
 )
 from cognee.cli._cognee import _discover_commands
 
+
 class TestCliConfig:
     """Test CLI configuration constants"""
 
@@ -77,6 +78,7 @@ class TestCliConfig:
         expected_formats = ["json", "pretty", "simple"]
         for expected_format in expected_formats:
             assert expected_format in OUTPUT_FORMAT_CHOICES
+
 
 class TestCliReference:
     """Test CLI reference protocol"""

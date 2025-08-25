@@ -354,6 +354,7 @@ class TestCognifyCommandEdgeCases:
         command.execute(args)
         mock_asyncio_run.assert_called_once()
 
+
 class TestDeleteCommandEdgeCases:
     """Test edge cases for DeleteCommand"""
 
@@ -461,7 +462,9 @@ class TestConfigCommandEdgeCases:
         args = argparse.Namespace(config_action="set", key="complex_config", value=complex_json)
 
         command.execute(args)
-        mock_cognee.config.set.assert_called_once_with("complex_config", complex_json_expected_value)
+        mock_cognee.config.set.assert_called_once_with(
+            "complex_config", complex_json_expected_value
+        )
 
     @patch("builtins.__import__")
     def test_config_set_invalid_json_value(self, mock_import):
