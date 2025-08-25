@@ -2,7 +2,14 @@ from ..tasks.task import Task
 from ..exceptions.tasks import WrongTaskTypeError
 
 
-def pipeline_tasks_validation(tasks):
+def pipeline_tasks_validation(tasks: list[Task]):
+    """
+    Validates the tasks argument to ensure it is a list of Task class instances.
+
+    Args:
+        tasks (list[Task]): The list of tasks to be validated.
+    """
+
     if not isinstance(tasks, list):
         raise WrongTaskTypeError(f"tasks argument must be a list, got {type(tasks).__name__}.")
 
