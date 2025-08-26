@@ -1,7 +1,8 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 
 from cognee.context_global_variables import set_database_global_context_variables
@@ -15,12 +16,17 @@ from cognee.api.v1.sync import SyncResponse
 logger = get_logger()
 
 
+class SyncRequest(BaseModel):
+    """Request model for sync operations."""
+    dataset_id: UUID
+
+
 def get_sync_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("", response_model=SyncResponse)
     async def sync_to_cloud(
-        dataset_id: UUID = Form(...),
+        request: SyncRequest,
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -30,8 +36,12 @@ def get_sync_router() -> APIRouter:
         It uploads your local datasets, knowledge graphs, and processed data to the cloud
         for backup, sharing, or cloud-based processing.
 
-        ## Request Parameters
-        - **dataset_id** (UUID): UUID of the dataset to sync to cloud
+        ## Request Body (JSON)
+        ```json
+        {
+            "dataset_id": "123e4567-e89b-12d3-a456-426614174000"
+        }
+        ```
 
         ## Response
         Returns immediate response for the sync operation:
@@ -53,10 +63,11 @@ def get_sync_router() -> APIRouter:
 
         ## Example Usage
         ```bash
-        # Sync dataset to cloud by ID
+        # Sync dataset to cloud by ID (JSON request)
         curl -X POST "http://localhost:8000/api/v1/sync" \\
-          -H "Authorization: Bearer your-token" \\
-          -F "dataset_id=123e4567-e89b-12d3-a456-426614174000"
+          -H "Content-Type: application/json" \\
+          -H "Cookie: auth_token=your-token" \\
+          -d '{"dataset_id": "123e4567-e89b-12d3-a456-426614174000"}'
         ```
 
         ## Error Codes
@@ -80,7 +91,7 @@ def get_sync_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "POST /v1/sync",
-                "dataset_id": str(dataset_id),
+                "dataset_id": str(request.dataset_id),
             },
         )
 
@@ -88,14 +99,14 @@ def get_sync_router() -> APIRouter:
 
         try:
             # Retrieve existing dataset and check permissions
-            dataset = await get_specific_user_permission_datasets(user.id, "write", [dataset_id])
+            dataset = await get_specific_user_permission_datasets(user.id, "write", [request.dataset_id])
             
             # Convert from list to Dataset element
             if isinstance(dataset, list):
                 if not dataset:
                     return JSONResponse(
                         status_code=404,
-                        content={"error": f"Dataset with ID {dataset_id} not found or access denied."}
+                        content={"error": f"Dataset with ID {request.dataset_id} not found or access denied."}
                     )
                 dataset = dataset[0]
 

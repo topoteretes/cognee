@@ -1,7 +1,8 @@
 import asyncio
+import pprint
 import uuid
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pydantic import BaseModel
 from cognee.modules.data.models import Data
@@ -92,7 +93,7 @@ async def sync(
     run_id = str(uuid.uuid4())
     
     # Get current timestamp
-    timestamp = datetime.now(datetime.UTC).isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
     
     from cognee.shared.logging_utils import get_logger
     logger = get_logger()
@@ -118,7 +119,7 @@ async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) ->
     from cognee.shared.logging_utils import get_logger
     logger = get_logger()
     
-    start_time = datetime.now(datetime.UTC)
+    start_time = datetime.now(timezone.utc)
     
     try:
         logger.info(f"Background sync {run_id}: Starting sync for dataset {dataset.name} ({dataset.id})")
@@ -126,7 +127,7 @@ async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) ->
         # Perform the actual sync operation
         records_processed, bytes_transferred = await _sync_to_cognee_cloud(dataset, user)
         
-        end_time = datetime.now(datetime.UTC)
+        end_time = datetime.now(timezone.utc)
         duration = (end_time - start_time).total_seconds()
         
         logger.info(f"Background sync {run_id}: Completed successfully. Records: {records_processed}, Bytes: {bytes_transferred}, Duration: {duration}s")
@@ -135,7 +136,7 @@ async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) ->
         # This would allow users to check the status of their sync operation later
         
     except Exception as e:
-        end_time = datetime.now(datetime.UTC)
+        end_time = datetime.now(timezone.utc)
         duration = (end_time - start_time).total_seconds()
         
         logger.error(f"Background sync {run_id}: Failed after {duration}s with error: {str(e)}")
@@ -231,6 +232,8 @@ async def _extract_and_upload_dataset(dataset: Dataset, user: User) -> int:
             total_size=sum(len(entry.content) for entry in extracted_contents),
             total_tokens=sum(len(entry.content) for entry in extracted_contents)
         )
+
+        pprint.pprint(sync_payload)
         
         # Step 4: Upload to cloud (placeholder implementation)
         # TODO: Implement actual cloud upload logic
