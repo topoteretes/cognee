@@ -11,8 +11,6 @@ from cognee.modules.pipelines import cognee_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
-from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
-from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 from cognee.modules.users.models import User
 
 from cognee.tasks.documents import (
@@ -23,7 +21,7 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
-from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_execution_mode
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
 logger = get_logger("cognify")
 
@@ -181,9 +179,9 @@ async def cognify(
     """
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 
-    pipeline_execution_mode_func = get_pipeline_execution_mode(run_in_background=run_in_background)
+    pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
-    return await pipeline_execution_mode_func(
+    return await pipeline_executor_func (
         pipeline=cognee_pipeline,
         tasks=tasks,
         user=user,

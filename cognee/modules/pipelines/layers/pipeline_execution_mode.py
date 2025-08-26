@@ -114,8 +114,8 @@ async def run_pipeline_as_background_process(
     return pipeline_run_started_info
 
 
-def get_pipeline_execution_mode(
-    run_in_background: bool,
+def get_pipeline_executor(
+    run_in_background: bool = False,
 ) -> Callable[..., Awaitable[Dict[str, Any]]]:
     """
     Return the appropriate pipeline runner.
