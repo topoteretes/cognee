@@ -13,7 +13,7 @@ from cognee.modules.data.methods import (
 
 
 async def authorized_user_datasets(
-    datasets: Union[str, list[str], list[UUID]], user: User = None
+    datasets: Union[str, UUID, list[str], list[UUID]], user: User = None
 ) -> Tuple[User, List[Dataset]]:
     """
     Function handles creation and dataset authorization if datasets already exist for Cognee.

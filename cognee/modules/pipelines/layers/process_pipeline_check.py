@@ -1,3 +1,4 @@
+from typing import Union, Optional
 from cognee.modules.data.models import Dataset
 from cognee.modules.data.models import Data
 from cognee.modules.pipelines.models import PipelineRunStatus
@@ -15,7 +16,7 @@ logger = get_logger(__name__)
 
 async def process_pipeline_check(
     dataset: Dataset, data: list[Data], pipeline_name: str
-) -> [None, PipelineRunStarted, PipelineRunCompleted]:
+) -> Optional[Union[PipelineRunStarted, PipelineRunCompleted]]:
     """
     Function used to determine if pipeline is currently being processed or was already processed.
     In case pipeline was or is being processed return value is returned and current pipline execution should be stopped.
@@ -34,9 +35,7 @@ async def process_pipeline_check(
     if isinstance(dataset, Dataset):
         task_status = await get_pipeline_status([dataset.id], pipeline_name)
     else:
-        task_status = [
-            PipelineRunStatus.DATASET_PROCESSING_COMPLETED
-        ]  # TODO: this is a random assignment, find permanent solution
+        task_status = {}
 
     if str(dataset.id) in task_status:
         if task_status[str(dataset.id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED:
