@@ -181,7 +181,7 @@ async def cognify(
 
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
-    return await pipeline_executor_func (
+    return await pipeline_executor_func(
         pipeline=cognee_pipeline,
         tasks=tasks,
         user=user,
