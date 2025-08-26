@@ -10,8 +10,22 @@ def get_data_file_path(file_path: str):
         # Normalize the file URI for Windows - replace backslashes with forward slashes
         normalized_file_uri = os.path.normpath(pure_file_path)
 
+        # Convert path to proper file system path
+        if os.name == "nt":  # Windows
+            # Handle Windows drive letters correctly
+            fs_path = normalized_file_uri
+            if (
+                (fs_path.startswith("/") or fs_path.startswith("\\"))
+                and len(fs_path) > 1
+                and fs_path[2] == ":"
+            ):
+                fs_path = fs_path[1:]
+        else:
+            # Unix - like systems
+            fs_path = normalized_file_uri
+
         # Now split the actual filesystem path
-        actual_fs_path = os.path.normpath(normalized_file_uri)
+        actual_fs_path = os.path.normpath(fs_path)
         return actual_fs_path
 
     elif file_path.startswith("s3://"):
