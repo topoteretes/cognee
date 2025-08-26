@@ -71,7 +71,6 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
 
       - name: Run integration tests
-        if: ${{ !contains(matrix.os, 'windows') }}
         shell: bash
         run: uv run pytest cognee/tests/integration/
         env:
