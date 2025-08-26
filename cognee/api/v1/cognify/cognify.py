@@ -181,8 +181,8 @@ async def cognify(
 
     # By calling get pipeline executor we get a function that will have the cognee_pipeline run in the background or a function that we will need to wait for
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
-    
-    # Run the cognee_pipeline in the bacgrkound or blocking based on executor
+
+    # Run the cognee_pipeline in the background or blocking based on executor
     return await pipeline_executor_func(
         pipeline=cognee_pipeline,
         tasks=tasks,
