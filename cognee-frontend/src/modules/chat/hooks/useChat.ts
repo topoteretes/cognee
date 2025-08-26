@@ -14,17 +14,24 @@ const fetchMessages = () => {
     .then(response => response.json());
 };
 
-const sendMessage = (message: string, searchType: string) => {
+const sendMessage = (message: string, searchType: string, topK?: number) => {
+  const payload: any = {
+    query: message,
+    searchType,
+    datasets: ["main_dataset"],
+  };
+  
+  // Add topK (top_k) parameter if provided
+  if (topK !== undefined) {
+    payload.top_k = topK;
+  }
+
   return fetch("/v1/search/", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      query: message,
-      searchType,
-      datasets: ["main_dataset"],
-    }),
+    body: JSON.stringify(payload),
   })
     .then(response => response.json());
 };
@@ -33,7 +40,6 @@ const sendMessage = (message: string, searchType: string) => {
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export default function useChat(dataset: Dataset) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-
   const {
     value: isSearchRunning,
     setTrue: disableSearchRun,
@@ -45,9 +51,8 @@ export default function useChat(dataset: Dataset) {
     return setMessages(data);
   }, []);
 
-  const handleMessageSending = useCallback((message: string, searchType: string) => {
+  const handleMessageSending = useCallback((message: string, searchType: string, topK?: number) => {
     const sentMessageId = v4();
-
     setMessages((messages) => [
       ...messages,
       {
@@ -56,10 +61,8 @@ export default function useChat(dataset: Dataset) {
         text: message,
       },
     ]);
-
     disableSearchRun();
-
-    return sendMessage(message, searchType)
+    return sendMessage(message, searchType, topK)
       .then(newMessages => {
         setMessages((messages) => [
           ...messages,
@@ -86,7 +89,6 @@ export default function useChat(dataset: Dataset) {
     isSearchRunning,
   };
 }
-
 
 interface Node {
   name: string;
