@@ -3,15 +3,26 @@ Tests for individual CLI commands with proper mocking and coroutine handling.
 """
 
 import pytest
+import sys
 import argparse
 import asyncio
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock, AsyncMock, ANY
 from cognee.cli.commands.add_command import AddCommand
 from cognee.cli.commands.search_command import SearchCommand
 from cognee.cli.commands.cognify_command import CognifyCommand
 from cognee.cli.commands.delete_command import DeleteCommand
 from cognee.cli.commands.config_command import ConfigCommand
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+
+
+# Mock asyncio.run to properly handle coroutines
+def _mock_run(coro):
+    # Create an event loop and run the coroutine
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 class TestAddCommand:
@@ -39,58 +50,39 @@ class TestAddCommand:
         # Check data argument accepts multiple values
         assert actions["data"].nargs == "+"
 
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.add_command.asyncio")
-    def test_execute_single_item(self, mock_asyncio, mock_import):
+    @patch("cognee.cli.commands.add_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_single_item(self, mock_asyncio_run):
         """Test execute with single data item"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.add = AsyncMock()
-        mock_import.return_value = mock_cognee
 
-        # Mock asyncio.run to properly handle coroutines
-        def mock_run(coro):
-            # Create an event loop and run the coroutine
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(coro)
-            finally:
-                loop.close()
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = AddCommand()
+            args = argparse.Namespace(data=["test.txt"], dataset_name="test_dataset")
+            command.execute(args)
 
-        mock_asyncio.run.side_effect = mock_run
+        mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        mock_cognee.add.assert_awaited_once_with(data="test.txt", dataset_name="test_dataset")
 
-        command = AddCommand()
-        args = argparse.Namespace(data=["test.txt"], dataset_name="test_dataset")
-
-        command.execute(args)
-
-        mock_asyncio.run.assert_called_once()
-
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.add_command.asyncio")
-    def test_execute_multiple_items(self, mock_asyncio, mock_import):
+    @patch("cognee.cli.commands.add_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_multiple_items(self, mock_asyncio_run):
         """Test execute with multiple data items"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.add = AsyncMock()
-        mock_import.return_value = mock_cognee
 
-        # Mock asyncio.run to properly handle coroutines
-        def mock_run(coro):
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(coro)
-            finally:
-                loop.close()
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = AddCommand()
+            args = argparse.Namespace(data=["test1.txt", "test2.txt"], dataset_name="test_dataset")
+            command.execute(args)
 
-        mock_asyncio.run.side_effect = mock_run
-
-        command = AddCommand()
-        args = argparse.Namespace(data=["test1.txt", "test2.txt"], dataset_name="test_dataset")
-
-        command.execute(args)
-
-        mock_asyncio.run.assert_called_once()
+        mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        mock_cognee.add.assert_awaited_once_with(
+            data=["test1.txt", "test2.txt"], dataset_name="test_dataset"
+        )
 
     @patch("cognee.cli.commands.add_command.asyncio.run")
     def test_execute_with_exception(self, mock_asyncio_run):
@@ -134,9 +126,8 @@ class TestSearchCommand:
         assert actions["top_k"].default == 10
         assert actions["output_format"].default == "pretty"
 
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.search_command.asyncio")
-    def test_execute_basic_search(self, mock_asyncio, mock_import):
+    @patch("cognee.cli.commands.search_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_basic_search(self, mock_asyncio_run):
         """Test execute with basic search"""
         # Mock the cognee module and SearchType
         mock_cognee = MagicMock()
@@ -144,40 +135,30 @@ class TestSearchCommand:
         mock_search_type = MagicMock()
         mock_search_type.__getitem__.return_value = "GRAPH_COMPLETION"
 
-        def mock_import_func(name, fromlist=None, *args, **kwargs):
-            if name == "cognee":
-                return mock_cognee
-            elif name == "cognee.modules.search.types":
-                module = MagicMock()
-                module.SearchType = mock_search_type
-                return module
-            return MagicMock()
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = SearchCommand()
+            args = argparse.Namespace(
+                query_text="test query",
+                query_type="GRAPH_COMPLETION",
+                datasets=None,
+                top_k=10,
+                system_prompt=None,
+                output_format="pretty",
+            )
+            command.execute(args)
 
-        mock_import.side_effect = mock_import_func
-
-        # Mock asyncio.run to properly handle coroutines
-        def mock_run(coro):
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(coro)
-            finally:
-                loop.close()
-
-        mock_asyncio.run.side_effect = mock_run
-
-        command = SearchCommand()
-        args = argparse.Namespace(
+        mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        mock_cognee.search.assert_awaited_once_with(
             query_text="test query",
-            query_type="GRAPH_COMPLETION",
+            query_type=ANY,
             datasets=None,
             top_k=10,
-            system_prompt=None,
-            output_format="pretty",
+            system_prompt_path="answer_simple_question.txt",
         )
-
-        command.execute(args)
-
-        mock_asyncio.run.assert_called_once()
+        # verify the enum’s name separately
+        called_enum = mock_cognee.search.await_args.kwargs["query_type"]
+        assert called_enum.name == "GRAPH_COMPLETION"
 
     @patch("cognee.cli.commands.search_command.asyncio.run")
     def test_execute_with_exception(self, mock_asyncio_run):
@@ -227,48 +208,36 @@ class TestCognifyCommand:
         # Check default values
         assert actions["chunker"].default == "TextChunker"
 
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.cognify_command.asyncio")
-    def test_execute_basic_cognify(self, mock_asyncio, mock_import):
+    @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_basic_cognify(self, mock_asyncio_run):
         """Test execute with basic cognify"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.cognify = AsyncMock(return_value="success")
 
-        def mock_import_func(name, fromlist=None, *args, **kwargs):
-            if name == "cognee":
-                return mock_cognee
-            elif name == "cognee.modules.chunking":
-                module = MagicMock()
-                module.TextChunker = MagicMock()
-                return module
-            return MagicMock()
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = CognifyCommand()
+            args = argparse.Namespace(
+                datasets=None,
+                chunk_size=None,
+                ontology_file=None,
+                chunker="TextChunker",
+                background=False,
+                verbose=False,
+            )
+            command.execute(args)
 
-        mock_import.side_effect = mock_import_func
+        mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        from cognee.modules.chunking import TextChunker
 
-        # Mock asyncio.run to properly handle coroutines
-        def mock_run(coro):
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(coro)
-            finally:
-                loop.close()
-
-        mock_asyncio.run.side_effect = mock_run
-
-        command = CognifyCommand()
-        args = argparse.Namespace(
+        mock_cognee.cognify.assert_awaited_once_with(
             datasets=None,
             chunk_size=None,
-            ontology_file=None,
-            chunker="TextChunker",
-            background=False,
-            verbose=False,
+            ontology_file_path=None,
+            chunker=TextChunker,
+            run_in_background=False,
         )
-
-        command.execute(args)
-
-        mock_asyncio.run.assert_called_once()
 
     @patch("cognee.cli.commands.cognify_command.asyncio.run")
     def test_execute_with_exception(self, mock_asyncio_run):
@@ -314,36 +283,27 @@ class TestDeleteCommand:
         assert "force" in actions
 
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.delete_command.asyncio")
-    def test_execute_delete_dataset_with_confirmation(
-        self, mock_asyncio, mock_import, mock_confirm
-    ):
+    @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_delete_dataset_with_confirmation(self, mock_asyncio_run, mock_confirm):
         """Test execute delete dataset with user confirmation"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.delete = AsyncMock()
-        mock_import.return_value = mock_cognee
 
-        # Mock asyncio.run to properly handle coroutines
-        def mock_run(coro):
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(coro)
-            finally:
-                loop.close()
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = DeleteCommand()
+            args = argparse.Namespace(
+                dataset_name="test_dataset", user_id=None, all=False, force=False
+            )
 
-        mock_asyncio.run.side_effect = mock_run
+            mock_confirm.return_value = True
 
-        command = DeleteCommand()
-        args = argparse.Namespace(dataset_name="test_dataset", user_id=None, all=False, force=False)
+            command.execute(args)
 
-        mock_confirm.return_value = True
-
-        command.execute(args)
-
-        mock_confirm.assert_called_once()
-        mock_asyncio.run.assert_called_once()
+        mock_confirm.assert_called_once_with(f"Delete dataset '{args.dataset_name}'?")
+        mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        mock_cognee.delete.assert_awaited_once_with(dataset_name="test_dataset", user_id=None)
 
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     def test_execute_delete_cancelled(self, mock_confirm):
@@ -356,33 +316,26 @@ class TestDeleteCommand:
         # Should not raise exception, just return
         command.execute(args)
 
-        mock_confirm.assert_called_once()
+        mock_confirm.assert_called_once_with(f"Delete dataset '{args.dataset_name}'?")
 
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.delete_command.asyncio")
-    def test_execute_delete_forced(self, mock_asyncio, mock_import):
+    @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
+    def test_execute_delete_forced(self, mock_asyncio_run):
         """Test execute delete with force flag"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.delete = AsyncMock()
-        mock_import.return_value = mock_cognee
 
-        # Mock asyncio.run to properly handle coroutines
-        def mock_run(coro):
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(coro)
-            finally:
-                loop.close()
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = DeleteCommand()
+            args = argparse.Namespace(
+                dataset_name="test_dataset", user_id=None, all=False, force=True
+            )
 
-        mock_asyncio.run.side_effect = mock_run
+            command.execute(args)
 
-        command = DeleteCommand()
-        args = argparse.Namespace(dataset_name="test_dataset", user_id=None, all=False, force=True)
-
-        command.execute(args)
-
-        mock_asyncio.run.assert_called_once()
+        mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        mock_cognee.delete.assert_awaited_once_with(dataset_name="test_dataset", user_id=None)
 
     def test_execute_no_delete_target(self):
         """Test execute when no delete target is specified"""
@@ -490,20 +443,19 @@ class TestConfigCommand:
         command.execute(args)
 
     @patch("cognee.cli.commands.config_command.fmt.confirm")
-    @patch("builtins.__import__")
-    def test_execute_unset_action(self, mock_import, mock_confirm):
+    def test_execute_unset_action(self, mock_confirm):
         """Test execute unset action"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.config.set_llm_provider = MagicMock()
-        mock_import.return_value = mock_cognee
 
-        command = ConfigCommand()
-        args = argparse.Namespace(config_action="unset", key="llm_provider", force=False)
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = ConfigCommand()
+            args = argparse.Namespace(config_action="unset", key="llm_provider", force=False)
 
-        mock_confirm.return_value = True
+            mock_confirm.return_value = True
 
-        command.execute(args)
+            command.execute(args)
 
         mock_confirm.assert_called_once()
 

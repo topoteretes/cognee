@@ -3,9 +3,10 @@ Tests for CLI edge cases and error scenarios with proper mocking.
 """
 
 import pytest
+import sys
+import asyncio
 import argparse
-import types
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock, AsyncMock, ANY, call
 from cognee.cli.commands.add_command import AddCommand
 from cognee.cli.commands.search_command import SearchCommand
 from cognee.cli.commands.cognify_command import CognifyCommand
@@ -14,27 +15,32 @@ from cognee.cli.commands.config_command import ConfigCommand
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 
 
+# Mock asyncio.run to properly handle coroutines
+def _mock_run(coro):
+    # Create an event loop and run the coroutine
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 class TestAddCommandEdgeCases:
     """Test edge cases for AddCommand"""
 
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.add_command.asyncio.run")
-    def test_add_empty_data_list(self, mock_asyncio_run, mock_import):
-        """Test add command with empty data list"""
-        # Mock the cognee module
+    @patch("cognee.cli.commands.add_command.asyncio.run", side_effect=_mock_run)
+    def test_add_empty_data_list(self, mock_asyncio_run):
         mock_cognee = MagicMock()
         mock_cognee.add = AsyncMock()
-        mock_import.return_value = mock_cognee
 
-        command = AddCommand()
-        # This shouldn't happen due to argparse nargs="+", but test defensive coding
-        args = argparse.Namespace(data=[], dataset_name="test_dataset")
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = AddCommand()
+            args = argparse.Namespace(data=[], dataset_name="test_dataset")
+            command.execute(args)
 
-        command.execute(args)
         mock_asyncio_run.assert_called_once()
-
-        coro = mock_asyncio_run.call_args[0][0]
-        assert isinstance(coro, types.CoroutineType)
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        mock_cognee.add.assert_awaited_once_with(data=[], dataset_name="test_dataset")
 
     @patch("cognee.cli.commands.add_command.asyncio.run")
     def test_add_asyncio_run_exception(self, mock_asyncio_run):
@@ -71,9 +77,8 @@ class TestAddCommandEdgeCases:
 class TestSearchCommandEdgeCases:
     """Test edge cases for SearchCommand"""
 
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.search_command.asyncio.run")
-    def test_search_empty_results(self, mock_asyncio_run, mock_import):
+    @patch("cognee.cli.commands.search_command.asyncio.run", side_effect=_mock_run)
+    def test_search_empty_results(self, mock_asyncio_run):
         """Test search command with empty results"""
         # Mock the cognee module and SearchType
         mock_cognee = MagicMock()
@@ -81,35 +86,36 @@ class TestSearchCommandEdgeCases:
         mock_search_type = MagicMock()
         mock_search_type.__getitem__.return_value = "GRAPH_COMPLETION"
 
-        def mock_import_func(name, fromlist=None, *args, **kwargs):
-            if name == "cognee":
-                return mock_cognee
-            elif name == "cognee.modules.search.types":
-                module = MagicMock()
-                module.SearchType = mock_search_type
-                return module
-            return MagicMock()
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = SearchCommand()
+            args = argparse.Namespace(
+                query_text="nonexistent query",
+                query_type="GRAPH_COMPLETION",
+                datasets=None,
+                top_k=10,
+                system_prompt=None,
+                output_format="pretty",
+            )
 
-        mock_import.side_effect = mock_import_func
+            # Should handle empty results gracefully
+            command.execute(args)
+
         mock_asyncio_run.return_value = []
-
-        command = SearchCommand()
-        args = argparse.Namespace(
+        mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        mock_cognee.search.assert_awaited_once_with(
             query_text="nonexistent query",
-            query_type="GRAPH_COMPLETION",
+            query_type=ANY,
             datasets=None,
             top_k=10,
-            system_prompt=None,
-            output_format="pretty",
+            system_prompt_path="answer_simple_question.txt",
         )
+        # verify the enum’s name separately
+        called_enum = mock_cognee.search.await_args.kwargs["query_type"]
+        assert called_enum.name == "GRAPH_COMPLETION"
 
-        # Should handle empty results gracefully
-        command.execute(args)
-        mock_asyncio_run.assert_called_once()
-
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.search_command.asyncio.run")
-    def test_search_very_large_top_k(self, mock_asyncio_run, mock_import):
+    @patch("cognee.cli.commands.search_command.asyncio.run", side_effect=_mock_run)
+    def test_search_very_large_top_k(self, mock_asyncio_run):
         """Test search command with very large top-k value"""
         # Mock the cognee module and SearchType
         mock_cognee = MagicMock()
@@ -117,30 +123,33 @@ class TestSearchCommandEdgeCases:
         mock_search_type = MagicMock()
         mock_search_type.__getitem__.return_value = "CHUNKS"
 
-        def mock_import_func(name, fromlist=None, *args, **kwargs):
-            if name == "cognee":
-                return mock_cognee
-            elif name == "cognee.modules.search.types":
-                module = MagicMock()
-                module.SearchType = mock_search_type
-                return module
-            return MagicMock()
-
-        mock_import.side_effect = mock_import_func
         mock_asyncio_run.return_value = ["result1"]
 
-        command = SearchCommand()
-        args = argparse.Namespace(
-            query_text="test query",
-            query_type="CHUNKS",
-            datasets=None,
-            top_k=999999,  # Very large value
-            system_prompt=None,
-            output_format="json",
-        )
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = SearchCommand()
+            args = argparse.Namespace(
+                query_text="test query",
+                query_type="CHUNKS",
+                datasets=None,
+                top_k=999999,  # Very large value
+                system_prompt=None,
+                output_format="json",
+            )
 
-        command.execute(args)
+            command.execute(args)
+
         mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        mock_cognee.search.assert_awaited_once_with(
+            query_text="test query",
+            query_type=ANY,
+            datasets=None,
+            top_k=999999,
+            system_prompt_path="answer_simple_question.txt",
+        )
+        # verify the enum’s name separately
+        called_enum = mock_cognee.search.await_args.kwargs["query_type"]
+        assert called_enum.name == "CHUNKS"
 
     @patch("builtins.__import__")
     def test_search_invalid_search_type_enum(self, mock_import):
@@ -181,9 +190,8 @@ class TestSearchCommandEdgeCases:
         args = parser.parse_args([unicode_query])
         assert args.query_text == unicode_query
 
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.search_command.asyncio.run")
-    def test_search_results_with_none_values(self, mock_asyncio_run, mock_import):
+    @patch("cognee.cli.commands.search_command.asyncio.run", side_effect=_mock_run)
+    def test_search_results_with_none_values(self, mock_asyncio_run):
         """Test search command when results contain None values"""
         # Mock the cognee module and SearchType
         mock_cognee = MagicMock()
@@ -191,105 +199,105 @@ class TestSearchCommandEdgeCases:
         mock_search_type = MagicMock()
         mock_search_type.__getitem__.return_value = "CHUNKS"
 
-        def mock_import_func(name, fromlist=None, *args, **kwargs):
-            if name == "cognee":
-                return mock_cognee
-            elif name == "cognee.modules.search.types":
-                module = MagicMock()
-                module.SearchType = mock_search_type
-                return module
-            return MagicMock()
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = SearchCommand()
+            args = argparse.Namespace(
+                query_text="test query",
+                query_type="CHUNKS",
+                datasets=None,
+                top_k=10,
+                system_prompt=None,
+                output_format="pretty",
+            )
 
-        mock_import.side_effect = mock_import_func
-        mock_asyncio_run.return_value = [None, "valid result", None]
+            # Should handle None values gracefully
+            command.execute(args)
 
-        command = SearchCommand()
-        args = argparse.Namespace(
+        mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        mock_cognee.search.assert_awaited_once_with(
             query_text="test query",
-            query_type="CHUNKS",
+            query_type=ANY,
             datasets=None,
             top_k=10,
-            system_prompt=None,
-            output_format="pretty",
+            system_prompt_path="answer_simple_question.txt",
         )
-
-        # Should handle None values gracefully
-        command.execute(args)
-        mock_asyncio_run.assert_called_once()
+        # verify the enum’s name separately
+        called_enum = mock_cognee.search.await_args.kwargs["query_type"]
+        assert called_enum.name == "CHUNKS"
 
 
 class TestCognifyCommandEdgeCases:
     """Test edge cases for CognifyCommand"""
 
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.cognify_command.asyncio.run")
-    def test_cognify_invalid_chunk_size(self, mock_asyncio_run, mock_import):
+    @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
+    def test_cognify_invalid_chunk_size(self, mock_asyncio_run):
         """Test cognify command with invalid chunk size"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.cognify = AsyncMock()
 
-        def mock_import_func(name, fromlist=None, *args, **kwargs):
-            if name == "cognee":
-                return mock_cognee
-            elif name == "cognee.modules.chunking":
-                module = MagicMock()
-                module.TextChunker = MagicMock()
-                return module
-            return MagicMock()
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = CognifyCommand()
+            args = argparse.Namespace(
+                datasets=None,
+                chunk_size=-100,  # Invalid negative chunk size
+                ontology_file=None,
+                chunker="TextChunker",
+                background=False,
+                verbose=False,
+            )
 
-        mock_import.side_effect = mock_import_func
+            # Should pass the invalid value to cognify and let it handle the validation
+            command.execute(args)
 
-        command = CognifyCommand()
-        args = argparse.Namespace(
+        mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        from cognee.modules.chunking import TextChunker
+
+        mock_cognee.cognify.assert_awaited_once_with(
             datasets=None,
-            chunk_size=-100,  # Invalid negative chunk size
-            ontology_file=None,
-            chunker="TextChunker",
-            background=False,
-            verbose=False,
+            chunk_size=-100,
+            ontology_file_path=None,
+            chunker=TextChunker,
+            run_in_background=False,
         )
 
-        # Should pass the invalid value to cognify and let it handle the validation
-        command.execute(args)
-        mock_asyncio_run.assert_called_once()
-
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.cognify_command.asyncio.run")
-    def test_cognify_nonexistent_ontology_file(self, mock_asyncio_run, mock_import):
+    @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
+    def test_cognify_nonexistent_ontology_file(self, mock_asyncio_run):
         """Test cognify command with nonexistent ontology file"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.cognify = AsyncMock()
 
-        def mock_import_func(name, fromlist=None, *args, **kwargs):
-            if name == "cognee":
-                return mock_cognee
-            elif name == "cognee.modules.chunking":
-                module = MagicMock()
-                module.TextChunker = MagicMock()
-                return module
-            return MagicMock()
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = CognifyCommand()
+            args = argparse.Namespace(
+                datasets=None,
+                chunk_size=None,
+                ontology_file="/nonexistent/path/ontology.owl",
+                chunker="TextChunker",
+                background=False,
+                verbose=False,
+            )
 
-        mock_import.side_effect = mock_import_func
+            # Should pass the path to cognify and let it handle file validation
+            command.execute(args)
 
-        command = CognifyCommand()
-        args = argparse.Namespace(
+        mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        from cognee.modules.chunking import TextChunker
+
+        mock_cognee.cognify.assert_awaited_once_with(
             datasets=None,
             chunk_size=None,
-            ontology_file="/nonexistent/path/ontology.owl",
-            chunker="TextChunker",
-            background=False,
-            verbose=False,
+            ontology_file_path="/nonexistent/path/ontology.owl",
+            chunker=TextChunker,
+            run_in_background=False,
         )
 
-        # Should pass the path to cognify and let it handle file validation
-        command.execute(args)
-        mock_asyncio_run.assert_called_once()
-
-    @patch("builtins.__import__")
     @patch("cognee.cli.commands.cognify_command.asyncio.run")
-    def test_cognify_langchain_chunker_import_error(self, mock_asyncio_run, mock_import):
+    def test_cognify_langchain_chunker_import_error(self, mock_asyncio_run):
         """Test cognify command when LangchainChunker import fails"""
         # Mock the cognee module
         mock_cognee = MagicMock()
@@ -306,76 +314,83 @@ class TestCognifyCommandEdgeCases:
                 return module
             return MagicMock()
 
-        mock_import.side_effect = mock_import_func
+        with (
+            patch("builtins.__import__", side_effect=mock_import_func),
+            patch.dict(sys.modules, {"cognee": mock_cognee}),
+        ):
+            command = CognifyCommand()
+            args = argparse.Namespace(
+                datasets=None,
+                chunk_size=None,
+                ontology_file=None,
+                chunker="LangchainChunker",
+                background=False,
+                verbose=True,
+            )
 
-        command = CognifyCommand()
-        args = argparse.Namespace(
-            datasets=None,
-            chunk_size=None,
-            ontology_file=None,
-            chunker="LangchainChunker",
-            background=False,
-            verbose=True,
-        )
+            # Should fall back to TextChunker and show warning
+            command.execute(args)
 
-        # Should fall back to TextChunker and show warning
-        command.execute(args)
         mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
 
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.cognify_command.asyncio.run")
-    def test_cognify_empty_datasets_list(self, mock_asyncio_run, mock_import):
+    @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
+    def test_cognify_empty_datasets_list(self, mock_asyncio_run):
         """Test cognify command with nonexistent ontology file"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.cognify = AsyncMock()
 
-        def mock_import_func(name, fromlist=None, *args, **kwargs):
-            if name == "cognee":
-                return mock_cognee
-            elif name == "cognee.modules.chunking":
-                module = MagicMock()
-                module.TextChunker = MagicMock()
-                return module
-            return MagicMock()
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = CognifyCommand()
+            args = argparse.Namespace(
+                datasets=[],
+                chunk_size=None,
+                ontology_file=None,
+                chunker="TextChunker",
+                background=False,
+                verbose=False,
+            )
 
-        mock_import.side_effect = mock_import_func
+            command.execute(args)
 
-        command = CognifyCommand()
-        args = argparse.Namespace(
-            datasets=[],
-            chunk_size=None,
-            ontology_file=None,
-            chunker="TextChunker",
-            background=False,
-            verbose=False,
-        )
-
-        command.execute(args)
         mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        from cognee.modules.chunking import TextChunker
+
+        mock_cognee.cognify.assert_awaited_once_with(
+            datasets=None,
+            chunk_size=None,
+            ontology_file_path=None,
+            chunker=TextChunker,
+            run_in_background=False,
+        )
 
 
 class TestDeleteCommandEdgeCases:
     """Test edge cases for DeleteCommand"""
 
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
-    @patch("builtins.__import__")
-    @patch("cognee.cli.commands.delete_command.asyncio.run")
-    def test_delete_all_with_user_id(self, mock_asyncio_run, mock_import, mock_confirm):
+    @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
+    def test_delete_all_with_user_id(self, mock_asyncio_run, mock_confirm):
         """Test delete command with both --all and --user-id"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.delete = AsyncMock()
-        mock_import.return_value = mock_cognee
 
-        command = DeleteCommand()
-        args = argparse.Namespace(dataset_name=None, user_id="test_user", all=True, force=False)
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = DeleteCommand()
+            args = argparse.Namespace(dataset_name=None, user_id="test_user", all=True, force=False)
 
-        mock_confirm.return_value = True
+            mock_confirm.return_value = True
 
-        # Should handle both flags being set
-        command.execute(args)
+            # Should handle both flags being set
+            command.execute(args)
+
+        mock_confirm.assert_called_once_with("Delete ALL data from cognee?")
         mock_asyncio_run.assert_called_once()
+        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
+        mock_cognee.delete.assert_awaited_once_with(dataset_name=None, user_id="test_user")
 
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     def test_delete_confirmation_keyboard_interrupt(self, mock_confirm):
@@ -482,20 +497,20 @@ class TestConfigCommandEdgeCases:
         mock_cognee.config.set.assert_called_once_with("test_key", invalid_json)
 
     @patch("cognee.cli.commands.config_command.fmt.confirm")
-    @patch("builtins.__import__")
-    def test_config_unset_unknown_key(self, mock_import, mock_confirm):
+    def test_config_unset_unknown_key(self, mock_confirm):
         """Test config unset with unknown key"""
         # Mock the cognee module
         mock_cognee = MagicMock()
-        mock_import.return_value = mock_cognee
 
-        command = ConfigCommand()
-        args = argparse.Namespace(config_action="unset", key="unknown_key", force=False)
+        with patch.dict(sys.modules, {"cognee": mock_cognee}):
+            command = ConfigCommand()
+            args = argparse.Namespace(config_action="unset", key="unknown_key", force=False)
 
-        mock_confirm.return_value = True
+            mock_confirm.return_value = True
 
-        # Should show error for unknown key
-        command.execute(args)
+            # Should show error for unknown key
+            command.execute(args)
+
         mock_confirm.assert_called_once()
 
     @patch("builtins.__import__")
