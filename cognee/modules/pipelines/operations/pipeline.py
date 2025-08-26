@@ -12,7 +12,9 @@ from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.modules.pipelines.operations import log_pipeline_run_initiated
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.modules.pipelines.layers.authorized_user_datasets import authorized_user_datasets
+from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+    resolve_authorized_user_datasets,
+)
 from cognee.modules.pipelines.layers.process_pipeline_check import process_pipeline_check
 
 from cognee.infrastructure.databases.relational import (
@@ -67,7 +69,7 @@ async def cognee_pipeline(
         await test_embedding_connection()
         cognee_pipeline.first_run = False  # Update flag after first run
 
-    user, authorized_datasets = await authorized_user_datasets(datasets, user)
+    user, authorized_datasets = await resolve_authorized_user_datasets(datasets, user)
 
     for dataset in authorized_datasets:
         async for run_info in run_pipeline(

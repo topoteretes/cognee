@@ -12,7 +12,7 @@ from cognee.modules.data.methods import (
 )
 
 
-async def authorized_user_datasets(
+async def resolve_authorized_user_datasets(
     datasets: Union[str, UUID, list[str], list[UUID]], user: User = None
 ) -> Tuple[User, List[Dataset]]:
     """
