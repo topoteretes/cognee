@@ -13,7 +13,7 @@ from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.utils import generate_pipeline_id
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 from cognee.modules.pipelines.methods import get_pipeline_run_by_dataset
-from cognee.modules.pipelines.layers import pipeline_tasks_validation
+from cognee.modules.pipelines.layers import validate_pipeline_tasks
 
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.methods import get_default_user
@@ -94,7 +94,7 @@ async def run_pipeline(
     incremental_loading=False,
 ):
     check_dataset_name(dataset.name)
-    pipeline_tasks_validation(tasks)
+    validate_pipeline_tasks(tasks)
 
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
