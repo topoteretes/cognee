@@ -9,6 +9,14 @@ from cognee.modules.data.models import Data
 from cognee.modules.data.models.Dataset import Dataset
 from cognee.modules.users.models import User
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.modules.sync.methods import (
+    create_sync_operation, 
+    update_sync_operation, 
+    mark_sync_started,
+    mark_sync_completed,
+    mark_sync_failed
+)
+from cognee.modules.sync.models import SyncStatus
 
 
 class DataEntryContent(BaseModel):
@@ -99,6 +107,19 @@ async def sync(
     logger = get_logger()
     logger.info(f"Starting cloud sync operation {run_id}: dataset {dataset.name} ({dataset.id})")
     
+    # Create sync operation record in database
+    try:
+        await create_sync_operation(
+            run_id=run_id,
+            dataset_id=dataset.id,
+            dataset_name=dataset.name,
+            user_id=user.id
+        )
+        logger.info(f"Created sync operation record for {run_id}")
+    except Exception as e:
+        logger.error(f"Failed to create sync operation record: {str(e)}")
+        # Continue without database tracking if record creation fails
+    
     # Start the sync operation in the background
     asyncio.create_task(_perform_background_sync(run_id, dataset, user))
     
@@ -124,16 +145,19 @@ async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) ->
     try:
         logger.info(f"Background sync {run_id}: Starting sync for dataset {dataset.name} ({dataset.id})")
         
+        # Mark sync as in progress
+        await mark_sync_started(run_id)
+        
         # Perform the actual sync operation
-        records_processed, bytes_transferred = await _sync_to_cognee_cloud(dataset, user)
+        records_processed, bytes_transferred = await _sync_to_cognee_cloud(dataset, user, run_id)
         
         end_time = datetime.now(timezone.utc)
         duration = (end_time - start_time).total_seconds()
         
         logger.info(f"Background sync {run_id}: Completed successfully. Records: {records_processed}, Bytes: {bytes_transferred}, Duration: {duration}s")
         
-        # TODO: Store completion status in database or cache for status checking
-        # This would allow users to check the status of their sync operation later
+        # Mark sync as completed with final stats
+        await mark_sync_completed(run_id, records_processed, bytes_transferred)
         
     except Exception as e:
         end_time = datetime.now(timezone.utc)
@@ -141,10 +165,11 @@ async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) ->
         
         logger.error(f"Background sync {run_id}: Failed after {duration}s with error: {str(e)}")
         
-        # TODO: Store failure status in database or cache for status checking
+        # Mark sync as failed with error message
+        await mark_sync_failed(run_id, str(e))
 
 
-async def _sync_to_cognee_cloud(dataset: Dataset, user: User) -> tuple[int, int]:
+async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tuple[int, int]:
     """Sync local data to Cognee Cloud."""
     from cognee.shared.logging_utils import get_logger
     logger = get_logger()
@@ -160,7 +185,7 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User) -> tuple[int, int]
         # 4. Uploading to cloud with proper authentication
         # 5. Verifying data integrity after upload
         
-        records_processed = await _extract_and_upload_dataset(dataset, user)
+        records_processed = await _extract_and_upload_dataset(dataset, user, run_id)
         
         # TODO: Calculate actual bytes transferred from the extracted content
         # For now using estimate, but this should be the actual size of sync payload sent to cloud
@@ -175,8 +200,18 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User) -> tuple[int, int]
         raise ConnectionError(f"Cloud sync failed: {str(e)}")
 
 
-async def _extract_and_upload_dataset(dataset: Dataset, user: User) -> int:
-    """Extract local dataset data and upload to Cognee Cloud."""
+async def _extract_and_upload_dataset(dataset: Dataset, user: User, run_id: str) -> int:
+    """
+    Extract local dataset data and upload to Cognee Cloud.
+    
+    Args:
+        dataset: Dataset to extract and sync
+        user: User performing the sync
+        run_id: Unique identifier for this sync operation (for progress tracking)
+        
+    Returns:
+        int: Number of records successfully processed
+    """
     from cognee.shared.logging_utils import get_logger
     logger = get_logger()
     
@@ -187,8 +222,15 @@ async def _extract_and_upload_dataset(dataset: Dataset, user: User) -> int:
         data_entries = await get_dataset_data(dataset.id)
         logger.info(f"Found {len(data_entries)} data entries in dataset")
         
+        # Update sync operation with total records count
+        await update_sync_operation(
+            run_id=run_id,
+            total_records=len(data_entries)
+        )
+        
         # Step 2: Read contents from each data entry's raw_data_location
         extracted_contents: List[DataEntryContent] = []
+        
         for data_entry in data_entries:
             try:
                 logger.info(f"Reading content from: {data_entry.name} ({data_entry.raw_data_location})")
@@ -203,6 +245,8 @@ async def _extract_and_upload_dataset(dataset: Dataset, user: User) -> int:
                     content=content,
                     node_set=data_entry.node_set
                 ))
+                
+                # Note: Progress tracking happens during actual cloud upload, not local file reading
                 
             except Exception as e:
                 logger.warning(f"Failed to read content from {data_entry.name}: {str(e)}")
@@ -238,8 +282,10 @@ async def _extract_and_upload_dataset(dataset: Dataset, user: User) -> int:
         # Step 4: Upload to cloud (placeholder implementation)
         # TODO: Implement actual cloud upload logic
         # - Authenticate with cloud service
-        # - Upload sync payload
+        # - Upload sync payload (with progress tracking here)
+        # - Update progress: await update_sync_operation(run_id, progress_percentage=50)
         # - Verify upload integrity
+        # - Final progress: await update_sync_operation(run_id, progress_percentage=100)
         
         logger.info(f"Prepared sync payload: {sync_payload.total_entries} entries, {sync_payload.total_size} bytes, {sync_payload.total_tokens} tokens")
         
