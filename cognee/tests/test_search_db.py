@@ -113,17 +113,17 @@ async def main():
 
     completion_gk = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
-        query_text="Next to which country is Germany located?",
+        query_text="Where is germany located, next to which country?",
         save_interaction=True,
     )
     completion_cot = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION_COT,
-        query_text="Next to which country is Germany located?",
+        query_text="What is the country next to germany??",
         save_interaction=True,
     )
     completion_ext = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
-        query_text="Next to which country is Germany located?",
+        query_text="What is the name of the country next to germany",
         save_interaction=True,
     )
 
