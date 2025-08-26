@@ -9,7 +9,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
-
+from cognee.modules.pipelines.layers import validate_pipeline_tasks
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
 from cognee.context_global_variables import set_database_global_context_variables
@@ -59,6 +59,8 @@ async def run_pipeline(
     context: dict = None,
     incremental_loading=False,
 ):
+    validate_pipeline_tasks(tasks)
+
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
@@ -71,13 +73,6 @@ async def run_pipeline(
         # return status information to async generator and finish execution
         yield process_pipeline_status
         return
-
-    if not isinstance(tasks, list):
-        raise ValueError("Tasks must be a list")
-
-    for task in tasks:
-        if not isinstance(task, Task):
-            raise ValueError(f"Task {task} is not an instance of Task")
 
     pipeline_run = run_tasks(
         tasks, dataset.id, data, user, pipeline_name, context, incremental_loading
