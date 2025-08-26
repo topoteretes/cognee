@@ -69,7 +69,7 @@ jobs:
     secrets: inherit
 
   different-operating-systems-tests:
-    name: Python Operating Systems Tests
+    name: Operating System and Python Tests
     needs: [basic-tests, e2e-tests, cli-tests]
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
