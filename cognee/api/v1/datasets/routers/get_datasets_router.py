@@ -284,7 +284,7 @@ def get_datasets_router() -> APIRouter:
         - **500 Internal Server Error**: Error retrieving graph data
         """
 
-        graph_data = await get_formatted_graph_data(dataset_id, user.id)
+        graph_data = await get_formatted_graph_data(dataset_id, user)
 
         return graph_data
 

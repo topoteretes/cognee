@@ -164,7 +164,7 @@ def get_cognify_router() -> APIRouter:
                     {
                         "pipeline_run_id": str(pipeline_run_info.pipeline_run_id),
                         "status": pipeline_run_info.status,
-                        "payload": await get_formatted_graph_data(pipeline_run.dataset_id, user.id),
+                        "payload": await get_formatted_graph_data(pipeline_run.dataset_id, user),
                     }
                 )
 
