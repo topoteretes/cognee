@@ -173,29 +173,17 @@ def log_database_configuration(logger):
     from cognee.infrastructure.databases.graph.config import get_graph_config
 
     try:
-        # Log relational database configuration
-        relational_config = get_relational_config()
-        if relational_config.db_provider == "postgres":
-            logger.info(f"Postgres host: {relational_config.db_host}:{relational_config.db_port}")
-        elif relational_config.db_provider == "sqlite":
-            logger.info(f"SQLite path: {relational_config.db_path}")
+        # Get base database directory path
+        from cognee.base_config import get_base_config
 
-        # Log vector database configuration
-        vector_config = get_vectordb_config()
-        if vector_config.vector_db_provider == "lancedb":
-            logger.info(f"Vector database path: {vector_config.vector_db_url}")
-        else:
-            logger.info(f"Vector database URL: {vector_config.vector_db_url}")
+        base_config = get_base_config()
+        databases_path = os.path.join(base_config.system_root_directory, "databases")
 
-        # Log graph database configuration
-        graph_config = get_graph_config()
-        if graph_config.graph_database_provider == "kuzu":
-            logger.info(f"Graph database path: {graph_config.graph_file_path}")
-        else:
-            logger.info(f"Graph database URL: {graph_config.graph_database_url}")
+        # Log concise database info
+        logger.info(f"Database storage: {databases_path}")
 
     except Exception as e:
-        logger.warning(f"Could not retrieve database configuration: {str(e)}")
+        logger.debug(f"Could not retrieve database configuration: {str(e)}")
 
 
 def cleanup_old_logs(logs_dir, max_files):
@@ -216,12 +204,21 @@ def cleanup_old_logs(logs_dir, max_files):
 
         # Remove old files that exceed the maximum
         if len(log_files) > max_files:
+            deleted_count = 0
             for old_file in log_files[max_files:]:
                 try:
                     old_file.unlink()
-                    logger.info(f"Deleted old log file: {old_file}")
+                    deleted_count += 1
+                    # Only log individual files in non-CLI mode
+                    if os.getenv("COGNEE_CLI_MODE") != "true":
+                        logger.info(f"Deleted old log file: {old_file}")
                 except Exception as e:
+                    # Always log errors
                     logger.error(f"Failed to delete old log file {old_file}: {e}")
+
+            # In CLI mode, show compact summary
+            if os.getenv("COGNEE_CLI_MODE") == "true" and deleted_count > 0:
+                logger.info(f"Cleaned up {deleted_count} old log files")
 
         return True
     except Exception as e:
@@ -241,6 +238,7 @@ def setup_logging(log_level=None, name=None):
     """
     global _is_structlog_configured
 
+    # Regular detailed logging for non-CLI usage
     log_level = log_level if log_level else log_levels[os.getenv("LOG_LEVEL", "INFO")]
 
     # Configure external library logging early to suppress verbose output
@@ -297,11 +295,6 @@ def setup_logging(log_level=None, name=None):
         )
         # Hand back to the original hook → prints traceback and exits
         sys.__excepthook__(exc_type, exc_value, traceback)
-
-        logger.info("Want to learn more? Visit the Cognee documentation: https://docs.cognee.ai")
-        logger.info(
-            "Need help? Reach out to us on our Discord server: https://discord.gg/NQPKmU5CCg"
-        )
 
     # Install exception handlers
     sys.excepthook = handle_exception
@@ -380,17 +373,37 @@ def setup_logging(log_level=None, name=None):
     # Mark logging as configured
     _is_structlog_configured = True
 
+    from cognee.infrastructure.databases.relational.config import get_relational_config
+    from cognee.infrastructure.databases.vector.config import get_vectordb_config
+    from cognee.infrastructure.databases.graph.config import get_graph_config
+
+    graph_config = get_graph_config()
+    vector_config = get_vectordb_config()
+    relational_config = get_relational_config()
+
+    try:
+        # Get base database directory path
+        from cognee.base_config import get_base_config
+
+        base_config = get_base_config()
+        databases_path = os.path.join(base_config.system_root_directory, "databases")
+    except Exception as e:
+        raise ValueError from e
+
     # Get a configured logger and log system information
     logger = structlog.get_logger(name if name else __name__)
+    # Detailed initialization for regular usage
     logger.info(
         "Logging initialized",
         python_version=PYTHON_VERSION,
         structlog_version=STRUCTLOG_VERSION,
         cognee_version=COGNEE_VERSION,
         os_info=OS_INFO,
+        database_path=databases_path,
+        graph_database_name=graph_config.graph_database_name,
+        vector_config=vector_config.vector_db_provider,
+        relational_config=relational_config.db_name,
     )
-
-    logger.info("Want to learn more? Visit the Cognee documentation: https://docs.cognee.ai")
 
     # Log database configuration
     log_database_configuration(logger)
