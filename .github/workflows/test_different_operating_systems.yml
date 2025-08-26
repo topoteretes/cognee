@@ -198,7 +198,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./cognee/tests/test_deletion_soft.py
+        run: uv run python ./cognee/tests/test_delete_soft.py
 
   run-hard-deletion-test:
     name: Hard Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
@@ -228,4 +228,4 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./cognee/tests/test_deletion_hard.py
+        run: uv run python ./cognee/tests/test_delete_hard.py
