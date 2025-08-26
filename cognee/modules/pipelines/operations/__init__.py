@@ -2,5 +2,4 @@ from .log_pipeline_run_initiated import log_pipeline_run_initiated
 from .log_pipeline_run_start import log_pipeline_run_start
 from .log_pipeline_run_complete import log_pipeline_run_complete
 from .log_pipeline_run_error import log_pipeline_run_error
-from .reset_pipeline_run_status import reset_pipeline_run_status
 from .pipeline import cognee_pipeline

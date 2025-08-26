@@ -2,20 +2,15 @@ from uuid import UUID
 from typing import Union, BinaryIO, List, Optional
 
 from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_default_user
-from cognee.modules.pipelines import Task
-from cognee.modules.pipelines import cognee_pipeline
-from cognee.modules.pipelines.methods import get_pipeline_runs_by_dataset
-from cognee.modules.pipelines.operations import reset_pipeline_run_status
-from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
-from cognee.modules.data.methods import (
-    create_authorized_dataset,
-    get_authorized_dataset,
-    get_authorized_dataset_by_name,
+from cognee.modules.pipelines import Task, cognee_pipeline
+from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
+    resolve_authorized_user_dataset,
+)
+from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
+    reset_dataset_pipeline_run_status,
 )
 from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
-from cognee.api.v1.exceptions.exceptions import DatasetNotFoundError
 
 
 async def add(
@@ -153,33 +148,9 @@ async def add(
 
     await setup()
 
-    if not user:
-        user = await get_default_user()
+    user, authorized_dataset = await resolve_authorized_user_dataset(dataset_id, dataset_name, user)
 
-    if dataset_id:
-        authorized_dataset = await get_authorized_dataset(user, dataset_id, "write")
-    elif dataset_name:
-        authorized_dataset = await get_authorized_dataset_by_name(dataset_name, user, "write")
-
-        if not authorized_dataset:
-            authorized_dataset = await create_authorized_dataset(
-                dataset_name=dataset_name, user=user
-            )
-    else:
-        raise ValueError("Either dataset_id or dataset_name must be provided.")
-
-    if not authorized_dataset:
-        raise DatasetNotFoundError(
-            message=f"Dataset ({str(dataset_id) or dataset_name}) not found."
-        )
-
-    related_pipeline_runs = await get_pipeline_runs_by_dataset(authorized_dataset.id)
-
-    for pipeline_run in related_pipeline_runs:
-        if pipeline_run.status is not PipelineRunStatus.DATASET_PROCESSING_INITIATED:
-            await reset_pipeline_run_status(
-                user.id, authorized_dataset.id, pipeline_run.pipeline_name
-            )
+    await reset_dataset_pipeline_run_status(authorized_dataset.id, user)
 
     pipeline_run_info = None
 
