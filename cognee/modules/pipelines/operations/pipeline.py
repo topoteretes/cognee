@@ -9,28 +9,16 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.pipelines.operations.run_tasks import run_tasks
-from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.modules.pipelines.utils import generate_pipeline_id
-from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
-from cognee.modules.pipelines.methods import get_pipeline_run_by_dataset
 from cognee.modules.pipelines.layers import validate_pipeline_tasks
-
 from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.modules.pipelines.operations import log_pipeline_run_initiated
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.modules.data.exceptions import DatasetNotFoundError
-from cognee.modules.data.methods import (
-    get_authorized_existing_datasets,
-    load_or_create_datasets,
-    check_dataset_name,
+from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+    resolve_authorized_user_datasets,
 )
-
-from cognee.modules.pipelines.models.PipelineRunInfo import (
-    PipelineRunCompleted,
-    PipelineRunStarted,
-)
+from cognee.modules.pipelines.layers.process_pipeline_check import process_pipeline_check
 
 logger = get_logger("cognee.pipeline")
 
@@ -49,29 +37,9 @@ async def cognee_pipeline(
 ):
     await environment_setup_and_checks(vector_db_config, graph_db_config)
 
-    # If no user is provided use default user
-    if user is None:
-        user = await get_default_user()
+    user, authorized_datasets = await resolve_authorized_user_datasets(datasets, user)
 
-    # Convert datasets to list
-    if isinstance(datasets, str) or isinstance(datasets, UUID):
-        datasets = [datasets]
-
-    # Get datasets user wants write permissions for (verify user has permissions if datasets are provided as well)
-    # NOTE: If a user wants to write to a dataset he does not own it must be provided through UUID
-    existing_datasets = await get_authorized_existing_datasets(datasets, "write", user)
-
-    if not datasets:
-        # Get datasets from database if none sent.
-        datasets = existing_datasets
-    else:
-        # If dataset matches an existing Dataset (by name or id), reuse it. Otherwise, create a new Dataset.
-        datasets = await load_or_create_datasets(datasets, existing_datasets, user)
-
-    if not datasets:
-        raise DatasetNotFoundError("There are no datasets to work with.")
-
-    for dataset in datasets:
+    for dataset in authorized_datasets:
         async for run_info in run_pipeline(
             dataset=dataset,
             user=user,
@@ -93,7 +61,6 @@ async def run_pipeline(
     context: dict = None,
     incremental_loading=False,
 ):
-    check_dataset_name(dataset.name)
     validate_pipeline_tasks(tasks)
 
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
@@ -119,42 +86,18 @@ async def run_pipeline(
             dataset_id=dataset.id,
         )
 
-    dataset_id = dataset.id
-
     if not data:
-        data: list[Data] = await get_dataset_data(dataset_id=dataset_id)
+        data: list[Data] = await get_dataset_data(dataset_id=dataset.id)
 
-    # async with update_status_lock: TODO: Add UI lock to prevent multiple backend requests
-    if isinstance(dataset, Dataset):
-        task_status = await get_pipeline_status([dataset_id], pipeline_name)
-    else:
-        task_status = [
-            PipelineRunStatus.DATASET_PROCESSING_COMPLETED
-        ]  # TODO: this is a random assignment, find permanent solution
-
-    if str(dataset_id) in task_status:
-        if task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_STARTED:
-            logger.info("Dataset %s is already being processed.", dataset_id)
-            pipeline_run = await get_pipeline_run_by_dataset(dataset_id, pipeline_name)
-            yield PipelineRunStarted(
-                pipeline_run_id=pipeline_run.pipeline_run_id,
-                dataset_id=dataset.id,
-                dataset_name=dataset.name,
-                payload=data,
-            )
-            return
-        elif task_status[str(dataset_id)] == PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
-            logger.info("Dataset %s is already processed.", dataset_id)
-            pipeline_run = await get_pipeline_run_by_dataset(dataset_id, pipeline_name)
-            yield PipelineRunCompleted(
-                pipeline_run_id=pipeline_run.pipeline_run_id,
-                dataset_id=dataset.id,
-                dataset_name=dataset.name,
-            )
-            return
+    process_pipeline_status = await process_pipeline_check(dataset, data, pipeline_name)
+    if process_pipeline_status:
+        # If pipeline was already processed or is currently being processed
+        # return status information to async generator and finish execution
+        yield process_pipeline_status
+        return
 
     pipeline_run = run_tasks(
-        tasks, dataset_id, data, user, pipeline_name, context, incremental_loading
+        tasks, dataset.id, data, user, pipeline_name, context, incremental_loading
     )
 
     async for pipeline_run_info in pipeline_run:
