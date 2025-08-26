@@ -94,12 +94,12 @@ async def main():
 
         await cognee.cognify([dataset_name])
 
-        context_nonempty = await GraphCompletionRetriever(
+        context_nonempty, _ = await GraphCompletionRetriever(
             node_type=NodeSet,
             node_name=["first"],
         ).get_context("What is in the context?")
 
-        context_empty = await GraphCompletionRetriever(
+        context_empty, _ = await GraphCompletionRetriever(
             node_type=NodeSet,
             node_name=["nonexistent"],
         ).get_context("What is in the context?")

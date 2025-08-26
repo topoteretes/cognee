@@ -1,14 +1,20 @@
-from typing import Any, Optional, Type, List
+from typing import Any, Optional, Type, List, Coroutine
 from collections import Counter
+from uuid import NAMESPACE_OID, uuid5
 import string
 
 from cognee.infrastructure.engine import DataPoint
+from cognee.tasks.storage import add_data_points
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.retrieval.utils.extract_uuid_from_node import extract_uuid_from_node
+from cognee.modules.retrieval.utils.models import CogneeUserInteraction
+from cognee.modules.engine.models.node_set import NodeSet
+from cognee.infrastructure.databases.graph import get_graph_engine
 
 logger = get_logger("GraphCompletionRetriever")
 
@@ -33,8 +39,10 @@ class GraphCompletionRetriever(BaseRetriever):
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        save_interaction: bool = False,
     ):
         """Initialize retriever with prompt paths and search parameters."""
+        self.save_interaction = save_interaction
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 5
@@ -118,7 +126,7 @@ class GraphCompletionRetriever(BaseRetriever):
 
         return found_triplets
 
-    async def get_context(self, query: str) -> str:
+    async def get_context(self, query: str) -> str | tuple[str, list]:
         """
         Retrieves and resolves graph triplets into context based on a query.
 
@@ -137,9 +145,11 @@ class GraphCompletionRetriever(BaseRetriever):
 
         if len(triplets) == 0:
             logger.warning("Empty context was provided to the completion")
-            return ""
+            return "", triplets
 
-        return await self.resolve_edges_to_text(triplets)
+        context = await self.resolve_edges_to_text(triplets)
+
+        return context, triplets
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         """
@@ -157,8 +167,10 @@ class GraphCompletionRetriever(BaseRetriever):
 
             - Any: A generated completion based on the query and context provided.
         """
+        triplets = None
+
         if context is None:
-            context = await self.get_context(query)
+            context, triplets = await self.get_context(query)
 
         completion = await generate_completion(
             query=query,
@@ -166,6 +178,12 @@ class GraphCompletionRetriever(BaseRetriever):
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
         )
+
+        if self.save_interaction and context and triplets and completion:
+            await self.save_qa(
+                question=query, answer=completion, context=context, triplets=triplets
+            )
+
         return [completion]
 
     def _top_n_words(self, text, stop_words=None, top_n=3, separator=", "):
@@ -187,3 +205,69 @@ class GraphCompletionRetriever(BaseRetriever):
         first_n_words = text.split()[:first_n_words]
         top_n_words = self._top_n_words(text, top_n=top_n_words)
         return f"{' '.join(first_n_words)}... [{top_n_words}]"
+
+    async def save_qa(self, question: str, answer: str, context: str, triplets: List) -> None:
+        """
+        Saves a question and answer pair for later analysis or storage.
+        Parameters:
+        -----------
+            - question (str): The question text.
+            - answer (str): The answer text.
+            - context (str): The context text.
+            - triplets (List): A list of triples retrieved from the graph.
+        """
+        nodeset_name = "Interactions"
+        interactions_node_set = NodeSet(
+            id=uuid5(NAMESPACE_OID, name=nodeset_name), name=nodeset_name
+        )
+        source_id = uuid5(NAMESPACE_OID, name=(question + answer + context))
+
+        cognee_user_interaction = CogneeUserInteraction(
+            id=source_id,
+            question=question,
+            answer=answer,
+            context=context,
+            belongs_to_set=interactions_node_set,
+        )
+
+        await add_data_points(data_points=[cognee_user_interaction], update_edge_collection=False)
+
+        relationships = []
+        relationship_name = "used_graph_element_to_answer"
+        for triplet in triplets:
+            target_id_1 = extract_uuid_from_node(triplet.node1)
+            target_id_2 = extract_uuid_from_node(triplet.node2)
+            if target_id_1 and target_id_2:
+                relationships.append(
+                    (
+                        source_id,
+                        target_id_1,
+                        relationship_name,
+                        {
+                            "relationship_name": relationship_name,
+                            "source_node_id": source_id,
+                            "target_node_id": target_id_1,
+                            "ontology_valid": False,
+                            "feedback_weight": 0,
+                        },
+                    )
+                )
+
+                relationships.append(
+                    (
+                        source_id,
+                        target_id_2,
+                        relationship_name,
+                        {
+                            "relationship_name": relationship_name,
+                            "source_node_id": source_id,
+                            "target_node_id": target_id_2,
+                            "ontology_valid": False,
+                            "feedback_weight": 0,
+                        },
+                    )
+                )
+
+            if len(relationships) > 0:
+                graph_engine = await get_graph_engine()
+                await graph_engine.add_edges(relationships)

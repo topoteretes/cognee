@@ -10,7 +10,37 @@ from cognee.tasks.storage.exceptions import (
 )
 
 
-async def add_data_points(data_points: List[DataPoint]) -> List[DataPoint]:
+async def add_data_points(
+    data_points: List[DataPoint], update_edge_collection: bool = True
+) -> List[DataPoint]:
+    """
+    Add a batch of data points to the graph database by extracting nodes and edges,
+    deduplicating them, and indexing them for retrieval.
+
+    This function parallelizes the graph extraction for each data point,
+    merges the resulting nodes and edges, and ensures uniqueness before
+    committing them to the underlying graph engine. It also updates the
+    associated retrieval indices for nodes and (optionally) edges.
+
+    Args:
+        data_points (List[DataPoint]):
+            A list of data points to process and insert into the graph.
+        update_edge_collection (bool, optional):
+            Whether to update the edge index after adding edges.
+            Defaults to True.
+
+    Returns:
+        List[DataPoint]:
+            The original list of data points after processing and insertion.
+
+    Side Effects:
+        - Calls `get_graph_from_model` concurrently for each data point.
+        - Deduplicates nodes and edges across all results.
+        - Updates the node index via `index_data_points`.
+        - Inserts nodes and edges into the graph engine.
+        - Optionally updates the edge index via `index_graph_edges`.
+    """
+
     if not isinstance(data_points, list):
         raise InvalidDataPointsInAddDataPointsError("data_points must be a list.")
     if not all(isinstance(dp, DataPoint) for dp in data_points):
@@ -48,7 +78,7 @@ async def add_data_points(data_points: List[DataPoint]) -> List[DataPoint]:
     await graph_engine.add_nodes(nodes)
     await graph_engine.add_edges(edges)
 
-    # This step has to happen after adding nodes and edges because we query the graph.
-    await index_graph_edges()
+    if update_edge_collection:
+        await index_graph_edges()
 
     return data_points

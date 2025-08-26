@@ -47,7 +47,7 @@ class TestGraphCompletionCoTRetriever:
 
         retriever = GraphCompletionCotRetriever()
 
-        context = await retriever.get_context("Who works at Canva?")
+        context, _ = await retriever.get_context("Who works at Canva?")
 
         assert "Mike Broski --[works_for]--> Canva" in context, "Failed to get Mike Broski"
         assert "Christina Mayer --[works_for]--> Canva" in context, "Failed to get Christina Mayer"
@@ -124,7 +124,7 @@ class TestGraphCompletionCoTRetriever:
 
         retriever = GraphCompletionCotRetriever(top_k=20)
 
-        context = await retriever.get_context("Who works at Figma?")
+        context, _ = await retriever.get_context("Who works at Figma?")
 
         print(context)
 
@@ -162,7 +162,7 @@ class TestGraphCompletionCoTRetriever:
 
         await setup()
 
-        context = await retriever.get_context("Who works at Figma?")
+        context, _ = await retriever.get_context("Who works at Figma?")
         assert context == "", "Context should be empty on an empty graph"
 
         answer = await retriever.get_completion("Who works at Figma?")
