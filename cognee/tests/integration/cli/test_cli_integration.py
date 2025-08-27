@@ -87,13 +87,11 @@ class TestCliIntegration:
             stderr_lower = result.stderr.lower()
             has_error = "error" in stderr_lower
             has_expected_failure = "failed to add data" in stderr_lower
-            has_litellm_cancellation = "loggingworker cancelled" in stderr_lower or "cancellederror" in stderr_lower
-            
-            assert (
-                not has_error 
-                or has_expected_failure 
-                or has_litellm_cancellation
+            has_litellm_cancellation = (
+                "loggingworker cancelled" in stderr_lower or "cancellederror" in stderr_lower
             )
+
+            assert not has_error or has_expected_failure or has_litellm_cancellation
 
         finally:
             os.unlink(temp_file)
