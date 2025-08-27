@@ -48,7 +48,6 @@ dependencies = [
     "fastapi-users[sqlalchemy]>=14.0.1,<15.0.0",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
-    "onnxruntime>=1.0.0,<2.0.0",
     "pylance>=0.22.0,<1.0.0",
     "kuzu (==0.11.0)",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
