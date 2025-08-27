@@ -22,7 +22,7 @@ from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
-from cognee.tasks.temporal_graph import extract_events_and_entities
+from cognee.tasks.temporal_graph import extract_events_and_timestamps, extract_knowledge_graph_from_events
 
 logger = get_logger("cognify")
 
@@ -180,7 +180,7 @@ async def cognify(
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
     if temporal_cognify:
-        tasks = await get_temporal_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
+        tasks = await get_temporal_tasks(user, chunker, chunk_size)
     else:
         tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 
@@ -241,7 +241,8 @@ async def get_temporal_tasks(
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
             chunker=chunker,
         ),
-        Task(extract_events_and_entities, task_config={"chunk_size": 10}),
+        Task(extract_events_and_timestamps, task_config={"chunk_size": 10}),
+        Task(extract_knowledge_graph_from_events),
         Task(add_data_points, task_config={"batch_size": 10}),
     ]
 
