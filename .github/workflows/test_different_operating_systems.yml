@@ -1,6 +1,7 @@
+name: Tests to run on different Operating Systems
+
 permissions:
   contents: read
-name: Tests to run on different Operating Systems
 
 on:
   workflow_call:
