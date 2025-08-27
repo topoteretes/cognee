@@ -18,34 +18,41 @@ proxy_url = "https://test.prometh.ai"
 
 
 def get_entities(tagged_tokens):
-    import nltk
-
-    nltk.download("maxent_ne_chunker", quiet=True)
-
-    from nltk.chunk import ne_chunk
-
-    return ne_chunk(tagged_tokens)
+    try:
+        import nltk
+        nltk.download("maxent_ne_chunker", quiet=True)
+        from nltk.chunk import ne_chunk
+        return ne_chunk(tagged_tokens)
+    except ImportError:
+        raise ImportError(
+            "NLTK is required for entity extraction. Install with 'pip install cognee[nlp]' to use this feature."
+        )
 
 
 def extract_pos_tags(sentence):
     """Extract Part-of-Speech (POS) tags for words in a sentence."""
-    import nltk
+    try:
+        import nltk
 
-    # Ensure that the necessary NLTK resources are downloaded
-    nltk.download("words", quiet=True)
-    nltk.download("punkt", quiet=True)
-    nltk.download("averaged_perceptron_tagger", quiet=True)
+        # Ensure that the necessary NLTK resources are downloaded
+        nltk.download("words", quiet=True)
+        nltk.download("punkt", quiet=True)
+        nltk.download("averaged_perceptron_tagger", quiet=True)
 
-    from nltk.tag import pos_tag
-    from nltk.tokenize import word_tokenize
+        from nltk.tag import pos_tag
+        from nltk.tokenize import word_tokenize
 
-    # Tokenize the sentence into words
-    tokens = word_tokenize(sentence)
+        # Tokenize the sentence into words
+        tokens = word_tokenize(sentence)
 
-    # Tag each word with its corresponding POS tag
-    pos_tags = pos_tag(tokens)
+        # Tag each word with its corresponding POS tag
+        pos_tags = pos_tag(tokens)
 
-    return pos_tags
+        return pos_tags
+    except ImportError:
+        raise ImportError(
+            "NLTK is required for POS tagging. Install with 'pip install cognee[nlp]' to use this feature."
+        )
 
 
 def get_anonymous_id():
