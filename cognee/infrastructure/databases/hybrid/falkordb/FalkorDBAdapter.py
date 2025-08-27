@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional, Tuple, Type, Union
 
 from falkordb import FalkorDB
 
-from cognee.exceptions import InvalidValueError
+from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
     record_graph_changes,
@@ -721,7 +721,7 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
             Returns the search results as a result set from the graph database.
         """
         if query_text is None and query_vector is None:
-            raise InvalidValueError(message="One of query_text or query_vector must be provided!")
+            raise MissingQueryParameterError()
 
         if query_text and not query_vector:
             query_vector = (await self.embed_data([query_text]))[0]

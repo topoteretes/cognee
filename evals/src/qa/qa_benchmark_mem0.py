@@ -19,7 +19,7 @@ class Mem0Config(QABenchmarkConfig):
     user_id: str = "hotpot_qa_user"
 
     # Model parameters
-    # model_name: str = "gpt-4o-mini"
+    # model_name: str = "gpt-5-mini"
     model_name: str = "gpt-4o"
 
     # Default results file

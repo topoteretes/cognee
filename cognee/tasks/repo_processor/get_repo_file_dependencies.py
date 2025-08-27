@@ -24,6 +24,7 @@ async def get_source_code_files(repo_path, language_config: dict[str, list[str]]
     --------
         A list of (absolute_path, language) tuples for source code files.
     """
+
     def _get_language_from_extension(file, language_config):
         for lang, exts in language_config.items():
             for ext in exts:
@@ -34,14 +35,14 @@ async def get_source_code_files(repo_path, language_config: dict[str, list[str]]
     # Default config if not provided
     if language_config is None:
         language_config = {
-            'python': ['.py'],
-            'javascript': ['.js', '.jsx'],
-            'typescript': ['.ts', '.tsx'],
-            'java': ['.java'],
-            'csharp': ['.cs'],
-            'go': ['.go'],
-            'rust': ['.rs'],
-            'cpp': ['.cpp', '.c', '.h', '.hpp'],
+            "python": [".py"],
+            "javascript": [".js", ".jsx"],
+            "typescript": [".ts", ".tsx"],
+            "java": [".java"],
+            "csharp": [".cs"],
+            "go": [".go"],
+            "rust": [".rs"],
+            "cpp": [".cpp", ".c", ".h", ".hpp"],
         }
 
     if not os.path.exists(repo_path):
@@ -55,9 +56,17 @@ async def get_source_code_files(repo_path, language_config: dict[str, list[str]]
                 continue
             # Exclude tests and common build/venv directories
             excluded_dirs = {
-                ".venv", "venv", "env", ".env", "site-packages",
-                "node_modules", "dist", "build", ".git",
-                "tests", "test",
+                ".venv",
+                "venv",
+                "env",
+                ".env",
+                "site-packages",
+                "node_modules",
+                "dist",
+                "build",
+                ".git",
+                "tests",
+                "test",
             }
             root_parts = set(os.path.normpath(root).split(os.sep))
             base_name, _ext = os.path.splitext(file)
@@ -133,17 +142,19 @@ async def get_repo_file_dependencies(
 
     # Build language config from supported_languages
     default_language_config = {
-        'python': ['.py'],
-        'javascript': ['.js', '.jsx'],
-        'typescript': ['.ts', '.tsx'],
-        'java': ['.java'],
-        'csharp': ['.cs'],
-        'go': ['.go'],
-        'rust': ['.rs'],
-        'cpp': ['.cpp', '.c', '.h', '.hpp'],
+        "python": [".py"],
+        "javascript": [".js", ".jsx"],
+        "typescript": [".ts", ".tsx"],
+        "java": [".java"],
+        "csharp": [".cs"],
+        "go": [".go"],
+        "rust": [".rs"],
+        "cpp": [".cpp", ".c", ".h", ".hpp"],
     }
     if supported_languages is not None:
-        language_config = {k: v for k, v in default_language_config.items() if k in supported_languages}
+        language_config = {
+            k: v for k, v in default_language_config.items() if k in supported_languages
+        }
     else:
         language_config = default_language_config
 
@@ -175,12 +186,16 @@ async def get_repo_file_dependencies(
         tasks = []
         for file_path, lang in source_code_files[start_range : end_range + 1]:
             # For now, only Python is supported; extend with other languages
-            if lang == 'python':
-                tasks.append(get_local_script_dependencies(repo_path, file_path, detailed_extraction))
+            if lang == "python":
+                tasks.append(
+                    get_local_script_dependencies(repo_path, file_path, detailed_extraction)
+                )
             else:
                 # Placeholder: create a minimal CodeFile for other languages
                 async def make_codefile_stub(file_path=file_path, lang=lang):
-                    async with aiofiles.open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    async with aiofiles.open(
+                        file_path, "r", encoding="utf-8", errors="replace"
+                    ) as f:
                         source = await f.read()
                     return CodeFile(
                         id=uuid5(NAMESPACE_OID, file_path),
@@ -189,12 +204,15 @@ async def get_repo_file_dependencies(
                         language=lang,
                         source_code=source,
                     )
+
                 tasks.append(make_codefile_stub())
 
         results: list[CodeFile] = await asyncio.gather(*tasks)
 
         for source_code_file in results:
             source_code_file.part_of = repo
-            if (getattr(source_code_file, 'language', None) is None and source_code_file.file_path.endswith('.py')):
-                source_code_file.language = 'python'
+            if getattr(
+                source_code_file, "language", None
+            ) is None and source_code_file.file_path.endswith(".py"):
+                source_code_file.language = "python"
             yield source_code_file

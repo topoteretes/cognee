@@ -36,4 +36,4 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: poetry run python ./cognee/tests/test_s3_file_storage.py
+        run: uv run python ./cognee/tests/test_s3_file_storage.py

@@ -19,6 +19,8 @@ async def search(
     top_k: int = 10,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
+    save_interaction: bool = False,
+    last_k: Optional[int] = None,
 ) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -107,6 +109,8 @@ async def search(
 
         node_name: Filter results to specific named entities (for targeted search).
 
+        save_interaction: Save interaction (query, context, answer connected to triplet endpoints) results into the graph or not
+
     Returns:
         list: Search results in format determined by query_type:
 
@@ -158,13 +162,6 @@ async def search(
         - VECTOR_DB_PROVIDER: Must match what was used during cognify
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
-    Raises:
-        DatasetNotFoundError: If specified datasets don't exist or aren't accessible
-        PermissionDeniedError: If user lacks read access to requested datasets
-        NoDataError: If no relevant data found for the search query
-        InvalidValueError: If LLM_API_KEY is not set (for LLM-based search types)
-        ValueError: If query_text is empty or search parameters are invalid
-        CollectionNotFoundError: If vector collection not found (data not processed)
     """
     # We use lists from now on for datasets
     if isinstance(datasets, UUID) or isinstance(datasets, str):
@@ -189,6 +186,8 @@ async def search(
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
+        save_interaction=save_interaction,
+        last_k=last_k,
     )
 
     return filtered_search_results

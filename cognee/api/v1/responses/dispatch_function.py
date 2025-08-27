@@ -88,11 +88,16 @@ async def handle_cognify(arguments: Dict[str, Any], user) -> str:
     """Handle cognify function call"""
     text = arguments.get("text")
     ontology_file_path = arguments.get("ontology_file_path")
+    custom_prompt = arguments.get("custom_prompt")
 
     if text:
         await add(data=text, user=user)
 
-    await cognify(user=user, ontology_file_path=ontology_file_path if ontology_file_path else None)
+    await cognify(
+        user=user,
+        ontology_file_path=ontology_file_path if ontology_file_path else None,
+        custom_prompt=custom_prompt,
+    )
 
     return (
         "Text successfully converted into knowledge graph."

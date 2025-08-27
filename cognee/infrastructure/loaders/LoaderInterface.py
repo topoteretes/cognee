@@ -58,7 +58,7 @@ class LoaderInterface(ABC):
         pass
 
     @abstractmethod
-    async def load(self, file_path: str, file_stream: Optional[Any] = None, **kwargs):
+    async def load(self, file_path: str, **kwargs):
         """
         Load and process the file, returning standardized result.
 

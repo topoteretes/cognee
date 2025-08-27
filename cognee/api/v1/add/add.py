@@ -1,9 +1,15 @@
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional
 
-from cognee.modules.pipelines import Task
 from cognee.modules.users.models import User
-from cognee.modules.pipelines import cognee_pipeline
+from cognee.modules.pipelines import Task, run_pipeline
+from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
+    resolve_authorized_user_dataset,
+)
+from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
+    reset_dataset_pipeline_run_status,
+)
+from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 
 
@@ -128,28 +134,29 @@ async def add(
 
         Optional:
         - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama"
-        - LLM_MODEL: Model name (default: "gpt-4o-mini")
+        - LLM_MODEL: Model name (default: "gpt-5-mini")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
         - VECTOR_DB_PROVIDER: "lancedb" (default), "chromadb", "pgvector"
-        - GRAPH_DATABASE_PROVIDER: "kuzu" (default), "neo4j", "networkx"
+        - GRAPH_DATABASE_PROVIDER: "kuzu" (default), "neo4j"
 
-    Raises:
-        FileNotFoundError: If specified file paths don't exist
-        PermissionError: If user lacks access to files or dataset
-        UnsupportedFileTypeError: If file format cannot be processed
-        InvalidValueError: If LLM_API_KEY is not set or invalid
     """
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),
         Task(ingest_data, dataset_name, user, node_set, dataset_id, preferred_loaders),
     ]
 
+    await setup()
+
+    user, authorized_dataset = await resolve_authorized_user_dataset(dataset_id, dataset_name, user)
+
+    await reset_dataset_pipeline_run_status(authorized_dataset.id, user)
+
     pipeline_run_info = None
 
-    async for run_info in cognee_pipeline(
+    async for run_info in run_pipeline(
         tasks=tasks,
-        datasets=dataset_id if dataset_id else dataset_name,
+        datasets=[authorized_dataset.id],
         data=data,
         user=user,
         pipeline_name="add_pipeline",
