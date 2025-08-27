@@ -2,7 +2,7 @@ from uuid import UUID
 from typing import Union, BinaryIO, List, Optional
 
 from cognee.modules.users.models import User
-from cognee.modules.pipelines import Task, cognee_pipeline
+from cognee.modules.pipelines import Task, run_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
     resolve_authorized_user_dataset,
 )
@@ -154,7 +154,7 @@ async def add(
 
     pipeline_run_info = None
 
-    async for run_info in cognee_pipeline(
+    async for run_info in run_pipeline(
         tasks=tasks,
         datasets=[authorized_dataset.id],
         data=data,

@@ -5,7 +5,7 @@ from typing import Optional, Tuple, List, Dict, Union, Any, Callable, Awaitable
 from cognee.eval_framework.benchmark_adapters.benchmark_adapters import BenchmarkAdapter
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.pipelines import cognee_pipeline
+from cognee.modules.pipelines import run_pipeline
 
 logger = get_logger(level=ERROR)
 
@@ -61,7 +61,7 @@ class CorpusBuilderExecutor:
         await cognee.add(self.raw_corpus)
 
         tasks = await self.task_getter(chunk_size=chunk_size, chunker=chunker)
-        pipeline_run = cognee_pipeline(tasks=tasks)
+        pipeline_run = run_pipeline(tasks=tasks)
 
         async for run_info in pipeline_run:
             print(run_info)

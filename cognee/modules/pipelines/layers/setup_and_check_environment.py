@@ -15,7 +15,7 @@ _first_run_done = False
 _first_run_lock = asyncio.Lock()
 
 
-async def environment_setup_and_checks(
+async def setup_and_check_environment(
     vector_db_config: dict = None,
     graph_db_config: dict = None,
 ):
