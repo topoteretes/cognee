@@ -1,3 +1,5 @@
+permissions:
+  contents: read
 name: Tests to run on different Operating Systems
 
 on:
