@@ -7,7 +7,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm import get_max_chunk_tokens
 
-from cognee.modules.pipelines import cognee_pipeline
+from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
@@ -179,12 +179,12 @@ async def cognify(
     """
     tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
 
-    # By calling get pipeline executor we get a function that will have the cognee_pipeline run in the background or a function that we will need to wait for
+    # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
-    # Run the cognee_pipeline in the background or blocking based on executor
+    # Run the run_pipeline in the background or blocking based on executor
     return await pipeline_executor_func(
-        pipeline=cognee_pipeline,
+        pipeline=run_pipeline,
         tasks=tasks,
         user=user,
         datasets=datasets,

@@ -14,7 +14,7 @@ from cognee.modules.pipelines.models.PipelineRunInfo import (
 logger = get_logger(__name__)
 
 
-async def process_pipeline_check(
+async def check_pipeline_run_qualification(
     dataset: Dataset, data: list[Data], pipeline_name: str
 ) -> Optional[Union[PipelineRunStarted, PipelineRunCompleted]]:
     """

@@ -2,8 +2,8 @@ import asyncio
 from uuid import UUID
 from typing import Union
 
-from cognee.modules.pipelines.layers.environment_setup_and_checks import (
-    environment_setup_and_checks,
+from cognee.modules.pipelines.layers.setup_and_check_environment import (
+    setup_and_check_environment,
 )
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.methods.get_dataset_data import get_dataset_data
@@ -16,14 +16,16 @@ from cognee.context_global_variables import set_database_global_context_variable
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
-from cognee.modules.pipelines.layers.process_pipeline_check import process_pipeline_check
+from cognee.modules.pipelines.layers.check_pipeline_run_qualification import (
+    check_pipeline_run_qualification,
+)
 
 logger = get_logger("cognee.pipeline")
 
 update_status_lock = asyncio.Lock()
 
 
-async def cognee_pipeline(
+async def run_pipeline(
     tasks: list[Task],
     data=None,
     datasets: Union[str, list[str], list[UUID]] = None,
@@ -33,12 +35,13 @@ async def cognee_pipeline(
     graph_db_config: dict = None,
     incremental_loading: bool = False,
 ):
-    await environment_setup_and_checks(vector_db_config, graph_db_config)
+    validate_pipeline_tasks(tasks)
+    await setup_and_check_environment(vector_db_config, graph_db_config)
 
     user, authorized_datasets = await resolve_authorized_user_datasets(datasets, user)
 
     for dataset in authorized_datasets:
-        async for run_info in run_pipeline(
+        async for run_info in run_pipeline_per_dataset(
             dataset=dataset,
             user=user,
             tasks=tasks,
@@ -50,7 +53,7 @@ async def cognee_pipeline(
             yield run_info
 
 
-async def run_pipeline(
+async def run_pipeline_per_dataset(
     dataset: Dataset,
     user: User,
     tasks: list[Task],
@@ -59,15 +62,13 @@ async def run_pipeline(
     context: dict = None,
     incremental_loading=False,
 ):
-    validate_pipeline_tasks(tasks)
-
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
     if not data:
         data: list[Data] = await get_dataset_data(dataset_id=dataset.id)
 
-    process_pipeline_status = await process_pipeline_check(dataset, data, pipeline_name)
+    process_pipeline_status = await check_pipeline_run_qualification(dataset, data, pipeline_name)
     if process_pipeline_status:
         # If pipeline was already processed or is currently being processed
         # return status information to async generator and finish execution
