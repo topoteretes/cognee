@@ -42,6 +42,7 @@ def create_relational_engine(
         try:
             # Test if asyncpg is available
             import asyncpg
+
             connection_string = (
                 f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
             )

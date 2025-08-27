@@ -7,14 +7,17 @@ from sqlalchemy import JSON, Column, Table, select, delete, MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.exc import ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
 try:
     from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 except ImportError:
     # PostgreSQL dependencies not installed, define dummy exceptions
     class DeadlockDetectedError(Exception):
         pass
+
     class DuplicateTableError(Exception):
         pass
+
     class UniqueViolationError(Exception):
         pass
 
@@ -81,6 +84,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Functions reading tables from database need to know what a Vector column type is
         try:
             from pgvector.sqlalchemy import Vector
+
             self.Vector = Vector
         except ImportError:
             raise ImportError(
