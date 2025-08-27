@@ -38,7 +38,8 @@ async def test_UnstructuredDocument(mock_engine):
 
     xlsx_file_path = os.path.join(
         pathlib.Path(__file__).parent.parent.parent,
-        "test_dataexample.xlsx",
+        "test_data",
+        "example.xlsx",
     )
 
     # Define test documents
