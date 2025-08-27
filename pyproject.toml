@@ -27,8 +27,6 @@ dependencies = [
     "typing_extensions>=4.12.2,<5.0.0",
     "nltk>=3.9.1,<4.0.0",
     "numpy>=1.26.4, <=4.0.0",
-    "pandas>=2.2.2,<3.0.0",
-
     "sqlalchemy>=2.0.39,<3.0.0",
     "aiosqlite>=0.20.0,<1.0.0",
     "tiktoken>=0.8.0,<1.0.0",
@@ -110,6 +108,7 @@ codegraph = [
 evals = [
     "plotly>=6.0.0,<7",
     "gdown>=5.2.0,<6",
+    "pandas>=2.2.2,<3.0.0",
 ]
 
 graphiti = ["graphiti-core>=0.7.0,<0.8"]
