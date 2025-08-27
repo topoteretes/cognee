@@ -7,9 +7,7 @@ from cognee.infrastructure.llm.config import (
 )
 
 
-async def extract_event_entities(
-    content: str, response_model: Type[BaseModel]
-):
+async def extract_event_entities(content: str, response_model: Type[BaseModel]):
     """Extract event entities from content using LLM."""
     llm_config = get_llm_config()
 

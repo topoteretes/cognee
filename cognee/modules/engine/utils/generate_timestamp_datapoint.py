@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from cognee.modules.engine.models import Interval, Timestamp, Event
 from cognee.modules.engine.utils import generate_node_id
 
+
 def generate_timestamp_datapoint(ts: Timestamp) -> Timestamp:
     """Create a Timestamp datapoint from a Timestamp model."""
     time_at = date_to_int(ts)
@@ -19,6 +20,7 @@ def generate_timestamp_datapoint(ts: Timestamp) -> Timestamp:
         second=ts.second,
         timestamp_str=timestamp_str,
     )
+
 
 def date_to_int(ts: Timestamp) -> int:
     """Convert timestamp to integer milliseconds."""

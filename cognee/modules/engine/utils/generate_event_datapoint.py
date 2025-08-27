@@ -1,6 +1,7 @@
 from cognee.modules.engine.models import Interval, Event
 from cognee.modules.engine.utils.generate_timestamp_datapoint import generate_timestamp_datapoint
 
+
 def generate_event_datapoint(event) -> Event:
     """Create an Event datapoint from an event model."""
     # Base event data

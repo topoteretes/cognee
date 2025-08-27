@@ -2,7 +2,6 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 
 
-
 class Timestamp(BaseModel):
     year: int = Field(..., ge=1, le=9999)
     month: int = Field(..., ge=1, le=12)

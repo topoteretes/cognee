@@ -22,7 +22,10 @@ from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
-from cognee.tasks.temporal_graph import extract_events_and_timestamps, extract_knowledge_graph_from_events
+from cognee.tasks.temporal_graph import (
+    extract_events_and_timestamps,
+    extract_knowledge_graph_from_events,
+)
 
 logger = get_logger("cognify")
 
@@ -229,6 +232,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     ]
 
     return default_tasks
+
 
 async def get_temporal_tasks(
     user: User = None, chunker=TextChunker, chunk_size: int = None

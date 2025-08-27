@@ -5,6 +5,7 @@ from cognee.modules.engine.models.EntityType import EntityType
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.engine.utils import generate_node_id, generate_node_name
 
+
 def add_entities_to_event(event: Event, event_with_entities: EventWithEntities) -> None:
     """Add entities to event via attributes field."""
     if not event_with_entities.attributes:
@@ -37,6 +38,7 @@ def add_entities_to_event(event: Event, event_with_entities: EventWithEntities) 
         if event.attributes is None:
             event.attributes = []
         event.attributes.append((edge, [entity]))
+
 
 def get_or_create_entity_type(entity_types: dict, entity_type_name: str) -> EntityType:
     """Get existing entity type or create new one."""

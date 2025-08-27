@@ -4,7 +4,10 @@ from cognee.modules.engine.models import Event
 from cognee.tasks.temporal_graph.enrich_events import enrich_events
 from cognee.tasks.temporal_graph.add_entities_to_event import add_entities_to_event
 
-async def extract_knowledge_graph_from_events(data_chunks: List[DocumentChunk]) -> List[DocumentChunk]:
+
+async def extract_knowledge_graph_from_events(
+    data_chunks: List[DocumentChunk],
+) -> List[DocumentChunk]:
     """Extract events from chunks and enrich them with entities."""
     # Extract events from chunks
     all_events = []

@@ -2,7 +2,8 @@ from typing import List
 
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.engine.models import Event
-from cognee.tasks.temporal_graph.models import EventWithEntities,EventEntityList
+from cognee.tasks.temporal_graph.models import EventWithEntities, EventEntityList
+
 
 async def enrich_events(events: List[Event]) -> List[EventWithEntities]:
     """Extract entities from events and return enriched events."""

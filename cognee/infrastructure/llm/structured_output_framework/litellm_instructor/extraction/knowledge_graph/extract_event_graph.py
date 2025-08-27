@@ -7,6 +7,7 @@ from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
 
+
 async def extract_event_graph(
     content: str, response_model: Type[BaseModel], system_prompt: str = None
 ):
