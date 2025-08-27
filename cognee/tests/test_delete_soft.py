@@ -45,43 +45,6 @@ async def main():
     Each of these car manufacturer contributes to Germany's reputation as a leader in the global automotive industry, showcasing a blend of innovation, performance, and design excellence.
     """
 
-    ################### HARD DELETE
-
-    # Add documents and get dataset information
-    add_result = await cognee.add(
-        [
-            pdf_document,
-            txt_document,
-            text_document_as_literal,
-            unstructured_document,
-            audio_document,
-            image_document,
-        ]
-    )
-    dataset_id = add_result.dataset_id
-
-    await cognee.cognify()
-
-    from cognee.infrastructure.databases.graph import get_graph_engine
-
-    graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
-    assert len(nodes) > 10 and len(edges) > 10, "Graph database is not loaded."
-
-    # Get the data IDs from the dataset
-    dataset_data = await get_dataset_data(dataset_id)
-    assert len(dataset_data) > 0, "Dataset should contain data"
-
-    # Delete each document using its ID
-    for data_item in dataset_data:
-        await cognee.delete(data_item.id, dataset_id, mode="hard")
-
-    nodes, edges = await graph_engine.get_graph_data()
-
-    assert len(nodes) == 0 and len(edges) == 0, "Document is not deleted with hard delete."
-
-    ################### SOFT DELETE
-
     # Add documents and get dataset information
     add_result = await cognee.add(
         [

@@ -15,14 +15,43 @@ from typing import Protocol
 # Configure external library logging
 def configure_external_library_logging():
     """Configure logging for external libraries to reduce verbosity"""
+    # Set environment variables to suppress LiteLLM logging
+    os.environ.setdefault("LITELLM_LOG", "ERROR")
+    os.environ.setdefault("LITELLM_SET_VERBOSE", "False")
+
     # Configure LiteLLM logging to reduce verbosity
     try:
         import litellm
 
+        # Disable verbose logging
         litellm.set_verbose = False
 
-        # Suppress LiteLLM ERROR logging using standard logging
-        logging.getLogger("litellm").setLevel(logging.CRITICAL)
+        # Set additional LiteLLM configuration
+        if hasattr(litellm, "suppress_debug_info"):
+            litellm.suppress_debug_info = True
+        if hasattr(litellm, "turn_off_message"):
+            litellm.turn_off_message = True
+        if hasattr(litellm, "_turn_on_debug"):
+            litellm._turn_on_debug = False
+
+        # Comprehensive logger suppression
+        loggers_to_suppress = [
+            "litellm",
+            "litellm.litellm_core_utils.logging_worker",
+            "litellm.litellm_core_utils",
+            "litellm.proxy",
+            "litellm.router",
+            "openai._base_client",
+            "LiteLLM",  # Capital case variant
+            "LiteLLM.core",
+            "LiteLLM.logging_worker",
+            "litellm.logging_worker",
+        ]
+
+        for logger_name in loggers_to_suppress:
+            logging.getLogger(logger_name).setLevel(logging.CRITICAL)
+            logging.getLogger(logger_name).disabled = True
+
     except ImportError:
         # LiteLLM not available, skip configuration
         pass
@@ -243,6 +272,75 @@ def setup_logging(log_level=None, name=None):
 
     # Configure external library logging early to suppress verbose output
     configure_external_library_logging()
+
+    # Add custom filter to suppress LiteLLM worker cancellation errors
+    class LiteLLMCancellationFilter(logging.Filter):
+        """Filter to suppress LiteLLM worker cancellation messages"""
+
+        def filter(self, record):
+            # Check if this is a LiteLLM-related logger
+            if hasattr(record, "name") and "litellm" in record.name.lower():
+                return False
+
+            # Check message content for cancellation errors
+            if hasattr(record, "msg") and record.msg:
+                msg_str = str(record.msg).lower()
+                if any(
+                    keyword in msg_str
+                    for keyword in [
+                        "loggingworker cancelled",
+                        "logging_worker.py",
+                        "cancellederror",
+                        "litellm:error",
+                    ]
+                ):
+                    return False
+
+            # Check formatted message
+            try:
+                if hasattr(record, "getMessage"):
+                    formatted_msg = record.getMessage().lower()
+                    if any(
+                        keyword in formatted_msg
+                        for keyword in [
+                            "loggingworker cancelled",
+                            "logging_worker.py",
+                            "cancellederror",
+                            "litellm:error",
+                        ]
+                    ):
+                        return False
+            except Exception:
+                pass
+
+            return True
+
+    # Apply the filter to root logger and specific loggers
+    cancellation_filter = LiteLLMCancellationFilter()
+    logging.getLogger().addFilter(cancellation_filter)
+    logging.getLogger("litellm").addFilter(cancellation_filter)
+
+    # Add custom filter to suppress LiteLLM worker cancellation errors
+    class LiteLLMFilter(logging.Filter):
+        def filter(self, record):
+            # Suppress LiteLLM worker cancellation errors
+            if hasattr(record, "msg") and isinstance(record.msg, str):
+                msg_lower = record.msg.lower()
+                if any(
+                    phrase in msg_lower
+                    for phrase in [
+                        "loggingworker cancelled",
+                        "cancellederror",
+                        "logging_worker.py",
+                        "loggingerror",
+                    ]
+                ):
+                    return False
+            return True
+
+    # Apply filter to root logger
+    litellm_filter = LiteLLMFilter()
+    logging.getLogger().addFilter(litellm_filter)
 
     def exception_handler(logger, method_name, event_dict):
         """Custom processor to handle uncaught exceptions."""

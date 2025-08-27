@@ -68,10 +68,10 @@ jobs:
     uses: ./.github/workflows/notebooks_tests.yml
     secrets: inherit
 
-  python-version-tests:
-    name: Python Version Tests
+  different-operating-systems-tests:
+    name: Operating System and Python Tests
     needs: [basic-tests, e2e-tests, cli-tests]
-    uses: ./.github/workflows/python_version_tests.yml
+    uses: ./.github/workflows/test_different_operating_systems.yml
     with:
       python-versions: '["3.10.x", "3.11.x", "3.12.x"]'
     secrets: inherit
@@ -124,7 +124,7 @@ jobs:
       cli-tests,
       graph-db-tests,
       notebook-tests,
-      python-version-tests,
+      different-operating-systems-tests,
       vector-db-tests,
       example-tests,
       gemini-tests,
@@ -144,7 +144,7 @@ jobs:
       cli-tests,
       graph-db-tests,
       notebook-tests,
-      python-version-tests,
+      different-operating-systems-tests,
       vector-db-tests,
       example-tests,
       db-examples-tests,
@@ -165,7 +165,7 @@ jobs:
                 "${{ needs.cli-tests.result }}" == "success" &&
                 "${{ needs.graph-db-tests.result }}" == "success" &&
                 "${{ needs.notebook-tests.result }}" == "success" &&
-                "${{ needs.python-version-tests.result }}" == "success" &&
+                "${{ needs.different-operating-systems-tests.result }}" == "success" &&
                 "${{ needs.vector-db-tests.result }}" == "success" &&
                 "${{ needs.example-tests.result }}" == "success" &&
                 "${{ needs.db-examples-tests.result }}" == "success" &&

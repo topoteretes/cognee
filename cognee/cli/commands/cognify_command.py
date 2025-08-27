@@ -87,12 +87,12 @@ After successful cognify processing, use `cognee search` to query the knowledge 
             async def run_cognify():
                 try:
                     # Import chunker classes here
-                    from cognee.modules.chunking import TextChunker
+                    from cognee.modules.chunking.TextChunker import TextChunker
 
                     chunker_class = TextChunker  # Default
                     if args.chunker == "LangchainChunker":
                         try:
-                            from cognee.modules.chunking import LangchainChunker
+                            from cognee.modules.chunking.LangchainChunker import LangchainChunker
 
                             chunker_class = LangchainChunker
                         except ImportError:
