@@ -40,8 +40,11 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
     user = await get_default_user()
     detailed_extraction = True
 
+
+    # Multi-language support: allow passing supported_languages
+    supported_languages = None # defer to task defaults
     tasks = [
-        Task(get_repo_file_dependencies, detailed_extraction=detailed_extraction),
+        Task(get_repo_file_dependencies, detailed_extraction=detailed_extraction, supported_languages=supported_languages),
         # Task(summarize_code, task_config={"batch_size": 500}), # This task takes a long time to complete
         Task(add_data_points, task_config={"batch_size": 30}),
     ]

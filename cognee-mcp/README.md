@@ -103,23 +103,159 @@ If you’d rather run cognee-mcp in a container, you have two options:
    3. Run it:
       ```bash
       # For HTTP transport (recommended for web deployments)
-      docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main --transport http
+      docker run -e TRANSPORT_MODE=http --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
       # For SSE transport  
-      docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main --transport sse
+      docker run -e TRANSPORT_MODE=sse --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
       # For stdio transport (default)
-      docker run --env-file ./.env --rm -it cognee/cognee-mcp:main
+      docker run -e TRANSPORT_MODE=stdio --env-file ./.env --rm -it cognee/cognee-mcp:main
       ```
 2. **Pull from Docker Hub** (no build required):
    ```bash
    # With HTTP transport (recommended for web deployments)
-   docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main --transport http
+   docker run -e TRANSPORT_MODE=http --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
    # With SSE transport
-   docker run --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main --transport sse
+   docker run -e TRANSPORT_MODE=sse --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
    # With stdio transport (default)
-   docker run --env-file ./.env --rm -it cognee/cognee-mcp:main
+   docker run -e TRANSPORT_MODE=stdio --env-file ./.env --rm -it cognee/cognee-mcp:main
+   ```
+
+### **Important: Docker vs Direct Usage**
+**Docker uses environment variables**, not command line arguments:
+- ✅ Docker: `-e TRANSPORT_MODE=http`
+- ❌ Docker: `--transport http` (won't work)
+
+**Direct Python usage** uses command line arguments:
+- ✅ Direct: `python src/server.py --transport http`
+- ❌ Direct: `-e TRANSPORT_MODE=http` (won't work)
 
 
-## 💻 Basic Usage
+## 🔗 MCP Client Configuration
+
+After starting your Cognee MCP server with Docker, you need to configure your MCP client to connect to it.
+
+### **SSE Transport Configuration** (Recommended)
+
+**Start the server with SSE transport:**
+```bash
+docker run -e TRANSPORT_MODE=sse --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
+```
+
+**Configure your MCP client:**
+
+#### **Claude CLI (Easiest)**
+```bash
+claude mcp add cognee-sse -t sse http://localhost:8000/sse
+```
+
+**Verify the connection:**
+```bash
+claude mcp list
+```
+
+You should see your server connected:
+```
+Checking MCP server health...
+
+cognee-sse: http://localhost:8000/sse (SSE) - ✓ Connected
+```
+
+#### **Manual Configuration**
+
+**Claude (`~/.claude.json`)**
+```json
+{
+  "mcpServers": {
+    "cognee": {
+      "type": "sse",
+      "url": "http://localhost:8000/sse"
+    }
+  }
+}
+```
+
+**Cursor (`~/.cursor/mcp.json`)**
+```json
+{
+  "mcpServers": {
+    "cognee-sse": {
+      "url": "http://localhost:8000/sse"
+    }
+  }
+}
+```
+
+### **HTTP Transport Configuration** (Alternative)
+
+**Start the server with HTTP transport:**
+```bash
+docker run -e TRANSPORT_MODE=http --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
+```
+
+**Configure your MCP client:**
+
+#### **Claude CLI (Easiest)**
+```bash
+claude mcp add cognee-http -t http http://localhost:8000/mcp
+```
+
+**Verify the connection:**
+```bash
+claude mcp list
+```
+
+You should see your server connected:
+```
+Checking MCP server health...
+
+cognee-http: http://localhost:8000/mcp (HTTP) - ✓ Connected
+```
+
+#### **Manual Configuration**
+
+**Claude (`~/.claude.json`)**
+```json
+{
+  "mcpServers": {
+    "cognee": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp"
+    }
+  }
+}
+```
+
+**Cursor (`~/.cursor/mcp.json`)**
+```json
+{
+  "mcpServers": {
+    "cognee-http": {
+      "url": "http://localhost:8000/mcp"
+    }
+  }
+}
+```
+
+### **Dual Configuration Example**
+You can configure both transports simultaneously for testing:
+
+```json
+{
+  "mcpServers": {
+    "cognee-sse": {
+      "type": "sse",
+      "url": "http://localhost:8000/sse"
+    },
+    "cognee-http": {
+      "type": "http", 
+      "url": "http://localhost:8000/mcp"
+    }
+  }
+}
+```
+
+**Note:** Only enable the server you're actually running to avoid connection errors.
+
+## 💻 Basic Usage
 
 The MCP server exposes its functionality through tools. Call them from any MCP client (Cursor, Claude Desktop, Cline, Roo and more).
 
@@ -155,45 +291,6 @@ delete(data_id="data-uuid", dataset_id="dataset-uuid", mode="soft")
 delete(data_id="data-uuid", dataset_id="dataset-uuid", mode="hard")
 ```
 
-Remember – use the CODE search type to query your code graph. For huge repos, run codify on modules incrementally and cache results.
-
-### IDE Example: Cursor
-
-1. After you run the server as described in the [Quick Start](#-quickstart), create a run script for cognee. Here is a simple example:
-    ```
-    #!/bin/bash
-    export ENV=local
-    export TOKENIZERS_PARALLELISM=false
-    export EMBEDDING_PROVIDER="fastembed"
-    export EMBEDDING_MODEL="sentence-transformers/all-MiniLM-L6-v2"
-    export EMBEDDING_DIMENSIONS=384
-    export EMBEDDING_MAX_TOKENS=256
-    export LLM_API_KEY=your-OpenAI-API-key
-    uv --directory /{cognee_root_path}/cognee-mcp run cognee
-    ```
-    Remember to replace *your-OpenAI-API-key* and *{cognee_root_path}* with correct values.
-
-2. Install Cursor and navigate to Settings → MCP Tools → New MCP Server
-
-3. Cursor will open *mcp.json* file in a new tab. Configure your cognee MCP server by copy-pasting the following:
-    ```
-    {
-      "mcpServers": {
-        "cognee": {
-          "command": "sh",
-          "args": [
-            "/{path-to-your-script}/run-cognee.sh"
-          ]
-        }
-      }
-    }
-    ```
-    Remember to replace *{path-to-your-script}* with the correct value of the path of the script you created in the first step.
-
-  That's it! You can refresh the server from the toggle next to your new cognee server. Check the green dot and the available tools to verify your server is running.
-
-  Now you can open your Cursor Agent and start using cognee tools from it via prompting.
-
 
 ## Development and Debugging
 
@@ -211,7 +308,7 @@ Open inspector with timeout passed:
 
 To apply new changes while developing cognee you need to do:
 
-1. `poetry lock` in cognee folder
+1. Update dependencies in cognee folder if needed
 2. `uv sync --dev --all-extras --reinstall`
 3. `mcp dev src/server.py`
 
