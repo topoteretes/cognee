@@ -3,7 +3,6 @@
 import os
 
 import uvicorn
-import sentry_sdk
 from traceback import format_exc
 from contextlib import asynccontextmanager
 from fastapi import Request
@@ -37,11 +36,18 @@ from cognee.api.v1.users.routers import (
 logger = get_logger()
 
 if os.getenv("ENV", "prod") == "prod":
-    sentry_sdk.init(
-        dsn=os.getenv("SENTRY_REPORTING_URL"),
-        traces_sample_rate=1.0,
-        profiles_sample_rate=1.0,
-    )
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=os.getenv("SENTRY_REPORTING_URL"),
+            traces_sample_rate=1.0,
+            profiles_sample_rate=1.0,
+        )
+    except ImportError:
+        logger.info(
+            "Sentry SDK not available. Install with 'pip install cognee[monitoring]' to enable error monitoring."
+        )
 
 
 app_environment = os.getenv("ENV", "prod")

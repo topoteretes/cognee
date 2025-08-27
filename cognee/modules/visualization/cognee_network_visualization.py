@@ -1,6 +1,5 @@
 import os
 import json
-import networkx
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
@@ -9,6 +8,13 @@ logger = get_logger()
 
 
 async def cognee_network_visualization(graph_data, destination_file_path: str = None):
+    try:
+        import networkx
+    except ImportError:
+        raise ImportError(
+            "NetworkX is not installed. Please install with 'pip install cognee[visualization]' to use graph visualization features."
+        )
+
     nodes_data, edges_data = graph_data
 
     G = networkx.DiGraph()

@@ -3,7 +3,6 @@
 import os
 import requests
 from datetime import datetime, timezone
-import matplotlib.pyplot as plt
 import http.server
 import socketserver
 from threading import Thread
