@@ -38,7 +38,9 @@ async def extract_summary(content: str, response_model: Type[BaseModel]):
     config = get_llm_config()
 
     if config.baml_registry is None:
-        raise ImportError("BAML is not available. Please install with 'pip install cognee[baml]' to use BAML extraction features.")
+        raise ImportError(
+            "BAML is not available. Please install with 'pip install cognee[baml]' to use BAML extraction features."
+        )
 
     # Use BAML's SummarizeContent function
     summary_result = await b.SummarizeContent(
@@ -81,7 +83,9 @@ async def extract_code_summary(content: str):
             config = get_llm_config()
 
             if config.baml_registry is None:
-                raise ImportError("BAML is not available. Please install with 'pip install cognee[baml]' to use BAML extraction features.")
+                raise ImportError(
+                    "BAML is not available. Please install with 'pip install cognee[baml]' to use BAML extraction features."
+                )
 
             result = await b.SummarizeCode(
                 content, baml_options={"client_registry": config.baml_registry}
