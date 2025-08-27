@@ -229,7 +229,7 @@ class TestCognifyCommand:
 
         mock_asyncio_run.assert_called_once()
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        from cognee.modules.chunking import TextChunker
+        from cognee.modules.chunking.TextChunker import TextChunker
 
         mock_cognee.cognify.assert_awaited_once_with(
             datasets=None,
