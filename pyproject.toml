@@ -28,9 +28,7 @@ dependencies = [
     "nltk>=3.9.1,<4.0.0",
     "numpy>=1.26.4, <=4.0.0",
     "pandas>=2.2.2,<3.0.0",
-    # Note: New s3fs and boto3 versions don't work well together
-    # Always use comaptible fixed versions of these two dependencies
-    "s3fs[boto3]==2025.3.2",
+
     "sqlalchemy>=2.0.39,<3.0.0",
     "aiosqlite>=0.20.0,<1.0.0",
     "tiktoken>=0.8.0,<1.0.0",
@@ -53,10 +51,10 @@ dependencies = [
     "fastapi>=0.115.7,<1.0.0",
     "python-multipart>=0.0.20,<1.0.0",
     "fastapi-users[sqlalchemy]>=14.0.1,<15.0.0",
-    "dlt[sqlalchemy]>=1.9.0,<2",
+
     "sentry-sdk[fastapi]>=2.9.0,<3",
     "structlog>=25.2.0,<26",
-    "baml-py (>=0.201.0,<0.202.0)",
+
     "pympler>=1.1,<2.0.0",
     "onnxruntime>=1.0.0,<2.0.0",
     "pylance>=0.22.0,<1.0.0",
@@ -116,14 +114,13 @@ evals = [
     "plotly>=6.0.0,<7",
     "gdown>=5.2.0,<6",
 ]
-gui = [
-    "pyside6>=6.8.3,<7",
-    "qasync>=0.27.1,<0.28",
-]
+
 graphiti = ["graphiti-core>=0.7.0,<0.8"]
 # Note: New s3fs and boto3 versions don't work well together
 # Always use comaptible fixed versions of these two dependencies
 aws = ["s3fs[boto3]==2025.3.2"]
+dlt = ["dlt[sqlalchemy]>=1.9.0,<2"]
+baml = ["baml-py (>=0.201.0,<0.202.0)"]
 dev = [
     "pytest>=7.4.0,<8",
     "pytest-cov>=6.1.1,<7.0.0",
