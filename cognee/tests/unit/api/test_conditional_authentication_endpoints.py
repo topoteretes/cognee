@@ -68,8 +68,13 @@ class TestConditionalAuthenticationEndpoints:
 
     @patch("cognee.api.v1.add.add")
     @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
-    @patch("cognee.modules.users.methods.get_conditional_authenticated_user.REQUIRE_AUTHENTICATION", False)
-    def test_add_endpoint_with_conditional_auth(self, mock_get_default_user, mock_add, client, mock_default_user):
+    @patch(
+        "cognee.modules.users.methods.get_conditional_authenticated_user.REQUIRE_AUTHENTICATION",
+        False,
+    )
+    def test_add_endpoint_with_conditional_auth(
+        self, mock_get_default_user, mock_add, client, mock_default_user
+    ):
         """Test add endpoint works with conditional authentication."""
         mock_get_default_user.return_value = mock_default_user
         mock_add.return_value = MagicMock(
@@ -89,8 +94,13 @@ class TestConditionalAuthenticationEndpoints:
         # is that conditional authentication is working (no 401 unauthorized errors)
 
     @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
-    @patch("cognee.modules.users.methods.get_conditional_authenticated_user.REQUIRE_AUTHENTICATION", False)
-    def test_conditional_authentication_works_with_current_environment(self, mock_get_default_user, client):
+    @patch(
+        "cognee.modules.users.methods.get_conditional_authenticated_user.REQUIRE_AUTHENTICATION",
+        False,
+    )
+    def test_conditional_authentication_works_with_current_environment(
+        self, mock_get_default_user, client
+    ):
         """Test that conditional authentication works with the current environment setup."""
         # Since REQUIRE_AUTHENTICATION defaults to "false", we expect endpoints to work without auth
         # This tests the actual integration behavior
@@ -110,7 +120,9 @@ class TestConditionalAuthenticationEndpoints:
 
     @patch("cognee.api.v1.add.add")
     @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
-    def test_authenticated_request_uses_user(self, mock_get_default, mock_cognee_add, client, mock_authenticated_user):
+    def test_authenticated_request_uses_user(
+        self, mock_get_default, mock_cognee_add, client, mock_authenticated_user
+    ):
         """Test that authenticated requests use the authenticated user, not default user."""
         # Mock successful authentication - this would normally be handled by FastAPI Users
         # but we're testing the conditional logic
@@ -150,7 +162,9 @@ class TestConditionalAuthenticationBehavior:
         ],
     )
     @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
-    def test_get_endpoints_work_without_auth(self, mock_get_default, client, endpoint, method, mock_default_user):
+    def test_get_endpoints_work_without_auth(
+        self, mock_get_default, client, endpoint, method, mock_default_user
+    ):
         """Test that GET endpoints work without authentication (with current environment)."""
         mock_get_default.return_value = mock_default_user
 
@@ -175,7 +189,9 @@ class TestConditionalAuthenticationBehavior:
     @patch("cognee.modules.settings.get_settings.get_vectordb_config")
     @patch("cognee.modules.settings.get_settings.get_llm_config")
     @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
-    def test_settings_endpoint_integration(self, mock_get_default, mock_llm_config, mock_vector_config, client, mock_default_user):
+    def test_settings_endpoint_integration(
+        self, mock_get_default, mock_llm_config, mock_vector_config, client, mock_default_user
+    ):
         """Test that settings endpoint integration works with conditional authentication."""
         mock_get_default.return_value = mock_default_user
 
