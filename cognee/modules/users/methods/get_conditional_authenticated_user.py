@@ -6,7 +6,10 @@ from ..get_fastapi_users import get_fastapi_users
 from .get_default_user import get_default_user
 
 # Check environment variable to determine authentication requirement
-REQUIRE_AUTHENTICATION = os.getenv("REQUIRE_AUTHENTICATION", "false").lower() == "true"
+REQUIRE_AUTHENTICATION = (
+    os.getenv("REQUIRE_AUTHENTICATION", "false").lower() == "true"
+    or os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true"
+)
 
 fastapi_users = get_fastapi_users()
 
