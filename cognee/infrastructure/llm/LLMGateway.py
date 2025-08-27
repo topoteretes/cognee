@@ -144,3 +144,12 @@ class LLMGateway:
         )
 
         return extract_event_graph(content=content, response_model=response_model)
+
+    @staticmethod
+    def extract_event_entities(content: str, response_model: Type[BaseModel]) -> Coroutine:
+        # TODO: Add BAML version of category and extraction and update function (consulted with Igor)
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.extraction import (
+            extract_event_entities,
+        )
+
+        return extract_event_entities(content=content, response_model=response_model)
