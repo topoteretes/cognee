@@ -310,7 +310,7 @@ def setup_logging(log_level=None, name=None):
                         ]
                     ):
                         return False
-            except:
+            except Exception:
                 pass
 
             return True
