@@ -2,6 +2,7 @@ import os
 import sys
 import uuid
 import pytest
+import pathlib
 from unittest.mock import patch
 
 from cognee.modules.chunking.TextChunker import TextChunker
@@ -18,29 +19,25 @@ chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentenc
 async def test_UnstructuredDocument(mock_engine):
     # Define file paths of test data
     pptx_file_path = os.path.join(
-        os.sep,
-        *(os.path.dirname(__file__).split(os.sep)[:-2]),
+        pathlib.Path(__file__).parent.parent.parent,
         "test_data",
         "example.pptx",
     )
 
     docx_file_path = os.path.join(
-        os.sep,
-        *(os.path.dirname(__file__).split(os.sep)[:-2]),
+        pathlib.Path(__file__).parent.parent.parent,
         "test_data",
         "example.docx",
     )
 
     csv_file_path = os.path.join(
-        os.sep,
-        *(os.path.dirname(__file__).split(os.sep)[:-2]),
+        pathlib.Path(__file__).parent.parent.parent,
         "test_data",
         "example.csv",
     )
 
     xlsx_file_path = os.path.join(
-        os.sep,
-        *(os.path.dirname(__file__).split(os.sep)[:-2]),
+        pathlib.Path(__file__).parent.parent.parent,
         "test_data",
         "example.xlsx",
     )
