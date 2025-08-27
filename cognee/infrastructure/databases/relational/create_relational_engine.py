@@ -39,8 +39,15 @@ def create_relational_engine(
         connection_string = f"sqlite+aiosqlite:///{db_path}/{db_name}"
 
     if db_provider == "postgres":
-        connection_string = (
-            f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
-        )
+        try:
+            # Test if asyncpg is available
+            import asyncpg
+            connection_string = (
+                f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+            )
+        except ImportError:
+            raise ImportError(
+                "PostgreSQL dependencies are not installed. Please install with 'pip install cognee[postgres]' or 'pip install cognee[postgres-binary]' to use PostgreSQL functionality."
+            )
 
     return SQLAlchemyAdapter(connection_string)

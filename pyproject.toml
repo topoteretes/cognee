@@ -72,15 +72,18 @@ distributed = [
     "modal>=1.0.5,<2.0.0",
 ]
 
+# Database backends
 neo4j = ["neo4j>=5.28.0,<6"]
 neptune = ["langchain_aws>=0.2.22"]
+# PostgreSQL support (binary - no compilation required)
 postgres = [
-    "psycopg2>=2.9.10,<3",
+    "psycopg2-binary>=2.9.10,<3.0.0",  # Pre-compiled binary, no PostgreSQL headers needed
     "pgvector>=0.3.5,<0.4",
     "asyncpg>=0.30.0,<1.0.0",
 ]
-postgres-binary = [
-    "psycopg2-binary>=2.9.10,<3.0.0",
+# PostgreSQL support (source - requires PostgreSQL development headers)
+postgres-source = [
+    "psycopg2>=2.9.10,<3 ; platform_system != 'Windows'",  # Requires libpq-dev, build tools
     "pgvector>=0.3.5,<0.4",
     "asyncpg>=0.30.0,<1.0.0",
 ]
