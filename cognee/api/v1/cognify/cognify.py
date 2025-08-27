@@ -23,7 +23,9 @@ from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
-from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import extract_knowledge_graph_from_events
+from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
+    extract_knowledge_graph_from_events,
+)
 
 
 logger = get_logger("cognify")
