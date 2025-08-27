@@ -190,7 +190,9 @@ async def cognify(
     if temporal_cognify:
         tasks = await get_temporal_tasks(user, chunker, chunk_size)
     else:
-        tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path, custom_prompt)
+        tasks = await get_default_tasks(
+            user, graph_model, chunker, chunk_size, ontology_file_path, custom_prompt
+        )
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
