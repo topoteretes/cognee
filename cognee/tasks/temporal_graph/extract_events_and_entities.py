@@ -6,7 +6,7 @@ from cognee.tasks.temporal_graph.models import EventList
 from cognee.modules.engine.utils.generate_event_datapoint import generate_event_datapoint
 
 
-async def extract_events_and_entities(data_chunks: List[DocumentChunk]) -> List[DocumentChunk]:
+async def extract_events_and_timestamps(data_chunks: List[DocumentChunk]) -> List[DocumentChunk]:
     """Extracts events and entities from a chunk of documents."""
     events = await asyncio.gather(
         *[LLMGateway.extract_event_graph(chunk.text, EventList) for chunk in data_chunks]
