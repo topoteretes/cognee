@@ -1,6 +1,5 @@
-from typing import Type
+from typing import Type, Optional, Coroutine
 from pydantic import BaseModel
-from typing import Coroutine
 from cognee.infrastructure.llm import get_llm_config
 
 
@@ -79,7 +78,10 @@ class LLMGateway:
 
     @staticmethod
     def extract_content_graph(
-        content: str, response_model: Type[BaseModel], mode: str = "simple"
+        content: str,
+        response_model: Type[BaseModel],
+        mode: str = "simple",
+        custom_prompt: Optional[str] = None,
     ) -> Coroutine:
         llm_config = get_llm_config()
         if llm_config.structured_output_framework.upper() == "BAML":
@@ -87,13 +89,20 @@ class LLMGateway:
                 extract_content_graph,
             )
 
-            return extract_content_graph(content=content, response_model=response_model, mode=mode)
+            return extract_content_graph(
+                content=content,
+                response_model=response_model,
+                mode=mode,
+                custom_prompt=custom_prompt,
+            )
         else:
             from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.extraction import (
                 extract_content_graph,
             )
 
-            return extract_content_graph(content=content, response_model=response_model)
+            return extract_content_graph(
+                content=content, response_model=response_model, custom_prompt=custom_prompt
+            )
 
     @staticmethod
     def extract_categories(content: str, response_model: Type[BaseModel]) -> Coroutine:
