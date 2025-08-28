@@ -20,7 +20,9 @@ class SearchPayloadDTO(InDTO):
     datasets: Optional[list[str]] = Field(default=None)
     dataset_ids: Optional[list[UUID]] = Field(default=None, examples=[[]])
     query: str = Field(default="What is in the document?")
+    system_prompt: Optional[str] = Field(default=None)
     top_k: Optional[int] = Field(default=10)
+    only_context: bool = Field(default=False)
 
 
 def get_search_router() -> APIRouter:
@@ -102,7 +104,9 @@ def get_search_router() -> APIRouter:
                 "datasets": payload.datasets,
                 "dataset_ids": [str(dataset_id) for dataset_id in payload.dataset_ids or []],
                 "query": payload.query,
+                "system_prompt": payload.system_prompt,
                 "top_k": payload.top_k,
+                "only_context": payload.only_context,
             },
         )
 
@@ -115,7 +119,9 @@ def get_search_router() -> APIRouter:
                 user=user,
                 datasets=payload.datasets,
                 dataset_ids=payload.dataset_ids,
+                system_prompt=payload.system_prompt,
                 top_k=payload.top_k,
+                only_context=payload.only_context,
             )
 
             return results

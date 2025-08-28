@@ -26,10 +26,12 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         self,
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
+        system_prompt: Optional[str] = None,
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
         save_interaction: bool = False,
+        only_context: bool = False,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -38,15 +40,14 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             node_type=node_type,
             node_name=node_name,
             save_interaction=save_interaction,
+            system_prompt=system_prompt,
+            only_context=only_context,
         )
 
     async def get_completion(
         self,
         query: str,
         context: Optional[Any] = None,
-        user_prompt: str = None,
-        system_prompt: str = None,
-        only_context: bool = False,
         context_extension_rounds=4,
     ) -> List[str]:
         """
@@ -92,8 +93,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 context=context,
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
-                user_prompt=user_prompt,
-                system_prompt=system_prompt,
+                system_prompt=self.system_prompt,
             )
 
             triplets += await self.get_triplets(completion)
@@ -120,9 +120,8 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             context=context,
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
-            user_prompt=user_prompt,
-            system_prompt=system_prompt,
-            only_context=only_context,
+            system_prompt=self.system_prompt,
+            only_context=self.only_context,
         )
 
         if self.save_interaction and context and triplets and completion:
@@ -130,4 +129,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 question=query, answer=completion, context=context, triplets=triplets
             )
 
-        return [completion]
+        if self.only_context:
+            return [context]
+        else:
+            return [completion]
