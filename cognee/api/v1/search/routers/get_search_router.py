@@ -20,7 +20,7 @@ class SearchPayloadDTO(InDTO):
     datasets: Optional[list[str]] = Field(default=None)
     dataset_ids: Optional[list[UUID]] = Field(default=None, examples=[[]])
     query: str = Field(default="What is in the document?")
-    system_prompt: Optional[str] = Field(default=None)
+    system_prompt: Optional[str] = Field(default="")
     top_k: Optional[int] = Field(default=10)
     only_context: bool = Field(default=False)
 
