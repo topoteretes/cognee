@@ -1,21 +1,17 @@
 import os
 from typing import Any, Optional, List, Type
 
-from poetry.console.commands import self
+
 from operator import itemgetter
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm import LLMGateway
-from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.shared.logging_utils import get_logger
 
 
 from cognee.tasks.temporal_graph.models import QueryInterval
-from cognee.infrastructure.llm.config import (
-    get_llm_config,
-)
 
 logger = get_logger()
 
