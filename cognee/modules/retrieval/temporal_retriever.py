@@ -93,8 +93,6 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         events_with_scores.sort(key=itemgetter("score"))
 
-        top_events = events_with_scores[: self.top_k]
-
         return events_with_scores[: self.top_k]
 
     async def get_context(self, query: str) -> Any:
