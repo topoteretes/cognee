@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import Request
 from fastapi import FastAPI, status
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
