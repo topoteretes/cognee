@@ -4,7 +4,7 @@ from typing import List, Union, BinaryIO
 
 from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
 from cognee.exceptions import CogneeSystemError
-from cognee.infrastructure.files.storage.s3_config import get_s3_config
+from cognee.infrastructure.files.storage.cloud_storage_config import get_cloud_storage_config
 
 
 async def resolve_data_directories(
@@ -25,7 +25,7 @@ async def resolve_data_directories(
         data = [data]
 
     resolved_data = []
-    s3_config = get_s3_config()
+    s3_config = get_cloud_storage_config()
 
     fs = None
     if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
