@@ -25,6 +25,7 @@ def get_add_router() -> APIRouter:
         data: List[UploadFile] = File(default=None),
         datasetName: Optional[str] = Form(default=None),
         datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
+        node_set: Optional[List[str]] = Form(default=[""], example=[""]),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -65,9 +66,7 @@ def get_add_router() -> APIRouter:
         send_telemetry(
             "Add API Endpoint Invoked",
             user.id,
-            additional_properties={
-                "endpoint": "POST /v1/add",
-            },
+            additional_properties={"endpoint": "POST /v1/add", "node_set": node_set},
         )
 
         from cognee.api.v1.add import add as cognee_add
@@ -76,34 +75,13 @@ def get_add_router() -> APIRouter:
             raise ValueError("Either datasetId or datasetName must be provided.")
 
         try:
-            if (
-                isinstance(data, str)
-                and data.startswith("http")
-                and (os.getenv("ALLOW_HTTP_REQUESTS", "true").lower() == "true")
-            ):
-                if "github" in data:
-                    # Perform git clone if the URL is from GitHub
-                    repo_name = data.split("/")[-1].replace(".git", "")
-                    subprocess.run(["git", "clone", data, f".data/{repo_name}"], check=True)
-                    # TODO: Update add call with dataset info
-                    await cognee_add(
-                        "data://.data/",
-                        f"{repo_name}",
-                    )
-                else:
-                    # Fetch and store the data from other types of URL using curl
-                    response = requests.get(data)
-                    response.raise_for_status()
+            add_run = await cognee_add(
+                data, datasetName, user=user, dataset_id=datasetId, node_set=node_set
+            )
 
-                    file_data = await response.content()
-                    # TODO: Update add call with dataset info
-                    return await cognee_add(file_data)
-            else:
-                add_run = await cognee_add(data, datasetName, user=user, dataset_id=datasetId)
-
-                if isinstance(add_run, PipelineRunErrored):
-                    return JSONResponse(status_code=420, content=add_run.model_dump(mode="json"))
-                return add_run.model_dump()
+            if isinstance(add_run, PipelineRunErrored):
+                return JSONResponse(status_code=420, content=add_run.model_dump(mode="json"))
+            return add_run.model_dump()
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 
