@@ -18,6 +18,7 @@ logger = get_logger()
 
 class SyncRequest(BaseModel):
     """Request model for sync operations."""
+
     dataset_id: UUID
 
 
@@ -99,8 +100,10 @@ def get_sync_router() -> APIRouter:
 
         try:
             # Retrieve existing dataset and check permissions
-            dataset = await get_specific_user_permission_datasets(user.id, "write", [request.dataset_id])
-            
+            dataset = await get_specific_user_permission_datasets(
+                user.id, "write", [request.dataset_id]
+            )
+
             # Convert from list to Dataset element
             if isinstance(dataset, list):
                 dataset = dataset[0]
@@ -120,9 +123,13 @@ def get_sync_router() -> APIRouter:
         except PermissionError as e:
             return JSONResponse(status_code=403, content={"error": str(e)})
         except ConnectionError as e:
-            return JSONResponse(status_code=409, content={"error": f"Cloud service unavailable: {str(e)}"})
+            return JSONResponse(
+                status_code=409, content={"error": f"Cloud service unavailable: {str(e)}"}
+            )
         except Exception as e:
             logger.error(f"Cloud sync operation failed: {str(e)}")
-            return JSONResponse(status_code=409, content={"error": f"Cloud sync operation failed: {str(e)}"})
+            return JSONResponse(
+                status_code=409, content={"error": f"Cloud sync operation failed: {str(e)}"}
+            )
 
     return router
