@@ -19,6 +19,10 @@ from cognee.modules.sync.methods import (
     mark_sync_failed
 )
 from cognee.modules.sync.models import SyncStatus
+from cognee.shared.logging_utils import get_logger
+
+# Initialize logger once at module level
+logger = get_logger()
 
 
 class LocalFileInfo(BaseModel):
@@ -97,8 +101,6 @@ async def sync(
     # Get current timestamp
     timestamp = datetime.now(timezone.utc).isoformat()
     
-    from cognee.shared.logging_utils import get_logger
-    logger = get_logger()
     logger.info(f"Starting cloud sync operation {run_id}: dataset {dataset.name} ({dataset.id})")
     
     # Create sync operation record in database (total_records will be set during background sync)
@@ -131,9 +133,6 @@ async def sync(
 
 async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) -> None:
     """Perform the actual sync operation in the background."""
-    from cognee.shared.logging_utils import get_logger
-    logger = get_logger()
-    
     start_time = datetime.now(timezone.utc)
     
     try:
@@ -170,9 +169,6 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
     2. Upload missing files individually 
     3. Prune cloud dataset to match local state
     """
-    from cognee.shared.logging_utils import get_logger
-    logger = get_logger()
-    
     logger.info(f"Starting sync to Cognee Cloud: dataset {dataset.name} ({dataset.id})")
     
     try:
@@ -258,9 +254,6 @@ async def _extract_local_files_with_hashes(dataset: Dataset, user: User, run_id:
     Returns:
         List[LocalFileInfo]: Information about each local file with stored hash
     """
-    from cognee.shared.logging_utils import get_logger
-    logger = get_logger()
-    
     try:
         logger.info(f"Extracting files from dataset: {dataset.name} ({dataset.id})")
         
@@ -352,9 +345,6 @@ async def _check_missing_hashes(
     Returns:
         List[str]: MD5 hashes that need to be uploaded
     """
-    from cognee.shared.logging_utils import get_logger
-    logger = get_logger()
-    
     url = f"{cloud_base_url}/api/sync/{dataset_id}/need-data"
     headers = {
         "Authorization": f"Bearer {auth_token}",
@@ -393,9 +383,6 @@ async def _upload_missing_files(
     Returns:
         int: Total bytes uploaded
     """
-    from cognee.shared.logging_utils import get_logger
-    logger = get_logger()
-    
     # Filter local files to only those with missing hashes
     files_to_upload = [f for f in local_files if f.content_hash in missing_hashes]
     
@@ -458,9 +445,6 @@ async def _prune_cloud_dataset(
     """
     Step 3: Prune cloud dataset to match local state.
     """
-    from cognee.shared.logging_utils import get_logger
-    logger = get_logger()
-    
     url = f"{cloud_base_url}/api/sync/{dataset_id}?prune=true"
     headers = {
         "Authorization": f"Bearer {auth_token}",

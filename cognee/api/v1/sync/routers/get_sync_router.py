@@ -103,11 +103,6 @@ def get_sync_router() -> APIRouter:
             
             # Convert from list to Dataset element
             if isinstance(dataset, list):
-                if not dataset:
-                    return JSONResponse(
-                        status_code=404,
-                        content={"error": f"Dataset with ID {request.dataset_id} not found or access denied."}
-                    )
                 dataset = dataset[0]
 
             await set_database_global_context_variables(dataset.id, dataset.owner_id)
