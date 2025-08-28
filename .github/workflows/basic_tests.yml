@@ -189,6 +189,9 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Install BAML Dependencies
+        run: uv add "cognee[baml]"
+
       - name: Run Simple Examples
         run: uv run python ./examples/python/simple_example.py
 

@@ -20,8 +20,10 @@ proxy_url = "https://test.prometh.ai"
 def get_entities(tagged_tokens):
     try:
         import nltk
+
         nltk.download("maxent_ne_chunker", quiet=True)
         from nltk.chunk import ne_chunk
+
         return ne_chunk(tagged_tokens)
     except ImportError:
         raise ImportError(
