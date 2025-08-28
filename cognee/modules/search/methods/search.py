@@ -101,11 +101,14 @@ async def specific_search(
     query: str,
     user: User,
     system_prompt_path="answer_simple_question.txt",
+    user_prompt: str = None,
+    system_prompt: str = None,
     top_k: int = 10,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
     save_interaction: Optional[bool] = False,
     last_k: Optional[int] = None,
+    only_context: bool = None,
 ) -> list:
     search_tasks: dict[SearchType, Callable] = {
         SearchType.SUMMARIES: SummariesRetriever(top_k=top_k).get_completion,
@@ -159,7 +162,9 @@ async def specific_search(
 
     send_telemetry("cognee.search EXECUTION STARTED", user.id)
 
-    results = await search_task(query)
+    results = await search_task(
+        query=query, system_prompt=system_prompt, user_prompt=user_prompt, only_context=only_context
+    )
 
     send_telemetry("cognee.search EXECUTION COMPLETED", user.id)
 

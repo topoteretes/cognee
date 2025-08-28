@@ -51,7 +51,13 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         self.followup_user_prompt_path = followup_user_prompt_path
 
     async def get_completion(
-        self, query: str, context: Optional[Any] = None, max_iter=4
+        self,
+        query: str,
+        context: Optional[Any] = None,
+        user_prompt: str = None,
+        system_prompt: str = None,
+        only_context: bool = False,
+        max_iter=4,
     ) -> List[str]:
         """
         Generate completion responses based on a user query and contextual information.
@@ -92,6 +98,8 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 context=context,
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
             )
             logger.info(f"Chain-of-thought: round {round_idx} - answer: {completion}")
             if round_idx < max_iter:
@@ -128,4 +136,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 question=query, answer=completion, context=context, triplets=triplets
             )
 
-        return [completion]
+        if only_context:
+            return [context]
+        else:
+            return [completion]

@@ -41,7 +41,13 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         )
 
     async def get_completion(
-        self, query: str, context: Optional[Any] = None, context_extension_rounds=4
+        self,
+        query: str,
+        context: Optional[Any] = None,
+        user_prompt: str = None,
+        system_prompt: str = None,
+        only_context: bool = False,
+        context_extension_rounds=4,
     ) -> List[str]:
         """
         Extends the context for a given query by retrieving related triplets and generating new
@@ -86,6 +92,8 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 context=context,
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
             )
 
             triplets += await self.get_triplets(completion)
@@ -112,6 +120,9 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             context=context,
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
+            user_prompt=user_prompt,
+            system_prompt=system_prompt,
+            only_context=only_context,
         )
 
         if self.save_interaction and context and triplets and completion:

@@ -151,7 +151,14 @@ class GraphCompletionRetriever(BaseRetriever):
 
         return context, triplets
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
+    async def get_completion(
+        self,
+        query: str,
+        context: Optional[Any] = None,
+        user_prompt: str = None,
+        system_prompt: str = None,
+        only_context: bool = False,
+    ) -> Any:
         """
         Generates a completion using graph connections context based on a query.
 
@@ -177,6 +184,9 @@ class GraphCompletionRetriever(BaseRetriever):
             context=context,
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
+            user_prompt=user_prompt,
+            system_prompt=system_prompt,
+            only_context=only_context,
         )
 
         if self.save_interaction and context and triplets and completion:
