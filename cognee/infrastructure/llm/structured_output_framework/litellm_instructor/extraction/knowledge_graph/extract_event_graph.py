@@ -15,7 +15,7 @@ async def extract_event_graph(
 
     llm_config = get_llm_config()
 
-    prompt_path = llm_config.graph_prompt_path
+    prompt_path = llm_config.temporal_graph_prompt_path
 
     # Check if the prompt path is an absolute path or just a filename
     if os.path.isabs(prompt_path):
