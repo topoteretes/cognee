@@ -1,10 +1,7 @@
 import asyncio
 import cognee
 from cognee.shared.logging_utils import setup_logging, INFO
-
-
-import json
-from pathlib import Path
+from cognee.api.v1.search import SearchType
 
 
 biography_1 = """
@@ -32,25 +29,6 @@ biography_1 = """
     Bangkok Glass .
     In 2013 , he moved from Buriram United to Bangkok Glass F.C. .
 
-    Personal life .
-    Attaphols sons , Wannaphon Buspakom and Kanokpon Buspakom , are professional footballers .
-
-    Honours .
-    Player .
-    Thai Port - Kor Royal Cup - Winners ( 2 ) : 1985 , 1990
-    Pahang FA - Malaysia Super League - Champions ( 1 ) : 1995
-    Thailand - Sea Games - Gold Medal ( 1 ) ; 1993 - Silver Medal ( 1 ) ; 1991
-
-    Manager .
-    BEC Tero Sasana - AFC Champions League - Runner-up ( 1 ) : 2002-03
-    - ASEAN Club Championship - Runner-up ( 1 ) : 2003
-    Muangthong United - Thai Premier League - Champions ( 1 ) : 2009
-    Buriram United - Thai Premier League - Champions ( 1 ) : 2011
-    - Thai FA Cup - Winners ( 2 ) : 2011 , 2012
-    - Thai League Cup - Winners ( 2 ) : 2011 , 2012
-    - Toyota Premier Cup - Winner ( 1 ) : 2011
-    - Kor Royal Cup - Winner ( 1 ) : 2013
-
     Individual
     - Thai Premier League Coach of the Year ( 3 ) : 2001-02 , 2009 , 2013
     """
@@ -69,11 +47,7 @@ biography_2 = """
     
     Personal life .
     In 1918 he had married the singer Hildur Arntzen ( 1888–1957 ) . Their marriage was dissolved in 1939 . In 1940 , he married Bartholine Eufemia Leganger ( 1903–1995 ) . They separated shortly after , and were officially divorced in 1945 . Øverland was married to journalist Margrete Aamot Øverland ( 1913–1978 ) during June 1945 . In 1946 , the Norwegian Parliament arranged for Arnulf and Margrete Aamot Øverland to reside at the Grotten . He lived there until his death in 1968 and she lived there for another ten years until her death in 1978 . Arnulf Øverland was buried at Vår Frelsers Gravlund in Oslo . Joseph Grimeland designed the bust of Arnulf Øverland ( bronze , 1970 ) at his grave site .
-    
-    Famous Quotes .
-    - “For a “monotheistic” religion it should be sufficient with three gods.”
-    - “What is there to be said about a Church which certainly promises its believers eternal salvation , but at the same time condemns the non-believers , all those who think differently , to an eternal torment in hell ? – If that Church absolutely must talk about love , then it should do so very quietly.”
-    
+
     Selected Works .
     - Den ensomme fest ( 1911 )
     - Berget det blå ( 1927 )
@@ -88,13 +62,6 @@ biography_2 = """
     - Dobloug Prize ( 1951 )
     - Mads Wiel Nygaards legat ( 1961 )
     
-    Other sources .
-    - Hambro , Carl ( 1984 ) Arnulf Øverland : det brennende hjerte ( Oslo : Aschehoug )
-    
-    External links .
-    - Du må ikke sove !
-    - Translation of Du må ikke sove by Lars-Toralf Storstrand
-    - Kristendommen , den tiende landeplage - Christianity , the tenth plague
     """
 
 
@@ -105,7 +72,22 @@ async def main():
     await cognee.add([biography_1, biography_2])
     await cognee.cognify(temporal_cognify=True)
 
-    print()
+    queries = [
+        "What happened before 1980?",
+        "What happened after 2010?",
+        "What happened between 2000 and 2006?",
+        "What happened between 1903 and 1995, I am interested in the Selected Works of Arnulf Øverland Ole Peter Arnulf Øverland?",
+        "Who is Attaphol Buspakom Attaphol Buspakom?",
+    ]
+
+    for query_text in queries:
+        search_results = await cognee.search(
+            query_type=SearchType.TEMPORAL,
+            query_text=query_text,
+            top_k=15,
+        )
+        print(f"Query: {query_text}")
+        print(f"Results: {search_results}\n")
 
 
 if __name__ == "__main__":
