@@ -1,3 +1,17 @@
-from .sync import sync, SyncResponse, DataEntryContent, DatasetMetadata, DatasetSyncPayload
+from .sync import (
+    sync, 
+    SyncResponse, 
+    LocalFileInfo,
+    CheckMissingHashesRequest,
+    CheckMissingHashesResponse,
+    PruneDatasetRequest
+)
 
-__all__ = ["sync", "SyncResponse", "DataEntryContent", "DatasetMetadata", "DatasetSyncPayload"]
+__all__ = [
+    "sync", 
+    "SyncResponse", 
+    "LocalFileInfo",
+    "CheckMissingHashesRequest",
+    "CheckMissingHashesResponse", 
+    "PruneDatasetRequest"
+]
