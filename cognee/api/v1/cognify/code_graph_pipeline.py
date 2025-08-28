@@ -40,39 +40,21 @@ async def run_code_graph_pipeline(repo_path, include_docs=False, excluded_paths=
     user = await get_default_user()
     detailed_extraction = True
 
-    # Default exclusion patterns
-    if excluded_paths is None:
-        excluded_paths = [
-            ".venv/",
-            "venv/",
-            "__pycache__/",
-            ".pytest_cache/",
-            "build/",
-            "dist/",
-            "node_modules/",
-            ".npm/",
-            ".git/",
-            ".svn/",
-            ".idea/",
-            ".vscode/",
-            "tmp/",
-            "temp/",
-            "*.pyc",
-            "*.pyo",
-            "*.log",
-            "*.tmp",
-        ]
-
+    # Multi-language support: allow passing supported_languages
+    supported_languages = None  # defer to task defaults
     tasks = [
         Task(
             get_repo_file_dependencies,
             detailed_extraction=detailed_extraction,
+            supported_languages=supported_languages,
             excluded_paths=excluded_paths,
         ),
+        # Task(summarize_code, task_config={"batch_size": 500}), # This task takes a long time to complete
         Task(add_data_points, task_config={"batch_size": 30}),
     ]
 
     if include_docs:
+        # This tasks take a long time to complete
         non_code_tasks = [
             Task(get_non_py_files, task_config={"batch_size": 50}),
             Task(ingest_data, dataset_name="repo_docs", user=user),
@@ -92,6 +74,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=False, excluded_paths=
 
     dataset_name = "codebase"
 
+    # Save dataset to database
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         dataset = await create_dataset(dataset_name, user, session)
@@ -112,8 +95,8 @@ async def run_code_graph_pipeline(repo_path, include_docs=False, excluded_paths=
 if __name__ == "__main__":
 
     async def main():
-        async for run_status in run_code_graph_pipeline("REPO_PATH"):
-            print(f"{run_status.pipeline_name}: {run_status.status}")
+        async for run_status in run_code_graph_pipeline("/Users/igorilic/Desktop/cognee/examples"):
+            print(f"{run_status.pipeline_run_id}: {run_status.status}")
 
         file_path = os.path.join(
             pathlib.Path(__file__).parent, ".artifacts", "graph_visualization.html"

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pylint.checkers.utils import node_type
 
-from cognee.exceptions import InvalidValueError
+from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.methods.search import search, specific_search
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.models import User
@@ -65,6 +65,8 @@ async def test_search(
         top_k=10,
         node_type=None,
         node_name=None,
+        save_interaction=False,
+        last_k=None,
     )
 
     # Verify result logging
@@ -217,7 +219,7 @@ async def test_specific_search_invalid_type(mock_user):
     query_type = "INVALID_TYPE"  # Not a valid SearchType
 
     # Execute and verify
-    with pytest.raises(InvalidValueError) as excinfo:
+    with pytest.raises(UnsupportedSearchTypeError) as excinfo:
         await specific_search(query_type, query, mock_user)
 
     assert "Unsupported search type" in str(excinfo.value)

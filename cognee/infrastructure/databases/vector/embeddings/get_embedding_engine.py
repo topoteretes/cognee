@@ -27,7 +27,7 @@ def get_embedding_engine() -> EmbeddingEngine:
         config.embedding_provider,
         config.embedding_model,
         config.embedding_dimensions,
-        config.embedding_max_tokens,
+        config.embedding_max_completion_tokens,
         config.embedding_endpoint,
         config.embedding_api_key,
         config.embedding_api_version,
@@ -41,7 +41,7 @@ def create_embedding_engine(
     embedding_provider,
     embedding_model,
     embedding_dimensions,
-    embedding_max_tokens,
+    embedding_max_completion_tokens,
     embedding_endpoint,
     embedding_api_key,
     embedding_api_version,
@@ -58,7 +58,7 @@ def create_embedding_engine(
           'ollama', or another supported provider.
         - embedding_model: The model to be used for the embedding engine.
         - embedding_dimensions: The number of dimensions for the embeddings.
-        - embedding_max_tokens: The maximum number of tokens for the embeddings.
+        - embedding_max_completion_tokens: The maximum number of tokens for the embeddings.
         - embedding_endpoint: The endpoint for the embedding service, relevant for certain
           providers.
         - embedding_api_key: API key to authenticate with the embedding service, if
@@ -81,7 +81,7 @@ def create_embedding_engine(
         return FastembedEmbeddingEngine(
             model=embedding_model,
             dimensions=embedding_dimensions,
-            max_tokens=embedding_max_tokens,
+            max_completion_tokens=embedding_max_completion_tokens,
         )
 
     if embedding_provider == "ollama":
@@ -90,7 +90,7 @@ def create_embedding_engine(
         return OllamaEmbeddingEngine(
             model=embedding_model,
             dimensions=embedding_dimensions,
-            max_tokens=embedding_max_tokens,
+            max_completion_tokens=embedding_max_completion_tokens,
             endpoint=embedding_endpoint,
             huggingface_tokenizer=huggingface_tokenizer,
         )
@@ -104,5 +104,5 @@ def create_embedding_engine(
         api_version=embedding_api_version,
         model=embedding_model,
         dimensions=embedding_dimensions,
-        max_tokens=embedding_max_tokens,
+        max_completion_tokens=embedding_max_completion_tokens,
     )

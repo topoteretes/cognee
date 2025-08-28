@@ -21,10 +21,6 @@ async def get_graph_engine() -> GraphDBInterface:
     if hasattr(graph_client, "initialize"):
         await graph_client.initialize()
 
-    # Handle loading of graph for NetworkX
-    if config["graph_database_provider"].lower() == "networkx" and graph_client.graph is None:
-        await graph_client.load_graph_from_file()
-
     return graph_client
 
 
@@ -181,8 +177,7 @@ def create_graph_engine(
             graph_id=graph_identifier,
         )
 
-    from .networkx.adapter import NetworkXAdapter
-
-    graph_client = NetworkXAdapter(filename=graph_file_path)
-
-    return graph_client
+    raise EnvironmentError(
+        f"Unsupported graph database provider: {graph_database_provider}. "
+        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'falkordb', 'kuzu', 'kuzu-remote', 'memgraph', 'neptune', 'neptune_analytics'])}"
+    )

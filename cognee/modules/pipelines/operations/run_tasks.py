@@ -66,7 +66,7 @@ async def run_tasks(
     user: User = None,
     pipeline_name: str = "unknown_pipeline",
     context: dict = None,
-    incremental_loading: bool = True,
+    incremental_loading: bool = False,
 ):
     async def _run_tasks_data_item_incremental(
         data_item,
@@ -162,6 +162,9 @@ async def run_tasks(
                 ),
                 "data_id": data_id,
             }
+
+            if os.getenv("RAISE_INCREMENTAL_LOADING_ERRORS", "true").lower() == "true":
+                raise error
 
     async def _run_tasks_data_item_regular(
         data_item,
@@ -281,6 +284,7 @@ async def run_tasks(
             for data_item in data
         ]
         results = await asyncio.gather(*data_item_tasks)
+
         # Remove skipped data items from results
         results = [result for result in results if result]
 

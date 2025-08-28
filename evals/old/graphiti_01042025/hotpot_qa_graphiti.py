@@ -50,7 +50,7 @@ async def search_graphiti(query: str, graphiti_client: Graphiti, num_results: in
 
 async def answer_questions(
     graphiti: Graphiti,
-    model_name: str = "gpt-4o-mini",
+    model_name: str = "gpt-5-mini",
     qa_pairs_file: str = "hotpot_50_qa_pairs.json",
     print_results: bool = True,
     output_file: str = None,
@@ -173,7 +173,7 @@ if __name__ == "__main__":
         corpus_limit: int = None  # Limit number of documents to process
 
         # Model parameters
-        model_name: str = "gpt-4o-mini"
+        model_name: str = "gpt-5-mini"
 
         # QA parameters
         qa_pairs_file: str = "hotpot_50_qa_pairs.json"

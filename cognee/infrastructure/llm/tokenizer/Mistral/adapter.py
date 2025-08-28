@@ -16,17 +16,17 @@ class MistralTokenizer(TokenizerInterface):
 
     Instance variables include:
     - model: str
-    - max_tokens: int
+    - max_completion_tokens: int
     - tokenizer: MistralTokenizer
     """
 
     def __init__(
         self,
         model: str,
-        max_tokens: int = 3072,
+        max_completion_tokens: int = 3072,
     ):
         self.model = model
-        self.max_tokens = max_tokens
+        self.max_completion_tokens = max_completion_tokens
 
         # Import here to make it an optional dependency
         from mistral_common.tokens.tokenizers.mistral import MistralTokenizer

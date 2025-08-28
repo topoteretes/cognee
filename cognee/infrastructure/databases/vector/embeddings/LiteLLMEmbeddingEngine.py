@@ -6,7 +6,7 @@ import math
 import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
-from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
+from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.llm.tokenizer.Gemini import (
     GeminiTokenizer,
 )
@@ -57,7 +57,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         api_key: str = None,
         endpoint: str = None,
         api_version: str = None,
-        max_tokens: int = 512,
+        max_completion_tokens: int = 512,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
@@ -65,7 +65,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.provider = provider
         self.model = model
         self.dimensions = dimensions
-        self.max_tokens = max_tokens
+        self.max_completion_tokens = max_completion_tokens
         self.tokenizer = self.get_tokenizer()
         self.retry_count = 0
 
@@ -179,20 +179,29 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         model = self.model.split("/")[-1]
 
         if "openai" in self.provider.lower():
-            tokenizer = TikTokenTokenizer(model=model, max_tokens=self.max_tokens)
+            tokenizer = TikTokenTokenizer(
+                model=model, max_completion_tokens=self.max_completion_tokens
+            )
         elif "gemini" in self.provider.lower():
-            tokenizer = GeminiTokenizer(model=model, max_tokens=self.max_tokens)
+            tokenizer = GeminiTokenizer(
+                model=model, max_completion_tokens=self.max_completion_tokens
+            )
         elif "mistral" in self.provider.lower():
-            tokenizer = MistralTokenizer(model=model, max_tokens=self.max_tokens)
+            tokenizer = MistralTokenizer(
+                model=model, max_completion_tokens=self.max_completion_tokens
+            )
         else:
             try:
                 tokenizer = HuggingFaceTokenizer(
-                    model=self.model.replace("hosted_vllm/", ""), max_tokens=self.max_tokens
+                    model=self.model.replace("hosted_vllm/", ""),
+                    max_completion_tokens=self.max_completion_tokens,
                 )
             except Exception as e:
                 logger.warning(f"Could not get tokenizer from HuggingFace due to: {e}")
                 logger.info("Switching to TikToken default tokenizer.")
-                tokenizer = TikTokenTokenizer(model=None, max_tokens=self.max_tokens)
+                tokenizer = TikTokenTokenizer(
+                    model=None, max_completion_tokens=self.max_completion_tokens
+                )
 
         logger.debug(f"Tokenizer loaded for model: {self.model}")
         return tokenizer

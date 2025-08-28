@@ -41,7 +41,7 @@ class GenericAPIAdapter(LLMInterface):
         api_key: str,
         model: str,
         name: str,
-        max_tokens: int,
+        max_completion_tokens: int,
         fallback_model: str = None,
         fallback_api_key: str = None,
         fallback_endpoint: str = None,
@@ -50,7 +50,7 @@ class GenericAPIAdapter(LLMInterface):
         self.model = model
         self.api_key = api_key
         self.endpoint = endpoint
-        self.max_tokens = max_tokens
+        self.max_completion_tokens = max_completion_tokens
 
         self.fallback_model = fallback_model
         self.fallback_api_key = fallback_api_key

@@ -16,7 +16,7 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.context_global_variables import set_database_global_context_variables
 
-from cognee.api.v1.delete.exceptions import (
+from cognee.api.v1.exceptions import (
     DocumentNotFoundError,
     DatasetNotFoundError,
     DocumentSubgraphNotFoundError,
