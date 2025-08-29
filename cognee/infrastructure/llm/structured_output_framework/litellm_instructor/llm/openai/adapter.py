@@ -132,7 +132,7 @@ class OpenAIAdapter(LLMInterface):
                 api_version=self.api_version,
                 response_model=response_model,
                 max_retries=self.MAX_RETRIES,
-                extra_body={"reasoning_effort": "low"},
+                extra_body={"reasoning_effort": "minimal"},
             )
         except (
             ContentFilterFinishReasonError,
