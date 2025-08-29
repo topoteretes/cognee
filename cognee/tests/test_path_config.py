@@ -1,26 +1,11 @@
 import os
 from pathlib import Path
 
-def ensure_absolute_path(path: str, base_path: str = None, allow_relative: bool = False) -> str:
-    """Ensures a path is absolute, optionally converting relative paths."""
-    if path is None:
-        raise ValueError("Path cannot be None")
-        
-    path_obj = Path(path)
-    if path_obj.is_absolute():
-        return str(path_obj.resolve())
-    
-    if not allow_relative:
-        raise ValueError(f"Path must be absolute. Got relative path: {path}")
-        
-    if base_path is None:
-        raise ValueError("base_path must be provided when converting relative paths")
-        
-    base = Path(base_path)
-    if not base.is_absolute():
-        raise ValueError("base_path must be absolute when converting relative paths")
-        
-    return str((base / path).resolve())
+from pathlib import Path
+import pytest
+from cognee.root_dir import ensure_absolute_path
+
+# …rest of your test cases using ensure_absolute_path…
 
 def test_root_dir_absolute_paths():
     """Test absolute path handling in root_dir.py"""
