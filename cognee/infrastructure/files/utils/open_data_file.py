@@ -4,7 +4,6 @@ from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
-from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
 
 
@@ -23,22 +22,16 @@ async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None,
             yield file
 
     elif file_path.startswith("s3://"):
+        try:
+            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+        except ImportError:
+            raise ImportError(
+                "S3 dependencies are not installed. Please install with 'pip install cognee[aws]' to use S3 functionality."
+            )
+
         normalized_url = get_data_file_path(file_path)
         s3_dir_path = os.path.dirname(normalized_url)
         s3_filename = os.path.basename(normalized_url)
-
-        # if "/" in s3_path:
-        #     s3_dir = "/".join(s3_path.split("/")[:-1])
-        #     s3_filename = s3_path.split("/")[-1]
-        # else:
-        #     s3_dir = ""
-        #     s3_filename = s3_path
-
-        # Extract filesystem path from S3 URL structure
-        # file_dir_path = (
-        #     f"s3://{parsed_url.netloc}/{s3_dir}" if s3_dir else f"s3://{parsed_url.netloc}"
-        # )
-        # file_name = s3_filename
 
         file_storage = S3FileStorage(s3_dir_path)
 

@@ -1,6 +1,10 @@
 import os
 import json
-import pandas as pd
+
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
 import subprocess
 import modal
 import streamlit as st
@@ -12,7 +16,7 @@ metrics_volume = modal.Volume.from_name("evaluation_dashboard_results", create_i
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install("streamlit", "pandas", "plotly")
+    .pip_install("streamlit", "plotly")
     .add_local_file(__file__, "/root/serve_dashboard.py")
 )
 
@@ -77,6 +81,12 @@ def main():
                 "avg_correctness": round(total_corr / num_q, 4),
             }
         )
+
+    if pd is None:
+        st.error(
+            "Pandas is required for the evaluation dashboard. Install with 'pip install cognee[evals]' to use this feature."
+        )
+        return
 
     df = pd.DataFrame(records)
     if df.empty:

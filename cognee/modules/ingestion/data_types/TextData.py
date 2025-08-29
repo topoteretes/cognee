@@ -1,7 +1,6 @@
 from typing import BinaryIO
 from contextlib import asynccontextmanager
 import hashlib
-from cognee.infrastructure.data.utils.extract_keywords import extract_keywords
 from .IngestionData import IngestionData
 
 
