@@ -103,12 +103,3 @@ def test_path_consistency():
         expected = str((Path(system_root) / rel_path).resolve())
         assert result == expected, f"Failed to resolve {rel_path} correctly"
 
-if __name__ == "__main__":
-    print("Running path configuration tests...")
-    test_root_dir_absolute_paths()
-    print("✓ Root directory absolute path tests passed")
-    test_database_relative_paths()
-    print("✓ Database relative path tests passed")
-    test_path_consistency()
-    print("✓ Path consistency tests passed")
-    print("All tests passed successfully!")
