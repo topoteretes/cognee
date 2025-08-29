@@ -13,15 +13,15 @@ class BaseConfig(BaseSettings):
     monitoring_tool: object = Observer.LANGFUSE
 
     @pydantic.model_validator(mode="after")
-    def validate_paths(cls, values):
+    def validate_paths(self):
         # Require absolute paths for root directories
-        values.data_root_directory = ensure_absolute_path(
-            values.data_root_directory, allow_relative=False
+        self.data_root_directory = ensure_absolute_path(
+            self.data_root_directory, allow_relative=False
         )
-        values.system_root_directory = ensure_absolute_path(
-            values.system_root_directory, allow_relative=False
+        self.system_root_directory = ensure_absolute_path(
+            self.system_root_directory, allow_relative=False
         )
-        return values
+        return self
 
     langfuse_public_key: Optional[str] = os.getenv("LANGFUSE_PUBLIC_KEY")
     langfuse_secret_key: Optional[str] = os.getenv("LANGFUSE_SECRET_KEY")
