@@ -4,6 +4,7 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.base_config import get_base_config
+from cognee.root_dir import ensure_absolute_path
 
 
 class VectorConfig(BaseSettings):
@@ -11,12 +12,10 @@ class VectorConfig(BaseSettings):
     Manage the configuration settings for the vector database.
 
     Public methods:
-
     - to_dict: Convert the configuration to a dictionary.
 
     Instance variables:
-
-    - vector_db_url: The URL of the vector database.
+    - vector_db_url: The URL of the vector database. Can be relative to system_root_directory.
     - vector_db_port: The port for the vector database.
     - vector_db_key: The key for accessing the vector database.
     - vector_db_provider: The provider for the vector database.
@@ -30,10 +29,18 @@ class VectorConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     @pydantic.model_validator(mode="after")
-    def fill_derived(cls, values):
-        # Set file path based on graph database provider if no file path is provided
-        if not values.vector_db_url:
-            base_config = get_base_config()
+    def validate_paths(cls, values):
+        base_config = get_base_config()
+
+        if values.vector_db_url:
+            # Convert relative paths to absolute using system_root_directory as base
+            values.vector_db_url = ensure_absolute_path(
+                values.vector_db_url,
+                base_path=base_config.system_root_directory,
+                allow_relative=True,
+            )
+        else:
+            # Default path
             databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
             values.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
 
