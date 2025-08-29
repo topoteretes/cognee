@@ -94,7 +94,15 @@ class CodeRetriever(BaseRetriever):
                         {"id": res.id, "score": res.score, "payload": res.payload}
                     )
 
+            existing_collection = []
             for collection in self.classes_and_functions_collections:
+                if await vector_engine.has_collection(collection):
+                    existing_collection.append(collection)
+
+            if not existing_collection:
+                raise RuntimeError("No collection found for code retriever")
+
+            for collection in existing_collection:
                 logger.debug(f"Searching {collection} collection with general query")
                 search_results_code = await vector_engine.search(
                     collection, query, limit=self.top_k
