@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 import pydantic
 from pydantic import Field
 from cognee.base_config import get_base_config
+from cognee.root_dir import ensure_absolute_path
 from cognee.shared.data_models import KnowledgeGraph
 
 
@@ -51,15 +52,22 @@ class GraphConfig(BaseSettings):
     @pydantic.model_validator(mode="after")
     def fill_derived(cls, values):
         provider = values.graph_database_provider.lower()
+        base_config = get_base_config()
 
         # Set default filename if no filename is provided
         if not values.graph_filename:
             values.graph_filename = f"cognee_graph_{provider}"
 
-        # Set file path based on graph database provider if no file path is provided
-        if not values.graph_file_path:
-            base_config = get_base_config()
-
+        # Handle graph file path
+        if values.graph_file_path:
+            # Convert relative paths to absolute using system_root_directory as base
+            values.graph_file_path = ensure_absolute_path(
+                values.graph_file_path,
+                base_path=base_config.system_root_directory,
+                allow_relative=True
+            )
+        else:
+            # Default path
             databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
             values.graph_file_path = os.path.join(databases_directory_path, values.graph_filename)
 
