@@ -3,7 +3,22 @@ from cognee.modules.engine.utils.generate_timestamp_datapoint import generate_ti
 
 
 def generate_event_datapoint(event) -> Event:
-    """Create an Event datapoint from an event model."""
+    """
+    Generates an Event datapoint from a given event model, including temporal metadata if available.
+
+    The function maps the basic attributes (name, description, location) from the input event
+    and enriches them with temporal information. If start and end times are provided, an
+    Interval is created. If only one timestamp is available, it is added directly. Temporal
+    information is also appended to the event description for context.
+
+    Args:
+        event: An event model instance containing attributes such as name, description,
+               location, time_from, and time_to.
+
+    Returns:
+        Event: A structured Event object with name, description, location, and enriched
+               temporal details.
+    """
     # Base event data
     event_data = {
         "name": event.name,

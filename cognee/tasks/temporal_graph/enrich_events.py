@@ -6,7 +6,19 @@ from cognee.tasks.temporal_graph.models import EventWithEntities, EventEntityLis
 
 
 async def enrich_events(events: List[Event]) -> List[EventWithEntities]:
-    """Extract entities from events and return enriched events."""
+    """
+    Enriches a list of events by extracting entities using an LLM.
+
+    The function serializes event data into JSON, sends it to the LLM for
+    entity extraction, and returns enriched events with associated entities.
+
+    Args:
+        events (List[Event]): A list of Event objects to be enriched.
+
+    Returns:
+        List[EventWithEntities]: A list of events augmented with extracted entities.
+    """
+
     import json
 
     # Convert events to JSON format for LLM processing

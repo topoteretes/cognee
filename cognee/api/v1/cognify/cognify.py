@@ -247,6 +247,25 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 async def get_temporal_tasks(
     user: User = None, chunker=TextChunker, chunk_size: int = None
 ) -> list[Task]:
+    """
+    Builds and returns a list of temporal processing tasks to be executed in sequence.
+
+    The pipeline includes:
+    1. Document classification.
+    2. Dataset permission checks (requires "write" access).
+    3. Document chunking with a specified or default chunk size.
+    4. Event and timestamp extraction from chunks.
+    5. Knowledge graph extraction from events.
+    6. Batched insertion of data points.
+
+    Args:
+        user (User, optional): The user requesting task execution, used for permission checks.
+        chunker (Callable, optional): A text chunking function/class to split documents. Defaults to TextChunker.
+        chunk_size (int, optional): Maximum token size per chunk. If not provided, uses system default.
+
+    Returns:
+        list[Task]: A list of Task objects representing the temporal processing pipeline.
+    """
     temporal_tasks = [
         Task(classify_documents),
         Task(check_permissions_on_dataset, user=user, permissions=["write"]),

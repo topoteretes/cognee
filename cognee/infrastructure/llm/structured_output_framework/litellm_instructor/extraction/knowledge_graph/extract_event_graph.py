@@ -8,10 +8,21 @@ from cognee.infrastructure.llm.config import (
 )
 
 
-async def extract_event_graph(
-    content: str, response_model: Type[BaseModel], system_prompt: str = None
-):
-    """Extract event graph from content using LLM."""
+async def extract_event_graph(content: str, response_model: Type[BaseModel]):
+    """
+    Extracts an event graph from the given content using an LLM with a structured output format.
+
+    This function loads a temporal graph extraction prompt from the LLM configuration,
+    renders it as a system prompt, and queries the LLM to produce a structured event
+    graph matching the specified response model.
+
+    Args:
+        content (str): The input text from which to extract the event graph.
+        response_model (Type[BaseModel]): A Pydantic model defining the structure of the expected output.
+
+    Returns:
+        BaseModel: An instance of the response_model populated with the extracted event graph.
+    """
 
     llm_config = get_llm_config()
 

@@ -8,7 +8,20 @@ from cognee.infrastructure.llm.config import (
 
 
 async def extract_event_entities(content: str, response_model: Type[BaseModel]):
-    """Extract event entities from content using LLM."""
+    """
+    Extracts event-related entities from the given content using an LLM with structured output.
+
+    This function loads an event entity extraction prompt from the LLM configuration,
+    renders it into a system prompt, and queries the LLM to produce structured entities
+    that conform to the specified response model.
+
+    Args:
+        content (str): The input text from which to extract event entities.
+        response_model (Type[BaseModel]): A Pydantic model defining the structure of the expected output.
+
+    Returns:
+        BaseModel: An instance of the response_model populated with extracted event entities.
+    """
     llm_config = get_llm_config()
 
     prompt_path = llm_config.event_entity_prompt_path

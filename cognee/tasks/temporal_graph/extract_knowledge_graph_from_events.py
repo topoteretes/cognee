@@ -8,7 +8,19 @@ from cognee.tasks.temporal_graph.add_entities_to_event import add_entities_to_ev
 async def extract_knowledge_graph_from_events(
     data_chunks: List[DocumentChunk],
 ) -> List[DocumentChunk]:
-    """Extract events from chunks and enrich them with entities."""
+    """
+    Extracts events from document chunks and enriches them with entities to form a knowledge graph.
+
+    The function collects all Event objects from the given document chunks,
+    uses an LLM to extract and attach related entities, and updates the events
+    with these enriched attributes.
+
+    Args:
+        data_chunks (List[DocumentChunk]): A list of document chunks containing extracted events.
+
+    Returns:
+        List[DocumentChunk]: The same list of document chunks, with their events enriched by entities.
+    """
     # Extract events from chunks
     all_events = []
     for chunk in data_chunks:

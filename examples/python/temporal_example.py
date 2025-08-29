@@ -61,7 +61,6 @@ biography_2 = """
     - Gyldendals Endowment ( 1935 )
     - Dobloug Prize ( 1951 )
     - Mads Wiel Nygaards legat ( 1961 )
-    
     """
 
 
