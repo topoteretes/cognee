@@ -4,6 +4,7 @@ import asyncio
 from uuid import UUID
 from typing import Callable, List, Optional, Type, Union
 
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.user_qa_feedback import UserQAFeedback
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.context_global_variables import set_database_global_context_variables
@@ -38,7 +39,7 @@ async def search(
     user: User,
     system_prompt_path="answer_simple_question.txt",
     top_k: int = 10,
-    node_type: Optional[Type] = None,
+    node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: Optional[bool] = False,
     last_k: Optional[int] = None,
@@ -67,6 +68,8 @@ async def search(
             dataset_ids=dataset_ids,
             system_prompt_path=system_prompt_path,
             top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
             save_interaction=save_interaction,
             last_k=last_k,
         )
@@ -102,7 +105,7 @@ async def specific_search(
     user: User,
     system_prompt_path="answer_simple_question.txt",
     top_k: int = 10,
-    node_type: Optional[Type] = None,
+    node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: Optional[bool] = False,
     last_k: Optional[int] = None,
@@ -173,6 +176,8 @@ async def authorized_search(
     dataset_ids: Optional[list[UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
     top_k: int = 10,
+    node_type: Optional[Type] = NodeSet,
+    node_name: Optional[List[str]] = None,
     save_interaction: bool = False,
     last_k: Optional[int] = None,
 ) -> list:
@@ -194,7 +199,9 @@ async def authorized_search(
         user,
         system_prompt_path,
         top_k,
-        save_interaction,
+        node_type=node_type,
+        node_name=node_name,
+        save_interaction=save_interaction,
         last_k=last_k,
     )
 
@@ -210,6 +217,8 @@ async def specific_search_by_context(
     user: User,
     system_prompt_path: str,
     top_k: int,
+    node_type: Optional[Type] = NodeSet,
+    node_name: Optional[List[str]] = None,
     save_interaction: bool = False,
     last_k: Optional[int] = None,
 ):
@@ -219,7 +228,15 @@ async def specific_search_by_context(
     """
 
     async def _search_by_context(
-        dataset, user, query_type, query_text, system_prompt_path, top_k, last_k
+        dataset,
+        user,
+        query_type,
+        query_text,
+        system_prompt_path,
+        top_k,
+        node_type: Optional[Type] = NodeSet,
+        node_name: Optional[List[str]] = None,
+        last_k: Optional[int] = None,
     ):
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)
@@ -229,6 +246,8 @@ async def specific_search_by_context(
             user,
             system_prompt_path=system_prompt_path,
             top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
             save_interaction=save_interaction,
             last_k=last_k,
         )
@@ -243,7 +262,15 @@ async def specific_search_by_context(
     for dataset in search_datasets:
         tasks.append(
             _search_by_context(
-                dataset, user, query_type, query_text, system_prompt_path, top_k, last_k
+                dataset,
+                user,
+                query_type,
+                query_text,
+                system_prompt_path,
+                top_k,
+                node_type=node_type,
+                node_name=node_name,
+                last_k=last_k,
             )
         )
 
