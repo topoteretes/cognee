@@ -122,19 +122,19 @@ async def main():
         f"Expected multiple 'is_a' edge, but found {edge_type_counts.get('is_a', 0)}"
     )
 
-    assert (edge_type_counts.get("during", 0) == type_counts.get("Interval", 0))(
+    assert (edge_type_counts.get("during", 0) == type_counts.get("Interval", 0)), (
         "Expected the same amount of during and interval objects in the graph"
     )
 
-    assert (edge_type_counts.get("during", 0) == type_counts.get("Interval", 0))(
+    assert (edge_type_counts.get("during", 0) == type_counts.get("Interval", 0)), (
         "Expected the same amount of during and interval objects in the graph"
     )
 
-    assert (edge_type_counts.get("time_from", 0) == type_counts.get("Interval", 0))(
+    assert (edge_type_counts.get("time_from", 0) == type_counts.get("Interval", 0)), (
         "Expected the same amount of time_from and interval objects in the graph"
     )
 
-    assert (edge_type_counts.get("time_to", 0) == type_counts.get("Interval", 0))(
+    assert (edge_type_counts.get("time_to", 0) == type_counts.get("Interval", 0)), (
         "Expected the same amount of time_to and interval objects in the graph"
     )
 
