@@ -16,19 +16,12 @@ def test_root_dir_absolute_paths():
     
     # Test with relative path (should fail)
     rel_path = "relative/path"
-    try:
+    with pytest.raises(ValueError, match="must be absolute"):
         ensure_absolute_path(rel_path, allow_relative=False)
-        assert False, "Should fail with relative path when allow_relative=False"
-    except ValueError as e:
-        assert "must be absolute" in str(e)
-        
-    # Test with None path
-    try:
-        ensure_absolute_path(None)
-        assert False, "Should fail with None path"
-    except ValueError as e:
-        assert "cannot be None" in str(e)
 
+    # Test with None path
+    with pytest.raises(ValueError, match="cannot be None"):
+        ensure_absolute_path(None)
 def test_database_relative_paths():
     """Test relative path handling for vector and graph databases"""
     system_root = "C:/system/root" if os.name == 'nt' else "/system/root"
