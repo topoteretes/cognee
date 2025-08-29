@@ -36,15 +36,19 @@ class GraphCompletionRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
+        system_prompt: str = None,
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
         save_interaction: bool = False,
+        only_context: bool = False,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.save_interaction = save_interaction
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
+        self.system_prompt = system_prompt
+        self.only_context = only_context
         self.top_k = top_k if top_k is not None else 5
         self.node_type = node_type
         self.node_name = node_name
@@ -151,7 +155,11 @@ class GraphCompletionRetriever(BaseRetriever):
 
         return context, triplets
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
+    async def get_completion(
+        self,
+        query: str,
+        context: Optional[Any] = None,
+    ) -> Any:
         """
         Generates a completion using graph connections context based on a query.
 
@@ -177,6 +185,8 @@ class GraphCompletionRetriever(BaseRetriever):
             context=context,
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
+            system_prompt=self.system_prompt,
+            only_context=self.only_context,
         )
 
         if self.save_interaction and context and triplets and completion:

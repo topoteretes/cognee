@@ -17,11 +17,13 @@ async def search(
     datasets: Optional[Union[list[str], str]] = None,
     dataset_ids: Optional[Union[list[UUID], UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
+    system_prompt: Optional[str] = None,
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: bool = False,
     last_k: Optional[int] = None,
+    only_context: bool = False,
 ) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -184,11 +186,13 @@ async def search(
         dataset_ids=dataset_ids if dataset_ids else datasets,
         user=user,
         system_prompt_path=system_prompt_path,
+        system_prompt=system_prompt,
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
         save_interaction=save_interaction,
         last_k=last_k,
+        only_context=only_context,
     )
 
     return filtered_search_results
