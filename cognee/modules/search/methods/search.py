@@ -4,6 +4,7 @@ import asyncio
 from uuid import UUID
 from typing import Callable, List, Optional, Type, Union
 
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.user_qa_feedback import UserQAFeedback
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.context_global_variables import set_database_global_context_variables
@@ -39,7 +40,7 @@ async def search(
     system_prompt_path="answer_simple_question.txt",
     system_prompt: Optional[str] = None,
     top_k: int = 10,
-    node_type: Optional[Type] = None,
+    node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: Optional[bool] = False,
     last_k: Optional[int] = None,
@@ -111,7 +112,7 @@ async def specific_search(
     system_prompt_path: str = "answer_simple_question.txt",
     system_prompt: Optional[str] = None,
     top_k: int = 10,
-    node_type: Optional[Type] = None,
+    node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: Optional[bool] = False,
     last_k: Optional[int] = None,
@@ -194,7 +195,7 @@ async def authorized_search(
     system_prompt_path: str = "answer_simple_question.txt",
     system_prompt: Optional[str] = None,
     top_k: int = 10,
-    node_type: Optional[Type] = None,
+    node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: Optional[bool] = False,
     last_k: Optional[int] = None,
@@ -239,7 +240,7 @@ async def specific_search_by_context(
     system_prompt_path: str = "answer_simple_question.txt",
     system_prompt: Optional[str] = None,
     top_k: int = 10,
-    node_type: Optional[Type] = None,
+    node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: Optional[bool] = False,
     last_k: Optional[int] = None,
@@ -258,7 +259,7 @@ async def specific_search_by_context(
         system_prompt_path: str = "answer_simple_question.txt",
         system_prompt: Optional[str] = None,
         top_k: int = 10,
-        node_type: Optional[Type] = None,
+        node_type: Optional[Type] = NodeSet,
         node_name: Optional[List[str]] = None,
         save_interaction: Optional[bool] = False,
         last_k: Optional[int] = None,

@@ -25,6 +25,7 @@ class SearchPayloadDTO(InDTO):
     system_prompt: Optional[str] = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
+    node_name: Optional[list[str]] = Field(default=None, example=[])
     top_k: Optional[int] = Field(default=10)
     only_context: bool = Field(default=False)
 
@@ -86,6 +87,7 @@ def get_search_router() -> APIRouter:
         - **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to search within
         - **query** (str): The search query string
         - **system_prompt** Optional[str]: System prompt to be used for Completion type searches in Cognee
+        - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
         - **top_k** (Optional[int]): Maximum number of results to return (default: 10)
         - **only_context** bool: Set to true to only return context Cognee will be sending to LLM in Completion type searches. This will be returned instead of LLM calls for completion type searches.
 
@@ -111,6 +113,7 @@ def get_search_router() -> APIRouter:
                 "dataset_ids": [str(dataset_id) for dataset_id in payload.dataset_ids or []],
                 "query": payload.query,
                 "system_prompt": payload.system_prompt,
+                "node_name": payload.node_name,
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
             },
@@ -126,6 +129,7 @@ def get_search_router() -> APIRouter:
                 datasets=payload.datasets,
                 dataset_ids=payload.dataset_ids,
                 system_prompt=payload.system_prompt,
+                node_name=payload.node_name,
                 top_k=payload.top_k,
                 only_context=payload.only_context,
             )

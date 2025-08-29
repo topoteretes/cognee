@@ -3,7 +3,7 @@ from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_eng
 from cognee.infrastructure.databases.relational import get_relational_engine
 
 
-async def prune_system(graph=True, vector=True, metadata=False):
+async def prune_system(graph=True, vector=True, metadata=True):
     if graph:
         graph_engine = await get_graph_engine()
         await graph_engine.delete_graph()
