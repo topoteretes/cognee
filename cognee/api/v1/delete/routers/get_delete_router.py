@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from uuid import UUID
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.methods import get_conditional_authenticated_user
 from cognee.shared.utils import send_telemetry
 
 logger = get_logger()
@@ -18,7 +18,7 @@ def get_delete_router() -> APIRouter:
         data_id: UUID,
         dataset_id: UUID,
         mode: str = "soft",
-        user: User = Depends(get_authenticated_user),
+        user: User = Depends(get_conditional_authenticated_user),
     ):
         """Delete data by its ID from the specified dataset.
 
