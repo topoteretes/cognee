@@ -7,13 +7,12 @@ async def generate_completion(
     context: str,
     user_prompt_path: str,
     system_prompt_path: str,
-    user_prompt: Optional[str] = None,
     system_prompt: Optional[str] = None,
     only_context: bool = False,
 ) -> str:
     """Generates a completion using LLM with given context and prompts."""
     args = {"question": query, "context": context}
-    user_prompt = user_prompt if user_prompt else LLMGateway.render_prompt(user_prompt_path, args)
+    user_prompt = LLMGateway.render_prompt(user_prompt_path, args)
     system_prompt = (
         system_prompt if system_prompt else LLMGateway.read_query_prompt(system_prompt_path)
     )
