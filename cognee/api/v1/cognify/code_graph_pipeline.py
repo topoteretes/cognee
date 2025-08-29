@@ -1,6 +1,7 @@
 import os
 import pathlib
 import asyncio
+from typing import Optional
 from cognee.shared.logging_utils import get_logger, setup_logging
 from cognee.modules.observability.get_observe import get_observe
 
@@ -28,7 +29,12 @@ logger = get_logger("code_graph_pipeline")
 
 
 @observe
-async def run_code_graph_pipeline(repo_path, include_docs=False, excluded_paths=None):
+async def run_code_graph_pipeline(
+    repo_path,
+    include_docs=False,
+    excluded_paths: Optional[list[str]] = None,
+    supported_languages: Optional[list[str]] = None,
+):
     import cognee
     from cognee.low_level import setup
 
@@ -40,8 +46,6 @@ async def run_code_graph_pipeline(repo_path, include_docs=False, excluded_paths=
     user = await get_default_user()
     detailed_extraction = True
 
-    # Multi-language support: allow passing supported_languages
-    supported_languages = None  # defer to task defaults
     tasks = [
         Task(
             get_repo_file_dependencies,
@@ -95,7 +99,7 @@ async def run_code_graph_pipeline(repo_path, include_docs=False, excluded_paths=
 if __name__ == "__main__":
 
     async def main():
-        async for run_status in run_code_graph_pipeline("/Users/igorilic/Desktop/cognee/examples"):
+        async for run_status in run_code_graph_pipeline("REPO_PATH"):
             print(f"{run_status.pipeline_run_id}: {run_status.status}")
 
         file_path = os.path.join(

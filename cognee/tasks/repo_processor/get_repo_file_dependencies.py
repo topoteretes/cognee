@@ -1,6 +1,7 @@
 import asyncio
 import math
 import os
+from pathlib import Path
 from typing import Set
 from typing import AsyncGenerator, Optional, List
 from uuid import NAMESPACE_OID, uuid5
@@ -78,15 +79,22 @@ async def get_source_code_files(
             if lang is None:
                 continue
             # Exclude tests, common build/venv directories and files provided in exclude_paths
-            excluded_dirs = EXCLUDED_DIRS | set(excluded_paths or [])
-            root_parts = set(os.path.normpath(root).split(os.sep))
+            excluded_dirs = EXCLUDED_DIRS
+            excluded_paths = {Path(p).resolve() for p in (excluded_paths or [])}  # full paths
+
+            root_path = Path(root).resolve()
+            root_parts = set(root_path.parts)  # same as before
             base_name, _ext = os.path.splitext(file)
             if (
                 base_name.startswith("test_")
-                or base_name.endswith("_test")  # catches Go's *_test.go and similar
+                or base_name.endswith("_test")
                 or ".test." in file
                 or ".spec." in file
-                or (excluded_dirs & root_parts)
+                or (excluded_dirs & root_parts)  # name match
+                or any(
+                    root_path.is_relative_to(p)  # full-path match
+                    for p in excluded_paths
+                )
             ):
                 continue
             file_path = os.path.abspath(os.path.join(root, file))
@@ -164,6 +172,7 @@ async def get_repo_file_dependencies(
         "go": [".go"],
         "rust": [".rs"],
         "cpp": [".cpp", ".c", ".h", ".hpp"],
+        "c": [".c", ".h"],
     }
     if supported_languages is not None:
         language_config = {
