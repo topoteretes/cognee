@@ -228,7 +228,15 @@ async def specific_search_by_context(
     """
 
     async def _search_by_context(
-        dataset, user, query_type, query_text, system_prompt_path, top_k, last_k
+        dataset,
+        user,
+        query_type,
+        query_text,
+        system_prompt_path,
+        top_k,
+        node_type: Optional[Type] = NodeSet,
+        node_name: Optional[List[str]] = None,
+        last_k: Optional[int] = None,
     ):
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)
