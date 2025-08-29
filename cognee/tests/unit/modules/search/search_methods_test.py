@@ -58,15 +58,17 @@ async def test_search(
     # Verify
     mock_log_query.assert_called_once_with(query_text, query_type.value, mock_user.id)
     mock_specific_search.assert_called_once_with(
-        query_type,
-        query_text,
-        mock_user,
+        query_type=query_type,
+        query_text=query_text,
+        user=mock_user,
         system_prompt_path="answer_simple_question.txt",
+        system_prompt=None,
         top_k=10,
         node_type=None,
         node_name=None,
         save_interaction=False,
         last_k=None,
+        only_context=False,
     )
 
     # Verify result logging
@@ -201,7 +203,10 @@ async def test_specific_search_feeling_lucky(
 
         if retriever_name == "CompletionRetriever":
             mock_retriever_class.assert_called_once_with(
-                system_prompt_path="answer_simple_question.txt", top_k=top_k
+                system_prompt_path="answer_simple_question.txt",
+                top_k=top_k,
+                system_prompt=None,
+                only_context=None,
             )
         else:
             mock_retriever_class.assert_called_once_with(top_k=top_k)

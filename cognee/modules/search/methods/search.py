@@ -179,7 +179,7 @@ async def specific_search(
 
     send_telemetry("cognee.search EXECUTION STARTED", user.id)
 
-    results = await search_task(query=query_text)
+    results = await search_task(query_text)
 
     send_telemetry("cognee.search EXECUTION COMPLETED", user.id)
 
