@@ -42,6 +42,8 @@ def get_add_router() -> APIRouter:
           - Regular file uploads
         - **datasetName** (Optional[str]): Name of the dataset to add data to
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
+        - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
+                 Used for grouping related data points in the knowledge graph.
 
         Either datasetName or datasetId must be provided.
 

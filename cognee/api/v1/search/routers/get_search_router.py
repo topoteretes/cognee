@@ -80,6 +80,7 @@ def get_search_router() -> APIRouter:
         - **datasets** (Optional[List[str]]): List of dataset names to search within
         - **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to search within
         - **query** (str): The search query string
+        - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
         - **top_k** (Optional[int]): Maximum number of results to return (default: 10)
 
         ## Response
