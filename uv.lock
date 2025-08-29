@@ -1015,7 +1015,7 @@ requires-dist = [
     { name = "notebook", marker = "extra == 'notebook'", specifier = ">=7.1.0,<8" },
     { name = "numpy", specifier = ">=1.26.4,<=4.0.0" },
     { name = "onnxruntime", specifier = ">=1.0.0,<2.0.0" },
-    { name = "openai", specifier = ">=1.80.1,<1.99.9" },
+    { name = "openai", specifier = ">=1.80.1,<2.0.0" },
     { name = "pandas", specifier = ">=2.2.2,<3.0.0" },
     { name = "pgvector", marker = "extra == 'postgres'", specifier = ">=0.3.5,<0.4" },
     { name = "pgvector", marker = "extra == 'postgres-binary'", specifier = ">=0.3.5,<0.4" },
@@ -1791,17 +1791,17 @@ name = "fastembed"
 version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "huggingface-hub" },
-    { name = "loguru" },
-    { name = "mmh3" },
+    { name = "huggingface-hub", marker = "python_full_version < '3.13'" },
+    { name = "loguru", marker = "python_full_version < '3.13'" },
+    { name = "mmh3", marker = "python_full_version < '3.13'" },
     { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "numpy", version = "2.3.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "onnxruntime" },
-    { name = "pillow" },
-    { name = "py-rust-stemmers" },
-    { name = "requests" },
-    { name = "tokenizers" },
-    { name = "tqdm" },
+    { name = "numpy", version = "2.3.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.12.*'" },
+    { name = "onnxruntime", marker = "python_full_version < '3.13'" },
+    { name = "pillow", marker = "python_full_version < '3.13'" },
+    { name = "py-rust-stemmers", marker = "python_full_version < '3.13'" },
+    { name = "requests", marker = "python_full_version < '3.13'" },
+    { name = "tokenizers", marker = "python_full_version < '3.13'" },
+    { name = "tqdm", marker = "python_full_version < '3.13'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c6/f4/036a656c605f63dc25f11284f60f69900a54a19c513e1ae60d21d6977e75/fastembed-0.6.0.tar.gz", hash = "sha256:5c9ead25f23449535b07243bbe1f370b820dcc77ec2931e61674e3fe7ff24733", size = 50731, upload-time = "2025-02-26T13:50:33.031Z" }
 wheels = [
@@ -2617,7 +2617,7 @@ wheels = [
 
 [[package]]
 name = "instructor"
-version = "1.10.0"
+version = "1.11.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -2633,9 +2633,9 @@ dependencies = [
     { name = "tenacity" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a5/67/63c4b4d2cc3c7b4238920ad3388a6f5d67265ab7c09ee34012d6b591130e/instructor-1.10.0.tar.gz", hash = "sha256:887d33e058b913290dbf526b0096b1bb8d7ea1a07d75afecbf716161f959697b", size = 69388981, upload-time = "2025-07-18T15:28:52.386Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/64/17/802d1dc4484410b65249e9d3c95a751b9c05dc106f1dff2e4a601c063ecd/instructor-1.11.2.tar.gz", hash = "sha256:e9ad4e2e0450a0840720bd2be034ffdfd7a65262ebdb854e7b2969886e1a2576", size = 69867645, upload-time = "2025-08-27T22:20:40.207Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2c/fb/ffc1ade9779795a8dc8e2379b1bfb522161ee7df8df12722f50d348fb4ea/instructor-1.10.0-py3-none-any.whl", hash = "sha256:9c789f0fce915d5498059afb5314530c8a5b22b0283302679148ddae98f732b0", size = 119455, upload-time = "2025-07-18T15:28:48.785Z" },
+    { url = "https://files.pythonhosted.org/packages/25/93/d514a35d01db8461a56798c53f715ee1c956e72ec8885de88779b1244f2c/instructor-1.11.2-py3-none-any.whl", hash = "sha256:f7bc1094bcb7c6494d53ff284fe6a6737eb5e343945693c198e253ee7496fe82", size = 148884, upload-time = "2025-08-27T22:20:36.579Z" },
 ]
 
 [[package]]
@@ -3464,8 +3464,8 @@ name = "loguru"
 version = "0.7.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "win32-setctime", marker = "sys_platform == 'win32'" },
+    { name = "colorama", marker = "python_full_version < '3.13' and sys_platform == 'win32'" },
+    { name = "win32-setctime", marker = "python_full_version < '3.13' and sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3a/05/a1dae3dffd1116099471c643b8924f5aa6524411dc6c63fdae648c4f1aca/loguru-0.7.3.tar.gz", hash = "sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6", size = 63559, upload-time = "2024-12-06T11:20:56.608Z" }
 wheels = [
@@ -4604,7 +4604,7 @@ wheels = [
 
 [[package]]
 name = "openai"
-version = "1.99.8"
+version = "1.102.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -4616,9 +4616,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4b/81/288157471c43975cc849bc8779b8c7209aec6da5d7cbcd87a982912a19e5/openai-1.99.8.tar.gz", hash = "sha256:4b49845983eb4d5ffae9bae5d98bd5c0bd3a709a30f8b994fc8f316961b6d566", size = 506953, upload-time = "2025-08-11T20:19:02.312Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/07/55/da5598ed5c6bdd9939633854049cddc5cbac0da938dfcfcb3c6b119c16c0/openai-1.102.0.tar.gz", hash = "sha256:2e0153bcd64a6523071e90211cbfca1f2bbc5ceedd0993ba932a5869f93b7fc9", size = 519027, upload-time = "2025-08-26T20:50:29.397Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/36/b6/3940f037aa33e6d5aa00707fd02843a1cac06ee0e106f39cfb71d0653d23/openai-1.99.8-py3-none-any.whl", hash = "sha256:426b981079cffde6dd54868b9b84761ffa291cde77010f051b96433e1835b47d", size = 786821, upload-time = "2025-08-11T20:18:59.943Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/0d/c9e7016d82c53c5b5e23e2bad36daebb8921ed44f69c0a985c6529a35106/openai-1.102.0-py3-none-any.whl", hash = "sha256:d751a7e95e222b5325306362ad02a7aa96e1fab3ed05b5888ce1c7ca63451345", size = 812015, upload-time = "2025-08-26T20:50:27.219Z" },
 ]
 
 [[package]]

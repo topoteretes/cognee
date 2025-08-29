@@ -11728,4 +11728,4 @@ posthog = ["posthog"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "7743005314483d6cc76febb7970c8af9a3d2a63e76247505e33b20fdc974aca1"
+content-hash = "576318d370b89d128a7c3e755fe3c898fef4e359acdd3f05f952ae497751fb04"

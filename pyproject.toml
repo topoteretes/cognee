@@ -20,7 +20,7 @@ classifiers = [
     "Operating System :: Microsoft :: Windows",
 ]
 dependencies = [
-    "openai>=1.80.1,<1.99.9",
+    "openai>=1.80.1,<2.0.0",
     "python-dotenv>=1.0.1,<2.0.0",
     "pydantic>=2.10.5,<3.0.0",
     "pydantic-settings>=2.2.1,<3",
