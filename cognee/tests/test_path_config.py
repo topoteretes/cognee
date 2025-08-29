@@ -45,19 +45,12 @@ def test_database_relative_paths():
     assert result == expected
     
     # Test with relative base_path (should fail)
-    try:
+    with pytest.raises(ValueError, match="base_path must be absolute"):
         ensure_absolute_path(rel_path, base_path="relative/base", allow_relative=True)
-        assert False, "Should fail when base_path is relative"
-    except ValueError as e:
-        assert "base_path must be absolute" in str(e)
     
     # Test without base_path for relative path
-    try:
+    with pytest.raises(ValueError, match="base_path must be provided"):
         ensure_absolute_path(rel_path, allow_relative=True)
-        assert False, "Should fail when base_path is not provided for relative path"
-    except ValueError as e:
-        assert "base_path must be provided" in str(e)
-
 def test_path_consistency():
     """Test that paths are handled consistently across configurations"""
     system_root = "C:/system/root" if os.name == 'nt' else "/system/root"
