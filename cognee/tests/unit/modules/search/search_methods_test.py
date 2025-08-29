@@ -3,8 +3,8 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pylint.checkers.utils import node_type
 
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.search.methods.search import search, specific_search
 from cognee.modules.search.types import SearchType
@@ -63,7 +63,7 @@ async def test_search(
         mock_user,
         system_prompt_path="answer_simple_question.txt",
         top_k=10,
-        node_type=None,
+        node_type=NodeSet,
         node_name=None,
         save_interaction=False,
         last_k=None,
