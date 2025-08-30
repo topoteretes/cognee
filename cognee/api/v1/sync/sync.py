@@ -1,16 +1,16 @@
-import asyncio
-import uuid
 import os
+import uuid
+import asyncio
+import aiohttp
+from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timezone
 
-import aiohttp
-import aiofiles
-from pydantic import BaseModel
-from cognee.modules.data.models import Data
-from cognee.modules.data.models.Dataset import Dataset
+from cognee.infrastructure.files.storage import get_file_storage
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
-from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+from cognee.modules.data.models import Dataset
+from cognee.modules.data.methods import get_dataset_data
 from cognee.modules.sync.methods import (
     create_sync_operation,
     update_sync_operation,
@@ -18,10 +18,7 @@ from cognee.modules.sync.methods import (
     mark_sync_completed,
     mark_sync_failed,
 )
-from cognee.modules.sync.models import SyncStatus
-from cognee.shared.logging_utils import get_logger
 
-# Initialize logger once at module level
 logger = get_logger()
 
 
@@ -223,12 +220,6 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
         except Exception as e:
             logger.warning(f"Failed to update progress: {str(e)}")
 
-        # Step 4: Prune cloud dataset to match local state
-        await _prune_cloud_dataset(
-            cloud_base_url, cloud_auth_token, dataset.id, local_hashes, run_id
-        )
-        logger.info("Cloud dataset pruned to match local state")
-
         # Final progress
         try:
             await update_sync_operation(run_id, progress_percentage=100)
@@ -236,7 +227,6 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
             logger.warning(f"Failed to update final progress: {str(e)}")
 
         records_processed = len(local_files)
-        total_bytes = sum(f.file_size for f in local_files)
 
         logger.info(
             f"Sync completed successfully: {records_processed} records, {bytes_uploaded} bytes uploaded"
@@ -359,8 +349,8 @@ async def _check_missing_hashes(
     Returns:
         List[str]: MD5 hashes that need to be uploaded
     """
-    url = f"{cloud_base_url}/api/sync/{dataset_id}/need-data"
-    headers = {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
+    url = f"{cloud_base_url}/api/sync/{dataset_id}/diff"
+    headers = {"X-Api-Key": auth_token, "Content-Type": "application/json"}
 
     payload = CheckMissingHashesRequest(hashes=local_hashes)
 
@@ -416,20 +406,17 @@ async def _upload_missing_files(
     total_bytes_uploaded = 0
     uploaded_count = 0
 
-    headers = {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/octet-stream"}
+    headers = {"X-Api-Key": auth_token, "Content-Type": "application/octet-stream"}
 
     async with aiohttp.ClientSession() as session:
         for file_info in files_to_upload:
             try:
-                # Read file content - strip file:// prefix if present
-                raw_path = file_info.raw_data_location
-                if raw_path.startswith("file://"):
-                    file_path = raw_path[7:]  # Remove 'file://' prefix
-                else:
-                    file_path = raw_path
+                file_dir = os.path.dirname(file_info.raw_data_location)
+                file_name = os.path.basename(file_info.raw_data_location)
+                file_storage = get_file_storage(file_dir)
 
-                async with aiofiles.open(file_path, mode="rb") as file:
-                    file_content = await file.read()
+                async with file_storage.open(file_name, mode="rb") as file:
+                    file_content = file.read()
 
                 # Upload file
                 url = f"{cloud_base_url}/api/sync/{dataset_id}/{file_info.content_hash}.{file_info.extension or 'bin'}"
@@ -469,7 +456,7 @@ async def _prune_cloud_dataset(
     Step 3: Prune cloud dataset to match local state.
     """
     url = f"{cloud_base_url}/api/sync/{dataset_id}?prune=true"
-    headers = {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
+    headers = {"X-Api-Key": auth_token, "Content-Type": "application/json"}
 
     payload = PruneDatasetRequest(items=local_hashes)
 

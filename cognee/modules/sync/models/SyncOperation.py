@@ -1,9 +1,9 @@
-from uuid import uuid4, UUID
+from uuid import uuid4
 from enum import Enum
 from typing import Optional
 from datetime import datetime, timezone
-from sqlalchemy.orm import Mapped
 from sqlalchemy import Column, Text, DateTime, UUID as SQLAlchemy_UUID, Integer, Enum as SQLEnum
+
 from cognee.infrastructure.databases.relational import Base
 
 
@@ -65,26 +65,6 @@ class SyncOperation(Base):
     # Additional metadata (can be added later when needed)
     # cloud_endpoint = Column(Text, doc="Cloud endpoint used for sync")
     # compression_enabled = Column(Text, doc="Whether compression was used")
-
-    def to_json(self) -> dict:
-        """Convert sync operation to JSON representation."""
-        return {
-            "id": str(self.id),
-            "run_id": self.run_id,
-            "status": self.status.value,
-            "progress_percentage": self.progress_percentage,
-            "dataset_id": str(self.dataset_id),
-            "dataset_name": self.dataset_name,
-            "user_id": str(self.user_id),
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
-            "total_records": self.total_records,
-            "processed_records": self.processed_records,
-            "bytes_transferred": self.bytes_transferred,
-            "error_message": self.error_message,
-            "retry_count": self.retry_count,
-        }
 
     def get_duration_seconds(self) -> Optional[float]:
         """Get the duration of the sync operation in seconds."""
