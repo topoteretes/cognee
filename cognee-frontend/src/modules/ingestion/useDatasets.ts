@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { v4 } from 'uuid';
-import { DataFile } from './useData';
+
 import { fetch } from '@/utils';
+import { DataFile } from './useData';
+import createDataset from "../datasets/createDataset";
 
 export interface Dataset {
   id: string;
@@ -56,21 +58,24 @@ function useDatasets() {
   }, []);
 
   const addDataset = useCallback((datasetName: string) => {
-    setDatasets((datasets) => [
-      ...datasets,
-      {
-        id: v4(),
-        name: datasetName,
-        data: [],
-        status: 'DATASET_INITIALIZED',
-      }
-    ]);
+    return createDataset({ name: datasetName  })
+      .then((dataset) => {
+        setDatasets((datasets) => [
+          ...datasets,
+          dataset,
+        ]);
+      });
   }, []);
 
   const removeDataset = useCallback((datasetId: string) => {
-    setDatasets((datasets) =>
-      datasets.filter((dataset) => dataset.id !== datasetId)
-    );
+    return fetch(`/v1/datasets/${datasetId}`, {
+      method: 'DELETE',
+    })
+      .then(() => {
+        setDatasets((datasets) =>
+          datasets.filter((dataset) => dataset.id !== datasetId)
+        );
+      });
   }, []);
 
   const fetchDatasets = useCallback(() => {
@@ -94,7 +99,41 @@ function useDatasets() {
       });
   }, [checkDatasetStatuses]);
 
-  return { datasets, addDataset, removeDataset, refreshDatasets: fetchDatasets };
+  const getDatasetData = useCallback((datasetId: string) => {
+    return fetch(`/v1/datasets/${datasetId}/data`)
+      .then((response) => response.json())
+      .then((data) => {
+        const datasetIndex = datasets.findIndex((dataset) => dataset.id === datasetId);
+
+        if (datasetIndex >= 0) {
+          setDatasets((datasets) => [
+           ...datasets.slice(0, datasetIndex),
+            {
+             ...datasets[datasetIndex],
+              data,
+            },
+           ...datasets.slice(datasetIndex + 1),
+          ]);
+        }
+
+        return data;
+      });
+  }, [datasets]);
+
+  const removeDatasetData = useCallback((datasetId: string, dataId: string) => {
+    return fetch(`/v1/datasets/${datasetId}/data/${dataId}`, {
+      method: 'DELETE',
+    });
+  }, []);
+
+  return {
+    datasets,
+    addDataset,
+    removeDataset,
+    getDatasetData,
+    removeDatasetData,
+    refreshDatasets: fetchDatasets,
+  };
 };
 
 export default useDatasets;
