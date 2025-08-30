@@ -1,12 +1,9 @@
 from typing import List, Union
 from uuid import UUID
 
-from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Dataset
-from cognee.modules.data.methods import create_dataset
-from cognee.modules.data.methods import get_unique_dataset_id
+from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.data.exceptions import DatasetNotFoundError
-from cognee.modules.users.permissions.methods import give_permission_on_dataset
 
 
 async def load_or_create_datasets(
@@ -34,22 +31,7 @@ async def load_or_create_datasets(
         if isinstance(identifier, UUID):
             raise DatasetNotFoundError(f"Dataset with given UUID does not exist: {identifier}")
 
-        # Otherwise, create a new Dataset instance
-        new_dataset = Dataset(
-            id=await get_unique_dataset_id(dataset_name=identifier, user=user),
-            name=identifier,
-            owner_id=user.id,
-        )
-
-        # Save dataset to database
-        db_engine = get_relational_engine()
-        async with db_engine.get_async_session() as session:
-            await create_dataset(identifier, user, session)
-
-        await give_permission_on_dataset(user, new_dataset.id, "read")
-        await give_permission_on_dataset(user, new_dataset.id, "write")
-        await give_permission_on_dataset(user, new_dataset.id, "delete")
-        await give_permission_on_dataset(user, new_dataset.id, "share")
+        new_dataset = await create_authorized_dataset(identifier, user)
 
         result.append(new_dataset)
 

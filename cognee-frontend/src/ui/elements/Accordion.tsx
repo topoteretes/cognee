@@ -8,11 +8,12 @@ interface AccordioProps {
   closeAccordion: () => void;
   tools?: React.ReactNode;
   children: React.ReactNode;
+  className?: string;
 }
 
-export default function Accordion({ title, tools, children, isOpen, openAccordion, closeAccordion }: AccordioProps) {
+export default function Accordion({ title, tools, children, isOpen, openAccordion, closeAccordion, className }: AccordioProps) {
   return (
-    <div className="flex flex-col">
+    <div className={classNames("flex flex-col", className)}>
       <div className="flex flex-row justify-between items-center">
         <button className="flex flex-row gap-4 items-center pr-2" onClick={isOpen ? closeAccordion : openAccordion}>
           {title}
@@ -21,13 +22,15 @@ export default function Accordion({ title, tools, children, isOpen, openAccordio
         {tools}
       </div>
 
-      <div className={classNames("grid transition-[grid-template-rows] duration-300 ease-in-out [grid-template-rows:0fr]", {
-        "[grid-template-rows:1fr]": isOpen,
-      })}>
-        <div className="overflow-hidden">
-          {children}
+      {isOpen && (
+        <div className={classNames("grid transition-[grid-template-rows] duration-300 ease-in-out [grid-template-rows:0fr]", {
+          "[grid-template-rows:1fr]": isOpen,
+        })}>
+          <div className="">
+            {children}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

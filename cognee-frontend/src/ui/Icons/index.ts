@@ -1,6 +1,10 @@
 export { default as AddIcon } from "./AddIcon";
 export { default as BackIcon } from "./BackIcon";
+export { default as PlayIcon } from "./PlayIcon";
+export { default as MenuIcon } from "./MenuIcon";
 export { default as PlusIcon } from "./PlusIcon";
+export { default as MinusIcon } from "./MinusIcon";
+export { default as CloseIcon } from "./CloseIcon";
 export { default as CheckIcon } from "./CheckIcon";
 export { default as CaretIcon } from "./CaretIcon";
 export { default as CloudIcon } from "./CloudIcon";

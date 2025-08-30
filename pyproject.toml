@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.2.3.dev1"
+version = "0.2.4"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -34,7 +34,7 @@ dependencies = [
     "sqlalchemy>=2.0.39,<3.0.0",
     "aiosqlite>=0.20.0,<1.0.0",
     "tiktoken>=0.8.0,<1.0.0",
-    "litellm>=1.57.4, <1.71.0",
+    "litellm>=1.71.0, <2.0.0",
     "instructor>=1.9.1,<2.0.0",
     "langfuse>=2.32.0,<3",
     "filetype>=1.2.0,<2.0.0",
@@ -60,7 +60,8 @@ dependencies = [
     "pympler>=1.1,<2.0.0",
     "onnxruntime>=1.0.0,<2.0.0",
     "pylance>=0.22.0,<1.0.0",
-    "kuzu (==0.11.0)"
+    "kuzu (==0.11.0)",
+    "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
 ]
 
 [project.optional-dependencies]
@@ -144,6 +145,9 @@ debug = ["debugpy>=1.8.9,<2.0.0"]
 [project.urls]
 Homepage = "https://www.cognee.ai"
 Repository = "https://github.com/topoteretes/cognee"
+
+[project.scripts]
+cognee = "cognee.cli._cognee:main"
 
 [build-system]
 requires = ["hatchling"]

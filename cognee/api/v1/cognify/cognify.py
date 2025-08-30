@@ -7,12 +7,10 @@ from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm import get_max_chunk_tokens
 
-from cognee.modules.pipelines import cognee_pipeline
+from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
-from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
-from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 from cognee.modules.users.models import User
 
 from cognee.tasks.documents import (
@@ -23,6 +21,7 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
 logger = get_logger("cognify")
 
@@ -40,6 +39,7 @@ async def cognify(
     graph_db_config: dict = None,
     run_in_background: bool = False,
     incremental_loading: bool = True,
+    custom_prompt: Optional[str] = None,
 ):
     """
     Transform ingested data into a structured knowledge graph.
@@ -102,6 +102,10 @@ async def cognify(
                           If False, waits for completion before returning.
                           Background mode recommended for large datasets (>100MB).
                           Use pipeline_run_id from return value to monitor progress.
+        custom_prompt: Optional custom prompt string to use for entity extraction and graph generation.
+                      If provided, this prompt will be used instead of the default prompts for
+                      knowledge graph extraction. The prompt should guide the LLM on how to
+                      extract entities and relationships from the text content.
 
     Returns:
         Union[dict, list[PipelineRunInfo]]:
@@ -178,115 +182,24 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
-    tasks = await get_default_tasks(user, graph_model, chunker, chunk_size, ontology_file_path)
+    tasks = await get_default_tasks(
+        user, graph_model, chunker, chunk_size, ontology_file_path, custom_prompt
+    )
 
-    if run_in_background:
-        return await run_cognify_as_background_process(
-            tasks=tasks,
-            user=user,
-            datasets=datasets,
-            vector_db_config=vector_db_config,
-            graph_db_config=graph_db_config,
-            incremental_loading=incremental_loading,
-        )
-    else:
-        return await run_cognify_blocking(
-            tasks=tasks,
-            user=user,
-            datasets=datasets,
-            vector_db_config=vector_db_config,
-            graph_db_config=graph_db_config,
-            incremental_loading=incremental_loading,
-        )
+    # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
+    pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
-
-async def run_cognify_blocking(
-    tasks,
-    user,
-    datasets,
-    graph_db_config: dict = None,
-    vector_db_config: dict = False,
-    incremental_loading: bool = True,
-):
-    total_run_info = {}
-
-    async for run_info in cognee_pipeline(
+    # Run the run_pipeline in the background or blocking based on executor
+    return await pipeline_executor_func(
+        pipeline=run_pipeline,
         tasks=tasks,
-        datasets=datasets,
         user=user,
-        pipeline_name="cognify_pipeline",
-        graph_db_config=graph_db_config,
+        datasets=datasets,
         vector_db_config=vector_db_config,
+        graph_db_config=graph_db_config,
         incremental_loading=incremental_loading,
-    ):
-        if run_info.dataset_id:
-            total_run_info[run_info.dataset_id] = run_info
-        else:
-            total_run_info = run_info
-
-    return total_run_info
-
-
-async def run_cognify_as_background_process(
-    tasks,
-    user,
-    datasets,
-    graph_db_config: dict = None,
-    vector_db_config: dict = False,
-    incremental_loading: bool = True,
-):
-    # Convert dataset to list if it's a string
-    if isinstance(datasets, str):
-        datasets = [datasets]
-
-    # Store pipeline status for all pipelines
-    pipeline_run_started_info = {}
-
-    async def handle_rest_of_the_run(pipeline_list):
-        # Execute all provided pipelines one by one to avoid database write conflicts
-        # TODO: Convert to async gather task instead of for loop when Queue mechanism for database is created
-        for pipeline in pipeline_list:
-            while True:
-                try:
-                    pipeline_run_info = await anext(pipeline)
-
-                    push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
-
-                    if isinstance(pipeline_run_info, PipelineRunCompleted) or isinstance(
-                        pipeline_run_info, PipelineRunErrored
-                    ):
-                        break
-                except StopAsyncIteration:
-                    break
-
-    # Start all pipelines to get started status
-    pipeline_list = []
-    for dataset in datasets:
-        pipeline_run = cognee_pipeline(
-            tasks=tasks,
-            user=user,
-            datasets=dataset,
-            pipeline_name="cognify_pipeline",
-            graph_db_config=graph_db_config,
-            vector_db_config=vector_db_config,
-            incremental_loading=incremental_loading,
-        )
-
-        # Save dataset Pipeline run started info
-        run_info = await anext(pipeline_run)
-        pipeline_run_started_info[run_info.dataset_id] = run_info
-
-        if pipeline_run_started_info[run_info.dataset_id].payload:
-            # Remove payload info to avoid serialization
-            # TODO: Handle payload serialization
-            pipeline_run_started_info[run_info.dataset_id].payload = []
-
-        pipeline_list.append(pipeline_run)
-
-    # Send all started pipelines to execute one by one in background
-    asyncio.create_task(handle_rest_of_the_run(pipeline_list=pipeline_list))
-
-    return pipeline_run_started_info
+        pipeline_name="cognify_pipeline",
+    )
 
 
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
@@ -295,6 +208,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunker=TextChunker,
     chunk_size: int = None,
     ontology_file_path: Optional[str] = None,
+    custom_prompt: Optional[str] = None,
 ) -> list[Task]:
     default_tasks = [
         Task(classify_documents),
@@ -308,6 +222,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             extract_graph_from_data,
             graph_model=graph_model,
             ontology_adapter=OntologyResolver(ontology_file=ontology_file_path),
+            custom_prompt=custom_prompt,
             task_config={"batch_size": 10},
         ),  # Generate knowledge graphs from the document chunks.
         Task(
