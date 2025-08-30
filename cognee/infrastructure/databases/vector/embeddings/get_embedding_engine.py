@@ -33,6 +33,7 @@ def get_embedding_engine() -> EmbeddingEngine:
         config.embedding_api_version,
         config.huggingface_tokenizer,
         llm_config.llm_api_key,
+        llm_config.llm_provider
     )
 
 
@@ -47,6 +48,7 @@ def create_embedding_engine(
     embedding_api_version,
     huggingface_tokenizer,
     llm_api_key,
+    llm_provider
 ):
     """
     Create and return an embedding engine based on the specified provider.
@@ -99,7 +101,7 @@ def create_embedding_engine(
 
     return LiteLLMEmbeddingEngine(
         provider=embedding_provider,
-        api_key=embedding_api_key or llm_api_key,
+        api_key=embedding_api_key or (embedding_api_key if llm_provider == 'custom' else llm_api_key),
         endpoint=embedding_endpoint,
         api_version=embedding_api_version,
         model=embedding_model,
