@@ -1,0 +1,15 @@
+For the purposes of identifying timestamps in a query, you are tasked with extracting relevant timestamps from the query.
+## Timestamp requirements
+- If the query contains interval extrack both starts_at and ends_at  properties
+- If the query contains an instantaneous timestamp, starts_at and ends_at should be the same
+- If the query its open-ended (before 2009 or after 2009), the corresponding non defined end of the time should be none
+    -For example: "before 2009" -- starts_at: None, ends_at: 2009 or  "after 2009" -- starts_at: 2009, ends_at: None
+- Put always the data that comes first in time as starts_at and the timestamps that comes second in time as ends_at
+- If starts_at or ends_at cannot be extracted both of them has to be None
+## Output Format
+Your reply should be a JSON: list of dictionaries with the following structure:
+```python
+class QueryInterval(BaseModel):
+    starts_at: Optional[Timestamp] = None
+    ends_at: Optional[Timestamp] = None
+```

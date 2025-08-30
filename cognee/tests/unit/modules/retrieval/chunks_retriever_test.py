@@ -1,7 +1,7 @@
 import os
 import pytest
 import pathlib
-
+from typing import List
 import cognee
 from cognee.low_level import setup
 from cognee.tasks.storage import add_data_points
@@ -10,6 +10,20 @@ from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
+from cognee.infrastructure.engine import DataPoint
+from cognee.modules.data.processing.document_types import Document
+from cognee.modules.engine.models import Entity
+
+
+class DocumentChunkWithEntities(DataPoint):
+    text: str
+    chunk_size: int
+    chunk_index: int
+    cut_type: str
+    is_part_of: Document
+    contains: List[Entity] = None
+
+    metadata: dict = {"index_fields": ["text"]}
 
 
 class TestChunksRetriever:
@@ -179,7 +193,9 @@ class TestChunksRetriever:
             await retriever.get_context("Christina Mayer")
 
         vector_engine = get_vector_engine()
-        await vector_engine.create_collection("DocumentChunk_text", payload_schema=DocumentChunk)
+        await vector_engine.create_collection(
+            "DocumentChunk_text", payload_schema=DocumentChunkWithEntities
+        )
 
         context = await retriever.get_context("Christina Mayer")
         assert len(context) == 0, "Found chunks when none should exist"
