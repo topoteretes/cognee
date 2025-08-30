@@ -36,6 +36,7 @@ class ClassDefinition(DataPoint):
 class CodeFile(DataPoint):
     name: str
     file_path: str
+    language: Optional[str] = None  # e.g., 'python', 'javascript', 'java', etc.
     source_code: Optional[str] = None
     part_of: Optional[Repository] = None
     depends_on: Optional[List["ImportStatement"]] = []

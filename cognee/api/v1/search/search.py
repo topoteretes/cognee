@@ -1,6 +1,7 @@
 from uuid import UUID
 from typing import Union, Optional, List, Type
 
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
@@ -16,11 +17,13 @@ async def search(
     datasets: Optional[Union[list[str], str]] = None,
     dataset_ids: Optional[Union[list[UUID], UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
+    system_prompt: Optional[str] = None,
     top_k: int = 10,
-    node_type: Optional[Type] = None,
+    node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: bool = False,
     last_k: Optional[int] = None,
+    only_context: bool = False,
 ) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -183,11 +186,13 @@ async def search(
         dataset_ids=dataset_ids if dataset_ids else datasets,
         user=user,
         system_prompt_path=system_prompt_path,
+        system_prompt=system_prompt,
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
         save_interaction=save_interaction,
         last_k=last_k,
+        only_context=only_context,
     )
 
     return filtered_search_results

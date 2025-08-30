@@ -68,10 +68,10 @@ jobs:
     uses: ./.github/workflows/notebooks_tests.yml
     secrets: inherit
 
-  python-version-tests:
-    name: Python Version Tests
+  different-operating-systems-tests:
+    name: Operating System and Python Tests
     needs: [basic-tests, e2e-tests, cli-tests]
-    uses: ./.github/workflows/python_version_tests.yml
+    uses: ./.github/workflows/test_different_operating_systems.yml
     with:
       python-versions: '["3.10.x", "3.11.x", "3.12.x"]'
     secrets: inherit
@@ -115,6 +115,12 @@ jobs:
     uses: ./.github/workflows/test_gemini.yml
     secrets: inherit
 
+  openrouter-tests:
+    name: OpenRouter Tests
+    needs: [basic-tests, e2e-tests, cli-tests]
+    uses: ./.github/workflows/test_openrouter.yml
+    secrets: inherit
+
   # Ollama tests moved to the end
   ollama-tests:
     name: Ollama Tests
@@ -124,10 +130,11 @@ jobs:
       cli-tests,
       graph-db-tests,
       notebook-tests,
-      python-version-tests,
+      different-operating-systems-tests,
       vector-db-tests,
       example-tests,
       gemini-tests,
+      openrouter-tests,
       mcp-test,
       relational-db-migration-tests,
       docker-compose-test,
@@ -144,12 +151,13 @@ jobs:
       cli-tests,
       graph-db-tests,
       notebook-tests,
-      python-version-tests,
+      different-operating-systems-tests,
       vector-db-tests,
       example-tests,
       db-examples-tests,
       mcp-test,
       gemini-tests,
+      openrouter-tests,
       ollama-tests,
       relational-db-migration-tests,
       docker-compose-test,
@@ -165,12 +173,13 @@ jobs:
                 "${{ needs.cli-tests.result }}" == "success" &&
                 "${{ needs.graph-db-tests.result }}" == "success" &&
                 "${{ needs.notebook-tests.result }}" == "success" &&
-                "${{ needs.python-version-tests.result }}" == "success" &&
+                "${{ needs.different-operating-systems-tests.result }}" == "success" &&
                 "${{ needs.vector-db-tests.result }}" == "success" &&
                 "${{ needs.example-tests.result }}" == "success" &&
                 "${{ needs.db-examples-tests.result }}" == "success" &&
                 "${{ needs.relational-db-migration-tests.result }}" == "success" &&
                 "${{ needs.gemini-tests.result }}" == "success" &&
+                "${{ needs.openrouter-tests.result }}" == "success" &&
                 "${{ needs.docker-compose-test.result }}" == "success" &&
                 "${{ needs.docker-ci-test.result }}" == "success" &&
                 "${{ needs.ollama-tests.result }}" == "success" ]]; then

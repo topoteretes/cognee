@@ -253,7 +253,7 @@ class TestCognifyCommandEdgeCases:
 
         mock_asyncio_run.assert_called_once()
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        from cognee.modules.chunking import TextChunker
+        from cognee.modules.chunking.TextChunker import TextChunker
 
         mock_cognee.cognify.assert_awaited_once_with(
             datasets=None,
@@ -286,7 +286,7 @@ class TestCognifyCommandEdgeCases:
 
         mock_asyncio_run.assert_called_once()
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        from cognee.modules.chunking import TextChunker
+        from cognee.modules.chunking.TextChunker import TextChunker
 
         mock_cognee.cognify.assert_awaited_once_with(
             datasets=None,
@@ -306,9 +306,17 @@ class TestCognifyCommandEdgeCases:
         def mock_import_func(name, fromlist=None, *args, **kwargs):
             if name == "cognee":
                 return mock_cognee
-            elif name == "cognee.modules.chunking" and fromlist and "LangchainChunker" in fromlist:
+            elif (
+                name == "cognee.modules.chunking.LangchainChunker"
+                and fromlist
+                and "LangchainChunker" in fromlist
+            ):
                 raise ImportError("LangchainChunker not available")
-            elif name == "cognee.modules.chunking":
+            elif (
+                name == "cognee.modules.chunking.TextChunker"
+                and fromlist
+                and "TextChunker" in fromlist
+            ):
                 module = MagicMock()
                 module.TextChunker = MagicMock()
                 return module
@@ -356,7 +364,7 @@ class TestCognifyCommandEdgeCases:
 
         mock_asyncio_run.assert_called_once()
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        from cognee.modules.chunking import TextChunker
+        from cognee.modules.chunking.TextChunker import TextChunker
 
         mock_cognee.cognify.assert_awaited_once_with(
             datasets=None,

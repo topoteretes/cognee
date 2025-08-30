@@ -2,6 +2,7 @@ import os
 import sys
 import uuid
 import pytest
+import pathlib
 from unittest.mock import patch
 
 from cognee.modules.chunking.TextChunker import TextChunker
@@ -24,8 +25,7 @@ GROUND_TRUTH = [
 @pytest.mark.asyncio
 async def test_PdfDocument(mock_engine):
     test_file_path = os.path.join(
-        os.sep,
-        *(os.path.dirname(__file__).split(os.sep)[:-2]),
+        pathlib.Path(__file__).parent.parent.parent,
         "test_data",
         "artificial-intelligence.pdf",
     )
