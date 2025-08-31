@@ -468,14 +468,13 @@ async def _prune_cloud_dataset(
 
     payload = PruneDatasetRequest(items=local_hashes)
 
-    logger.info(f"Pruning cloud dataset to match local state")
+    logger.info("Pruning cloud dataset to match local state")
 
     try:
         async with aiohttp.ClientSession() as session:
             async with session.put(url, json=payload.dict(), headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
-                    message = data.get("message", "completed")
                     deleted_entries = data.get("deleted_database_entries", 0)
                     deleted_files = data.get("deleted_files_from_storage", 0)
 
