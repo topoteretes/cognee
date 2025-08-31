@@ -46,6 +46,12 @@ class StorageManager:
         else:
             return self.storage.is_file(file_path)
 
+    async def get_size(self, file_path: str) -> int:
+        if inspect.iscoroutinefunction(self.storage.get_size):
+            return await self.storage.get_size(file_path)
+        else:
+            return self.storage.get_size(file_path)
+
     async def store(self, file_path: str, data: BinaryIO, overwrite: bool = False) -> str:
         """
         Store data at the specified file path.

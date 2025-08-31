@@ -1,22 +1,21 @@
 from uuid import UUID
-
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
 
-from cognee.context_global_variables import set_database_global_context_variables
+from cognee.api.DTO import InDTO
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 from cognee.shared.utils import send_telemetry
 from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.sync import SyncResponse
+from cognee.context_global_variables import set_database_global_context_variables
 
 logger = get_logger()
 
 
-class SyncRequest(BaseModel):
+class SyncRequest(InDTO):
     """Request model for sync operations."""
 
     dataset_id: UUID

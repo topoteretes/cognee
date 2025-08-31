@@ -210,7 +210,7 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
 
         # Step 3: Upload missing files
         bytes_uploaded = await _upload_missing_files(
-            cloud_base_url, cloud_auth_token, dataset.id, local_files, missing_hashes, run_id
+            cloud_base_url, cloud_auth_token, dataset, local_files, missing_hashes, run_id
         )
         logger.info(f"Upload complete: {len(missing_hashes)} files, {bytes_uploaded} bytes")
 
@@ -314,15 +314,11 @@ async def _extract_local_files_with_hashes(
 async def _get_file_size(file_path: str) -> int:
     """Get file size in bytes."""
     try:
-        # Strip file:// prefix if present
-        if file_path.startswith("file://"):
-            actual_path = file_path[7:]  # Remove 'file://' prefix
-        else:
-            actual_path = file_path
+        file_dir = os.path.dirname(file_path)
+        file_name = os.path.basename(file_path)
+        file_storage = get_file_storage(file_dir)
 
-        if os.path.exists(actual_path):
-            return os.path.getsize(actual_path)
-        return 0
+        return await file_storage.get_size(file_name)
     except Exception:
         return 0
 
@@ -383,7 +379,7 @@ async def _check_missing_hashes(
 async def _upload_missing_files(
     cloud_base_url: str,
     auth_token: str,
-    dataset_id: str,
+    dataset: Dataset,
     local_files: List[LocalFileInfo],
     missing_hashes: List[str],
     run_id: str,
@@ -406,7 +402,7 @@ async def _upload_missing_files(
     total_bytes_uploaded = 0
     uploaded_count = 0
 
-    headers = {"X-Api-Key": auth_token, "Content-Type": "application/octet-stream"}
+    headers = {"X-Api-Key": auth_token}
 
     async with aiohttp.ClientSession() as session:
         for file_info in files_to_upload:
@@ -419,9 +415,21 @@ async def _upload_missing_files(
                     file_content = file.read()
 
                 # Upload file
-                url = f"{cloud_base_url}/api/sync/{dataset_id}/{file_info.content_hash}.{file_info.extension or 'bin'}"
+                url = f"{cloud_base_url}/api/sync/{dataset.id}/data/{file_info.id}"
 
-                async with session.put(url, data=file_content, headers=headers) as response:
+                request_data = aiohttp.FormData()
+
+                request_data.add_field(
+                    "file", file_content, content_type=file_info.mime_type, filename=file_info.name
+                )
+                request_data.add_field("dataset_id", str(dataset.id))
+                request_data.add_field("dataset_name", dataset.name)
+                request_data.add_field("data_id", str(file_info.id))
+                request_data.add_field("mime_type", file_info.mime_type)
+                request_data.add_field("extension", file_info.extension)
+                request_data.add_field("md5", file_info.content_hash)
+
+                async with session.put(url, data=request_data, headers=headers) as response:
                     if response.status in [200, 201]:
                         total_bytes_uploaded += len(file_content)
                         uploaded_count += 1
