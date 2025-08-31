@@ -27,6 +27,7 @@ from cognee.api.v1.search.routers import get_search_router
 from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.delete.routers import get_delete_router
 from cognee.api.v1.responses.routers import get_responses_router
+from cognee.api.v1.sync.routers import get_sync_router
 from cognee.api.v1.users.routers import (
     get_auth_router,
     get_register_router,
@@ -249,6 +250,8 @@ app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["vi
 app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
 
 app.include_router(get_responses_router(), prefix="/api/v1/responses", tags=["responses"])
+
+app.include_router(get_sync_router(), prefix="/api/v1/sync", tags=["sync"])
 
 codegraph_routes = get_code_pipeline_router()
 if codegraph_routes:
