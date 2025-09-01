@@ -9,6 +9,30 @@ from types import SimpleNamespace
 from cognee.api.client import app
 
 
+# Fixtures for reuse across test classes
+@pytest.fixture
+def mock_default_user():
+    """Mock default user for testing."""
+    return SimpleNamespace(
+        id=uuid4(), email="default@example.com", is_active=True, tenant_id=uuid4()
+    )
+
+
+@pytest.fixture
+def mock_authenticated_user():
+    """Mock authenticated user for testing."""
+    from cognee.modules.users.models import User
+
+    return User(
+        id=uuid4(),
+        email="auth@example.com",
+        hashed_password="hashed",
+        is_active=True,
+        is_verified=True,
+        tenant_id=uuid4(),
+    )
+
+
 class TestConditionalAuthenticationEndpoints:
     """Test that API endpoints work correctly with conditional authentication."""
 
@@ -16,27 +40,6 @@ class TestConditionalAuthenticationEndpoints:
     def client(self):
         """Create a test client."""
         return TestClient(app)
-
-    @pytest.fixture
-    def mock_default_user(self):
-        """Mock default user for testing."""
-        return SimpleNamespace(
-            id=uuid4(), email="default@example.com", is_active=True, tenant_id=uuid4()
-        )
-
-    @pytest.fixture
-    def mock_authenticated_user(self):
-        """Mock authenticated user for testing."""
-        from cognee.modules.users.models import User
-
-        return User(
-            id=uuid4(),
-            email="auth@example.com",
-            hashed_password="hashed",
-            is_active=True,
-            is_verified=True,
-            tenant_id=uuid4(),
-        )
 
     def test_health_endpoint_no_auth_required(self, client):
         """Test that health endpoint works without authentication."""
@@ -89,9 +92,6 @@ class TestConditionalAuthenticationEndpoints:
 
         # Core test: authentication is not required (should not get 401)
         assert response.status_code != 401
-        # Note: When run individually, this test returns 200. When run with other tests,
-        # there may be async event loop conflicts causing 500 errors, but the key point
-        # is that conditional authentication is working (no 401 unauthorized errors)
 
     @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
     @patch(
@@ -121,7 +121,7 @@ class TestConditionalAuthenticationEndpoints:
     @patch("cognee.api.v1.add.add")
     @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
     def test_authenticated_request_uses_user(
-        self, mock_get_default, mock_cognee_add, client, mock_authenticated_user
+        self, mock_get_default, mock_cognee_add, mock_authenticated_user
     ):
         """Test that authenticated requests use the authenticated user, not default user."""
         # Mock successful authentication - this would normally be handled by FastAPI Users
@@ -257,27 +257,3 @@ class TestConditionalAuthenticationErrorHandling:
 
         # In default environment, should be False
         assert REQUIRE_AUTHENTICATION == False
-
-
-# Fixtures for reuse across test classes
-@pytest.fixture
-def mock_default_user():
-    """Mock default user for testing."""
-    return SimpleNamespace(
-        id=uuid4(), email="default@example.com", is_active=True, tenant_id=uuid4()
-    )
-
-
-@pytest.fixture
-def mock_authenticated_user():
-    """Mock authenticated user for testing."""
-    from cognee.modules.users.models import User
-
-    return User(
-        id=uuid4(),
-        email="auth@example.com",
-        hashed_password="hashed",
-        is_active=True,
-        is_verified=True,
-        tenant_id=uuid4(),
-    )
