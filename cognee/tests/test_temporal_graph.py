@@ -1,11 +1,14 @@
 import asyncio
 import cognee
+from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 
 from cognee.shared.logging_utils import setup_logging, INFO
+from cognee.tasks.temporal_graph.models import Timestamp
 from cognee.api.v1.search import SearchType
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from collections import Counter
+from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 
 logger = get_logger()
 
@@ -137,6 +140,21 @@ async def main():
     assert edge_type_counts.get("time_to", 0) == type_counts.get("Interval", 0), (
         "Expected the same amount of time_to and interval objects in the graph"
     )
+
+    retriever = TemporalRetriever()
+
+    result_before = await retriever.extract_time_from_query("What happened before 1890?")
+
+    assert result_before[0] == None
+
+    result_after = await retriever.extract_time_from_query("What happened after 1891?")
+
+    assert result_after[1] == None
+
+    result_between = await retriever.extract_time_from_query("What happened between 1890 and 1900?")
+
+    assert result_between[1]
+    assert result_between[0]
 
 
 if __name__ == "__main__":
