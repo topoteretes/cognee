@@ -16,8 +16,8 @@ export default function Header() {
   } = useBoolean(false);
 
   const handleDataSyncConfirm = () => {
-    syncData("2664f3a6-c9cc-514f-aa2e-15411a3a760c")
-      .then(() => {
+    syncData()
+      .finally(() => {
         closeSyncModal();
       });
   };

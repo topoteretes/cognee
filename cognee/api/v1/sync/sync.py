@@ -267,7 +267,7 @@ async def _extract_local_files_with_hashes(
         for data_entry in data_entries:
             try:
                 # Use existing content_hash from database
-                content_hash = data_entry.content_hash
+                content_hash = data_entry.raw_content_hash
                 file_size = data_entry.data_size if data_entry.data_size else 0
 
                 # Skip entries without content hash (shouldn't happen in normal cases)

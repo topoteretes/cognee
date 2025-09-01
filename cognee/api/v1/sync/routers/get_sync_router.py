@@ -1,4 +1,5 @@
 from uuid import UUID
+from typing import Optional
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
@@ -18,13 +19,13 @@ logger = get_logger()
 class SyncRequest(InDTO):
     """Request model for sync operations."""
 
-    dataset_id: UUID
+    dataset_id: Optional[UUID] = None
 
 
 def get_sync_router() -> APIRouter:
     router = APIRouter()
 
-    @router.post("", response_model=SyncResponse)
+    @router.post("", response_model=dict[str, SyncResponse])
     async def sync_to_cloud(
         request: SyncRequest,
         user: User = Depends(get_authenticated_user),
@@ -91,7 +92,7 @@ def get_sync_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "POST /v1/sync",
-                "dataset_id": str(request.dataset_id),
+                "dataset_id": str(request.dataset_id) if request.dataset_id else "*",
             },
         )
 
@@ -99,23 +100,24 @@ def get_sync_router() -> APIRouter:
 
         try:
             # Retrieve existing dataset and check permissions
-            dataset = await get_specific_user_permission_datasets(
-                user.id, "write", [request.dataset_id]
+            datasets = await get_specific_user_permission_datasets(
+                user.id, "write", [request.dataset_id] if request.dataset_id else None
             )
 
-            # Convert from list to Dataset element
-            if isinstance(dataset, list):
-                dataset = dataset[0]
+            sync_results = {}
 
-            await set_database_global_context_variables(dataset.id, dataset.owner_id)
+            for dataset in datasets:
+                await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
-            # Execute cloud sync operation
-            sync_result = await cognee_sync(
-                dataset=dataset,
-                user=user,
-            )
+                # Execute cloud sync operation
+                sync_result = await cognee_sync(
+                    dataset=dataset,
+                    user=user,
+                )
 
-            return sync_result
+                sync_results[str(dataset.id)] = sync_result
+
+            return sync_results
 
         except ValueError as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
@@ -127,8 +129,6 @@ def get_sync_router() -> APIRouter:
             )
         except Exception as e:
             logger.error(f"Cloud sync operation failed: {str(e)}")
-            return JSONResponse(
-                status_code=409, content={"error": f"Cloud sync operation failed: {str(e)}"}
-            )
+            return JSONResponse(status_code=409, content={"error": "Cloud sync operation failed."})
 
     return router
