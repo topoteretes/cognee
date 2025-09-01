@@ -46,9 +46,7 @@ def get_cognify_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("", response_model=dict)
-    async def cognify(
-        payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)
-    ):
+    async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
         """
         Transform datasets into structured knowledge graphs through cognitive processing.
 

@@ -66,9 +66,7 @@ def get_search_router() -> APIRouter:
             return JSONResponse(status_code=500, content={"error": str(error)})
 
     @router.post("", response_model=list)
-    async def search(
-        payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)
-    ):
+    async def search(payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)):
         """
         Search for nodes in the graph database.
 
