@@ -167,11 +167,15 @@ class _FakeRetriever(TemporalRetriever):
         return ["e1", "e2"]
 
     async def _fake_graph_collect_events(self, ids):
-        return [{"events": [
-            {"id": "e1", "description": "E1"},
-            {"id": "e2", "description": "E2"},
-            {"id": "e3", "description": "E3"},
-        ]}]
+        return [
+            {
+                "events": [
+                    {"id": "e1", "description": "E1"},
+                    {"id": "e2", "description": "E2"},
+                    {"id": "e3", "description": "E3"},
+                ]
+            }
+        ]
 
     async def _fake_vector_embed(self, texts):
         assert isinstance(texts, list) and texts
@@ -190,9 +194,7 @@ class _FakeRetriever(TemporalRetriever):
             triplets = await self.get_triplets(query)
             return await self.resolve_edges_to_text(triplets)
 
-        ids = await self._fake_graph_collect_ids(
-            time_from=time_from, time_to=time_to
-        )
+        ids = await self._fake_graph_collect_ids(time_from=time_from, time_to=time_to)
         relevant_events = await self._fake_graph_collect_events(ids)
 
         _ = await self._fake_vector_embed([query])
