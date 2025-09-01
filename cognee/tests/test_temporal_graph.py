@@ -145,11 +145,11 @@ async def main():
 
     result_before = await retriever.extract_time_from_query("What happened before 1890?")
 
-    assert result_before[0] == None
+    assert result_before[0] is None
 
     result_after = await retriever.extract_time_from_query("What happened after 1891?")
 
-    assert result_after[1] == None
+    assert result_after[1] is None
 
     result_between = await retriever.extract_time_from_query("What happened between 1890 and 1900?")
 
