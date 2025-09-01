@@ -5,7 +5,7 @@ import Image from "next/image";
 import { useBoolean } from "@/utils";
 
 import { CloseIcon, CloudIcon, CogneeIcon } from "../Icons";
-import { CTAButton, GhostButton, IconButton, Modal, NeutralButton } from "../elements";
+import { CTAButton, GhostButton, IconButton, Modal } from "../elements";
 import syncData from "@/modules/cloud/syncData";
 
 export default function Header() {
@@ -24,7 +24,7 @@ export default function Header() {
 
   return (
     <>
-      <header className="relative bg-[rgba(244,244,244,0.5)] flex flex-row h-14 px-5 items-center justify-between w-full max-w-[1920px] mx-auto">
+      <header className="relative bg-[rgba(244,244,244,0.5)] flex flex-row h-14 min-h-14 px-5 items-center justify-between w-full max-w-[1920px] mx-auto">
         <div className="flex flex-row gap-4 items-center">
           <CogneeIcon />
           <div className="text-lg">Cognee Graph Interface</div>
@@ -55,7 +55,7 @@ export default function Header() {
           </div>
           <div className="mt-8 mb-6">Are you sure you want to sync local datasets to cloud?</div>
           <div className="flex flex-row gap-4 mt-4 justify-end">
-            <NeutralButton type="button" onClick={closeSyncModal}>cancel</NeutralButton>
+            <GhostButton type="button" onClick={closeSyncModal}>cancel</GhostButton>
             <CTAButton onClick={handleDataSyncConfirm} type="submit">confirm</CTAButton>
           </div>
         </div>

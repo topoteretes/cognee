@@ -1,3 +1,4 @@
+import json
 from uuid import UUID
 from fastapi.responses import JSONResponse
 from pydantic import Field
@@ -7,7 +8,7 @@ from fastapi import APIRouter, Depends
 from cognee.api.DTO import InDTO
 from cognee.infrastructure.databases.relational import get_async_session
 from cognee.modules.notebooks.models import Notebook, NotebookCell
-from cognee.modules.notebooks.operations import run_in_sandbox
+from cognee.modules.notebooks.operations import run_in_local_sandbox
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.notebooks.methods import (
@@ -41,7 +42,7 @@ def get_notebooks_router():
     async def update_notebook_endpoint(
         notebook_id: UUID, notebook_data: NotebookData, user: User = Depends(get_authenticated_user)
     ):
-        async with get_async_session() as session:
+        async with get_async_session(auto_commit=True) as session:
             notebook: Notebook = await get_notebook(notebook_id, user.id, session)
 
             if notebook is None:
@@ -71,7 +72,7 @@ def get_notebooks_router():
             if notebook is None:
                 return JSONResponse(status_code=404, content={"error": "Notebook not found"})
 
-            result, error = run_in_sandbox(run_code.content)
+            result, error = run_in_local_sandbox(run_code.content)
 
             return JSONResponse(status_code=200, content={"result": result, "error": error})
 
@@ -79,7 +80,7 @@ def get_notebooks_router():
     async def delete_notebook_endpoint(
         notebook_id: UUID, user: User = Depends(get_authenticated_user)
     ):
-        async with get_async_session() as session:
+        async with get_async_session(auto_commit=True) as session:
             notebook: Notebook = await get_notebook(notebook_id, user.id, session)
 
             if notebook is None:

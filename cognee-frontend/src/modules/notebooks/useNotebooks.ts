@@ -19,6 +19,8 @@ function useNotebooks() {
           ...notebooks,
           notebook,
         ]);
+
+        return notebook;
       });
   }, []);
 
@@ -72,15 +74,8 @@ function useNotebooks() {
         },
       })
       .then((response) => response.json())
-      .then(() => {
-        setNotebooks((existingNotebooks) =>
-          existingNotebooks.map((existingNotebook) =>
-            existingNotebook.id === notebook.id ? existingNotebook : notebook
-          )
-        );
-      });
   }, []);
-  
+
   const runCell = useCallback((notebook: Notebook, cell: Cell) => {
     return fetch(`/v1/notebooks/${notebook.id}/${cell.id}/run`, {
         body: JSON.stringify({
@@ -109,7 +104,7 @@ function useNotebooks() {
         );
       });
   }, []);
-  
+
   return {
     notebooks,
     addNotebook,

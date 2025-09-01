@@ -65,14 +65,14 @@ export default function CogneeInstancesAccordion() {
           openAccordion={openInstancesPanel}
           closeAccordion={closeInstancesPanel}
         >
-          <div className="flex flex-row items-center justify-between px-0.5 py-0.5">
+          <div className="flex flex-row items-center justify-between px-0.5 py-1">
             <div className="flex flex-row items-center gap-2.5">
               <LocalCogneeIcon className="text-indigo-700" />
               <span className="text-xs">local cognee</span>
             </div>
             {isLocalCogneeConnected ? <span className="text-xs text-indigo-600">Connected</span> : <span className="text-xs text-gray-400">Not connected</span>}
           </div>
-          <button className="w-full flex flex-row items-center justify-between px-0.5 py-0.5" onClick={!isCloudCogneeConnected ? openCloudConnectionModal : () => {}}>
+          <button className="w-full flex flex-row items-center justify-between px-0.5 py-0.5 cursor-pointer" onClick={!isCloudCogneeConnected ? openCloudConnectionModal : () => {}}>
             <div className="flex flex-row items-center gap-2.5">
               <CloudIcon color="#000000" />
               <span className="text-xs">cloud cognee</span>

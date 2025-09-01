@@ -13,6 +13,7 @@ from cognee.infrastructure.databases.relational import Base
 class NotebookCell(BaseModel):
     id: UUID_t
     type: Literal["markdown", "code"]
+    name: str
     content: str
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

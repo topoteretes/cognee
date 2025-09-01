@@ -16,7 +16,9 @@ def with_async_session(func: Callable[..., Any]) -> Callable[..., Any]:
 
         if session is None:
             async with get_async_session() as session:
-                return await func(*args, **kwargs, session=session)
+                result = await func(*args, **kwargs, session=session)
+                await session.commit()
+                return result
         else:
             return await func(*args, **kwargs)
 

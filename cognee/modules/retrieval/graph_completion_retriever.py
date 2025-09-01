@@ -130,7 +130,7 @@ class GraphCompletionRetriever(BaseRetriever):
 
         return found_triplets
 
-    async def get_context(self, query: str) -> str | tuple[str, list]:
+    async def get_context(self, query: str) -> tuple[str, list]:
         """
         Retrieves and resolves graph triplets into context based on a query.
 
@@ -194,7 +194,7 @@ class GraphCompletionRetriever(BaseRetriever):
                 question=query, answer=completion, context=context, triplets=triplets
             )
 
-        return [completion]
+        return [completion], triplets
 
     def _top_n_words(self, text, stop_words=None, top_n=3, separator=", "):
         """Concatenates the top N frequent words in text."""

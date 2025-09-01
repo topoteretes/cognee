@@ -2,14 +2,15 @@
 
 import { ChangeEvent, useEffect, useState } from "react";
 import { useBoolean } from "@/utils";
-import { Accordion, CTAButton, GhostButton, IconButton, Input, Modal, NeutralButton, PopupMenu } from "@/ui/elements";
+import { Accordion, CTAButton, GhostButton, IconButton, Input, Modal, PopupMenu } from "@/ui/elements";
 import { CloseIcon, DatasetIcon, MinusIcon, PlusIcon } from "@/ui/Icons";
 import useDatasets, { Dataset } from "@/modules/ingestion/useDatasets";
 import addData from "@/modules/ingestion/addData";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
 import { DataFile } from '@/modules/ingestion/useData';
+import { LoadingIndicator } from '@/ui/App';
 
-export default function DatasetAccordion() {
+export default function DatasetsAccordion() {
   const {
     value: isDatasetsPanelOpen,
     setTrue: openDatasetsPanel,
@@ -150,7 +151,7 @@ export default function DatasetAccordion() {
         const onUpdate = () => {};
 
         return cognifyDataset(dataset, onUpdate)
-          .then(() => {
+          .finally(() => {
             setProcessingFilesDone();
           });
       });
@@ -197,7 +198,7 @@ export default function DatasetAccordion() {
         <div className="flex flex-col">
           {datasets.length === 0 && (
             <div className="flex flex-row items-baseline-last text-sm text-gray-400 mt-2 px-2">
-              <span>No datasets, create a new one by clicking +</span>
+              <span>No datasets here, add one by clicking +</span>
             </div>
           )}
           {datasets.map((dataset) => {
@@ -205,10 +206,10 @@ export default function DatasetAccordion() {
               <Accordion
                 key={dataset.id}
                 title={(
-                  <div key={dataset.id} className="flex flex-row gap-2.5 items-center px-0.5 py-1.5">
-                    <DatasetIcon />
+                  <button key={dataset.id} className="flex flex-row gap-2.5 items-center px-0.5 py-1 cursor-pointer">
+                    {isProcessingFiles ? <LoadingIndicator /> : <DatasetIcon />}
                     <span className="text-xs">{dataset.name}</span>
-                  </div>
+                  </button>
                 )}
                 isOpen={openDatasets.has(dataset.id)}
                 openAccordion={() => toggleDataset(dataset.id)}
@@ -238,9 +239,8 @@ export default function DatasetAccordion() {
                     </div>
                   )}
                   {dataset.data?.map((data) => (
-                    <div key={data.id} className="flex flex-row gap-2.5 items-center justify-between px-0.5 py-1.5">
+                    <div key={data.id} className="flex flex-row gap-2.5 items-center justify-between px-0.5 py-1">
                       <div className="flex flex-row items-center gap-2.5">
-                        <DatasetIcon />
                         <span className="text-xs">{data.name}</span>
                       </div>
                       <div>
@@ -283,7 +283,7 @@ export default function DatasetAccordion() {
           </div>
           <div className="mt-8 mb-6">Are you sure you want to delete <span className="text-indigo-600">{datasetToRemove?.name}</span>? This action cannot be undone.</div>
           <div className="flex flex-row gap-4 mt-4 justify-end">
-            <NeutralButton type="button" onClick={handleDatasetRemoveCancel}>cancel</NeutralButton>
+            <GhostButton type="button" onClick={handleDatasetRemoveCancel}>cancel</GhostButton>
             <CTAButton onClick={handleRemoveDatasetConfirm} type="submit">delete</CTAButton>
           </div>
         </div>
@@ -297,7 +297,7 @@ export default function DatasetAccordion() {
           </div>
           <div className="mt-8 mb-6">Are you sure you want to delete <span className="text-indigo-600">{dataToRemove?.name}</span>? This action cannot be undone.</div>
           <div className="flex flex-row gap-4 mt-4 justify-end">
-            <NeutralButton type="button" onClick={handleDataRemoveCancel}>cancel</NeutralButton>
+            <GhostButton type="button" onClick={handleDataRemoveCancel}>cancel</GhostButton>
             <CTAButton onClick={handleDataRemoveConfirm} type="submit">delete</CTAButton>
           </div>
         </div>

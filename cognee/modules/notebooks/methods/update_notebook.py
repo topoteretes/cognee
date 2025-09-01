@@ -14,6 +14,4 @@ async def update_notebook(
     if notebook not in session:
         session.add(notebook)
 
-    await session.commit()
-
     return notebook

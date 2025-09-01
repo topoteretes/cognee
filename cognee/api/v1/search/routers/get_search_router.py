@@ -1,5 +1,4 @@
 from uuid import UUID
-import pathlib
 from typing import Optional
 from datetime import datetime
 from pydantic import Field
@@ -134,7 +133,7 @@ def get_search_router() -> APIRouter:
                 only_context=payload.only_context,
             )
 
-            return results
+            return JSONResponse(content=results)
         except PermissionDeniedError:
             return []
         except Exception as error:
