@@ -115,6 +115,12 @@ jobs:
     uses: ./.github/workflows/test_gemini.yml
     secrets: inherit
 
+  openrouter-tests:
+    name: OpenRouter Tests
+    needs: [basic-tests, e2e-tests, cli-tests]
+    uses: ./.github/workflows/test_openrouter.yml
+    secrets: inherit
+
   # Ollama tests moved to the end
   ollama-tests:
     name: Ollama Tests
@@ -128,6 +134,7 @@ jobs:
       vector-db-tests,
       example-tests,
       gemini-tests,
+      openrouter-tests,
       mcp-test,
       relational-db-migration-tests,
       docker-compose-test,
@@ -150,6 +157,7 @@ jobs:
       db-examples-tests,
       mcp-test,
       gemini-tests,
+      openrouter-tests,
       ollama-tests,
       relational-db-migration-tests,
       docker-compose-test,
@@ -171,6 +179,7 @@ jobs:
                 "${{ needs.db-examples-tests.result }}" == "success" &&
                 "${{ needs.relational-db-migration-tests.result }}" == "success" &&
                 "${{ needs.gemini-tests.result }}" == "success" &&
+                "${{ needs.openrouter-tests.result }}" == "success" &&
                 "${{ needs.docker-compose-test.result }}" == "success" &&
                 "${{ needs.docker-ci-test.result }}" == "success" &&
                 "${{ needs.ollama-tests.result }}" == "success" ]]; then
