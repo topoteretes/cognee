@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_conditional_authenticated_user
+from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 
 
@@ -17,7 +17,7 @@ def get_permissions_router() -> APIRouter:
         permission_name: str,
         dataset_ids: List[UUID],
         principal_id: UUID,
-        user: User = Depends(get_conditional_authenticated_user),
+        user: User = Depends(get_authenticated_user),
     ):
         """
         Grant permission on datasets to a principal (user or role).
@@ -65,7 +65,7 @@ def get_permissions_router() -> APIRouter:
         )
 
     @permissions_router.post("/roles")
-    async def create_role(role_name: str, user: User = Depends(get_conditional_authenticated_user)):
+    async def create_role(role_name: str, user: User = Depends(get_authenticated_user)):
         """
         Create a new role.
 
@@ -100,7 +100,7 @@ def get_permissions_router() -> APIRouter:
 
     @permissions_router.post("/users/{user_id}/roles")
     async def add_user_to_role(
-        user_id: UUID, role_id: UUID, user: User = Depends(get_conditional_authenticated_user)
+        user_id: UUID, role_id: UUID, user: User = Depends(get_authenticated_user)
     ):
         """
         Add a user to a role.
@@ -142,7 +142,7 @@ def get_permissions_router() -> APIRouter:
 
     @permissions_router.post("/users/{user_id}/tenants")
     async def add_user_to_tenant(
-        user_id: UUID, tenant_id: UUID, user: User = Depends(get_conditional_authenticated_user)
+        user_id: UUID, tenant_id: UUID, user: User = Depends(get_authenticated_user)
     ):
         """
         Add a user to a tenant.
@@ -184,7 +184,7 @@ def get_permissions_router() -> APIRouter:
 
     @permissions_router.post("/tenants")
     async def create_tenant(
-        tenant_name: str, user: User = Depends(get_conditional_authenticated_user)
+        tenant_name: str, user: User = Depends(get_authenticated_user)
     ):
         """
         Create a new tenant.

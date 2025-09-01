@@ -69,7 +69,7 @@ class TestConditionalAuthenticationEndpoints:
     @patch("cognee.api.v1.add.add")
     @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
     @patch(
-        "cognee.modules.users.methods.get_conditional_authenticated_user.REQUIRE_AUTHENTICATION",
+        "cognee.modules.users.methods.get_authenticated_user.REQUIRE_AUTHENTICATION",
         False,
     )
     def test_add_endpoint_with_conditional_auth(
@@ -95,7 +95,7 @@ class TestConditionalAuthenticationEndpoints:
 
     @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
     @patch(
-        "cognee.modules.users.methods.get_conditional_authenticated_user.REQUIRE_AUTHENTICATION",
+        "cognee.modules.users.methods.get_authenticated_user.REQUIRE_AUTHENTICATION",
         False,
     )
     def test_conditional_authentication_works_with_current_environment(
@@ -131,13 +131,13 @@ class TestConditionalAuthenticationEndpoints:
         )
 
         # Simulate authenticated request by directly testing the conditional function
-        from cognee.modules.users.methods.get_conditional_authenticated_user import (
-            get_conditional_authenticated_user,
+        from cognee.modules.users.methods.get_authenticated_user import (
+            get_authenticated_user,
         )
 
         async def test_logic():
             # When user is provided (authenticated), should not call get_default_user
-            result = await get_conditional_authenticated_user(user=mock_authenticated_user)
+            result = await get_authenticated_user(user=mock_authenticated_user)
             assert result == mock_authenticated_user
             mock_get_default.assert_not_called()
 
@@ -248,7 +248,7 @@ class TestConditionalAuthenticationErrorHandling:
     def test_current_environment_configuration(self):
         """Test that current environment configuration is working properly."""
         # This tests the actual module state without trying to change it
-        from cognee.modules.users.methods.get_conditional_authenticated_user import (
+        from cognee.modules.users.methods.get_authenticated_user import (
             REQUIRE_AUTHENTICATION,
         )
 

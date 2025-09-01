@@ -21,7 +21,7 @@ from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
 from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_conditional_authenticated_user
+from cognee.modules.users.methods import get_authenticated_user
 
 
 def get_responses_router() -> APIRouter:
@@ -73,7 +73,7 @@ def get_responses_router() -> APIRouter:
     @router.post("/", response_model=ResponseBody)
     async def create_response(
         request: ResponseRequest,
-        user: User = Depends(get_conditional_authenticated_user),
+        user: User = Depends(get_authenticated_user),
     ) -> ResponseBody:
         """
         OpenAI-compatible responses endpoint with function calling support.

@@ -9,7 +9,7 @@ from fastapi import Form, File, UploadFile, Depends
 from typing import List, Optional, Union, Literal
 
 from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_conditional_authenticated_user
+from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.shared.logging_utils import get_logger
@@ -25,7 +25,7 @@ def get_add_router() -> APIRouter:
         data: List[UploadFile] = File(default=None),
         datasetName: Optional[str] = Form(default=None),
         datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
-        user: User = Depends(get_conditional_authenticated_user),
+        user: User = Depends(get_authenticated_user),
     ):
         """
         Add data to a dataset for processing and knowledge graph construction.

@@ -10,7 +10,7 @@ from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
 from cognee.api.DTO import InDTO
 from cognee.modules.pipelines.methods import get_pipeline_run
 from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_conditional_authenticated_user
+from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.get_user_db import get_user_db_context
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.users.get_user_manager import get_user_manager_context
@@ -47,7 +47,7 @@ def get_cognify_router() -> APIRouter:
 
     @router.post("", response_model=dict)
     async def cognify(
-        payload: CognifyPayloadDTO, user: User = Depends(get_conditional_authenticated_user)
+        payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)
     ):
         """
         Transform datasets into structured knowledge graphs through cognitive processing.

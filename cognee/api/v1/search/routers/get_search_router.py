@@ -9,7 +9,7 @@ from cognee.api.DTO import InDTO, OutDTO
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
 from cognee.modules.users.models import User
 from cognee.modules.search.operations import get_history
-from cognee.modules.users.methods import get_conditional_authenticated_user
+from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 
 
@@ -33,7 +33,7 @@ def get_search_router() -> APIRouter:
         created_at: datetime
 
     @router.get("", response_model=list[SearchHistoryItem])
-    async def get_search_history(user: User = Depends(get_conditional_authenticated_user)):
+    async def get_search_history(user: User = Depends(get_authenticated_user)):
         """
         Get search history for the authenticated user.
 
@@ -67,7 +67,7 @@ def get_search_router() -> APIRouter:
 
     @router.post("", response_model=list)
     async def search(
-        payload: SearchPayloadDTO, user: User = Depends(get_conditional_authenticated_user)
+        payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)
     ):
         """
         Search for nodes in the graph database.

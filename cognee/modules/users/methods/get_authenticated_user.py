@@ -24,7 +24,7 @@ else:
     )
 
 
-async def get_conditional_authenticated_user(
+async def get_authenticated_user(
     user: Optional[User] = Depends(_auth_dependency),
 ) -> User:
     """

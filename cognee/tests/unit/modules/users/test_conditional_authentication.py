@@ -20,17 +20,17 @@ class TestConditionalAuthentication:
         mock_default_user = SimpleNamespace(id=uuid4(), email="default@example.com", is_active=True)
 
         with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "false"}):
-            from cognee.modules.users.methods.get_conditional_authenticated_user import (
-                get_conditional_authenticated_user,
+            from cognee.modules.users.methods.get_authenticated_user import (
+                get_authenticated_user,
             )
 
             with patch(
-                "cognee.modules.users.methods.get_conditional_authenticated_user.get_default_user"
+                "cognee.modules.users.methods.get_authenticated_user.get_default_user"
             ) as mock_get_default:
                 mock_get_default.return_value = mock_default_user
 
                 # Test with None user (no authentication)
-                result = await get_conditional_authenticated_user(user=None)
+                result = await get_authenticated_user(user=None)
 
                 assert result == mock_default_user
                 mock_get_default.assert_called_once()
@@ -47,15 +47,15 @@ class TestConditionalAuthentication:
         )
 
         with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "false"}):
-            from cognee.modules.users.methods.get_conditional_authenticated_user import (
-                get_conditional_authenticated_user,
+            from cognee.modules.users.methods.get_authenticated_user import (
+                get_authenticated_user,
             )
 
             with patch(
-                "cognee.modules.users.methods.get_conditional_authenticated_user.get_default_user"
+                "cognee.modules.users.methods.get_authenticated_user.get_default_user"
             ) as mock_get_default:
                 # Test with authenticated user
-                result = await get_conditional_authenticated_user(user=mock_authenticated_user)
+                result = await get_authenticated_user(user=mock_authenticated_user)
 
                 assert result == mock_authenticated_user
                 mock_get_default.assert_not_called()
@@ -72,11 +72,11 @@ class TestConditionalAuthentication:
         )
 
         with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "true"}):
-            from cognee.modules.users.methods.get_conditional_authenticated_user import (
-                get_conditional_authenticated_user,
+            from cognee.modules.users.methods.get_authenticated_user import (
+                get_authenticated_user,
             )
 
-            result = await get_conditional_authenticated_user(user=mock_authenticated_user)
+            result = await get_authenticated_user(user=mock_authenticated_user)
 
             assert result == mock_authenticated_user
 
@@ -88,11 +88,11 @@ class TestConditionalAuthentication:
 
         # Since REQUIRE_AUTHENTICATION is currently false (set at import time),
         # we expect it to return the default user, not None
-        from cognee.modules.users.methods.get_conditional_authenticated_user import (
-            get_conditional_authenticated_user,
+        from cognee.modules.users.methods.get_authenticated_user import (
+            get_authenticated_user,
         )
 
-        result = await get_conditional_authenticated_user(user=None)
+        result = await get_authenticated_user(user=None)
 
         # The current implementation will return default user because REQUIRE_AUTHENTICATION is false
         assert result is not None  # Should get default user
@@ -120,13 +120,13 @@ class TestConditionalAuthenticationIntegration:
     @pytest.mark.asyncio
     async def test_conditional_authentication_function_exists(self):
         """Test that the conditional authentication function can be imported and used."""
-        from cognee.modules.users.methods.get_conditional_authenticated_user import (
-            get_conditional_authenticated_user,
+        from cognee.modules.users.methods.get_authenticated_user import (
+            get_authenticated_user,
             REQUIRE_AUTHENTICATION,
         )
 
         # Should be callable
-        assert callable(get_conditional_authenticated_user)
+        assert callable(get_authenticated_user)
 
         # REQUIRE_AUTHENTICATION should be a boolean
         assert isinstance(REQUIRE_AUTHENTICATION, bool)
@@ -142,12 +142,12 @@ class TestConditionalAuthenticationEnvironmentVariables:
         """Test that REQUIRE_AUTHENTICATION defaults to false when imported with no env var."""
         with patch.dict(os.environ, {}, clear=True):
             # Remove module from cache to force fresh import
-            module_name = "cognee.modules.users.methods.get_conditional_authenticated_user"
+            module_name = "cognee.modules.users.methods.get_authenticated_user"
             if module_name in sys.modules:
                 del sys.modules[module_name]
 
             # Import after patching environment - module will see empty environment
-            from cognee.modules.users.methods.get_conditional_authenticated_user import (
+            from cognee.modules.users.methods.get_authenticated_user import (
                 REQUIRE_AUTHENTICATION,
             )
 
@@ -157,12 +157,12 @@ class TestConditionalAuthenticationEnvironmentVariables:
         """Test that REQUIRE_AUTHENTICATION=true is parsed correctly when imported."""
         with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "true"}):
             # Remove module from cache to force fresh import
-            module_name = "cognee.modules.users.methods.get_conditional_authenticated_user"
+            module_name = "cognee.modules.users.methods.get_authenticated_user"
             if module_name in sys.modules:
                 del sys.modules[module_name]
 
             # Import after patching environment - module will see REQUIRE_AUTHENTICATION=true
-            from cognee.modules.users.methods.get_conditional_authenticated_user import (
+            from cognee.modules.users.methods.get_authenticated_user import (
                 REQUIRE_AUTHENTICATION,
             )
 
@@ -172,12 +172,12 @@ class TestConditionalAuthenticationEnvironmentVariables:
         """Test that REQUIRE_AUTHENTICATION=false is parsed correctly when imported."""
         with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "false"}):
             # Remove module from cache to force fresh import
-            module_name = "cognee.modules.users.methods.get_conditional_authenticated_user"
+            module_name = "cognee.modules.users.methods.get_authenticated_user"
             if module_name in sys.modules:
                 del sys.modules[module_name]
 
             # Import after patching environment - module will see REQUIRE_AUTHENTICATION=false
-            from cognee.modules.users.methods.get_conditional_authenticated_user import (
+            from cognee.modules.users.methods.get_authenticated_user import (
                 REQUIRE_AUTHENTICATION,
             )
 
@@ -190,12 +190,12 @@ class TestConditionalAuthenticationEnvironmentVariables:
         for case in test_cases:
             with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": case}):
                 # Remove module from cache to force fresh import
-                module_name = "cognee.modules.users.methods.get_conditional_authenticated_user"
+                module_name = "cognee.modules.users.methods.get_authenticated_user"
                 if module_name in sys.modules:
                     del sys.modules[module_name]
 
                 # Import after patching environment
-                from cognee.modules.users.methods.get_conditional_authenticated_user import (
+                from cognee.modules.users.methods.get_authenticated_user import (
                     REQUIRE_AUTHENTICATION,
                 )
 
@@ -204,7 +204,7 @@ class TestConditionalAuthenticationEnvironmentVariables:
 
     def test_current_require_authentication_value(self):
         """Test that the current REQUIRE_AUTHENTICATION module value is as expected."""
-        from cognee.modules.users.methods.get_conditional_authenticated_user import (
+        from cognee.modules.users.methods.get_authenticated_user import (
             REQUIRE_AUTHENTICATION,
         )
 
@@ -219,25 +219,25 @@ class TestConditionalAuthenticationEdgeCases:
     @pytest.mark.asyncio
     async def test_get_default_user_raises_exception(self):
         """Test behavior when get_default_user raises an exception."""
-        from cognee.modules.users.methods.get_conditional_authenticated_user import (
-            get_conditional_authenticated_user,
+        from cognee.modules.users.methods.get_authenticated_user import (
+            get_authenticated_user,
         )
 
         with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "false"}):
             with patch(
-                "cognee.modules.users.methods.get_conditional_authenticated_user.get_default_user"
+                "cognee.modules.users.methods.get_authenticated_user.get_default_user"
             ) as mock_get_default:
                 mock_get_default.side_effect = Exception("Database error")
 
                 # This should propagate the exception
                 with pytest.raises(Exception, match="Database error"):
-                    await get_conditional_authenticated_user(user=None)
+                    await get_authenticated_user(user=None)
 
     @pytest.mark.asyncio
     async def test_user_type_consistency(self):
         """Test that the function always returns the same type."""
-        from cognee.modules.users.methods.get_conditional_authenticated_user import (
-            get_conditional_authenticated_user,
+        from cognee.modules.users.methods.get_authenticated_user import (
+            get_authenticated_user,
         )
 
         mock_user = User(
@@ -252,16 +252,16 @@ class TestConditionalAuthenticationEdgeCases:
 
         with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "false"}):
             with patch(
-                "cognee.modules.users.methods.get_conditional_authenticated_user.get_default_user"
+                "cognee.modules.users.methods.get_authenticated_user.get_default_user"
             ) as mock_get_default:
                 mock_get_default.return_value = mock_default_user
 
                 # Test with user
-                result1 = await get_conditional_authenticated_user(user=mock_user)
+                result1 = await get_authenticated_user(user=mock_user)
                 assert result1 == mock_user
 
                 # Test with None
-                result2 = await get_conditional_authenticated_user(user=None)
+                result2 = await get_authenticated_user(user=None)
                 assert result2 == mock_default_user
 
                 # Both should have user-like interface
@@ -287,18 +287,18 @@ class TestAuthenticationScenarios:
         which should trigger fallback to default user.
         """
         mock_default_user = SimpleNamespace(id=uuid4(), email="default@example.com")
-        from cognee.modules.users.methods.get_conditional_authenticated_user import (
-            get_conditional_authenticated_user,
+        from cognee.modules.users.methods.get_authenticated_user import (
+            get_authenticated_user,
         )
 
         with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "false"}):
             with patch(
-                "cognee.modules.users.methods.get_conditional_authenticated_user.get_default_user"
+                "cognee.modules.users.methods.get_authenticated_user.get_default_user"
             ) as mock_get_default:
                 mock_get_default.return_value = mock_default_user
 
                 # All the above scenarios result in user=None being passed to our function
-                result = await get_conditional_authenticated_user(user=None)
+                result = await get_authenticated_user(user=None)
                 assert result == mock_default_user
                 mock_get_default.assert_called_once()
 
@@ -312,10 +312,10 @@ class TestAuthenticationScenarios:
             is_verified=True,
         )
 
-        from cognee.modules.users.methods.get_conditional_authenticated_user import (
-            get_conditional_authenticated_user,
+        from cognee.modules.users.methods.get_authenticated_user import (
+            get_authenticated_user,
         )
 
         with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "false"}):
-            result = await get_conditional_authenticated_user(user=mock_user)
+            result = await get_authenticated_user(user=mock_user)
             assert result == mock_user

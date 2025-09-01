@@ -15,7 +15,7 @@ from cognee.modules.data.methods import create_dataset, get_datasets_by_name
 from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.exceptions import DataNotFoundError, DatasetNotFoundError
 from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_conditional_authenticated_user
+from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.permissions.methods import (
     get_all_user_permission_datasets,
     give_permission_on_dataset,
@@ -74,7 +74,7 @@ def get_datasets_router() -> APIRouter:
     router = APIRouter()
 
     @router.get("", response_model=list[DatasetDTO])
-    async def get_datasets(user: User = Depends(get_conditional_authenticated_user)):
+    async def get_datasets(user: User = Depends(get_authenticated_user)):
         """
         Get all datasets accessible to the authenticated user.
 
@@ -115,7 +115,7 @@ def get_datasets_router() -> APIRouter:
     @router.post("", response_model=DatasetDTO)
     async def create_new_dataset(
         dataset_data: DatasetCreationPayload,
-        user: User = Depends(get_conditional_authenticated_user),
+        user: User = Depends(get_authenticated_user),
     ):
         """
         Create a new dataset or return existing dataset with the same name.
@@ -177,7 +177,7 @@ def get_datasets_router() -> APIRouter:
         "/{dataset_id}", response_model=None, responses={404: {"model": ErrorResponseDTO}}
     )
     async def delete_dataset(
-        dataset_id: UUID, user: User = Depends(get_conditional_authenticated_user)
+        dataset_id: UUID, user: User = Depends(get_authenticated_user)
     ):
         """
         Delete a dataset by its ID.
@@ -219,7 +219,7 @@ def get_datasets_router() -> APIRouter:
         responses={404: {"model": ErrorResponseDTO}},
     )
     async def delete_data(
-        dataset_id: UUID, data_id: UUID, user: User = Depends(get_conditional_authenticated_user)
+        dataset_id: UUID, data_id: UUID, user: User = Depends(get_authenticated_user)
     ):
         """
         Delete a specific data item from a dataset.
@@ -267,7 +267,7 @@ def get_datasets_router() -> APIRouter:
 
     @router.get("/{dataset_id}/graph", response_model=GraphDTO)
     async def get_dataset_graph(
-        dataset_id: UUID, user: User = Depends(get_conditional_authenticated_user)
+        dataset_id: UUID, user: User = Depends(get_authenticated_user)
     ):
         """
         Get the knowledge graph visualization for a dataset.
@@ -299,7 +299,7 @@ def get_datasets_router() -> APIRouter:
         responses={404: {"model": ErrorResponseDTO}},
     )
     async def get_dataset_data(
-        dataset_id: UUID, user: User = Depends(get_conditional_authenticated_user)
+        dataset_id: UUID, user: User = Depends(get_authenticated_user)
     ):
         """
         Get all data items in a dataset.
@@ -355,7 +355,7 @@ def get_datasets_router() -> APIRouter:
     @router.get("/status", response_model=dict[str, PipelineRunStatus])
     async def get_dataset_status(
         datasets: Annotated[List[UUID], Query(alias="dataset")] = [],
-        user: User = Depends(get_conditional_authenticated_user),
+        user: User = Depends(get_authenticated_user),
     ):
         """
         Get the processing status of datasets.
@@ -402,7 +402,7 @@ def get_datasets_router() -> APIRouter:
 
     @router.get("/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
     async def get_raw_data(
-        dataset_id: UUID, data_id: UUID, user: User = Depends(get_conditional_authenticated_user)
+        dataset_id: UUID, data_id: UUID, user: User = Depends(get_authenticated_user)
     ):
         """
         Download the raw data file for a specific data item.
