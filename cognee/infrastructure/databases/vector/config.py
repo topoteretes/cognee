@@ -16,7 +16,7 @@ class VectorConfig(BaseSettings):
     - to_dict: Convert the configuration to a dictionary.
 
     Instance variables:
-    - vector_db_url: The URL of the vector database. Can be relative to system_root_directory.
+    - vector_db_url: The URL of the vector database.
     - vector_db_port: The port for the vector database.
     - vector_db_key: The key for accessing the vector database.
     - vector_db_provider: The provider for the vector database.
