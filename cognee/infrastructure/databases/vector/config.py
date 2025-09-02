@@ -1,5 +1,6 @@
 import os
 import pydantic
+from pathlib import Path
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -32,12 +33,11 @@ class VectorConfig(BaseSettings):
     def validate_paths(cls, values):
         base_config = get_base_config()
 
-        if values.vector_db_url:
-            # Convert relative paths to absolute using system_root_directory as base
+        # If vector_db_url is provided and is not a path skip checking if path is absolute (as it can also be a url)
+        if values.vector_db_url and Path(values.vector_db_url).exists():
+            # Relative path to absolute
             values.vector_db_url = ensure_absolute_path(
                 values.vector_db_url,
-                base_path=base_config.system_root_directory,
-                allow_relative=True,
             )
         else:
             # Default path

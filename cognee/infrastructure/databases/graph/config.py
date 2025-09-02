@@ -60,11 +60,9 @@ class GraphConfig(BaseSettings):
 
         # Handle graph file path
         if values.graph_file_path:
-            # Convert relative paths to absolute using system_root_directory as base
+            # Check if absolute path is provided
             values.graph_file_path = ensure_absolute_path(
-                values.graph_file_path,
-                base_path=base_config.system_root_directory,
-                allow_relative=True
+                os.path.join(values.graph_file_path, values.graph_filename)
             )
         else:
             # Default path
