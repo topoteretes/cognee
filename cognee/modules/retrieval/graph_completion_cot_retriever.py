@@ -32,14 +32,18 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         validation_system_prompt_path: str = "cot_validation_system_prompt.txt",
         followup_system_prompt_path: str = "cot_followup_system_prompt.txt",
         followup_user_prompt_path: str = "cot_followup_user_prompt.txt",
+        system_prompt: str = None,
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
         save_interaction: bool = False,
+        only_context: bool = False,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
             system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
+            only_context=only_context,
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
@@ -51,7 +55,10 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         self.followup_user_prompt_path = followup_user_prompt_path
 
     async def get_completion(
-        self, query: str, context: Optional[Any] = None, max_iter=4
+        self,
+        query: str,
+        context: Optional[Any] = None,
+        max_iter=4,
     ) -> List[str]:
         """
         Generate completion responses based on a user query and contextual information.
@@ -92,6 +99,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 context=context,
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
+                system_prompt=self.system_prompt,
             )
             logger.info(f"Chain-of-thought: round {round_idx} - answer: {completion}")
             if round_idx < max_iter:
@@ -128,4 +136,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 question=query, answer=completion, context=context, triplets=triplets
             )
 
-        return [completion]
+        if self.only_context:
+            return [context]
+        else:
+            return [completion]

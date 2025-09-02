@@ -38,7 +38,7 @@ class CognifyPayloadDTO(InDTO):
     dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
     custom_prompt: Optional[str] = Field(
-        default=None, description="Custom prompt for entity extraction and graph generation"
+        default="", description="Custom prompt for entity extraction and graph generation"
     )
 
 
