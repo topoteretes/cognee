@@ -9,22 +9,14 @@ def get_absolute_path(path_from_root: str) -> str:
     return str(absolute_path.resolve())
 
 
-def ensure_absolute_path(
-    path: str, base_path: Optional[str] = None, allow_relative: bool = False
-) -> str:
-    """Ensures a path is absolute, optionally converting relative paths.
+def ensure_absolute_path(path: str) -> str:
+    """Ensures a path is absolute.
 
     Args:
-        path: The path to validate/convert.
-        base_path: Required base when converting relative paths (e.g., SYSTEM_ROOT_DIRECTORY).
-        allow_relative: If False, raises error for relative paths instead of converting.
+        path: The path to validate.
 
     Returns:
         Absolute path as string
-
-    Raises:
-        ValueError: If path is None; or path is relative and allow_relative is False;
-                   or base_path is missing/non-absolute when converting.
     """
     if path is None:
         raise ValueError("Path cannot be None")
@@ -32,12 +24,4 @@ def ensure_absolute_path(
     if path_obj.is_absolute():
         return str(path_obj.resolve())
 
-    if not allow_relative:
-        raise ValueError(f"Path must be absolute. Got relative path: {path}")
-
-    if base_path is None:
-        raise ValueError("base_path must be provided when converting relative paths")
-    base = Path(base_path).expanduser()
-    if not base.is_absolute():
-        raise ValueError("base_path must be absolute when converting relative paths")
-    return str((base / path_obj).resolve())
+    raise ValueError(f"Path must be absolute. Got relative path: {path}")

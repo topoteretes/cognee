@@ -15,12 +15,8 @@ class BaseConfig(BaseSettings):
     @pydantic.model_validator(mode="after")
     def validate_paths(self):
         # Require absolute paths for root directories
-        self.data_root_directory = ensure_absolute_path(
-            self.data_root_directory, allow_relative=False
-        )
-        self.system_root_directory = ensure_absolute_path(
-            self.system_root_directory, allow_relative=False
-        )
+        self.data_root_directory = ensure_absolute_path(self.data_root_directory)
+        self.system_root_directory = ensure_absolute_path(self.system_root_directory)
         return self
 
     langfuse_public_key: Optional[str] = os.getenv("LANGFUSE_PUBLIC_KEY")
