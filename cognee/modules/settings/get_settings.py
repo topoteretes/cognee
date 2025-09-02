@@ -15,10 +15,11 @@ class ModelName(Enum):
     ollama = "ollama"
     anthropic = "anthropic"
     gemini = "gemini"
+    bedrock = "bedrock"
 
 
 class LLMConfig(BaseModel):
-    api_key: str
+    api_key: Optional[str]
     model: str
     provider: str
     endpoint: Optional[str]
@@ -71,6 +72,10 @@ def get_settings() -> SettingsDict:
         {
             "value": "gemini",
             "label": "Gemini",
+        },
+        {
+            "value": "bedrock",
+            "label": "AWS Bedrock",
         },
     ]
 
@@ -132,6 +137,20 @@ def get_settings() -> SettingsDict:
                         {
                             "value": "gemini-2.0-flash-exp",
                             "label": "Gemini 2.0 Flash",
+                        },
+                    ],
+                    "bedrock": [
+                        {
+                            "value": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+                            "label": "Claude 3.5 Sonnet",
+                        },
+                        {
+                            "value": "us.anthropic.claude-3-5-haiku-20241022-v1:0",
+                            "label": "Claude 3.5 Haiku",
+                        },
+                        {
+                            "value": "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
+                            "label": "Claude 3.5 Sonnet (June)",
                         },
                     ],
                 },

@@ -154,7 +154,7 @@ async def search(
         - LLM_API_KEY: API key for your LLM provider
 
         Optional:
-        - LLM_PROVIDER, LLM_MODEL: Configure LLM for search responses
+        - LLM_PROVIDER, LLM_MODEL: Configure LLM for search responses (supports: openai, anthropic, gemini, ollama, bedrock)
         - VECTOR_DB_PROVIDER: Must match what was used during cognify
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
