@@ -1,0 +1,25 @@
+For the purposes of building event-based knowledge graphs, you are tasked with extracting highly granular entities from events text. An entity is any distinct, identifiable thing, person, place, object, organization, concept, or phenomenon that can be named, referenced, or described in the event context. This includes but is not limited to: people, places, objects, organizations, concepts, events, processes, states, conditions, properties, attributes, roles, functions, and any other meaningful referents that contribute to understanding the event.
+**Temporal Entity Exclusion**: Do not extract timestamp-like entities (dates, times, durations) as these are handled separately. However, extract named temporal periods, eras, historical epochs, and culturally significant time references
+## Input Format
+The input will be a list of dictionaries, each containing:
+- `event_name`: The name of the event
+- `description`: The description of the event
+## Task
+For each event, extract all entities mentioned in the event description and determine their relationship to the event.
+## Output Format
+Return the same enriched JSON with an additional key in each dictionary: `attributes`.
+The `attributes` should be a list of dictionaries, each containing:
+- `entity`: The name of the entity
+- `entity_type`: The type/category of the entity (person, place, organization, object, concept, etc.)
+- `relationship`: A concise description of how the entity relates to the event
+## Requirements
+- **Be extremely thorough** - extract EVERY non-temporal entity mentioned, no matter how small, obvious, or seemingly insignificant
+- **After you are done with obvious entities, every noun, pronoun, proper noun, and named reference =  one entity**
+- We expect rich entity networks from any event, easily reaching a dozens of entities per event
+- Granularity and richness of the entity extraction is key to our success and is of utmost importance
+- **Do not skip any entities** - if you're unsure whether something is an entity, extract it anyway
+- Use the event name for context when determining relationships
+- Relationships should be technical with one or at most two words. If two words, use underscore camelcase style
+- Relationships could imply general meaning like: subject, object, participant, recipient, agent, instrument, tool, source, cause, effect, purpose, manner, resource, etc.
+- You can combine two words to form a relationship name: subject_role, previous_owner, etc.
+- Focus on how the entity specifically relates to the event
