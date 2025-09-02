@@ -21,16 +21,16 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.storage.utils import JSONEncoder
 
 
-# try:
-#     from codingagents.coding_rule_associations import (
-#         add_rule_associations,
-#         get_existing_rules,
-#     )
-# except ModuleNotFoundError:
-#     from .codingagents.coding_rule_associations import (
-#         add_rule_associations,
-#         get_existing_rules,
-#     )
+try:
+    from codingagents.coding_rule_associations import (
+        add_rule_associations,
+        get_existing_rules,
+    )
+except ModuleNotFoundError:
+    from .codingagents.coding_rule_associations import (
+        add_rule_associations,
+        get_existing_rules,
+    )
 
 
 mcp = FastMCP("Cognee")
@@ -310,7 +310,7 @@ async def save_interaction(data: str) -> list:
                 logger.info("Save interaction process finished.")
                 logger.info("Generating associated rules from interaction data.")
 
-                # await add_rule_associations(data=data, rules_nodeset_name="coding_agent_rules")
+                await add_rule_associations(data=data, rules_nodeset_name="coding_agent_rules")
 
                 logger.info("Associated rules generated from interaction data.")
 
@@ -572,10 +572,8 @@ async def get_developer_rules() -> list:
     async def fetch_rules_from_cognee() -> str:
         """Collect all developer rules from Cognee"""
         with redirect_stdout(sys.stderr):
-            note = "This is broken in 0.2.2"
-            return note
-            # developer_rules = await get_existing_rules(rules_nodeset_name="coding_agent_rules")
-            # return developer_rules
+            developer_rules = await get_existing_rules(rules_nodeset_name="coding_agent_rules")
+            return developer_rules
 
     rules_text = await fetch_rules_from_cognee()
 
