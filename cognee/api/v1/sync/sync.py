@@ -220,9 +220,14 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
         except Exception as e:
             logger.warning(f"Failed to update progress: {str(e)}")
 
-        # Step 4: Trigger cognify processing on cloud dataset
-        await _trigger_remote_cognify(cloud_base_url, cloud_auth_token, dataset.id, run_id)
-        logger.info(f"Cognify processing triggered for dataset {dataset.id}")
+        # Step 4: Trigger cognify processing on cloud dataset (only if new files were uploaded)
+        if missing_hashes:
+            await _trigger_remote_cognify(cloud_base_url, cloud_auth_token, dataset.id, run_id)
+            logger.info(f"Cognify processing triggered for dataset {dataset.id}")
+        else:
+            logger.info(
+                f"Skipping cognify processing - no new files were uploaded for dataset {dataset.id}"
+            )
 
         # Final progress
         try:
@@ -511,7 +516,7 @@ async def _trigger_remote_cognify(
 
     payload = {
         "dataset_ids": [str(dataset_id)],  # Convert UUID to string for JSON serialization
-        "run_in_background": False,  # TODO: evaluate, currently False we can catch remote response
+        "run_in_background": False,
         "custom_prompt": "",
     }
 
