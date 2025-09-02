@@ -23,6 +23,7 @@ class LLMProvider(Enum):
     - ANTHROPIC: Represents the Anthropic provider.
     - CUSTOM: Represents a custom provider option.
     - GEMINI: Represents the Gemini provider.
+    - BEDROCK: Represents the AWS Bedrock provider.
     """
 
     OPENAI = "openai"
@@ -30,6 +31,7 @@ class LLMProvider(Enum):
     ANTHROPIC = "anthropic"
     CUSTOM = "custom"
     GEMINI = "gemini"
+    BEDROCK = "bedrock"
 
 
 def get_llm_client():
@@ -143,6 +145,24 @@ def get_llm_client():
             max_completion_tokens=max_completion_tokens,
             endpoint=llm_config.llm_endpoint,
             api_version=llm_config.llm_api_version,
+            streaming=llm_config.llm_streaming,
+        )
+
+    elif provider == LLMProvider.BEDROCK:
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.bedrock.adapter import (
+            BedrockAdapter,
+        )
+
+        return BedrockAdapter(
+            model=llm_config.llm_model,
+            api_key=llm_config.llm_api_key,
+            aws_access_key_id=llm_config.aws_access_key_id,
+            aws_secret_access_key=llm_config.aws_secret_access_key,
+            aws_session_token=llm_config.aws_session_token,
+            aws_region_name=llm_config.aws_region_name,
+            aws_profile_name=llm_config.aws_profile_name,
+            aws_bedrock_runtime_endpoint=llm_config.aws_bedrock_runtime_endpoint,
+            max_tokens=max_tokens,
             streaming=llm_config.llm_streaming,
         )
 

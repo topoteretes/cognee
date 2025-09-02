@@ -123,6 +123,16 @@ os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 ```
 
 You can also set the variables by creating .env file, using our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
+
+**Supported LLM Providers:** OpenAI (default), Anthropic, Gemini, Ollama, AWS Bedrock
+
+**For AWS Bedrock:** Set `LLM_PROVIDER="bedrock"` and use one of three authentication methods:
+- API Key: `LLM_API_KEY="your_bedrock_api_key"`
+- AWS Credentials: `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` (+ `AWS_SESSION_TOKEN` if needed)
+- AWS Profile: `AWS_PROFILE_NAME="your_profile"`
+
+Use an [inference profile](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModel.html#API_runtime_InvokeModel_Example_5:~:text=Use%20an%20inference%20profile%20in%20model%20invocation) for the model IDs. This usually means appending `us.*` (or other region) to the model ID (e.g., `us.anthropic.claude-3-5-sonnet-20241022-v2:0`). See [AWS Bedrock models](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html).
+
 To use different LLM providers, for more info check out our <a href="https://docs.cognee.ai">documentation</a>
 
 

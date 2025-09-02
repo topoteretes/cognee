@@ -121,6 +121,24 @@ jobs:
     uses: ./.github/workflows/test_openrouter.yml
     secrets: inherit
 
+  bedrock-tests:
+    name: Bedrock Tests
+    needs: [basic-tests, e2e-tests]
+    uses: ./.github/workflows/test_bedrock_api_key.yml
+    secrets: inherit
+
+  bedrock-aws-credentials-tests:
+    name: Bedrock AWS Credentials Tests
+    needs: [basic-tests, e2e-tests]
+    uses: ./.github/workflows/test_bedrock_aws_credentials.yml
+    secrets: inherit
+
+  bedrock-aws-profile-tests:
+    name: Bedrock AWS Profile Tests
+    needs: [basic-tests, e2e-tests]
+    uses: ./.github/workflows/test_bedrock_aws_profile.yml
+    secrets: inherit
+
   # Ollama tests moved to the end
   ollama-tests:
     name: Ollama Tests
@@ -158,6 +176,9 @@ jobs:
       mcp-test,
       gemini-tests,
       openrouter-tests,
+      bedrock-tests,
+      bedrock-aws-credentials-tests,
+      bedrock-aws-profile-tests,
       ollama-tests,
       relational-db-migration-tests,
       docker-compose-test,
@@ -180,6 +201,9 @@ jobs:
                 "${{ needs.relational-db-migration-tests.result }}" == "success" &&
                 "${{ needs.gemini-tests.result }}" == "success" &&
                 "${{ needs.openrouter-tests.result }}" == "success" &&
+                "${{ needs.bedrock-tests.result }}" == "success" &&
+                "${{ needs.bedrock-aws-credentials-tests.result }}" == "success" &&
+                "${{ needs.bedrock-aws-profile-tests.result }}" == "success" &&
                 "${{ needs.docker-compose-test.result }}" == "success" &&
                 "${{ needs.docker-ci-test.result }}" == "success" &&
                 "${{ needs.ollama-tests.result }}" == "success" ]]; then

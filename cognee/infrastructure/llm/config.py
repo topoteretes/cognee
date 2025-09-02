@@ -27,6 +27,12 @@ class LLMConfig(BaseSettings):
     - embedding_rate_limit_enabled
     - embedding_rate_limit_requests
     - embedding_rate_limit_interval
+    - aws_access_key_id (Bedrock)
+    - aws_secret_access_key (Bedrock)
+    - aws_session_token (Bedrock)
+    - aws_region_name (Bedrock)
+    - aws_profile_name (Bedrock)
+    - aws_bedrock_runtime_endpoint (Bedrock)
 
     Public methods include:
     - ensure_env_vars_for_ollama
@@ -62,6 +68,14 @@ class LLMConfig(BaseSettings):
     fallback_api_key: str = ""
     fallback_endpoint: str = ""
     fallback_model: str = ""
+
+    # AWS Bedrock configuration
+    aws_access_key_id: Optional[str] = None
+    aws_secret_access_key: Optional[str] = None
+    aws_session_token: Optional[str] = None
+    aws_region_name: str = "us-east-1"
+    aws_profile_name: Optional[str] = None
+    aws_bedrock_runtime_endpoint: Optional[str] = None
 
     baml_registry: ClassVar[ClientRegistry] = ClientRegistry()
 
