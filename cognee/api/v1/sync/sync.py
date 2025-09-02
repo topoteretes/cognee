@@ -511,7 +511,7 @@ async def _trigger_remote_cognify(
 
     payload = {
         "dataset_ids": [dataset_id],
-        "run_in_background": False,  # TODO: consider making this background
+        "run_in_background": False,  # TODO: evaluate, currently False we can catch remote response
         "custom_prompt": "",
     }
 
