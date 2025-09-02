@@ -90,7 +90,7 @@ class StorageManager:
         """
         # Check the actual storage type by class name to determine if open() is async or sync
 
-        if self.storage.__class__.__name__ == "S3FileStorage" and file_path.startswith("s3://"):
+        if self.storage.__class__.__name__ == "S3FileStorage":
             # S3FileStorage.open() is async
             async with self.storage.open(file_path, *args, **kwargs) as file:
                 yield file
