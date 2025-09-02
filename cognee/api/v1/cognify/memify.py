@@ -1,28 +1,33 @@
-from pydantic import BaseModel
 from typing import Union, Optional, List, Type
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.llm import get_max_chunk_tokens
 
+from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
+from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.users.models import User
+from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+    resolve_authorized_user_datasets,
+)
+from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
+    reset_dataset_pipeline_run_status,
+)
+from cognee.modules.engine.operations.setup import setup
 
-from cognee.tasks.memify import extract_subgraph
+from cognee.tasks.memify.extract_subgraph import extract_subgraph
+from cognee.tasks.codingagents.coding_rule_associations import add_rule_associations
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
 logger = get_logger("memify")
 
 
 async def memify(
+    tasks: List[Task],
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
-    tasks: List[Task] = None,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     cypher_query: Optional[str] = None,
@@ -50,10 +55,34 @@ async def memify(
                           Background mode recommended for large datasets (>100MB).
                           Use pipeline_run_id from return value to monitor progress.
     """
+
+    if cypher_query:
+        pass
+    else:
+        memory_fragment = await get_memory_fragment(node_type=node_type, node_name=node_name)
+        # List of edges should be a single element in the list to represent one data item
+        data = [memory_fragment.edges]
+
     memify_tasks = [
-        Task(extract_subgraph, cypher_query=cypher_query, node_type=node_type, node_name=node_name),
-        *tasks,  # Unpack tasks provided to memify pipeline
+        Task(extract_subgraph),
+        Task(CogneeGraph.resolve_edges_to_text, task_config={"batch_size": 10}),
+        Task(
+            add_rule_associations,
+            rules_nodeset_name="coding_agent_rules",
+            user_prompt_location="memify_coding_rule_association_agent_user.txt",
+            system_prompt_location="memify_coding_rule_association_agent_system.txt",
+        ),
+        # *tasks,  # Unpack tasks provided to memify pipeline
     ]
+
+    await setup()
+
+    user, authorized_datasets = await resolve_authorized_user_datasets(datasets, user)
+
+    for dataset in authorized_datasets:
+        await reset_dataset_pipeline_run_status(
+            dataset.id, user, pipeline_names=["memify_pipeline"]
+        )
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
@@ -63,6 +92,7 @@ async def memify(
         pipeline=run_pipeline,
         tasks=memify_tasks,
         user=user,
+        data=data,
         datasets=datasets,
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,

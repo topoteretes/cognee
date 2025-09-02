@@ -1,1 +1,1 @@
-from extract_subgraph import extract_subgraph
+from .extract_subgraph import extract_subgraph
