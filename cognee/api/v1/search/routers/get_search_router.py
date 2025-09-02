@@ -1,9 +1,11 @@
 from uuid import UUID
+import pathlib
 from typing import Optional
 from datetime import datetime
 from pydantic import Field
 from fastapi import Depends, APIRouter
 from fastapi.responses import JSONResponse
+
 from cognee.modules.search.types import SearchType
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
@@ -20,7 +22,12 @@ class SearchPayloadDTO(InDTO):
     datasets: Optional[list[str]] = Field(default=None)
     dataset_ids: Optional[list[UUID]] = Field(default=None, examples=[[]])
     query: str = Field(default="What is in the document?")
+    system_prompt: Optional[str] = Field(
+        default="Answer the question using the provided context. Be as brief as possible."
+    )
+    node_name: Optional[list[str]] = Field(default=None, example=[])
     top_k: Optional[int] = Field(default=10)
+    only_context: bool = Field(default=False)
 
 
 def get_search_router() -> APIRouter:
@@ -79,7 +86,10 @@ def get_search_router() -> APIRouter:
         - **datasets** (Optional[List[str]]): List of dataset names to search within
         - **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to search within
         - **query** (str): The search query string
+        - **system_prompt** Optional[str]: System prompt to be used for Completion type searches in Cognee
+        - **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).
         - **top_k** (Optional[int]): Maximum number of results to return (default: 10)
+        - **only_context** bool: Set to true to only return context Cognee will be sending to LLM in Completion type searches. This will be returned instead of LLM calls for completion type searches.
 
         ## Response
         Returns a list of search results containing relevant nodes from the graph.
@@ -102,7 +112,10 @@ def get_search_router() -> APIRouter:
                 "datasets": payload.datasets,
                 "dataset_ids": [str(dataset_id) for dataset_id in payload.dataset_ids or []],
                 "query": payload.query,
+                "system_prompt": payload.system_prompt,
+                "node_name": payload.node_name,
                 "top_k": payload.top_k,
+                "only_context": payload.only_context,
             },
         )
 
@@ -115,7 +128,10 @@ def get_search_router() -> APIRouter:
                 user=user,
                 datasets=payload.datasets,
                 dataset_ids=payload.dataset_ids,
+                system_prompt=payload.system_prompt,
+                node_name=payload.node_name,
                 top_k=payload.top_k,
+                only_context=payload.only_context,
             )
 
             return results

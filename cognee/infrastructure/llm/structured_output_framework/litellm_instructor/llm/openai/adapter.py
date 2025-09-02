@@ -23,8 +23,11 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     sleep_and_retry_sync,
 )
 from cognee.modules.observability.get_observe import get_observe
+from cognee.shared.logging_utils import get_logger
 
 observe = get_observe()
+
+logger = get_logger()
 
 
 class OpenAIAdapter(LLMInterface):
@@ -129,6 +132,7 @@ class OpenAIAdapter(LLMInterface):
                 api_version=self.api_version,
                 response_model=response_model,
                 max_retries=self.MAX_RETRIES,
+                extra_body={"reasoning_effort": "minimal"},
             )
         except (
             ContentFilterFinishReasonError,
@@ -139,7 +143,27 @@ class OpenAIAdapter(LLMInterface):
                 isinstance(error, InstructorRetryException)
                 and "content management policy" not in str(error).lower()
             ):
-                raise error
+                logger.debug(
+                    "LLM Model does not support reasoning_effort parameter, trying call without the parameter."
+                )
+                return await self.aclient.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": f"""{text_input}""",
+                        },
+                        {
+                            "role": "system",
+                            "content": system_prompt,
+                        },
+                    ],
+                    api_key=self.api_key,
+                    api_base=self.endpoint,
+                    api_version=self.api_version,
+                    response_model=response_model,
+                    max_retries=self.MAX_RETRIES,
+                )
 
             if not (self.fallback_model and self.fallback_api_key):
                 raise ContentPolicyFilterError(
