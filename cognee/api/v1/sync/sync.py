@@ -510,7 +510,7 @@ async def _trigger_remote_cognify(
     headers = {"X-Api-Key": auth_token, "Content-Type": "application/json"}
 
     payload = {
-        "dataset_ids": [dataset_id],
+        "dataset_ids": [str(dataset_id)],  # Convert UUID to string for JSON serialization
         "run_in_background": False,  # TODO: evaluate, currently False we can catch remote response
         "custom_prompt": "",
     }
