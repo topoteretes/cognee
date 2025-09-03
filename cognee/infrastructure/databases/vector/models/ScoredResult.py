@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 from pydantic import BaseModel
 
@@ -14,8 +14,10 @@ class ScoredResult(BaseModel):
     better outcome.
     - payload (Dict[str, Any]): Additional information related to the score, stored as
     key-value pairs in a dictionary.
+    - vector (Optional[List[float]]): Optional vector embedding associated with the result.
     """
 
     id: UUID
     score: float  # Lower score is better
     payload: Dict[str, Any]
+    vector: Optional[List[float]] = None
