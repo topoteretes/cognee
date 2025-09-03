@@ -3,6 +3,7 @@ permissions:
 name: Database Adapter MyPy Check
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main, dev ]
     paths:
@@ -53,7 +54,7 @@ jobs:
             echo "Running MyPy on vector database adapters..."
             for adapter in $vector_adapters; do
               echo "Checking: $adapter"
-              poetry run mypy "$adapter" \
+              uv run mypy "$adapter" \
                 --config-file mypy.ini \
                 --show-error-codes \
                 --no-error-summary
@@ -77,7 +78,7 @@ jobs:
             echo "Running MyPy on graph database adapters..."
             for adapter in $graph_adapters; do
               echo "Checking: $adapter"
-              poetry run mypy "$adapter" \
+              uv run mypy "$adapter" \
                 --config-file mypy.ini \
                 --show-error-codes \
                 --no-error-summary
@@ -101,7 +102,7 @@ jobs:
             echo "Running MyPy on hybrid database adapters..."
             for adapter in $hybrid_adapters; do
               echo "Checking: $adapter"
-              poetry run mypy "$adapter" \
+              uv run mypy "$adapter" \
                 --config-file mypy.ini \
                 --show-error-codes \
                 --no-error-summary
