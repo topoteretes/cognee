@@ -4,7 +4,7 @@ from uuid import UUID
 from cognee.shared.logging_utils import get_logger
 
 from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
-from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
@@ -18,7 +18,6 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 from cognee.modules.engine.operations.setup import setup
 
 from cognee.tasks.memify.extract_subgraph import extract_subgraph
-from cognee.tasks.codingagents.coding_rule_associations import add_rule_associations
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
 logger = get_logger("memify")
@@ -65,14 +64,7 @@ async def memify(
 
     memify_tasks = [
         Task(extract_subgraph),
-        Task(CogneeGraph.resolve_edges_to_text, task_config={"batch_size": 10}),
-        Task(
-            add_rule_associations,
-            rules_nodeset_name="coding_agent_rules",
-            user_prompt_location="memify_coding_rule_association_agent_user.txt",
-            system_prompt_location="memify_coding_rule_association_agent_system.txt",
-        ),
-        # *tasks,  # Unpack tasks provided to memify pipeline
+        *tasks,  # Unpack tasks provided to memify pipeline
     ]
 
     await setup()
