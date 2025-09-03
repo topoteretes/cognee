@@ -31,9 +31,8 @@ def mock_authenticated_user():
         tenant_id=uuid4(),
     )
 
-gau_mod = importlib.import_module(
-    "cognee.modules.users.methods.get_authenticated_user"
-)
+
+gau_mod = importlib.import_module("cognee.modules.users.methods.get_authenticated_user")
 
 
 class TestConditionalAuthenticationEndpoints:
@@ -76,7 +75,7 @@ class TestConditionalAuthenticationEndpoints:
         assert "CookieAuth" in security_schemes
 
     @patch("cognee.api.v1.add.add")
-    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
+    @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     @patch(
         "cognee.api.client.REQUIRE_AUTHENTICATION",
         False,
@@ -101,7 +100,7 @@ class TestConditionalAuthenticationEndpoints:
         # Core test: authentication is not required (should not get 401)
         assert response.status_code != 401
 
-    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
+    @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     @patch(
         "cognee.api.client.REQUIRE_AUTHENTICATION",
         False,
@@ -143,7 +142,7 @@ class TestConditionalAuthenticationBehavior:
             ("/api/v1/datasets", "GET"),
         ],
     )
-    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
+    @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     def test_get_endpoints_work_without_auth(
         self, mock_get_default, client, endpoint, method, mock_default_user
     ):
@@ -170,14 +169,11 @@ class TestConditionalAuthenticationBehavior:
             except Exception:
                 pass  # If response is not JSON, that's fine
 
+    gsm_mod = importlib.import_module("cognee.modules.settings.get_settings")
 
-    gsm_mod = importlib.import_module(
-        "cognee.modules.settings.get_settings"
-    )
-
-    @patch.object(gsm_mod, 'get_vectordb_config')
-    @patch.object(gsm_mod, 'get_llm_config')
-    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
+    @patch.object(gsm_mod, "get_vectordb_config")
+    @patch.object(gsm_mod, "get_llm_config")
+    @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     def test_settings_endpoint_integration(
         self, mock_get_default, mock_llm_config, mock_vector_config, client, mock_default_user
     ):
@@ -215,7 +211,7 @@ class TestConditionalAuthenticationErrorHandling:
     def client(self):
         return TestClient(app)
 
-    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
+    @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     def test_get_default_user_fails(self, mock_get_default, client):
         """Test behavior when get_default_user fails (with current environment)."""
         mock_get_default.side_effect = Exception("Database connection failed")

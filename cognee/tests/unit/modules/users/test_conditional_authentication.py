@@ -10,16 +10,14 @@ import importlib
 from cognee.modules.users.models import User
 
 
-gau_mod = importlib.import_module(
-    "cognee.modules.users.methods.get_authenticated_user"
-)
+gau_mod = importlib.import_module("cognee.modules.users.methods.get_authenticated_user")
 
 
 class TestConditionalAuthentication:
     """Test cases for conditional authentication functionality."""
 
     @pytest.mark.asyncio
-    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
+    @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     async def test_require_authentication_false_no_token_returns_default_user(
         self, mock_get_default
     ):
@@ -37,7 +35,7 @@ class TestConditionalAuthentication:
         mock_get_default.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
+    @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     async def test_require_authentication_false_with_valid_user_returns_user(
         self, mock_get_default
     ):
@@ -59,7 +57,7 @@ class TestConditionalAuthentication:
         mock_get_default.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
+    @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     async def test_require_authentication_true_with_user_returns_user(self, mock_get_default):
         """Test that when REQUIRE_AUTHENTICATION=true and user present, returns user."""
         mock_authenticated_user = User(
@@ -128,6 +126,7 @@ class TestConditionalAuthenticationEnvironmentVariables:
             from cognee.modules.users.methods.get_authenticated_user import (
                 REQUIRE_AUTHENTICATION,
             )
+
             importlib.invalidate_caches()
             assert not REQUIRE_AUTHENTICATION
 
@@ -195,7 +194,7 @@ class TestConditionalAuthenticationEdgeCases:
     """Test edge cases and error scenarios."""
 
     @pytest.mark.asyncio
-    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
+    @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     async def test_get_default_user_raises_exception(self, mock_get_default):
         """Test behavior when get_default_user raises an exception."""
         mock_get_default.side_effect = Exception("Database error")
@@ -205,7 +204,7 @@ class TestConditionalAuthenticationEdgeCases:
             await gau_mod.get_authenticated_user(user=None)
 
     @pytest.mark.asyncio
-    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
+    @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     async def test_user_type_consistency(self, mock_get_default):
         """Test that the function always returns the same type."""
         mock_user = User(
@@ -242,7 +241,7 @@ class TestConditionalAuthenticationEdgeCases:
 class TestAuthenticationScenarios:
     """Test specific authentication scenarios that could occur in FastAPI Users."""
 
-    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
+    @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     async def test_fallback_to_default_user_scenarios(self, mock_get_default):
         """
         Test fallback to default user for all scenarios where FastAPI Users returns None:
