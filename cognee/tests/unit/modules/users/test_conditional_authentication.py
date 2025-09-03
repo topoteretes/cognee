@@ -12,12 +12,17 @@ class TestConditionalAuthentication:
     """Test cases for conditional authentication functionality."""
 
     @pytest.mark.asyncio
-    @patch("cognee.modules.users.methods.get_authenticated_user.get_default_user", new_callable=AsyncMock)
+    @patch(
+        "cognee.modules.users.methods.get_authenticated_user.get_default_user",
+        new_callable=AsyncMock,
+    )
     @patch(
         "cognee.modules.users.methods.get_authenticated_user.REQUIRE_AUTHENTICATION",
         False,
     )
-    async def test_require_authentication_false_no_token_returns_default_user(self, mock_get_default):
+    async def test_require_authentication_false_no_token_returns_default_user(
+        self, mock_get_default
+    ):
         """Test that when REQUIRE_AUTHENTICATION=false and no token, returns default user."""
         # Mock the default user
         mock_default_user = SimpleNamespace(id=uuid4(), email="default@example.com", is_active=True)
@@ -34,12 +39,17 @@ class TestConditionalAuthentication:
         mock_get_default.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("cognee.modules.users.methods.get_authenticated_user.get_default_user", new_callable=AsyncMock)
+    @patch(
+        "cognee.modules.users.methods.get_authenticated_user.get_default_user",
+        new_callable=AsyncMock,
+    )
     @patch(
         "cognee.modules.users.methods.get_authenticated_user.REQUIRE_AUTHENTICATION",
         False,
     )
-    async def test_require_authentication_false_with_valid_user_returns_user(self, mock_get_default):
+    async def test_require_authentication_false_with_valid_user_returns_user(
+        self, mock_get_default
+    ):
         """Test that when REQUIRE_AUTHENTICATION=false and valid user, returns that user."""
         mock_authenticated_user = User(
             id=uuid4(),
@@ -81,6 +91,7 @@ class TestConditionalAuthentication:
         result = await get_authenticated_user(user=mock_authenticated_user)
 
         assert result == mock_authenticated_user
+
 
 class TestConditionalAuthenticationIntegration:
     """Integration tests that test the full authentication flow."""
@@ -200,7 +211,10 @@ class TestConditionalAuthenticationEdgeCases:
     """Test edge cases and error scenarios."""
 
     @pytest.mark.asyncio
-    @patch("cognee.modules.users.methods.get_authenticated_user.get_default_user", new_callable=AsyncMock)
+    @patch(
+        "cognee.modules.users.methods.get_authenticated_user.get_default_user",
+        new_callable=AsyncMock,
+    )
     @patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "false"})
     async def test_get_default_user_raises_exception(self, mock_get_default):
         """Test behavior when get_default_user raises an exception."""
@@ -215,7 +229,10 @@ class TestConditionalAuthenticationEdgeCases:
             await get_authenticated_user(user=None)
 
     @pytest.mark.asyncio
-    @patch("cognee.modules.users.methods.get_authenticated_user.get_default_user", new_callable=AsyncMock)
+    @patch(
+        "cognee.modules.users.methods.get_authenticated_user.get_default_user",
+        new_callable=AsyncMock,
+    )
     @patch(
         "cognee.modules.users.methods.get_authenticated_user.REQUIRE_AUTHENTICATION",
         False,
@@ -260,7 +277,10 @@ class TestConditionalAuthenticationEdgeCases:
 class TestAuthenticationScenarios:
     """Test specific authentication scenarios that could occur in FastAPI Users."""
 
-    @patch("cognee.modules.users.methods.get_authenticated_user.get_default_user", new_callable=AsyncMock)
+    @patch(
+        "cognee.modules.users.methods.get_authenticated_user.get_default_user",
+        new_callable=AsyncMock,
+    )
     @patch(
         "cognee.modules.users.methods.get_authenticated_user.REQUIRE_AUTHENTICATION",
         False,
@@ -278,7 +298,7 @@ class TestAuthenticationScenarios:
         """
         mock_default_user = SimpleNamespace(id=uuid4(), email="default@example.com")
         mock_get_default.return_value = mock_default_user
-        
+
         from cognee.modules.users.methods.get_authenticated_user import (
             get_authenticated_user,
         )

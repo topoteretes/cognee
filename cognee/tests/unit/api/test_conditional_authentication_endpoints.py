@@ -119,6 +119,7 @@ class TestConditionalAuthenticationEndpoints:
         assert response.status_code != 401
         # Note: This test verifies conditional authentication works in the current environment
 
+
 class TestConditionalAuthenticationBehavior:
     """Test the behavior of conditional authentication across different endpoints."""
 
