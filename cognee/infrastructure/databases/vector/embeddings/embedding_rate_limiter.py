@@ -250,9 +250,7 @@ def embedding_rate_limit_sync(func):
             logger.warning(error_msg)
 
             # Create a custom embedding rate limit exception
-            from cognee.infrastructure.databases.exceptions.EmbeddingException import (
-                EmbeddingException,
-            )
+            from cognee.infrastructure.databases.exceptions import EmbeddingException
 
             raise EmbeddingException(error_msg)
 
@@ -307,9 +305,7 @@ def embedding_rate_limit_async(func):
             logger.warning(error_msg)
 
             # Create a custom embedding rate limit exception
-            from cognee.infrastructure.databases.exceptions.EmbeddingException import (
-                EmbeddingException,
-            )
+            from cognee.infrastructure.databases.exceptions import EmbeddingException
 
             raise EmbeddingException(error_msg)
 
