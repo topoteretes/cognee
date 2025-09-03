@@ -220,6 +220,15 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
         except Exception as e:
             logger.warning(f"Failed to update progress: {str(e)}")
 
+        # Step 4: Trigger cognify processing on cloud dataset (only if new files were uploaded)
+        if missing_hashes:
+            await _trigger_remote_cognify(cloud_base_url, cloud_auth_token, dataset.id, run_id)
+            logger.info(f"Cognify processing triggered for dataset {dataset.id}")
+        else:
+            logger.info(
+                f"Skipping cognify processing - no new files were uploaded for dataset {dataset.id}"
+            )
+
         # Final progress
         try:
             await update_sync_operation(run_id, progress_percentage=100)
@@ -491,3 +500,49 @@ async def _prune_cloud_dataset(
     except Exception as e:
         logger.error(f"Error pruning cloud dataset: {str(e)}")
         # Don't raise error for prune failures - sync partially succeeded
+
+
+async def _trigger_remote_cognify(
+    cloud_base_url: str, auth_token: str, dataset_id: str, run_id: str
+) -> None:
+    """
+    Step 4: Trigger cognify processing on the cloud dataset.
+
+    This initiates knowledge graph processing on the synchronized dataset
+    using the cloud infrastructure.
+    """
+    url = f"{cloud_base_url}/api/cognify"
+    headers = {"X-Api-Key": auth_token, "Content-Type": "application/json"}
+
+    payload = {
+        "dataset_ids": [str(dataset_id)],  # Convert UUID to string for JSON serialization
+        "run_in_background": False,
+        "custom_prompt": "",
+    }
+
+    logger.info(f"Triggering cognify processing for dataset {dataset_id}")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    logger.info(f"Cognify processing started successfully: {data}")
+
+                    # Extract pipeline run IDs for monitoring if available
+                    if isinstance(data, dict):
+                        for dataset_key, run_info in data.items():
+                            if isinstance(run_info, dict) and "pipeline_run_id" in run_info:
+                                logger.info(
+                                    f"Cognify pipeline run ID for dataset {dataset_key}: {run_info['pipeline_run_id']}"
+                                )
+                else:
+                    error_text = await response.text()
+                    logger.warning(
+                        f"Failed to trigger cognify processing: Status {response.status} - {error_text}"
+                    )
+                    # TODO: consider adding retries
+
+    except Exception as e:
+        logger.warning(f"Error triggering cognify processing: {str(e)}")
+        # TODO: consider adding retries
