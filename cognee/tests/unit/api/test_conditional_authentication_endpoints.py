@@ -1,6 +1,4 @@
-import os
 import pytest
-import pytest_asyncio
 from unittest.mock import patch, AsyncMock, MagicMock
 from uuid import uuid4
 from fastapi.testclient import TestClient
@@ -52,7 +50,10 @@ class TestConditionalAuthenticationEndpoints:
         assert response.status_code == 200
         assert response.json() == {"message": "Hello, World, I am alive!"}
 
-    @patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "false"})
+    @patch(
+        "cognee.modules.users.methods.get_authenticated_user.REQUIRE_AUTHENTICATION",
+        False,
+    )
     def test_openapi_schema_no_global_security(self, client):
         """Test that OpenAPI schema doesn't require global authentication."""
         response = client.get("/openapi.json")
