@@ -19,6 +19,7 @@ fastapi_users = get_fastapi_users()
 
 _auth_dependency = fastapi_users.current_user(active=True, optional=not REQUIRE_AUTHENTICATION)
 
+
 async def get_authenticated_user(
     user: Optional[User] = Depends(_auth_dependency),
 ) -> User:
