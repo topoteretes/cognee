@@ -1,5 +1,5 @@
 import os
-from typing import Any, Optional, List, Type
+from typing import Any, Optional, List, Tuple, Type
 
 
 from operator import itemgetter
@@ -132,12 +132,14 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         top_k_events = await self.filter_top_k_events(relevant_events, vector_search_results)
 
-        return self.descriptions_to_string(top_k_events)
+        return self.descriptions_to_string(top_k_events), triplets
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
+    async def get_completion(
+        self, query: str, context: Optional[Any] = None
+    ) -> Tuple[List[str], List]:
         """Generates a response using the query and optional context."""
 
-        context = await self.get_context(query=query)
+        context, triplets = await self.get_context(query=query)
 
         completion = await generate_completion(
             query=query,
@@ -146,4 +148,4 @@ class TemporalRetriever(GraphCompletionRetriever):
             system_prompt_path=self.system_prompt_path,
         )
 
-        return [completion]
+        return [completion], triplets

@@ -1,4 +1,4 @@
-from typing import Any, Optional, List, Type
+from typing import Any, Optional, List, Tuple, Type
 from cognee.shared.logging_utils import get_logger
 
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -59,7 +59,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         query: str,
         context: Optional[Any] = None,
         max_iter=4,
-    ) -> List[str]:
+    ) -> Tuple[List[str], List]:
         """
         Generate completion responses based on a user query and contextual information.
 
@@ -137,6 +137,6 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             )
 
         if self.only_context:
-            return [context]
+            return [context], triplets
         else:
-            return [completion]
+            return [completion], triplets

@@ -271,7 +271,8 @@ async def specific_search_by_context(
     ):
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)
-        search_results, triplets = await specific_search(
+
+        result = await specific_search(
             query_type=query_type,
             query_text=query_text,
             user=user,
@@ -284,6 +285,14 @@ async def specific_search_by_context(
             last_k=last_k,
             only_context=only_context,
         )
+
+        if isinstance(result, tuple):
+            search_results = result[0]
+            triplets = result[1]
+        else:
+            search_results = result
+            triplets = []
+
         return {
             "search_result": search_results,
             "graph": [
