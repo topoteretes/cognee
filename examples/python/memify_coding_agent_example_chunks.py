@@ -80,8 +80,8 @@ async def main():
     # Memify accepts these tasks and orchestrates forwarding of graph data through these tasks (if data is not specified).
     # If data is explicitely specified in the arguments this specified data will be forwarded through the tasks instead
     await memify(
-        preprocessing_tasks=subgraph_extraction_tasks,
-        processing_tasks=coding_rules_association_tasks,
+        data_streaming_tasks=subgraph_extraction_tasks,
+        data_processing_tasks=coding_rules_association_tasks,
     )
 
     # Find the new specific coding rules added to graph through memify (created based on chat conversation between team members)

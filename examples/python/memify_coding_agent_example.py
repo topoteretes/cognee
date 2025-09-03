@@ -62,8 +62,8 @@ async def main():
     ]
 
     await memify(
-        preprocessing_tasks=subgraph_extraction_tasks,
-        processing_tasks=rule_association_tasks,
+        data_streaming_tasks=subgraph_extraction_tasks,
+        data_processing_tasks=rule_association_tasks,
         node_name=["coding_rules"],
     )
 

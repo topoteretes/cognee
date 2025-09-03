@@ -23,9 +23,9 @@ logger = get_logger("memify")
 
 
 async def memify(
-    preprocessing_tasks: List[Task],
-    processing_tasks: List[Task] = [],
-    postprocessing_tasks: List[Task] = [],
+    data_streaming_tasks: List[Task],
+    data_processing_tasks: List[Task] = [],
+    data_persistence_tasks: List[Task] = [],
     data: Optional[Any] = None,
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
@@ -66,9 +66,9 @@ async def memify(
             data = [memory_fragment]
 
     memify_tasks = [
-        *preprocessing_tasks,  # Unpack tasks provided to memify pipeline
-        *processing_tasks,
-        *postprocessing_tasks,
+        *data_streaming_tasks,  # Unpack tasks provided to memify pipeline
+        *data_processing_tasks,
+        *data_persistence_tasks,
     ]
 
     await setup()
