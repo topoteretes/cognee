@@ -1,8 +1,9 @@
 "use client";
 
-import { ChangeEvent, useEffect, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useState } from "react";
 import { useBoolean } from "@/utils";
 import { Accordion, CTAButton, GhostButton, IconButton, Input, Modal, PopupMenu } from "@/ui/elements";
+import { AccordionProps } from "@/ui/elements/Accordion";
 import { CloseIcon, DatasetIcon, MinusIcon, PlusIcon } from "@/ui/Icons";
 import useDatasets, { Dataset } from "@/modules/ingestion/useDatasets";
 import addData from "@/modules/ingestion/addData";
@@ -10,7 +11,23 @@ import cognifyDataset from "@/modules/datasets/cognifyDataset";
 import { DataFile } from '@/modules/ingestion/useData';
 import { LoadingIndicator } from '@/ui/App';
 
-export default function DatasetsAccordion() {
+interface DatasetsChangePayload {
+  datasets: Dataset[]
+  refreshDatasets: () => void;
+}
+
+export interface DatasetsAccordionProps extends Omit<AccordionProps, "isOpen" | "openAccordion" | "closeAccordion" | "children"> {
+  onDatasetsChange?: (payload: DatasetsChangePayload) => void;
+}
+
+export default function DatasetsAccordion({
+  title,
+  tools,
+  switchCaretPosition = false,
+  className,
+  contentClassName,
+  onDatasetsChange,
+}: DatasetsAccordionProps) {
   const {
     value: isDatasetsPanelOpen,
     setTrue: openDatasetsPanel,
@@ -31,8 +48,8 @@ export default function DatasetsAccordion() {
       refreshDatasets();
     }
   }, [datasets.length, refreshDatasets]);
-  
-  const [openDatasets, openDataset] = useState(new Set());
+
+  const [openDatasets, openDataset] = useState<Set<string>>(new Set());
 
   const toggleDataset = (id: string) => {
     openDataset((prev) => {
@@ -50,6 +67,26 @@ export default function DatasetsAccordion() {
       return newState;
     });
   };
+
+  const refreshOpenDatasetsData = useCallback(() => {
+    return Promise.all(
+      openDatasets.values().map(
+        (datasetId) => getDatasetData(datasetId)
+      )
+    );
+  }, [getDatasetData, openDatasets]);
+
+  const refreshDatasetsAndData = useCallback(() => {
+    refreshDatasets()
+     .then(refreshOpenDatasetsData);
+  }, [refreshDatasets, refreshOpenDatasetsData]);
+
+  useEffect(() => {
+    onDatasetsChange?.({
+      datasets,
+      refreshDatasets: refreshDatasetsAndData,
+    });
+  }, [datasets, onDatasetsChange, refreshDatasets, refreshDatasetsAndData]);
 
   const {
     value: isNewDatasetModalOpen,
@@ -84,7 +121,7 @@ export default function DatasetsAccordion() {
     addDataset(datasetName)
       .then(() => {
         closeNewDatasetModal();
-        refreshDatasets();
+        refreshDatasetsAndData();
       });
   };
 
@@ -114,7 +151,7 @@ export default function DatasetsAccordion() {
         .then(() => {
           closeRemoveDatasetModal();
           setDatasetToRemove(null);
-          refreshDatasets();
+          refreshDatasetsAndData();
         });
     }
   };
@@ -181,7 +218,7 @@ export default function DatasetsAccordion() {
          .then(() => {
           closeRemoveDataModal();
           setDataToRemove(null);
-          refreshDatasets();
+          refreshDatasetsAndData();
         });
     }
   }
@@ -189,11 +226,14 @@ export default function DatasetsAccordion() {
   return (
     <>
       <Accordion
-        title={<span>Datasets</span>}
+        title={title || <span>Datasets</span>}
         isOpen={isDatasetsPanelOpen}
         openAccordion={openDatasetsPanel}
         closeAccordion={closeDatasetsPanel}
-        tools={<IconButton onClick={handleDatasetAdd}><PlusIcon /></IconButton>}
+        tools={tools || <IconButton onClick={handleDatasetAdd}><PlusIcon /></IconButton>}
+        switchCaretPosition={switchCaretPosition}
+        className={className}
+        contentClassName={contentClassName}
       >
         <div className="flex flex-col">
           {datasets.length === 0 && (
@@ -206,10 +246,10 @@ export default function DatasetsAccordion() {
               <Accordion
                 key={dataset.id}
                 title={(
-                  <button key={dataset.id} className="flex flex-row gap-2.5 items-center px-0.5 py-1 cursor-pointer">
+                  <div className="flex flex-row gap-2 items-center py-1.5 cursor-pointer">
                     {isProcessingFiles ? <LoadingIndicator /> : <DatasetIcon />}
                     <span className="text-xs">{dataset.name}</span>
-                  </button>
+                  </div>
                 )}
                 isOpen={openDatasets.has(dataset.id)}
                 openAccordion={() => toggleDataset(dataset.id)}
@@ -219,36 +259,35 @@ export default function DatasetsAccordion() {
                     <input tabIndex={-1} type="file" multiple onChange={handleAddFiles.bind(null, dataset)} className="absolute w-full h-full cursor-pointer opacity-0" />
                     <PopupMenu>
                       <div className="flex flex-col gap-0.5">
-                        <button className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer relative">
+                        <div className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer relative">
                           <input tabIndex={-1} type="file" multiple onChange={handleAddFiles.bind(null, dataset)} className="absolute w-full h-full cursor-pointer opacity-0" />
                           <span>add data</span>
-                        </button>
+                        </div>
                       </div>
                       <div className="flex flex-col gap-0.5 items-start">
-                        <button onClick={() => handleDatasetRemove(dataset)} className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer">delete</button>
+                        <div onClick={() => handleDatasetRemove(dataset)} className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer">delete</div>
                       </div>
                     </PopupMenu>
                   </IconButton>
                 )}
-                className="pl-1"
+                className="first:pt-1.5"
+                switchCaretPosition={true}
               >
-                <div className="pl-4">
+                <>
                   {dataset.data?.length === 0 && (
                     <div className="flex flex-row items-baseline-last text-sm text-gray-400 mt-2 px-2">
                       <span>No data in a dataset, add by clicking &quot;add data&quot; in a dropdown menu</span>
                     </div>
                   )}
                   {dataset.data?.map((data) => (
-                    <div key={data.id} className="flex flex-row gap-2.5 items-center justify-between px-0.5 py-1">
-                      <div className="flex flex-row items-center gap-2.5">
-                        <span className="text-xs">{data.name}</span>
-                      </div>
+                    <div key={data.id} className="flex flex-row gap-2 items-center justify-between py-1.5 pl-6 last:pb-2.5">
+                      <span className="text-xs">{data.name}</span>
                       <div>
                         <IconButton onClick={() => handleDataRemove(data)}><MinusIcon /></IconButton>
                       </div>
                     </div>
                   ))}
-                </div>
+                </>
               </Accordion>
             );
           })}

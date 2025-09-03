@@ -1,10 +1,12 @@
 import classNames from "classnames";
 
 import { useBoolean } from "@/utils";
+import { LocalCogneeIcon, PlayIcon } from "@/ui/Icons";
+import { PopupMenu } from "@/ui/elements";
 import { LoadingIndicator } from "@/ui/App";
-import { MenuIcon, PlayIcon } from "@/ui/Icons";
-import IconButton from "../IconButton";
+
 import { Cell } from "./types";
+import IconButton from "../IconButton";
 
 interface NotebookCellHeaderProps {
   cell: Cell;
@@ -45,25 +47,21 @@ export default function NotebookCellHeader({
         {isRunningCell ? <LoadingIndicator /> : <IconButton onClick={handleCellRun}><PlayIcon /></IconButton>}
         <span className="ml-4">{cell.name}</span>
       </div>
-      <div className="pr-4">
-        <details className="relative">
-          <summary className="list-none">
-            <div className="p-[0.5rem] m-[-0.5rem] cursor-pointer hover:bg-white rounded-xl">
-              <MenuIcon />
-            </div>
-          </summary>
-
-          <div className="absolute right-0 top-full flex flex-col gap-4 pl-1 py-3 pr-4 whitespace-nowrap bg-white border-1 border-gray-100 z-10">
-            <div className="flex flex-col gap-0.5">
-              <button onClick={() => moveCellUp(cell)} className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer">move cell up</button>
-              <button onClick={() => moveCellDown(cell)} className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer">move cell down</button>
-            </div>
-            <div className="flex flex-col gap-0.5 items-start">
-              <button onClick={() => renameCell(cell)} className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer">rename</button>
-              <button onClick={() => removeCell(cell)} className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer">delete</button>
-            </div>
+      <div className="pr-4 flex flex-row items-center gap-8">
+        <div className="flex flex-row items-center gap-2">
+          <LocalCogneeIcon className="text-indigo-700" />
+          <span className="text-xs">local cognee</span>
+        </div>
+        <PopupMenu>
+          <div className="flex flex-col gap-0.5">
+            <button onClick={() => moveCellUp(cell)} className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer">move cell up</button>
+            <button onClick={() => moveCellDown(cell)} className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer">move cell down</button>
           </div>
-        </details>
+          <div className="flex flex-col gap-0.5 items-start">
+            <button onClick={() => renameCell(cell)} className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer">rename</button>
+            <button onClick={() => removeCell(cell)} className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer">delete</button>
+          </div>
+        </PopupMenu>
       </div>
     </div>
   );

@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import Header from "@/ui/Layout/Header";
+import { Header } from "@/ui/Layout";
+import { SearchIcon } from "@/ui/Icons";
 import { Notebook } from "@/ui/elements";
-
-import useNotebooks from "@/modules/notebooks/useNotebooks";
 import { Notebook as NotebookType } from "@/ui/elements/Notebook/types";
-import DatasetsAccordion from "./DatasetsAccordion";
-import CogneeInstancesAccordion from "./CogneeInstancesAccordion";
+import { Dataset } from "@/modules/ingestion/useDatasets";
+import useNotebooks from "@/modules/notebooks/useNotebooks";
+
 import NotebooksAccordion from "./NotebooksAccordion";
+import CogneeInstancesAccordion from "./CogneeInstancesAccordion";
+import AddDataToCognee from "./AddDataToCognee";
+import InstanceDatasetsAccordion from "./InstanceDatasetsAccordion";
 
 export default function Dashboard() {
   const {
@@ -24,7 +27,12 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!notebooks.length) {
-      refreshNotebooks();
+      refreshNotebooks()
+        .then((notebooks) => {
+          if (notebooks[0]) {
+            setSelectedNotebookId(notebooks[0].id);
+          }
+        });
     }
   }, [notebooks.length, refreshNotebooks]);
 
@@ -65,26 +73,39 @@ export default function Dashboard() {
     saveNotebookThrottled(notebook);
   }, [saveNotebookThrottled, updateNotebook]);
 
-  return (
-    <div className="h-full flex flex-col">
-      <div className="absolute top-0 right-0 bottom-0 left-0 flex flex-row gap-2.5">
-        <div className="flex-1/5 bg-gray-100 h-full"></div>
-        <div className="flex-3/5 h-full flex flex-row gap-2.5">
-          <div className="flex-1/3 bg-gray-100 h-full"></div>
-          <div className="flex-1/3 bg-gray-100 h-full"></div>
-          <div className="flex-1/3 bg-gray-100 h-full"></div>
-        </div>
-        <div className="flex-1/5 bg-gray-100 h-full"></div>
-      </div>
+  const selectedNotebook = notebooks.find((notebook) => notebook.id === selectedNotebookId);
 
+  // ############################
+  // Datasets logic
+
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const refreshDatasetsRef = useRef(() => {});
+
+  const handleDatasetsChange = useCallback((payload: { datasets: Dataset[], refreshDatasets: () => void }) => {
+    const {
+      datasets,
+      refreshDatasets,
+    } = payload;
+
+    refreshDatasetsRef.current = refreshDatasets;
+    setDatasets(datasets);
+  }, []);
+
+  return (
+    <div className="h-full flex flex-col bg-gray-200">
       <Header />
 
-      <div className="relative flex-1 flex flex-row gap-2.5 items-start w-full max-w-[1920px] mx-auto">
-        <div className="px-5 py-4 lg:w-80">
-          {/* <div className="relative mb-5">
+      <div className="relative flex-1 flex flex-row gap-2.5 items-start w-full max-w-[1920px] max-h-[calc(100% - 3.5rem)] overflow-hidden mx-auto px-2.5 py-2.5">
+        <div className="px-5 py-4 lg:w-96 bg-white rounded-xl min-h-full">
+          <div className="relative mb-2">
             <label htmlFor="search-input"><SearchIcon className="absolute left-3 top-[10px] cursor-text" /></label>
             <input id="search-input" className="text-xs leading-3 w-full h-8 flex flex-row items-center gap-2.5 rounded-3xl pl-9 placeholder-gray-300 border-gray-300 border-[1px] focus:outline-indigo-600" placeholder="Search datasets..." />
-          </div> */}
+          </div>
+
+          <AddDataToCognee
+            datasets={datasets}
+            refreshDatasets={refreshDatasetsRef.current}
+          />
 
           <NotebooksAccordion
             notebooks={notebooks}
@@ -94,16 +115,19 @@ export default function Dashboard() {
           />
 
           <div className="mt-7 mb-14">
-            <CogneeInstancesAccordion />
+            <CogneeInstancesAccordion>
+              <InstanceDatasetsAccordion
+                onDatasetsChange={handleDatasetsChange}
+              />
+            </CogneeInstancesAccordion>
           </div>
-
-          <DatasetsAccordion />
         </div>
 
-        <div className="flex-1 flex flex-col justify-between h-full overflow-hidden">
-            {selectedNotebookId && (
+        <div className="flex-1 flex flex-col justify-between h-full overflow-y-auto">
+            {selectedNotebook && (
               <Notebook
-                notebook={notebooks.find((notebook) => notebook.id === selectedNotebookId)!}
+                key={selectedNotebook.id}
+                notebook={selectedNotebook}
                 updateNotebook={handleNotebookUpdate}
                 saveNotebook={saveNotebook}
                 runCell={runCell}
@@ -111,7 +135,6 @@ export default function Dashboard() {
             )}
         </div>
       </div>
-
     </div>
   );
 }

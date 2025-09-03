@@ -6,9 +6,12 @@ import { useBoolean } from "@/utils";
 
 import { CloseIcon, CloudIcon, CogneeIcon } from "../Icons";
 import { CTAButton, GhostButton, IconButton, Modal } from "../elements";
+import { useAuthenticatedUser } from "@/modules/auth";
 import syncData from "@/modules/cloud/syncData";
 
 export default function Header() {
+  const { user } = useAuthenticatedUser();
+
   const {
     value: isSyncModalOpen,
     setTrue: openSyncModal,
@@ -42,7 +45,13 @@ export default function Header() {
             <SettingsIcon />
           </div> */}
           <Link href="/account" className="bg-indigo-600 w-8 h-8 rounded-full overflow-hidden">
-            <Image width="32" height="32" alt="Name of the user" src="/images/cognee-logo-with-text.png" />
+            {user?.avatarImagePath ? (
+              <Image width="32" height="32" alt="Name of the user" src={user.avatarImagePath} />
+            ) : (
+              <div className="w-8 h-8 rounded-full text-white flex items-center justify-center">
+                {user?.email?.charAt(0) || "C"}
+              </div>
+            )}
           </Link>
         </div>
       </header>

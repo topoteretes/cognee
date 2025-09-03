@@ -77,6 +77,21 @@ function useNotebooks() {
   }, []);
 
   const runCell = useCallback((notebook: Notebook, cell: Cell) => {
+    setNotebooks((existingNotebooks) =>
+      existingNotebooks.map((existingNotebook) =>
+        existingNotebook.id === notebook.id ? {
+          ...existingNotebook,
+          cells: existingNotebook.cells.map((existingCell) =>
+            existingCell.id === cell.id ? {
+              ...existingCell,
+              result: undefined,
+              error: undefined,
+            } : existingCell
+          ),
+        } : notebook
+      )
+    );
+
     return fetch(`/v1/notebooks/${notebook.id}/${cell.id}/run`, {
         body: JSON.stringify({
           content: cell.content,
@@ -96,7 +111,7 @@ function useNotebooks() {
                 existingCell.id === cell.id ? {
                  ...existingCell,
                   result: response.result,
-                  error: response.result ? null : response.error,
+                  error: response.error,
                 } : existingCell
               ),
             } : notebook

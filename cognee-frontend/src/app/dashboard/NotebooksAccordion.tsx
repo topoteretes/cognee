@@ -100,13 +100,13 @@ export default function NotebooksAccordion({
           </div>
         )}
         {notebooks.map((notebook: Notebook) => (
-          <div key={notebook.id} className="flex flex-row gap-2.5 items-center justify-between px-0.5 py-1">
-            <button onClick={() => openNotebook(notebook.id)} className="flex flex-row gap-2.5 items-center px-2 cursor-pointer">
+          <div key={notebook.id} className="flex flex-row gap-2.5 items-center justify-between py-1.5 first:pt-3">
+            <button onClick={() => openNotebook(notebook.id)} className="flex flex-row gap-2 items-center cursor-pointer">
               {isNotebookLoading ? <LoadingIndicator /> : <NotebookIcon />}
               <span className="text-xs">{notebook.name}</span>
             </button>
             <div>
-              <IconButton onClick={() => handleNotebookRemove(notebook)}><MinusIcon /></IconButton>
+              {notebook.deletable && <IconButton onClick={() => handleNotebookRemove(notebook)}><MinusIcon /></IconButton>}
             </div>
           </div>
         ))}

@@ -1,15 +1,16 @@
 "use client";
 
 import { v4 as uuid4 } from "uuid";
-import { MutableRefObject, useCallback, useEffect, useRef } from "react";
+import classNames from "classnames";
+import { Fragment, MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
 
-import { PlusIcon } from "@/ui/Icons";
-import { IconButton, TextArea } from '@/ui/elements';
+import { CaretIcon, PlusIcon } from "@/ui/Icons";
+import { IconButton, PopupMenu, TextArea } from "@/ui/elements";
+import { GraphControlsAPI } from "@/app/(graph)/GraphControls";
+import GraphVisualization, { GraphVisualizationAPI } from "@/app/(graph)/GraphVisualization";
 
 import NotebookCellHeader from "./NotebookCellHeader";
 import { Cell, Notebook as NotebookType } from "./types";
-import GraphVisualization, { GraphVisualizationAPI } from "@/app/(graph)/GraphVisualization";
-import { GraphControlsAPI } from '@/app/(graph)/GraphControls';
 
 interface NotebookProps {
   notebook: NotebookType;
@@ -50,19 +51,27 @@ export default function Notebook({ notebook, updateNotebook, saveNotebook, runCe
     return runCell(notebook, cell);
   }, [notebook, runCell]);
 
-  const handleCellAdd = useCallback(() => {
+  const handleCellAdd = useCallback((afterCellIndex: number, cellType: "markdown" | "code") => {
     const newCell: Cell = {
       id: uuid4(),
       name: "new cell",
-      type: "code",
+      type: cellType,
       content: "",
     };
-    updateNotebook({
+
+    const newNotebook = {
       ...notebook,
-      cells: [...notebook.cells, newCell],
-    });
+      cells: [
+        ...notebook.cells.slice(0, afterCellIndex + 1),
+        newCell,
+        ...notebook.cells.slice(afterCellIndex + 1),
+      ],
+    };
+
+    toggleCellOpen(newCell.id);
+    updateNotebook(newNotebook);
   }, [notebook, updateNotebook]);
-  
+
   const handleCellRemove = useCallback((cell: Cell) => {
     updateNotebook({
       ...notebook,
@@ -119,52 +128,117 @@ export default function Notebook({ notebook, updateNotebook, saveNotebook, runCe
       });
     }
   }, [notebook, updateNotebook]);
-  
+
+  const [openCells, setOpenCells] = useState(new Set(notebook.cells.map((c: Cell) => c.id)));
+
+  const toggleCellOpen = (id: string) => {
+    setOpenCells((prev) => {
+      const newState = new Set(prev);
+
+      if (newState.has(id)) {
+        newState.delete(id)
+      } else {
+        newState.add(id);
+      }
+
+      return newState;
+    });
+  };
+
   return (
-    <div className="bg-white rounded-xl flex flex-col gap-6 px-7 py-5">
-      {notebook.cells.map((cell: Cell) => (
-        <div key={cell.id} className="flex flex-row rounded-xl border-1 border-gray-100">
-          <div className="flex flex-col flex-1 overflow-hidden">
-            <NotebookCellHeader
-              cell={cell}
-              runCell={handleCellRun}
-              renameCell={handleCellRename}
-              removeCell={handleCellRemove}
-              moveCellUp={handleCellUp}
-              moveCellDown={handleCellDown}
-              className="rounded-tl-xl rounded-tr-xl"
-            />
+    <div className="bg-white rounded-xl flex flex-col gap-0.5 px-7 py-5 flex-1">
+      <div className="mb-5">{notebook.name}</div>
 
-            <TextArea
-              value={cell.content}
-              onChange={handleCellInputChange.bind(null, notebook, cell)}
-              // onKeyUp={handleCellRunOnEnter}
-              isAutoExpanding
-              name="cellInput"
-              placeholder="Type your code here..."
-              contentEditable={true}
-              className="resize-none min-h-36 max-h-96 overflow-y-auto rounded-tl-none rounded-tr-none rounded-bl-xl rounded-br-xl border-0 !outline-0"
-            />
+      {notebook.cells.map((cell: Cell, index) => (
+        <Fragment key={cell.id}>
+          <div key={cell.id} className="flex flex-row rounded-xl border-1 border-gray-100">
+            <div className="flex flex-col flex-1 relative">
+              {cell.type === "code" ? (
+                <>
+                  <div className="absolute left-[-1.35rem] top-2.5">
+                    <IconButton className="p-[0.25rem] m-[-0.25rem]" onClick={toggleCellOpen.bind(null, cell.id)}>
+                      <CaretIcon className={classNames("transition-transform", openCells.has(cell.id) ? "rotate-0" : "rotate-180")} />
+                    </IconButton>
+                  </div>
 
-            <div className="flex flex-col bg-gray-100 overflow-x-auto max-w-full">
-              {cell.result && (
-                <div className="px-2 py-2">
-                  output: <CellResult content={cell.result} />
-                </div>
-              )}
-              {!cell.result && cell.error && (
-                <div className="px-2 py-2">
-                  error: {cell.error}
-                </div>
+                  <NotebookCellHeader
+                    cell={cell}
+                    runCell={handleCellRun}
+                    renameCell={handleCellRename}
+                    removeCell={handleCellRemove}
+                    moveCellUp={handleCellUp}
+                    moveCellDown={handleCellDown}
+                    className="rounded-tl-xl rounded-tr-xl"
+                  />
+
+                  {openCells.has(cell.id) && (
+                    <>
+                      <TextArea
+                        value={cell.content}
+                        onChange={handleCellInputChange.bind(null, notebook, cell)}
+                        // onKeyUp={handleCellRunOnEnter}
+                        isAutoExpanding
+                        name="cellInput"
+                        placeholder="Type your code here..."
+                        contentEditable={true}
+                        className="resize-none min-h-36 max-h-96 overflow-y-auto rounded-tl-none rounded-tr-none rounded-bl-xl rounded-br-xl border-0 !outline-0"
+                      />
+
+                      <div className="flex flex-col bg-gray-100 overflow-x-auto max-w-full">
+                        {cell.result && (
+                          <div className="px-2 py-2">
+                            output: <CellResult content={cell.result} />
+                          </div>
+                        )}
+                        {cell.error && (
+                          <div className="px-2 py-2">
+                            error: {cell.error}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </>
+              ) : (
+                openCells.has(cell.id) && (
+                  <TextArea
+                    value={cell.content}
+                    onChange={handleCellInputChange.bind(null, notebook, cell)}
+                    // onKeyUp={handleCellRunOnEnter}
+                    isAutoExpanding
+                    name="cellInput"
+                    placeholder="Type your text here..."
+                    contentEditable={true}
+                    className="resize-none min-h-24 max-h-96 overflow-y-auto rounded-tl-none rounded-tr-none rounded-bl-xl rounded-br-xl border-0 !outline-0"
+                  />
+                )
               )}
             </div>
           </div>
-        </div>
+          <div className="ml-[-1.35rem]">
+            <PopupMenu
+              openToRight={true}
+              triggerElement={<PlusIcon />}
+              triggerClassName="p-[0.25rem] m-[-0.25rem]"
+            >
+              <div className="flex flex-col gap-0.5">
+                <button
+                  onClick={() => handleCellAdd(index, "markdown")}
+                  className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer"
+                >
+                  <span>text</span>
+                </button>
+              </div>
+              <div
+                onClick={() => handleCellAdd(index, "code")}
+                className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer"
+              >
+                <span>code</span>
+              </div>
+            </PopupMenu>
+          </div>
+        </Fragment>
       ))}
-
-      <div>
-        <IconButton onClick={handleCellAdd}><PlusIcon /></IconButton>
-      </div>
     </div>
   );
 }

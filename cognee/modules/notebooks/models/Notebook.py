@@ -4,7 +4,7 @@ from uuid import uuid4, UUID as UUID_t
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime, timezone
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import Column, DateTime, JSON, UUID, String, TypeDecorator
+from sqlalchemy import Boolean, Column, DateTime, JSON, UUID, String, TypeDecorator
 from sqlalchemy.orm import mapped_column, Mapped
 
 from cognee.infrastructure.databases.relational import Base
@@ -47,5 +47,7 @@ class Notebook(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
 
     cells: Mapped[List[NotebookCell]] = mapped_column(NotebookCellList, nullable=False)
+
+    deletable: Mapped[bool] = mapped_column(Boolean, default=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

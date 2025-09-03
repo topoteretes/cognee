@@ -1,6 +1,5 @@
 import io
 import sys
-import json
 import traceback
 
 
@@ -27,6 +26,26 @@ def run_in_local_sandbox(code, environment=None):
 
     error = None
 
+    printOutput = []
+
+    # def process_output(output):
+    #     try:
+    #         result = json.loads(
+    #             re.sub(
+    #                 r"'([^']*)'", r'"\1"',
+    #                 re.sub(r"\bNone\b", "null", output)
+    #             )
+    #         )
+    #         result = json.loads(output)
+    #         return result
+    #     except json.JSONDecodeError:
+    #         return output
+
+    def customPrintFunction(output):
+        printOutput.append(output)
+
+    environment["print"] = customPrintFunction
+
     try:
         exec(code, environment)
     except Exception:
@@ -35,22 +54,7 @@ def run_in_local_sandbox(code, environment=None):
         sys.stdout = sys_stdout
         sys.stderr = sys_stdout
 
-    output = buffer.getvalue()
-
-    if output:
-        if "\n" in output:
-            output_items = output.split("\n")
-
-            def process_output(output):
-                try:
-                    result = json.loads(output)
-                    return result
-                except json.JSONDecodeError:
-                    return output
-
-            output = list(map(process_output, output_items))
-
-    return output, error
+    return printOutput, error
 
 
 if __name__ == "__main__":

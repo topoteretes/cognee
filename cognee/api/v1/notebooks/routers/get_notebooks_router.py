@@ -1,5 +1,5 @@
-import json
 from uuid import UUID
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import Field
 from typing import List, Optional
@@ -36,7 +36,7 @@ def get_notebooks_router():
     async def create_notebook_endpoint(
         notebook_data: NotebookData, user: User = Depends(get_authenticated_user)
     ):
-        return await create_notebook(user.id, notebook_data.name)
+        return await create_notebook(user.id, notebook_data.name, notebook_data.cells)
 
     @router.put("/{notebook_id}")
     async def update_notebook_endpoint(
@@ -74,7 +74,9 @@ def get_notebooks_router():
 
             result, error = run_in_local_sandbox(run_code.content)
 
-            return JSONResponse(status_code=200, content={"result": result, "error": error})
+            return JSONResponse(
+                status_code=200, content={"result": jsonable_encoder(result), "error": error}
+            )
 
     @router.delete("/{notebook_id}")
     async def delete_notebook_endpoint(

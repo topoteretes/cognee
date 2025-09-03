@@ -11,4 +11,5 @@ export interface Notebook {
   id: string;
   name: string;
   cells: Cell[];
+  deletable?: boolean;
 }
