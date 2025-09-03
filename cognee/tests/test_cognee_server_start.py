@@ -19,8 +19,6 @@ class TestCogneeServerStart(unittest.TestCase):
                 "-m",
                 "uvicorn",
                 "cognee.api.client:app",
-                "--workers",
-                "4",
                 "--host",
                 "0.0.0.0",
                 "--port",
