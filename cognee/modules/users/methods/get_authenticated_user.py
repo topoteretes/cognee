@@ -34,7 +34,7 @@ async def get_authenticated_user(
 
     Always returns a User object for consistent typing.
     """
-    if user is None and not REQUIRE_AUTHENTICATION:
+    if user is None:
         # When authentication is optional and user is None, use default user
         try:
             user = await get_default_user()
