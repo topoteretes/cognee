@@ -156,7 +156,7 @@ class TestConditionalAuthenticationBehavior:
                 error_detail = response.json().get("detail", "")
                 assert "authenticate" not in error_detail.lower()
                 assert "unauthorized" not in error_detail.lower()
-            except:
+            except Exception:
                 pass  # If response is not JSON, that's fine
 
     @patch("cognee.modules.settings.get_settings.get_vectordb_config")
@@ -229,4 +229,4 @@ class TestConditionalAuthenticationErrorHandling:
         assert isinstance(REQUIRE_AUTHENTICATION, bool)
 
         # In default environment, should be False
-        assert REQUIRE_AUTHENTICATION == False
+        assert not REQUIRE_AUTHENTICATION

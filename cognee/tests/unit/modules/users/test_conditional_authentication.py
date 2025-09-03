@@ -126,7 +126,7 @@ class TestConditionalAuthenticationIntegration:
         assert isinstance(REQUIRE_AUTHENTICATION, bool)
 
         # Currently should be False (optional authentication)
-        assert REQUIRE_AUTHENTICATION == False
+        assert not REQUIRE_AUTHENTICATION
 
 
 class TestConditionalAuthenticationEnvironmentVariables:
@@ -145,7 +145,7 @@ class TestConditionalAuthenticationEnvironmentVariables:
                 REQUIRE_AUTHENTICATION,
             )
 
-            assert REQUIRE_AUTHENTICATION == False
+            assert not REQUIRE_AUTHENTICATION
 
     def test_require_authentication_true(self):
         """Test that REQUIRE_AUTHENTICATION=true is parsed correctly when imported."""
@@ -160,7 +160,7 @@ class TestConditionalAuthenticationEnvironmentVariables:
                 REQUIRE_AUTHENTICATION,
             )
 
-            assert REQUIRE_AUTHENTICATION == True
+            assert REQUIRE_AUTHENTICATION
 
     def test_require_authentication_false_explicit(self):
         """Test that REQUIRE_AUTHENTICATION=false is parsed correctly when imported."""
@@ -175,7 +175,7 @@ class TestConditionalAuthenticationEnvironmentVariables:
                 REQUIRE_AUTHENTICATION,
             )
 
-            assert REQUIRE_AUTHENTICATION == False
+            assert not REQUIRE_AUTHENTICATION
 
     def test_require_authentication_case_insensitive(self):
         """Test that environment variable parsing is case insensitive when imported."""
@@ -204,7 +204,7 @@ class TestConditionalAuthenticationEnvironmentVariables:
 
         # The module-level variable should currently be False (set at import time)
         assert isinstance(REQUIRE_AUTHENTICATION, bool)
-        assert REQUIRE_AUTHENTICATION == False
+        assert not REQUIRE_AUTHENTICATION
 
 
 class TestConditionalAuthenticationEdgeCases:
