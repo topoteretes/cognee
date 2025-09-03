@@ -248,8 +248,12 @@ class TestConditionalAuthenticationEdgeCases:
         # Both should have user-like interface
         assert hasattr(result1, "id")
         assert hasattr(result1, "email")
+        assert result1.id == mock_user.id
+        assert result1.email == mock_user.email
         assert hasattr(result2, "id")
         assert hasattr(result2, "email")
+        assert result2.id == mock_default_user.id
+        assert result2.email == mock_default_user.email
 
 
 @pytest.mark.asyncio

@@ -119,35 +119,6 @@ class TestConditionalAuthenticationEndpoints:
         assert response.status_code != 401
         # Note: This test verifies conditional authentication works in the current environment
 
-    @patch("cognee.api.v1.add.add")
-    @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
-    def test_authenticated_request_uses_user(
-        self, mock_get_default, mock_cognee_add, mock_authenticated_user
-    ):
-        """Test that authenticated requests use the authenticated user, not default user."""
-        # Mock successful authentication - this would normally be handled by FastAPI Users
-        # but we're testing the conditional logic
-        mock_cognee_add.return_value = MagicMock(
-            model_dump=lambda: {"status": "success", "pipeline_run_id": str(uuid4())}
-        )
-
-        # Simulate authenticated request by directly testing the conditional function
-        from cognee.modules.users.methods.get_authenticated_user import (
-            get_authenticated_user,
-        )
-
-        async def test_logic():
-            # When user is provided (authenticated), should not call get_default_user
-            result = await get_authenticated_user(user=mock_authenticated_user)
-            assert result == mock_authenticated_user
-            mock_get_default.assert_not_called()
-
-        # Run the async test
-        import asyncio
-
-        asyncio.run(test_logic())
-
-
 class TestConditionalAuthenticationBehavior:
     """Test the behavior of conditional authentication across different endpoints."""
 
