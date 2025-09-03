@@ -1,4 +1,4 @@
-from typing import Any, Optional, List, Tuple, Type
+from typing import Any, Optional, List, Type
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
@@ -49,7 +49,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         query: str,
         context: Optional[Any] = None,
         context_extension_rounds=4,
-    ) -> Tuple[List[str], List]:
+    ) -> List[str]:
         """
         Extends the context for a given query by retrieving related triplets and generating new
         completions based on them.
@@ -130,6 +130,6 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             )
 
         if self.only_context:
-            return [context], triplets
+            return [context]
         else:
-            return [completion], triplets
+            return [completion]

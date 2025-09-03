@@ -59,7 +59,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         query: str,
         context: Optional[Any] = None,
         max_iter=4,
-    ) -> Tuple[List[str], List]:
+    ) -> List[str]:
         """
         Generate completion responses based on a user query and contextual information.
 
@@ -137,6 +137,6 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             )
 
         if self.only_context:
-            return [context], triplets
+            return [context]
         else:
-            return [completion], triplets
+            return [completion]

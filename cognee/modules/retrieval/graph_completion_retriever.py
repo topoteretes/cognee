@@ -159,7 +159,7 @@ class GraphCompletionRetriever(BaseRetriever):
         self,
         query: str,
         context: Optional[Any] = None,
-    ) -> Any:
+    ) -> List[str]:
         """
         Generates a completion using graph connections context based on a query.
 
@@ -194,7 +194,7 @@ class GraphCompletionRetriever(BaseRetriever):
                 question=query, answer=completion, context=context, triplets=triplets
             )
 
-        return [completion], triplets
+        return [completion]
 
     def _top_n_words(self, text, stop_words=None, top_n=3, separator=", "):
         """Concatenates the top N frequent words in text."""

@@ -101,6 +101,8 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         graph_engine = await get_graph_engine()
 
+        triplets = []
+
         if time_from and time_to:
             ids = await graph_engine.collect_time_ids(time_from=time_from, time_to=time_to)
         elif time_from:
@@ -134,9 +136,7 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         return self.descriptions_to_string(top_k_events), triplets
 
-    async def get_completion(
-        self, query: str, context: Optional[Any] = None
-    ) -> Tuple[List[str], List]:
+    async def get_completion(self, query: str, context: Optional[Any] = None) -> List[str]:
         """Generates a response using the query and optional context."""
 
         context, triplets = await self.get_context(query=query)
@@ -148,4 +148,4 @@ class TemporalRetriever(GraphCompletionRetriever):
             system_prompt_path=self.system_prompt_path,
         )
 
-        return [completion], triplets
+        return [completion]
