@@ -25,14 +25,6 @@ uv sync
 ## Setup LLM
 Add environment variables to `.env` file.
 In case you choose to use OpenAI provider, add just the model and api_key.
-
-**Supported LLM Providers:**
-- OpenAI (default)
-- Anthropic
-- Gemini
-- Ollama
-- AWS Bedrock
-
 ```
 LLM_PROVIDER=""
 LLM_MODEL=""
@@ -46,36 +38,6 @@ EMBEDDING_ENDPOINT=""
 EMBEDDING_API_KEY=""
 EMBEDDING_API_VERSION=""
 ```
-
-**For AWS Bedrock, you have three authentication options:**
-
-1. **API Key (Bearer Token):**
-```
-LLM_PROVIDER="bedrock"
-LLM_API_KEY="your_bedrock_api_key"
-LLM_MODEL="us.anthropic.claude-3-5-sonnet-20241022-v2:0"
-AWS_REGION_NAME="us-east-1"
-```
-
-2. **AWS Credentials:**
-```
-LLM_PROVIDER="bedrock"
-LLM_MODEL="us.anthropic.claude-3-5-sonnet-20241022-v2:0"
-AWS_ACCESS_KEY_ID="your_aws_access_key"
-AWS_SECRET_ACCESS_KEY="your_aws_secret_key"
-[if needed] AWS_SESSION_TOKEN="your_session_token"
-AWS_REGION_NAME="us-east-1"
-```
-
-3. **AWS Profile:**
-```
-LLM_PROVIDER="bedrock"
-LLM_MODEL="us.anthropic.claude-3-5-sonnet-20241022-v2:0"
-AWS_PROFILE_NAME="your_aws_profile"
-AWS_REGION_NAME="us-east-1"
-```
-
-**Note:** For Bedrock models, use an [inference profile](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModel.html#API_runtime_InvokeModel_Example_5:~:text=Use%20an%20inference%20profile%20in%20model%20invocation) for `LLM_MODEL`. This usually means appending `us.*` (or other region) to the model ID (e.g., `us.anthropic.claude-3-5-sonnet-20241022-v2:0`). See [AWS Bedrock models](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html) for available models.
 
 Activate the Python environment:
 ```
