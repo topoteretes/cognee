@@ -1,5 +1,4 @@
 from typing import Union, Optional, List, Type, Any
-from dataclasses import field
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -18,14 +17,17 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 )
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
+from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
+from cognee.tasks.codingagents.coding_rule_associations import (
+    add_rule_associations,
+)
 
 logger = get_logger("memify")
 
 
 async def memify(
-    data_streaming_tasks: List[Task],
-    data_processing_tasks: List[Task] = [],
-    data_persistence_tasks: List[Task] = [],
+    extraction_tasks: List[Task] = [Task(extract_subgraph_chunks)],
+    enrichment_tasks: List[Task] = [Task(add_rule_associations)],
     data: Optional[Any] = None,
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
@@ -66,9 +68,8 @@ async def memify(
             data = [memory_fragment]
 
     memify_tasks = [
-        *data_streaming_tasks,  # Unpack tasks provided to memify pipeline
-        *data_processing_tasks,
-        *data_persistence_tasks,
+        *extraction_tasks,  # Unpack tasks provided to memify pipeline
+        *enrichment_tasks,
     ]
 
     await setup()

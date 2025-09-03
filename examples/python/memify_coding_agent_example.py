@@ -7,8 +7,7 @@ from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.cognify.memify import memify
 from cognee.modules.pipelines.tasks.task import Task
-from cognee.tasks.memify.extract_subgraph import extract_subgraph
-from cognee.modules.graph.utils import resolve_edges_to_text
+from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
 from cognee.tasks.codingagents.coding_rule_associations import (
     add_rule_associations,
     get_existing_rules,
@@ -26,54 +25,75 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     print("Data reset complete.\n")
+    print("Adding conversation about rules to cognee:\n")
 
-    # cognee knowledge graph will be created based on this text
-    text = """
-    Natural language processing (NLP) is an interdisciplinary
-    subfield of computer science and information retrieval.
-    """
-
-    coding_rules_text = """
-    Code must be formatted by PEP8 standards.
+    coding_rules_chat_from_principal_engineer = """
+    We want code to be formatted by PEP8 standards.
     Typing and Docstrings must be added.
+    Please also make sure to write NOTE: on all more complex code segments.
+    If there is any duplicate code, try to handle it in one function to avoid code duplication.
+    Susan should also always review new code changes before merging to main.
+    New releases should not happen on Friday so we don't have to fix them during the weekend.
     """
+    print(
+        f"Coding rules conversation with principal engineer: {coding_rules_chat_from_principal_engineer}"
+    )
 
-    print("Adding text to cognee:")
-    print(text.strip())
+    coding_rules_chat_from_manager = """
+    Susan should always review new code changes before merging to main.
+    New releases should not happen on Friday so we don't have to fix them during the weekend.
+    """
+    print(f"Coding rules conversation with manager: {coding_rules_chat_from_manager}")
+
     # Add the text, and make it available for cognify
-    await cognee.add(text)
-    await cognee.add(coding_rules_text, node_set=["coding_rules"])
+    await cognee.add([coding_rules_chat_from_principal_engineer, coding_rules_chat_from_manager])
     print("Text added successfully.\n")
 
     # Use LLMs and cognee to create knowledge graph
     await cognee.cognify()
     print("Cognify process complete.\n")
 
-    subgraph_extraction_tasks = [Task(extract_subgraph)]
+    # Visualize graph after cognification
+    file_path = os.path.join(
+        pathlib.Path(__file__).parent, ".artifacts", "graph_visualization_only_cognify.html"
+    )
+    await visualize_graph(file_path)
+    print(f"Open file to see graph visualization only after cognification: {file_path}")
 
-    rule_association_tasks = [
-        Task(resolve_edges_to_text, task_config={"batch_size": 10}),
+    # After graph is created, create a second pipeline that will go through the graph and enchance it with specific
+    # coding rule nodes
+
+    # extract_subgraph_chunks is a function that returns all document chunks from specified subgraphs (if no subgraph is specifed the whole graph will be sent through memify)
+    subgraph_extraction_tasks = [Task(extract_subgraph_chunks)]
+
+    # add_rule_associations is a function that handles processing coding rules from chunks and keeps track of
+    # existing rules so duplicate rules won't be created. As the result of this processing new Rule nodes will be created
+    # in the graph that specify coding rules found in conversations.
+    coding_rules_association_tasks = [
         Task(
             add_rule_associations,
             rules_nodeset_name="coding_agent_rules",
-            user_prompt_location="memify_coding_rule_association_agent_user.txt",
-            system_prompt_location="memify_coding_rule_association_agent_system.txt",
+            task_config={"batch_size": 1},
         ),
     ]
 
+    # Memify accepts these tasks and orchestrates forwarding of graph data through these tasks (if data is not specified).
+    # If data is explicitely specified in the arguments this specified data will be forwarded through the tasks instead
     await memify(
-        data_streaming_tasks=subgraph_extraction_tasks,
-        data_processing_tasks=rule_association_tasks,
-        node_name=["coding_rules"],
+        extraction_tasks=subgraph_extraction_tasks,
+        enrichment_tasks=coding_rules_association_tasks,
     )
 
+    # Find the new specific coding rules added to graph through memify (created based on chat conversation between team members)
     developer_rules = await get_existing_rules(rules_nodeset_name="coding_agent_rules")
     print(developer_rules)
 
+    # Visualize new graph with added memify context
     file_path = os.path.join(
-        pathlib.Path(__file__).parent, ".artifacts", "graph_visualization.html"
+        pathlib.Path(__file__).parent, ".artifacts", "graph_visualization_after_memify.html"
     )
     await visualize_graph(file_path)
+    print(f"Open file to see graph visualization after memify enhancment: {file_path}")
 
 
 if __name__ == "__main__":
