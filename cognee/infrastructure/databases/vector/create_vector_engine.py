@@ -66,9 +66,9 @@ def create_vector_engine(
             f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
         )
 
-        from .pgvector.PGVectorAdapter import PGVectorAdapter
+        from .pgvector.PGVectorAdapterV1 import PGVectorAdapterV1
 
-        return PGVectorAdapter(
+        return PGVectorAdapterV1(
             connection_string,
             vector_db_key,
             embedding_engine,
