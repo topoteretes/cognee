@@ -33,6 +33,7 @@ from cognee.api.v1.users.routers import (
     get_users_router,
     get_visualize_router,
 )
+from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
 logger = get_logger()
 
@@ -109,6 +110,9 @@ def custom_openapi():
             "name": os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token"),
         },
     }
+
+    if REQUIRE_AUTHENTICATION:
+        openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
 
     # Remove global security requirement - let individual endpoints specify their own security
     # openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
