@@ -94,9 +94,9 @@ def create_vector_engine(
                 "ChromaDB is not installed. Please install it with 'pip install chromadb'"
             )
 
-        from .chromadb.ChromaDBAdapter import ChromaDBAdapter
+        from .chromadb.ChromaDBAdapterV1 import ChromaDBAdapterV1
 
-        return ChromaDBAdapter(
+        return ChromaDBAdapterV1(
             url=vector_db_url,
             api_key=vector_db_key,
             embedding_engine=embedding_engine,
