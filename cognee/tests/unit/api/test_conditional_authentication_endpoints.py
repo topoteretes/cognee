@@ -3,6 +3,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from uuid import uuid4
 from fastapi.testclient import TestClient
 from types import SimpleNamespace
+import importlib
 
 from cognee.api.client import app
 
@@ -30,6 +31,10 @@ def mock_authenticated_user():
         tenant_id=uuid4(),
     )
 
+gau_mod = importlib.import_module(
+    "cognee.modules.users.methods.get_authenticated_user"
+)
+
 
 class TestConditionalAuthenticationEndpoints:
     """Test that API endpoints work correctly with conditional authentication."""
@@ -51,7 +56,7 @@ class TestConditionalAuthenticationEndpoints:
         assert response.json() == {"message": "Hello, World, I am alive!"}
 
     @patch(
-        "cognee.modules.users.methods.get_authenticated_user.REQUIRE_AUTHENTICATION",
+        "cognee.api.client.REQUIRE_AUTHENTICATION",
         False,
     )
     def test_openapi_schema_no_global_security(self, client):
@@ -71,9 +76,9 @@ class TestConditionalAuthenticationEndpoints:
         assert "CookieAuth" in security_schemes
 
     @patch("cognee.api.v1.add.add")
-    @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
+    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
     @patch(
-        "cognee.modules.users.methods.get_authenticated_user.REQUIRE_AUTHENTICATION",
+        "cognee.api.client.REQUIRE_AUTHENTICATION",
         False,
     )
     def test_add_endpoint_with_conditional_auth(
@@ -91,12 +96,14 @@ class TestConditionalAuthenticationEndpoints:
 
         response = client.post("/api/v1/add", files=files, data=form_data)
 
+        assert mock_get_default_user.call_count == 1
+
         # Core test: authentication is not required (should not get 401)
         assert response.status_code != 401
 
-    @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
+    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
     @patch(
-        "cognee.modules.users.methods.get_authenticated_user.REQUIRE_AUTHENTICATION",
+        "cognee.api.client.REQUIRE_AUTHENTICATION",
         False,
     )
     def test_conditional_authentication_works_with_current_environment(
@@ -114,6 +121,8 @@ class TestConditionalAuthenticationEndpoints:
         form_data = {"datasetName": "test_dataset"}
 
         response = client.post("/api/v1/add", files=files, data=form_data)
+
+        assert mock_get_default_user.call_count == 1
 
         # Core test: authentication is not required (should not get 401)
         assert response.status_code != 401
@@ -134,7 +143,7 @@ class TestConditionalAuthenticationBehavior:
             ("/api/v1/datasets", "GET"),
         ],
     )
-    @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
+    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
     def test_get_endpoints_work_without_auth(
         self, mock_get_default, client, endpoint, method, mock_default_user
     ):
@@ -145,6 +154,8 @@ class TestConditionalAuthenticationBehavior:
             response = client.get(endpoint)
         elif method == "POST":
             response = client.post(endpoint, json={})
+
+        assert mock_get_default.call_count == 1
 
         # Should not return 401 Unauthorized (authentication is optional by default)
         assert response.status_code != 401
@@ -159,9 +170,14 @@ class TestConditionalAuthenticationBehavior:
             except Exception:
                 pass  # If response is not JSON, that's fine
 
-    @patch("cognee.modules.settings.get_settings.get_vectordb_config")
-    @patch("cognee.modules.settings.get_settings.get_llm_config")
-    @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
+
+    gsm_mod = importlib.import_module(
+        "cognee.modules.settings.get_settings"
+    )
+
+    @patch.object(gsm_mod, 'get_vectordb_config')
+    @patch.object(gsm_mod, 'get_llm_config')
+    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
     def test_settings_endpoint_integration(
         self, mock_get_default, mock_llm_config, mock_vector_config, client, mock_default_user
     ):
@@ -185,6 +201,8 @@ class TestConditionalAuthenticationBehavior:
 
         response = client.get("/api/v1/settings")
 
+        assert mock_get_default.call_count == 1
+
         # Core test: authentication is not required (should not get 401)
         assert response.status_code != 401
         # Note: This test verifies conditional authentication works for settings endpoint
@@ -197,7 +215,7 @@ class TestConditionalAuthenticationErrorHandling:
     def client(self):
         return TestClient(app)
 
-    @patch("cognee.modules.users.methods.get_default_user.get_default_user", new_callable=AsyncMock)
+    @patch.object(gau_mod, 'get_default_user', new_callable=AsyncMock)
     def test_get_default_user_fails(self, mock_get_default, client):
         """Test behavior when get_default_user fails (with current environment)."""
         mock_get_default.side_effect = Exception("Database connection failed")
