@@ -1,4 +1,5 @@
-from typing import Union, Optional, List, Type
+from typing import Union, Optional, List, Type, Any
+from dataclasses import field
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -16,15 +17,16 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
     reset_dataset_pipeline_run_status,
 )
 from cognee.modules.engine.operations.setup import setup
-
-from cognee.tasks.memify.extract_subgraph import extract_subgraph
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
 logger = get_logger("memify")
 
 
 async def memify(
-    tasks: List[Task],
+    preprocessing_tasks: List[Task],
+    processing_tasks: List[Task] = [],
+    postprocessing_tasks: List[Task] = [],
+    data: Optional[Any] = None,
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
     node_type: Optional[Type] = NodeSet,
@@ -55,16 +57,18 @@ async def memify(
                           Use pipeline_run_id from return value to monitor progress.
     """
 
-    if cypher_query:
-        pass
-    else:
-        memory_fragment = await get_memory_fragment(node_type=node_type, node_name=node_name)
-        # List of edges should be a single element in the list to represent one data item
-        data = [memory_fragment.edges]
+    if not data:
+        if cypher_query:
+            pass
+        else:
+            memory_fragment = await get_memory_fragment(node_type=node_type, node_name=node_name)
+            # Subgraphs should be a single element in the list to represent one data item
+            data = [memory_fragment]
 
     memify_tasks = [
-        Task(extract_subgraph),
-        *tasks,  # Unpack tasks provided to memify pipeline
+        *preprocessing_tasks,  # Unpack tasks provided to memify pipeline
+        *processing_tasks,
+        *postprocessing_tasks,
     ]
 
     await setup()

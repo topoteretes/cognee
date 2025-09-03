@@ -96,10 +96,14 @@ async def add_rule_associations(
     user_prompt_location: str = "coding_rule_association_agent_user.txt",
     system_prompt_location: str = "coding_rule_association_agent_system.txt",
 ):
+    if isinstance(data, list):
+        # If data is a list of strings join all strings in list
+        data = " ".join(data)
+
     graph_engine = await get_graph_engine()
     existing_rules = await get_existing_rules(rules_nodeset_name=rules_nodeset_name)
 
-    user_context = {"user data": data, "rules": existing_rules}
+    user_context = {"chat": data, "rules": existing_rules}
 
     user_prompt = LLMGateway.render_prompt(user_prompt_location, context=user_context)
     system_prompt = LLMGateway.render_prompt(system_prompt_location, context={})

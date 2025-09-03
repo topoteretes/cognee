@@ -1,7 +1,18 @@
 import asyncio
+import pathlib
+import os
+
 import cognee
+from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.shared.logging_utils import setup_logging, ERROR
-from cognee.api.v1.search import SearchType
+from cognee.api.v1.cognify.memify import memify
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.tasks.memify.extract_subgraph import extract_subgraph
+from cognee.modules.graph.utils import resolve_edges_to_text
+from cognee.tasks.codingagents.coding_rule_associations import (
+    add_rule_associations,
+    get_existing_rules,
+)
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
@@ -38,14 +49,10 @@ async def main():
     await cognee.cognify()
     print("Cognify process complete.\n")
 
-    from cognee.api.v1.cognify.memify import memify
+    subgraph_extraction_tasks = [Task(extract_subgraph)]
 
-    from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
-    from cognee.tasks.codingagents.coding_rule_associations import add_rule_associations
-    from cognee.modules.pipelines.tasks.task import Task
-
-    memify_tasks = [
-        Task(CogneeGraph.resolve_edges_to_text, task_config={"batch_size": 10}),
+    rule_association_tasks = [
+        Task(resolve_edges_to_text, task_config={"batch_size": 10}),
         Task(
             add_rule_associations,
             rules_nodeset_name="coding_agent_rules",
@@ -54,11 +61,14 @@ async def main():
         ),
     ]
 
-    await memify(tasks=memify_tasks, node_name=["coding_rules"])
+    await memify(
+        preprocessing_tasks=subgraph_extraction_tasks,
+        processing_tasks=rule_association_tasks,
+        node_name=["coding_rules"],
+    )
 
-    import os
-    import pathlib
-    from cognee.api.v1.visualize.visualize import visualize_graph
+    developer_rules = await get_existing_rules(rules_nodeset_name="coding_agent_rules")
+    print(developer_rules)
 
     file_path = os.path.join(
         pathlib.Path(__file__).parent, ".artifacts", "graph_visualization.html"

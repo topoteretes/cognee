@@ -1,7 +1,7 @@
-from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
+from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 
 
-async def extract_subgraph(subgraphs):
+async def extract_subgraph(subgraphs: list[CogneeGraph]):
     for subgraph in subgraphs:
-        for edge in subgraph:
+        for edge in subgraph.edges:
             yield edge
