@@ -131,9 +131,9 @@ def create_vector_engine(
         )
 
     else:
-        from .lancedb.LanceDBAdapter import LanceDBAdapter
+        from .lancedb.LanceDBAdapterV1 import LanceDBAdapterV1
 
-        return LanceDBAdapter(
+        return LanceDBAdapterV1(
             url=vector_db_url,
             api_key=vector_db_key,
             embedding_engine=embedding_engine,
