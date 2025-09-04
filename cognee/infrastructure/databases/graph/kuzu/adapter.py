@@ -145,7 +145,7 @@ class KuzuAdapter(GraphDBInterface):
         except Exception as e:
             logger.error(f"Failed to initialize Kuzu database: {e}")
             raise e
-    
+
     def _get_connection(self) -> Connection:
         """Get the connection to the Kuzu database."""
         if not self.connection:
@@ -173,7 +173,9 @@ class KuzuAdapter(GraphDBInterface):
         except FileNotFoundError:
             logger.warning(f"Kuzu S3 storage file not found: {self.db_path}")
 
-    async def query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Tuple[Any, ...]]:
+    async def query(
+        self, query: str, params: Optional[Dict[str, Any]] = None
+    ) -> List[Tuple[Any, ...]]:
         """
         Execute a Kuzu query asynchronously with automatic reconnection.
 
@@ -221,7 +223,7 @@ class KuzuAdapter(GraphDBInterface):
                                 val = val.as_py()
                             processed_rows.append(val)
                         rows.append(tuple(processed_rows))
-                    
+
                 return rows
             except Exception as e:
                 logger.error(f"Query execution failed: {str(e)}")
@@ -320,7 +322,9 @@ class KuzuAdapter(GraphDBInterface):
         result = await self.query(query_str, {"id": node_id})
         return result[0][0] if result else False
 
-    async def add_node(self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None) -> None:
+    async def add_node(
+        self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
+    ) -> None:
         """
         Add a single node to the graph if it doesn't exist.
 
@@ -343,8 +347,9 @@ class KuzuAdapter(GraphDBInterface):
                     "type": str(node_properties.get("type", "")),
                 }
                 # Use the passed properties, excluding core fields
-                other_properties = {k: v for k, v in node_properties.items() 
-                                  if k not in ["id", "name", "type"]}
+                other_properties = {
+                    k: v for k, v in node_properties.items() if k not in ["id", "name", "type"]
+                }
             else:
                 # Handle DataPoint object
                 node_properties = node.model_dump()
@@ -354,8 +359,9 @@ class KuzuAdapter(GraphDBInterface):
                     "type": str(node_properties.get("type", "")),
                 }
                 # Remove core fields from other properties
-                other_properties = {k: v for k, v in node_properties.items() 
-                                  if k not in ["id", "name", "type"]}
+                other_properties = {
+                    k: v for k, v in node_properties.items() if k not in ["id", "name", "type"]
+                }
 
             core_properties["properties"] = json.dumps(other_properties, cls=JSONEncoder)
 
@@ -593,7 +599,9 @@ class KuzuAdapter(GraphDBInterface):
         )
         return result[0][0] if result else False
 
-    async def has_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> List[Tuple[str, str, str, Dict[str, Any]]]:
+    async def has_edges(
+        self, edges: List[Tuple[str, str, str, Dict[str, Any]]]
+    ) -> List[Tuple[str, str, str, Dict[str, Any]]]:
         """
         Check if multiple edges exist in a batch operation.
 
@@ -793,7 +801,7 @@ class KuzuAdapter(GraphDBInterface):
                     relationship_name = row[1]
                     target_node = self._parse_node_properties(row[2])
                     # TODO: any edge properties we can add? Adding empty to avoid modifying query without reason
-                    edges.append((source_node, relationship_name, target_node, {})) # type: ignore # currently each node is a dict, wihle typing expects nodes to be strings
+                    edges.append((source_node, relationship_name, target_node, {}))  # type: ignore # currently each node is a dict, wihle typing expects nodes to be strings
             return edges
         except Exception as e:
             logger.error(f"Failed to get edges for node {node_id}: {e}")
@@ -1362,8 +1370,8 @@ class KuzuAdapter(GraphDBInterface):
         try:
             # Get basic graph data
             nodes, edges = await self.get_model_independent_graph_data()
-            num_nodes = len(nodes[0]["nodes"]) if nodes else 0 # type: ignore # nodes is type string?
-            num_edges = len(edges[0]["elements"]) if edges else 0 # type: ignore # edges is type string?
+            num_nodes = len(nodes[0]["nodes"]) if nodes else 0  # type: ignore # nodes is type string?
+            num_edges = len(edges[0]["elements"]) if edges else 0  # type: ignore # edges is type string?
 
             # Calculate mandatory metrics
             mandatory_metrics = {
@@ -1571,10 +1579,10 @@ class KuzuAdapter(GraphDBInterface):
 
             # Reinitialize the database
             self._initialize_connection()
-            
+
             if not self._get_connection():
                 raise RuntimeError("Failed to establish database connection")
-                
+
             # Verify the database is empty
             result = self._get_connection().execute("MATCH (n:Node) RETURN COUNT(n)")
             if not isinstance(result, list):

@@ -123,7 +123,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
-    async def create_collection(self, collection_name: str, payload_schema: Optional[Any] = None) -> None:
+    async def create_collection(
+        self, collection_name: str, payload_schema: Optional[Any] = None
+    ) -> None:
         vector_size = self.embedding_engine.get_vector_size()
 
         async with self.VECTOR_DB_LOCK:
@@ -151,7 +153,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     payload: Mapped[Dict[str, Any]] = mapped_column(JSON)
                     vector: Mapped[List[float]] = mapped_column(self.Vector(vector_size))
 
-                    def __init__(self, id: str, payload: Dict[str, Any], vector: List[float]) -> None:
+                    def __init__(
+                        self, id: str, payload: Dict[str, Any], vector: List[float]
+                    ) -> None:
                         self.id = id
                         self.payload = payload
                         self.vector = vector
@@ -159,10 +163,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 async with self.engine.begin() as connection:
                     if len(Base.metadata.tables.keys()) > 0:
                         from sqlalchemy import Table
+
                         table: Table = PGVectorDataPoint.__table__  # type: ignore
-                        await connection.run_sync(
-                            Base.metadata.create_all, tables=[table]
-                        )
+                        await connection.run_sync(Base.metadata.create_all, tables=[table])
 
     @retry(
         retry=retry_if_exception_type(DeadlockDetectedError),
@@ -351,11 +354,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Create and return ScoredResult objects
         return [
-            ScoredResult(
-                id=row["id"], 
-                payload=row["payload"] or {}, 
-                score=row["score"]
-            )
+            ScoredResult(id=row["id"], payload=row["payload"] or {}, score=row["score"])
             for row in vector_list
         ]
 
