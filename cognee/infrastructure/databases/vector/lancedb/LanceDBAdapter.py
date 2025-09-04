@@ -4,7 +4,18 @@ from uuid import UUID
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
-from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints, Dict, Any
+from typing import (
+    Generic,
+    List,
+    Optional,
+    TypeVar,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+    Dict,
+    Any,
+)
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.engine import DataPoint
@@ -46,7 +57,7 @@ class LanceDBAdapter(VectorDBInterface):
 
     def __init__(
         self,
-        url: Optional[str], # TODO: consider if we want to make this required and/or api_key
+        url: Optional[str],  # TODO: consider if we want to make this required and/or api_key
         api_key: Optional[str],
         embedding_engine: EmbeddingEngine,
     ):
@@ -109,7 +120,9 @@ class LanceDBAdapter(VectorDBInterface):
         collection_names = await connection.table_names()
         return collection_name in collection_names
 
-    async def create_collection(self, collection_name: str, payload_schema: Optional[Any] = None) -> None:
+    async def create_collection(
+        self, collection_name: str, payload_schema: Optional[Any] = None
+    ) -> None:
         vector_size = self.embedding_engine.get_vector_size()
 
         class LanceDataPoint(LanceModel):
@@ -123,7 +136,9 @@ class LanceDBAdapter(VectorDBInterface):
             """
 
             id: UUID
-            vector: Vector[vector_size] # TODO: double check and consider raising this later in Pydantic
+            vector: Vector[
+                vector_size
+            ]  # TODO: double check and consider raising this later in Pydantic
             payload: Dict[str, Any]
 
         if not await self.has_collection(collection_name):
@@ -300,10 +315,7 @@ class LanceDBAdapter(VectorDBInterface):
             [
                 IndexSchema(
                     id=data_point.id,
-                    text=getattr(
-                        data_point, 
-                        data_point.metadata["index_fields"][0]
-                    ),
+                    text=getattr(data_point, data_point.metadata["index_fields"][0]),
                 )
                 for data_point in data_points
                 if data_point.metadata and len(data_point.metadata.get("index_fields", [])) > 0
@@ -327,7 +339,7 @@ class LanceDBAdapter(VectorDBInterface):
     def get_data_point_schema(self, model_type: Optional[Any]) -> Any:
         if model_type is None:
             return DataPoint
-        
+
         related_models_fields = []
 
         for field_name, field_config in model_type.model_fields.items():

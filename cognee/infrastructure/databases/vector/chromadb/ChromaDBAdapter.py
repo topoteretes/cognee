@@ -217,7 +217,9 @@ class ChromaDBAdapter(VectorDBInterface):
         collections = await self.get_collection_names()
         return collection_name in collections
 
-    async def create_collection(self, collection_name: str, payload_schema: Optional[Any] = None) -> None:
+    async def create_collection(
+        self, collection_name: str, payload_schema: Optional[Any] = None
+    ) -> None:
         """
         Create a new collection in ChromaDB if it does not already exist.
 
@@ -313,10 +315,7 @@ class ChromaDBAdapter(VectorDBInterface):
             [
                 IndexSchema(
                     id=data_point.id,
-                    text=getattr(
-                        data_point, 
-                        data_point.metadata["index_fields"][0]
-                    ),
+                    text=getattr(data_point, data_point.metadata["index_fields"][0]),
                 )
                 for data_point in data_points
                 if data_point.metadata and len(data_point.metadata["index_fields"]) > 0
