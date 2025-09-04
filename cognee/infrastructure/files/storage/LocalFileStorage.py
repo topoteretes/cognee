@@ -6,6 +6,7 @@ from typing import BinaryIO, Optional, Union
 
 from .FileBufferedReader import FileBufferedReader
 from .storage import Storage
+from .storage_provider_registry import StorageProviderRegistry
 
 
 def get_parsed_path(file_path: str) -> str:
@@ -47,6 +48,7 @@ def get_parsed_path(file_path: str) -> str:
         return os.path.normpath(file_path)
 
 
+@StorageProviderRegistry.register("local")
 class LocalFileStorage(Storage):
     """
     Manage local file storage operations such as storing, retrieving, and managing files on
