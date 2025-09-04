@@ -142,7 +142,9 @@ class Neo4jAdapter(GraphDBInterface):
         )
         return results[0]["node_exists"] if len(results) > 0 else False
 
-    async def add_node(self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None) -> None:
+    async def add_node(
+        self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
+    ) -> None:
         """
         Add a new node to the database based on the provided DataPoint object or string ID.
 
@@ -407,7 +409,7 @@ class Neo4jAdapter(GraphDBInterface):
         )
 
         params = {
-            "from_node": str(source_id), # Adding str as callsites may still be passing UUID
+            "from_node": str(source_id),  # Adding str as callsites may still be passing UUID
             "to_node": str(target_id),
             "relationship_name": relationship_name,
             "properties": serialized_properties,
@@ -482,8 +484,8 @@ class Neo4jAdapter(GraphDBInterface):
 
         edge_params = [
             {
-                "from_node": str(edge[0]), # Adding str as callsites may still be passing UUID
-                "to_node": str(edge[1]), # Adding str as callsites may still be passing UUID
+                "from_node": str(edge[0]),  # Adding str as callsites may still be passing UUID
+                "to_node": str(edge[1]),  # Adding str as callsites may still be passing UUID
                 "relationship_name": edge[2],
                 "properties": self._flatten_edge_properties(
                     {

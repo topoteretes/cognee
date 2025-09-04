@@ -73,13 +73,15 @@ class RemoteKuzuAdapter(KuzuAdapter):
                         status=response.status,
                         message=error_detail,
                     )
-                return await response.json() # type: ignore
+                return await response.json()  # type: ignore
         except aiohttp.ClientError as e:
             logger.error(f"API request failed: {str(e)}")
             logger.error(f"Request data: {data}")
             raise
 
-    async def query(self, query: str, params: Optional[dict[str, Any]] = None) -> List[Tuple[Any, ...]]:
+    async def query(
+        self, query: str, params: Optional[dict[str, Any]] = None
+    ) -> List[Tuple[Any, ...]]:
         """Execute a Kuzu query via the REST API."""
         try:
             # Initialize schema if needed
