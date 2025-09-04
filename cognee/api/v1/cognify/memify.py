@@ -33,24 +33,24 @@ async def memify(
     user: User = None,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
-    cypher_query: Optional[str] = None,
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
+    vector_db_config: Optional[dict] = None,
+    graph_db_config: Optional[dict] = None,
     run_in_background: bool = False,
 ):
     """
-    Prerequisites:
-        - **LLM_API_KEY**: Must be configured (required for entity extraction and graph generation)
-        - **Data Added**: Must have data previously added via `cognee.add()` and `cognee.cognify()`
-        - **Vector Database**: Must be accessible for embeddings storage
-        - **Graph Database**: Must be accessible for relationship storage
-
     Args:
-        datasets: Dataset name(s) or dataset uuid to process. Processes all available data if None.
+        extraction_tasks: List of Cognee Tasks to execute for graph/data extraction.
+        enrichment_tasks: List of Cognee Tasks to handle enrichment of provided graph/data from extraction tasks.
+        data: The data to ingest. Can be anything when custom extraction and enrichment tasks are used.
+              Data provided here will be forwarded to the first extraction task in the pipeline as input.
+              If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded
+        datasets: Dataset name(s) or dataset uuid to process. Processes all available datasets if None.
             - Single dataset: "my_dataset"
             - Multiple datasets: ["docs", "research", "reports"]
             - None: Process all datasets for the user
         user: User context for authentication and data access. Uses default if None.
+        node_type: Filter graph to specific entity types (for advanced filtering). Used when no data is provided.
+        node_name: Filter graph to specific named entities (for targeted search). Used when no data is provided.
         vector_db_config: Custom vector database configuration for embeddings storage.
         graph_db_config: Custom graph database configuration for relationship storage.
         run_in_background: If True, starts processing asynchronously and returns immediately.
@@ -60,12 +60,9 @@ async def memify(
     """
 
     if not data:
-        if cypher_query:
-            pass
-        else:
-            memory_fragment = await get_memory_fragment(node_type=node_type, node_name=node_name)
-            # Subgraphs should be a single element in the list to represent one data item
-            data = [memory_fragment]
+        memory_fragment = await get_memory_fragment(node_type=node_type, node_name=node_name)
+        # Subgraphs should be a single element in the list to represent one data item
+        data = [memory_fragment]
 
     memify_tasks = [
         *extraction_tasks,  # Unpack tasks provided to memify pipeline
