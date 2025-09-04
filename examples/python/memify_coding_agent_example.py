@@ -85,13 +85,14 @@ async def main():
     )
 
     # Find the new specific coding rules added to graph through memify (created based on chat conversation between team members)
-    print(
-        await cognee.search(
-            query_text="List me the coding rules",
-            query_type=cognee.SearchType.CODING_RULES,
-            node_name=["coding_agent_rules"],
-        )
+    coding_rules = await cognee.search(
+        query_text="List me the coding rules",
+        query_type=cognee.SearchType.CODING_RULES,
+        node_name=["coding_agent_rules"],
     )
+
+    for coding_rule in coding_rules:
+        print(coding_rule)
 
     # Visualize new graph with added memify context
     file_path = os.path.join(
