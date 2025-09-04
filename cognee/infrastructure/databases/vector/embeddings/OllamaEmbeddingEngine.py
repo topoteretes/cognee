@@ -97,6 +97,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         payload = {
             "model": self.model,
             "prompt": prompt,
+            "input": prompt
         }
         headers = {}
         api_key = os.getenv("LLM_API_KEY")
