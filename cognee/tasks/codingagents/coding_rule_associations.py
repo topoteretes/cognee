@@ -31,7 +31,7 @@ class RuleSet(DataPoint):
     )
 
 
-async def get_existing_rules(rules_nodeset_name: str) -> str:
+async def get_existing_rules(rules_nodeset_name: str, return_list: bool = False) -> str:
     graph_engine = await get_graph_engine()
     nodes_data, _ = await graph_engine.get_nodeset_subgraph(
         node_type=NodeSet, node_name=[rules_nodeset_name]
@@ -46,7 +46,8 @@ async def get_existing_rules(rules_nodeset_name: str) -> str:
         and "text" in item[1]
     ]
 
-    existing_rules = "\n".join(f"- {rule}" for rule in existing_rules)
+    if not return_list:
+        existing_rules = "\n".join(f"- {rule}" for rule in existing_rules)
 
     return existing_rules
 
