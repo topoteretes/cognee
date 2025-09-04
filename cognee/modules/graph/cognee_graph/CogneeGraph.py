@@ -76,7 +76,7 @@ class CogneeGraph(CogneeAbstractGraph):
             start_time = time.time()
 
             # Determine projection strategy
-            if node_type is not None and node_name not in [None, []]:
+            if node_type is not None and node_name not in [None, [], ""]:
                 nodes_data, edges_data = await adapter.get_nodeset_subgraph(
                     node_type=node_type, node_name=node_name
                 )

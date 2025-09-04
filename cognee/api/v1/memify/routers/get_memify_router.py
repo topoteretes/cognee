@@ -23,8 +23,8 @@ class MemifyPayloadDTO(InDTO):
     )
     enrichment_tasks: Optional[List[str]] = Field(default=None, examples=[[]])
     data: Optional[str] = Field(default="")
-    dataset_names: Optional[List[str]] = Field(default=None, examples=[[]])
-    dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
+    dataset_name: Optional[str] = Field(default=None)
+    dataset_id: Optional[UUID] = Field(default=None, examples=[[""]])
     node_name: Optional[List[str]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
 
@@ -46,8 +46,8 @@ def get_memify_router() -> APIRouter:
         - **data** Optional[List[str]]: The data to ingest. Can be any text data when custom extraction and enrichment tasks are used.
               Data provided here will be forwarded to the first extraction task in the pipeline as input.
               If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded
-        - **dataset_names** (Optional[List[str]]): Name of the datasets to memify
-        - **dataset_ids** (Optional[List[UUID]]): List of UUIDs of an already existing dataset
+        - **dataset_name** (Optional[str]): Name of the datasets to memify
+        - **dataset_id** (Optional[UUID]): List of UUIDs of an already existing dataset
         - **node_name** (Optional[List[str]]):  Filter graph to specific named entities (for targeted search). Used when no data is provided.
         - **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).
 
@@ -75,7 +75,7 @@ def get_memify_router() -> APIRouter:
             additional_properties={"endpoint": "POST /v1/memify"},
         )
 
-        if not payload.dataset_ids and not payload.dataset_names:
+        if not payload.dataset_id and not payload.dataset_name:
             raise ValueError("Either datasetId or datasetName must be provided.")
 
         try:
@@ -85,7 +85,7 @@ def get_memify_router() -> APIRouter:
                 extraction_tasks=payload.extraction_tasks,
                 enrichment_tasks=payload.enrichment_tasks,
                 data=payload.data,
-                datasets=payload.dataset_ids if payload.dataset_ids else payload.dataset_names,
+                dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
                 node_name=payload.node_name,
                 user=user,
             )
