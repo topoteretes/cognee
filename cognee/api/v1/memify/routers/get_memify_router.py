@@ -4,7 +4,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from fastapi import Depends
 from pydantic import Field
-from typing import List, Optional
+from typing import List, Optional, Union, Literal
 
 from cognee.api.DTO import InDTO
 from cognee.modules.users.models import User
@@ -24,7 +24,8 @@ class MemifyPayloadDTO(InDTO):
     enrichment_tasks: Optional[List[str]] = Field(default=None, examples=[[]])
     data: Optional[str] = Field(default="")
     dataset_name: Optional[str] = Field(default=None)
-    dataset_id: Optional[UUID] = Field(default=None, examples=[[""]])
+    # Note: Literal is needed for Swagger use
+    dataset_id: Union[UUID, Literal[""], None] = Field(default=None, examples=[""])
     node_name: Optional[List[str]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
 
