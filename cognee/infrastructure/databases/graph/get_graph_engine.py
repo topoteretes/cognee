@@ -77,9 +77,9 @@ def create_graph_engine(
         if not graph_database_url:
             raise EnvironmentError("Missing required Neo4j URL.")
 
-        from .neo4j_driver.adapter import Neo4jAdapter
+        from .neo4j_driver.adapter_v1 import Neo4jAdapterV1
 
-        return Neo4jAdapter(
+        return Neo4jAdapterV1(
             graph_database_url=graph_database_url,
             graph_database_username=graph_database_username or None,
             graph_database_password=graph_database_password or None,
