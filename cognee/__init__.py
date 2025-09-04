@@ -18,6 +18,7 @@ logger = setup_logging()
 from .api.v1.add import add
 from .api.v1.delete import delete
 from .api.v1.cognify import cognify
+from .modules.memify import memify
 from .api.v1.config.config import config
 from .api.v1.datasets.datasets import datasets
 from .api.v1.prune import prune

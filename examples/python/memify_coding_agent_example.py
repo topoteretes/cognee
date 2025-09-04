@@ -3,15 +3,12 @@ import pathlib
 import os
 
 import cognee
+from cognee import memify
 from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.shared.logging_utils import setup_logging, ERROR
-from cognee.api.v1.cognify.memify import memify
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
-from cognee.tasks.codingagents.coding_rule_associations import (
-    add_rule_associations,
-    get_existing_rules,
-)
+from cognee.tasks.codingagents.coding_rule_associations import add_rule_associations
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
