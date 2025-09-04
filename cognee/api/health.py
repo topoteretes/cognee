@@ -118,7 +118,7 @@ class HealthChecker:
 
             # Test basic operation with actual graph query
             if hasattr(engine, "execute"):
-                # For SQL-like graph DBs (Neo4j, Memgraph)
+                # For SQL-like graph DBs (Neo4j)
                 await engine.execute("MATCH () RETURN count(*) LIMIT 1")
             elif hasattr(engine, "query"):
                 # For other graph engines
