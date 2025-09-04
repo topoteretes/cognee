@@ -13,6 +13,7 @@ from cognee.modules.retrieval.insights_retriever import InsightsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.modules.retrieval.coding_rules_retriever import CodingRulesRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
@@ -168,6 +169,7 @@ async def specific_search(
         SearchType.CYPHER: CypherSearchRetriever().get_completion,
         SearchType.NATURAL_LANGUAGE: NaturalLanguageRetriever().get_completion,
         SearchType.FEEDBACK: UserQAFeedback(last_k=last_k).add_feedback,
+        SearchType.TEMPORAL: TemporalRetriever(top_k=top_k).get_completion,
         SearchType.CODING_RULES: CodingRulesRetriever(
             rules_nodeset_name=node_name
         ).get_existing_rules,
