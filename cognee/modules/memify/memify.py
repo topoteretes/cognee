@@ -26,8 +26,8 @@ logger = get_logger("memify")
 
 
 async def memify(
-    extraction_tasks: List[Task] = [Task(extract_subgraph_chunks)],
-    enrichment_tasks: List[Task] = [Task(add_rule_associations)],
+    extraction_tasks: Union[List[Task], List[str]] = [Task(extract_subgraph_chunks)],
+    enrichment_tasks: Union[List[Task], List[str]] = [Task(add_rule_associations)],
     data: Optional[Any] = None,
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
@@ -38,6 +38,15 @@ async def memify(
     run_in_background: bool = False,
 ):
     """
+    Enrichment pipeline in Cognee, can work with already built graphs. If no data is provided existing knowledge graph will be used as data,
+    custom data can also be provided instead which can be processed with provided extraction and enrichment tasks.
+
+    Provided tasks and data will be arranged to run the Cognee pipeline and execute graph enrichment/creation.
+
+    This is the core processing step in Cognee that converts raw text and documents
+    into an intelligent knowledge graph. It analyzes content, extracts entities and
+    relationships, and creates semantic connections for enhanced search and reasoning.
+
     Args:
         extraction_tasks: List of Cognee Tasks to execute for graph/data extraction.
         enrichment_tasks: List of Cognee Tasks to handle enrichment of provided graph/data from extraction tasks.

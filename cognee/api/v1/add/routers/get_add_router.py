@@ -1,6 +1,3 @@
-import os
-import requests
-import subprocess
 from uuid import UUID
 
 from fastapi import APIRouter
@@ -60,9 +57,6 @@ def get_add_router() -> APIRouter:
 
         ## Notes
         - To add data to datasets not owned by the user, use dataset_id (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)
-        - GitHub repositories are cloned and all files are processed
-        - HTTP URLs are fetched and their content is processed
-        - The ALLOW_HTTP_REQUESTS environment variable controls URL processing
         - datasetId value can only be the UUID of an already existing dataset
         """
         send_telemetry(

@@ -55,7 +55,7 @@ async def main():
         pathlib.Path(__file__).parent, ".artifacts", "graph_visualization_only_cognify.html"
     )
     await visualize_graph(file_path)
-    print(f"Open file to see graph visualization only after cognification: {file_path}")
+    print(f"Open file to see graph visualization only after cognification: {file_path}\n")
 
     # After graph is created, create a second pipeline that will go through the graph and enchance it with specific
     # coding rule nodes
@@ -88,15 +88,16 @@ async def main():
         node_name=["coding_agent_rules"],
     )
 
+    print("Coding rules created by memify:")
     for coding_rule in coding_rules:
-        print(coding_rule)
+        print("- " + coding_rule)
 
     # Visualize new graph with added memify context
     file_path = os.path.join(
         pathlib.Path(__file__).parent, ".artifacts", "graph_visualization_after_memify.html"
     )
     await visualize_graph(file_path)
-    print(f"Open file to see graph visualization after memify enhancment: {file_path}")
+    print(f"\nOpen file to see graph visualization after memify enhancment: {file_path}")
 
 
 if __name__ == "__main__":
