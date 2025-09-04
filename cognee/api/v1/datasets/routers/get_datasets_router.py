@@ -114,7 +114,8 @@ def get_datasets_router() -> APIRouter:
 
     @router.post("", response_model=DatasetDTO)
     async def create_new_dataset(
-        dataset_data: DatasetCreationPayload, user: User = Depends(get_authenticated_user)
+        dataset_data: DatasetCreationPayload,
+        user: User = Depends(get_authenticated_user),
     ):
         """
         Create a new dataset or return existing dataset with the same name.
