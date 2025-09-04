@@ -316,9 +316,6 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
 
-        # NOTE: This needs to be initialized in case search doesn't return a value
-        closest_items: List[ScoredResult] = []
-
         # Use async session to connect to the database
         async with self.get_async_session() as session:
             query = select(
