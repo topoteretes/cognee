@@ -17,15 +17,15 @@ logger = get_logger()
 
 
 class MemifyPayloadDTO(InDTO):
-    extraction_tasks: List[str] = Field(
+    extraction_tasks: Optional[List[str]] = Field(
         default=None,
         examples=[[]],
     )
-    enrichment_tasks: List[str] = (Field(default=None, examples=[[]]),)
-    data: Optional[str] = (Field(default=None),)
-    dataset_names: Optional[List[str]] = Field(default=None)
+    enrichment_tasks: Optional[List[str]] = Field(default=None, examples=[[]])
+    data: Optional[str] = Field(default="")
+    dataset_names: Optional[List[str]] = Field(default=None, examples=[[]])
     dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
-    node_name: Optional[List[str]] = Field(default=None)
+    node_name: Optional[List[str]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
 
 
@@ -78,10 +78,10 @@ def get_memify_router() -> APIRouter:
         if not payload.dataset_ids and not payload.dataset_names:
             raise ValueError("Either datasetId or datasetName must be provided.")
 
-        from cognee import memify
-
         try:
-            memify_run = await memify(
+            from cognee.modules.memify import memify as cognee_memify
+
+            memify_run = await cognee_memify(
                 extraction_tasks=payload.extraction_tasks,
                 enrichment_tasks=payload.enrichment_tasks,
                 data=payload.data,

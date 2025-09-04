@@ -26,8 +26,8 @@ logger = get_logger("memify")
 
 
 async def memify(
-    extraction_tasks: Union[List[Task], List[str]] = [Task(extract_subgraph_chunks)],
-    enrichment_tasks: Union[List[Task], List[str]] = [Task(add_rule_associations)],
+    extraction_tasks: Union[List[Task], List[str]] = None,
+    enrichment_tasks: Union[List[Task], List[str]] = None,
     data: Optional[Any] = None,
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
@@ -67,6 +67,18 @@ async def memify(
                           Background mode recommended for large datasets (>100MB).
                           Use pipeline_run_id from return value to monitor progress.
     """
+
+    # Use default coding rules tasks if no tasks were provided
+    if not extraction_tasks:
+        extraction_tasks = [Task(extract_subgraph_chunks)]
+    if not enrichment_tasks:
+        enrichment_tasks = [
+            Task(
+                add_rule_associations,
+                rules_nodeset_name="coding_agent_rules",
+                task_config={"batch_size": 1},
+            )
+        ]
 
     if not data:
         memory_fragment = await get_memory_fragment(node_type=node_type, node_name=node_name)

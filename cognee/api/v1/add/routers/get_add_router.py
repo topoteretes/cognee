@@ -21,7 +21,7 @@ def get_add_router() -> APIRouter:
     async def add(
         data: List[UploadFile] = File(default=None),
         datasetName: Optional[str] = Form(default=None),
-        datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
+        datasetId: Union[UUID, None] = Form(default=None, examples=[""]),
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
         user: User = Depends(get_authenticated_user),
     ):
