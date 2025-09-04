@@ -105,9 +105,9 @@ def create_graph_engine(
         if not graph_file_path:
             raise EnvironmentError("Missing required Kuzu database path.")
 
-        from .kuzu.adapter import KuzuAdapter
+        from .kuzu.adapterV1 import KuzuAdapterV1
 
-        return KuzuAdapter(db_path=graph_file_path)
+        return KuzuAdapterV1(db_path=graph_file_path)
 
     elif graph_database_provider == "kuzu-remote":
         if not graph_database_url:
