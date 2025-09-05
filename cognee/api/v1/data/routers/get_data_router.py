@@ -43,7 +43,7 @@ class DataImportResponseDTO(OutDTO):
 def get_data_router() -> APIRouter:
     router = APIRouter()
 
-    @router.get("/export/{dataset_id}", response_model=DataExportDTO)
+    @router.get("/datasets/{dataset_id}/export", response_model=DataExportDTO)
     async def export_dataset_data(
         dataset_id: UUID, 
         user: User = Depends(get_authenticated_user)
@@ -81,7 +81,7 @@ def get_data_router() -> APIRouter:
             "Data API Endpoint Invoked",
             user.id,
             additional_properties={
-                "endpoint": f"GET /v1/data/export/{str(dataset_id)}",
+                "endpoint": f"GET /v1/data/datasets/{str(dataset_id)}/export",
                 "dataset_id": str(dataset_id),
             },
         )
@@ -117,7 +117,7 @@ def get_data_router() -> APIRouter:
                 detail="An internal error occurred during export",
             ) from error
 
-    @router.post("/import", response_model=DataImportResponseDTO)
+    @router.post("/datasets/import", response_model=DataImportResponseDTO)
     async def import_dataset_data(
         import_request: DataImportRequestDTO,
         transfer_file: UploadFile = File(...),
@@ -157,7 +157,7 @@ def get_data_router() -> APIRouter:
             "Data API Endpoint Invoked",
             user.id,
             additional_properties={
-                "endpoint": "POST /v1/data/import",
+                "endpoint": "POST /v1/data/datasets/import",
                 "target_dataset_name": import_request.target_dataset_name,
             },
         )

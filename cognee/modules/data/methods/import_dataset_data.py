@@ -239,22 +239,58 @@ async def _import_vector_data(
 
 async def _create_vector_collection(vector_engine, collection_name: str, collection_data: Dict[str, Any]):
     """Create a new vector collection based on imported schema"""
-    # This is a placeholder - implement based on your vector DB requirements
     try:
         from cognee.infrastructure.engine import DataPoint
-        await vector_engine.create_collection(collection_name, DataPoint)
+        # Check if collection exists first
+        existing_collections = await vector_engine.get_collections()
+        if collection_name not in existing_collections:
+            await vector_engine.create_collection(collection_name, DataPoint)
+            logger.info(f"Created vector collection: {collection_name}")
+        else:
+            logger.info(f"Collection {collection_name} already exists")
     except Exception as e:
         logger.error(f"Error creating vector collection {collection_name}: {str(e)}")
+        raise
 
 
 async def _import_collection_vectors(
     vector_engine, collection_name: str, collection_data: Dict[str, Any], target_user: User
 ) -> int:
     """Import vectors into a collection"""
-    # This is a placeholder - implement actual vector import based on your data format
     try:
-        # For now, return a placeholder count
-        return len(collection_data.get("data", []))
+        vectors_data = collection_data.get("data", [])
+        if not vectors_data:
+            logger.warning(f"No vector data found for collection {collection_name}")
+            return 0
+        
+        imported_count = 0
+        for vector_item in vectors_data:
+            try:
+                # Reconstruct the data point from the exported format
+                from cognee.infrastructure.engine import DataPoint
+                
+                # Create a temporary DataPoint with the imported data
+                data_point = DataPoint(
+                    id=vector_item.get("id"),
+                    **vector_item.get("data", {})
+                )
+                
+                # Store the vector with its embedding
+                if "embedding" in vector_item:
+                    await vector_engine.store_embeddings(
+                        collection_name, 
+                        [data_point],
+                        [vector_item["embedding"]]
+                    )
+                    imported_count += 1
+                    
+            except Exception as item_error:
+                logger.error(f"Error importing individual vector: {str(item_error)}")
+                continue
+        
+        logger.info(f"Successfully imported {imported_count} vectors to collection {collection_name}")
+        return imported_count
+        
     except Exception as e:
         logger.error(f"Error importing vectors to {collection_name}: {str(e)}")
         return 0
