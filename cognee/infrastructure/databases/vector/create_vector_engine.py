@@ -66,9 +66,9 @@ def create_vector_engine(
             f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
         )
 
-        from .pgvector.PGVectorAdapter import PGVectorAdapter
+        from .pgvector.PGVectorAdapterV1 import PGVectorAdapterV1
 
-        return PGVectorAdapter(
+        return PGVectorAdapterV1(
             connection_string,
             vector_db_key,
             embedding_engine,
@@ -94,9 +94,9 @@ def create_vector_engine(
                 "ChromaDB is not installed. Please install it with 'pip install chromadb'"
             )
 
-        from .chromadb.ChromaDBAdapter import ChromaDBAdapter
+        from .chromadb.ChromaDBAdapterV1 import ChromaDBAdapterV1
 
-        return ChromaDBAdapter(
+        return ChromaDBAdapterV1(
             url=vector_db_url,
             api_key=vector_db_key,
             embedding_engine=embedding_engine,
@@ -131,9 +131,9 @@ def create_vector_engine(
         )
 
     else:
-        from .lancedb.LanceDBAdapter import LanceDBAdapter
+        from .lancedb.LanceDBAdapterV1 import LanceDBAdapterV1
 
-        return LanceDBAdapter(
+        return LanceDBAdapterV1(
             url=vector_db_url,
             api_key=vector_db_key,
             embedding_engine=embedding_engine,

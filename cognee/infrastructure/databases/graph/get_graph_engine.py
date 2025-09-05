@@ -77,9 +77,9 @@ def create_graph_engine(
         if not graph_database_url:
             raise EnvironmentError("Missing required Neo4j URL.")
 
-        from .neo4j_driver.adapter import Neo4jAdapter
+        from .neo4j_driver.adapter_v1 import Neo4jAdapterV1
 
-        return Neo4jAdapter(
+        return Neo4jAdapterV1(
             graph_database_url=graph_database_url,
             graph_database_username=graph_database_username or None,
             graph_database_password=graph_database_password or None,
@@ -105,9 +105,9 @@ def create_graph_engine(
         if not graph_file_path:
             raise EnvironmentError("Missing required Kuzu database path.")
 
-        from .kuzu.adapter import KuzuAdapter
+        from .kuzu.adapterV1 import KuzuAdapterV1
 
-        return KuzuAdapter(db_path=graph_file_path)
+        return KuzuAdapterV1(db_path=graph_file_path)
 
     elif graph_database_provider == "kuzu-remote":
         if not graph_database_url:
@@ -179,5 +179,5 @@ def create_graph_engine(
 
     raise EnvironmentError(
         f"Unsupported graph database provider: {graph_database_provider}. "
-        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'falkordb', 'kuzu', 'kuzu-remote', 'memgraph', 'neptune', 'neptune_analytics'])}"
+        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'falkordb', 'kuzu', 'kuzu-remote', 'neptune', 'neptune_analytics'])}"
     )
