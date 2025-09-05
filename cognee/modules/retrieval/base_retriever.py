@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Callable
+from typing import Any, Optional
 
 
 class BaseRetriever(ABC):
@@ -11,6 +11,6 @@ class BaseRetriever(ABC):
         pass
 
     @abstractmethod
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
+    async def get_completion(self, query: str, context: Optional[Any] = None) -> str:
         """Generates a response using the query and optional context."""
         pass

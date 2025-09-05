@@ -1,16 +1,15 @@
-from typing import Any, Optional, Type, List, Coroutine
-from collections import Counter
+from typing import Any, Optional, Type, List
 from uuid import NAMESPACE_OID, uuid5
-import string
 
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.users.methods import get_default_user
 from cognee.tasks.storage import add_data_points
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
-from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.base_graph_retriever import BaseGraphRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.utils.extract_uuid_from_node import extract_uuid_from_node
 from cognee.modules.retrieval.utils.models import CogneeUserInteraction
@@ -20,7 +19,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 logger = get_logger("GraphCompletionRetriever")
 
 
-class GraphCompletionRetriever(BaseRetriever):
+class GraphCompletionRetriever(BaseGraphRetriever):
     """
     Retriever for handling graph-based completion searches.
 
@@ -37,19 +36,17 @@ class GraphCompletionRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        system_prompt: str = None,
+        system_prompt: Optional[str] = None,
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
         save_interaction: bool = False,
-        only_context: bool = False,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.save_interaction = save_interaction
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.system_prompt = system_prompt
-        self.only_context = only_context
         self.top_k = top_k if top_k is not None else 5
         self.node_type = node_type
         self.node_name = node_name
@@ -70,7 +67,7 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         return await resolve_edges_to_text(retrieved_edges)
 
-    async def get_triplets(self, query: str) -> list:
+    async def get_triplets(self, query: str) -> List[Edge]:
         """
         Retrieves relevant graph triplets based on a query string.
 
@@ -85,7 +82,7 @@ class GraphCompletionRetriever(BaseRetriever):
             - list: A list of found triplets that match the query.
         """
         subclasses = get_all_subclasses(DataPoint)
-        vector_index_collections = []
+        vector_index_collections: List[str] = []
 
         for subclass in subclasses:
             if "metadata" in subclass.model_fields:
@@ -96,8 +93,11 @@ class GraphCompletionRetriever(BaseRetriever):
                         for field_name in index_fields:
                             vector_index_collections.append(f"{subclass.__name__}_{field_name}")
 
+        user = await get_default_user()
+
         found_triplets = await brute_force_triplet_search(
             query,
+            user=user,
             top_k=self.top_k,
             collections=vector_index_collections or None,
             node_type=self.node_type,
@@ -106,7 +106,7 @@ class GraphCompletionRetriever(BaseRetriever):
 
         return found_triplets
 
-    async def get_context(self, query: str) -> str | tuple[str, list]:
+    async def get_context(self, query: str) -> List[Edge]:
         """
         Retrieves and resolves graph triplets into context based on a query.
 
@@ -125,16 +125,16 @@ class GraphCompletionRetriever(BaseRetriever):
 
         if len(triplets) == 0:
             logger.warning("Empty context was provided to the completion")
-            return "", triplets
+            return []
 
-        context = await self.resolve_edges_to_text(triplets)
+        # context = await self.resolve_edges_to_text(triplets)
 
-        return context, triplets
+        return triplets
 
     async def get_completion(
         self,
         query: str,
-        context: Optional[Any] = None,
+        context: Optional[List[Edge]] = None,
     ) -> Any:
         """
         Generates a completion using graph connections context based on a query.
@@ -151,26 +151,24 @@ class GraphCompletionRetriever(BaseRetriever):
 
             - Any: A generated completion based on the query and context provided.
         """
-        triplets = None
-
         if context is None:
-            context, triplets = await self.get_context(query)
+            triplets = await self.get_context(query)
+            context_text = await resolve_edges_to_text(triplets)
 
         completion = await generate_completion(
             query=query,
-            context=context,
+            context=context_text,
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
             system_prompt=self.system_prompt,
-            only_context=self.only_context,
         )
 
         if self.save_interaction and context and triplets and completion:
             await self.save_qa(
-                question=query, answer=completion, context=context, triplets=triplets
+                question=query, answer=completion, context=context_text, triplets=triplets
             )
 
-        return [completion]
+        return completion
 
     async def save_qa(self, question: str, answer: str, context: str, triplets: List) -> None:
         """
