@@ -1,10 +1,11 @@
 import os
 from urllib.parse import urlparse
 from typing import Union, BinaryIO, Any
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from cognee.infrastructure.files.storage import StorageProviderRegistry
 
 
 class SaveDataSettings(BaseSettings):
@@ -29,9 +30,9 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
 
     if isinstance(data_item, str):
         parsed_url = urlparse(data_item)
-
+        scheme_with_separator = f"{parsed_url.scheme}://"
         # data is s3 file path
-        if parsed_url.scheme == "s3":
+        if scheme_with_separator in StorageProviderRegistry.get_all_cloud_schemes():
             return data_item
 
         # data is local file path

@@ -4,7 +4,7 @@ from typing import Union, BinaryIO
 from tempfile import SpooledTemporaryFile
 
 from cognee.modules.ingestion.exceptions import IngestionError
-from .data_types import TextData, BinaryData, S3BinaryData
+from .data_types import TextData, BinaryData, CloudBinaryData
 
 
 def classify(data: Union[str, BinaryIO], filename: str = None):
@@ -15,13 +15,25 @@ def classify(data: Union[str, BinaryIO], filename: str = None):
         return BinaryData(data, filename if filename else str(data.name).split("/")[-1])
 
     try:
-        from s3fs import S3File
-    except ImportError:
-        S3File = None
+        from fsspec.spec import AbstractBufferedFile
 
-    if S3File is not None:
-        if isinstance(data, S3File):
-            return S3BinaryData(s3_path=path.join("s3://", data.bucket, data.key), name=data.key)
+        fsspec_file_type = AbstractBufferedFile
+    except ImportError:
+        fsspec_file_type = None
+
+    # check if data is a fsspec file(s3File, gcsFile, azureFile are subclasses of AbstractBufferedFile)
+    if fsspec_file_type is not None:
+        if isinstance(data, fsspec_file_type):
+            # Other cloud storage don't need to replace "adfs://" with "az://", just for Azure Blob Storage
+            full_name = (
+                data.full_name.replace("abfs://", "az://")
+                if data.full_name.startswith("abfs://")
+                else data.full_name
+            )
+
+            file_name = path.basename(full_name)
+
+            return CloudBinaryData(cloud_file_path=full_name, name=file_name)
 
     raise IngestionError(
         message=f"Type of data sent to classify(data: Union[str, BinaryIO) not supported or s3fs is not installed: {type(data)}"

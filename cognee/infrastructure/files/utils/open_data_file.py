@@ -1,11 +1,11 @@
 import os
 from os import path
-from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
-from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+from cognee.infrastructure.files.storage import LocalFileStorage
+from cognee.infrastructure.files.storage import StorageProviderRegistry
+from cognee.infrastructure.files.storage.utils import get_scheme_with_separator
 
 
 @asynccontextmanager
@@ -22,10 +22,10 @@ async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None,
         with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
             yield file
 
-    elif file_path.startswith("s3://"):
+    elif file_path.startswith(StorageProviderRegistry.get_all_cloud_schemes()):
         normalized_url = get_data_file_path(file_path)
-        s3_dir_path = os.path.dirname(normalized_url)
-        s3_filename = os.path.basename(normalized_url)
+        dir_path = os.path.dirname(normalized_url)
+        filename = os.path.basename(normalized_url)
 
         # if "/" in s3_path:
         #     s3_dir = "/".join(s3_path.split("/")[:-1])
@@ -40,9 +40,11 @@ async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None,
         # )
         # file_name = s3_filename
 
-        file_storage = S3FileStorage(s3_dir_path)
+        scheme_with_separator = get_scheme_with_separator(normalized_url)
+        cloud_storage = StorageProviderRegistry.get_provider_by_cloud_scheme(scheme_with_separator)
+        file_storage = cloud_storage(dir_path)
 
-        async with file_storage.open(s3_filename, mode=mode, **kwargs) as file:
+        async with file_storage.open(filename, mode=mode, **kwargs) as file:
             yield file
 
     else:

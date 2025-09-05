@@ -1,4 +1,4 @@
-from typing import BinaryIO, Protocol, Union
+from typing import BinaryIO, Protocol, Union, Optional
 
 
 class Storage(Protocol):
@@ -106,7 +106,7 @@ class Storage(Protocol):
         """
         pass
 
-    def remove_all(self, root_path: str = None):
+    def remove_all(self, tree_path: Optional[str] = None):
         """
         Remove an entire directory tree at the specified path, including all files and
         subdirectories.

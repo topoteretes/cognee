@@ -1,10 +1,9 @@
 import os
-from urllib.parse import urlparse
 from typing import List, Union, BinaryIO
 
-from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
-from cognee.exceptions import CogneeSystemError
-from cognee.infrastructure.files.storage.cloud_storage_config import get_cloud_storage_config
+from cognee.tasks.ingestion.exceptions import CloudFileSystemNotFoundError
+from cognee.infrastructure.files.storage import StorageProviderRegistry
+from cognee.infrastructure.files.storage.utils import get_scheme_with_separator
 
 
 async def resolve_data_directories(
@@ -25,40 +24,35 @@ async def resolve_data_directories(
         data = [data]
 
     resolved_data = []
-    s3_config = get_cloud_storage_config()
-
-    fs = None
-    if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
-        import s3fs
-
-        fs = s3fs.S3FileSystem(
-            key=s3_config.aws_access_key_id, secret=s3_config.aws_secret_access_key, anon=False
-        )
 
     for item in data:
         if isinstance(item, str):  # Check if the item is a path
-            # S3
-            if urlparse(item).scheme == "s3":
+            scheme_with_separator = get_scheme_with_separator(item)
+            # Check if the item is a cloud storage(s3, gcs, azure, etc.) file path
+            if scheme_with_separator in StorageProviderRegistry.get_all_cloud_schemes():
+                cloud_storage_cls = StorageProviderRegistry.get_provider_by_cloud_scheme(
+                    scheme_with_separator
+                )
+                cloud_storage = cloud_storage_cls(scheme_with_separator)
+                fs = cloud_storage.fs
+
                 if fs is not None:
-                    if include_subdirectories:
+                    if include_subdirectories and fs.isdir(item):
                         base_path = item if item.endswith("/") else item + "/"
-                        s3_keys = fs.glob(base_path + "**")
-                        # If path is not directory attempt to add item directly
-                        if not s3_keys:
-                            s3_keys = fs.ls(item)
+                        keys = fs.glob(base_path + "**")
                     else:
-                        s3_keys = fs.ls(item)
+                        keys = fs.ls(item)
                     # Filter out keys that represent directories using fs.isdir
-                    s3_files = []
-                    for key in s3_keys:
+                    files = []
+                    for key in keys:
                         if not fs.isdir(key):
-                            if not key.startswith("s3://"):
-                                s3_files.append("s3://" + key)
+                            if not key.startswith(scheme_with_separator):
+                                files.append(scheme_with_separator + key)
                             else:
-                                s3_files.append(key)
-                    resolved_data.extend(s3_files)
+                                files.append(key)
+                    resolved_data.extend(files)
                 else:
-                    raise S3FileSystemNotFoundError()
+                    raise CloudFileSystemNotFoundError()
 
             elif os.path.isdir(item):  # If it's a directory
                 if include_subdirectories:

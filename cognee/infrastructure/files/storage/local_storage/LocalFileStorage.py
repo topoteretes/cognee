@@ -4,9 +4,9 @@ from urllib.parse import urlparse
 from contextlib import contextmanager
 from typing import BinaryIO, Optional, Union
 
-from .FileBufferedReader import FileBufferedReader
-from .storage import Storage
-from .storage_provider_registry import StorageProviderRegistry
+from ..FileBufferedReader import FileBufferedReader
+from ..storage import Storage
+from ..storage_provider_registry import StorageProviderRegistry
 
 
 def get_parsed_path(file_path: str) -> str:
@@ -246,7 +246,7 @@ class LocalFileStorage(Storage):
         if os.path.exists(full_file_path):
             os.remove(full_file_path)
 
-    def remove_all(self, tree_path: str = None):
+    def remove_all(self, tree_path: Optional[str] = None):
         """
         Remove an entire directory tree at the specified path, including all files and
         subdirectories.

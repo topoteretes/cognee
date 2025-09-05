@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from cognee.version import get_cognee_version
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.files.storage.utils.get_storage_type import get_storage_type
 
 logger = get_logger()
 
@@ -154,7 +155,7 @@ class HealthChecker:
             storage = get_file_storage(base_config.data_root_directory)
 
             # Determine provider
-            provider = "s3" if base_config.data_root_directory.startswith("s3://") else "local"
+            provider = get_storage_type(base_config.data_root_directory)
 
             # Test storage accessibility - for local storage, just check directory exists
             if provider == "local":
@@ -165,10 +166,10 @@ class HealthChecker:
                     f.write("test")
                 os.remove(test_file)
             else:
-                # For S3, test basic operations
+                # For Cloud Storage (S3, GCS, etc.), test basic operations
                 test_path = "health_check_test"
                 await storage.store(test_path, b"test")
-                await storage.delete(test_path)
+                await storage.remove_all(test_path)
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(

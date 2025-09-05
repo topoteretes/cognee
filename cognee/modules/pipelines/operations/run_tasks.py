@@ -333,12 +333,12 @@ async def run_tasks(
         )
 
         graph_engine = await get_graph_engine()
-        if hasattr(graph_engine, "push_to_s3"):
-            await graph_engine.push_to_s3()
+        if hasattr(graph_engine, "push_to_cloud"):
+            await graph_engine.push_to_cloud()
 
         relational_engine = get_relational_engine()
-        if hasattr(relational_engine, "push_to_s3"):
-            await relational_engine.push_to_s3()
+        if hasattr(relational_engine, "push_to_cloud"):
+            await relational_engine.push_to_cloud()
 
     except Exception as error:
         await log_pipeline_run_error(

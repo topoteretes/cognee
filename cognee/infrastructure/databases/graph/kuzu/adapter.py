@@ -14,10 +14,13 @@ from typing import Dict, Any, List, Union, Optional, Tuple, Type
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
-from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.files.storage import get_file_storage, StorageProviderRegistry
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
     record_graph_changes,
+)
+from cognee.infrastructure.databases.graph.kuzu.kuzu_cloud_database_mixin import (
+    KuzuCloudDatabaseMixin,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
@@ -25,7 +28,7 @@ from cognee.modules.storage.utils import JSONEncoder
 logger = get_logger()
 
 
-class KuzuAdapter(GraphDBInterface):
+class KuzuAdapter(GraphDBInterface, KuzuCloudDatabaseMixin):
     """
     Adapter for Kuzu graph database operations with improved consistency and async support.
 
@@ -47,11 +50,11 @@ class KuzuAdapter(GraphDBInterface):
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
         try:
-            if "s3://" in self.db_path:
+            if self.db_path.startswith(StorageProviderRegistry.get_all_cloud_schemes()):
                 with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
                     self.temp_graph_file = temp_file.name
 
-                run_sync(self.pull_from_s3())
+                run_sync(self.pull_from_cloud())
 
                 self.db = Database(
                     self.temp_graph_file,
@@ -131,27 +134,6 @@ class KuzuAdapter(GraphDBInterface):
         except Exception as e:
             logger.error(f"Failed to initialize Kuzu database: {e}")
             raise e
-
-    async def push_to_s3(self) -> None:
-        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file"):
-            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-
-            s3_file_storage = S3FileStorage("")
-
-            if self.connection:
-                async with self.KUZU_ASYNC_LOCK:
-                    self.connection.execute("CHECKPOINT;")
-
-            s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
-
-    async def pull_from_s3(self) -> None:
-        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-
-        s3_file_storage = S3FileStorage("")
-        try:
-            s3_file_storage.s3.get(self.db_path, self.temp_graph_file, recursive=True)
-        except FileNotFoundError:
-            logger.warning(f"Kuzu S3 storage file not found: {self.db_path}")
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """

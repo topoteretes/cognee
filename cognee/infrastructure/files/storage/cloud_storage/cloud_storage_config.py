@@ -16,15 +16,15 @@ class CloudStorageConfig(BaseSettings):
     aws_access_key_id: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
 
-    # Azure Blob Storage Specific Config (for future sprints)
-    azure_account_name: Optional[str] = None
-    azure_account_key: Optional[str] = None
-    azure_container_name: Optional[str] = None
+    # Azure Blob Storage Specific Config
+    azure_storage_account_name: Optional[str] = None
+    azure_storage_account_key: Optional[str] = None
+    azure_storage_container_name: Optional[str] = None
 
-    # Google Cloud Storage Specific Config (for future sprints)
-    gcs_project_id: Optional[str] = None
-    gcs_credentials_path: Optional[str] = None
-    gcs_bucket: Optional[str] = None
+    # Google Cloud Storage Specific Config
+    google_project_id: Optional[str] = None
+    google_application_credentials: Optional[str] = None
+    google_bucket: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -45,12 +45,12 @@ class CloudStorageConfig(BaseSettings):
             "aws_endpoint_url": self.aws_endpoint_url,
             "aws_access_key_id": self.aws_access_key_id,
             "aws_secret_access_key": self.aws_secret_access_key,
-            "azure_account_name": self.azure_account_name,
-            "azure_account_key": self.azure_account_key,
-            "azure_container_name": self.azure_container_name,
-            "gcs_project_id": self.gcs_project_id,
-            "gcs_credentials_path": self.gcs_credentials_path,
-            "gcs_bucket": self.gcs_bucket,
+            "azure_storage_account_name": self.azure_storage_account_name,
+            "azure_storage_account_key": self.azure_storage_account_key,
+            "azure_storage_container_name": self.azure_storage_container_name,
+            "google_project_id": self.google_project_id,
+            "google_application_credentials": self.google_application_credentials,
+            "google_bucket": self.google_bucket,
             "model_config": self.model_config,
         }
 
@@ -73,12 +73,12 @@ class CloudStorageConfig(BaseSettings):
             "aws_endpoint_url": self.aws_endpoint_url,
             "aws_access_key_id": self.aws_access_key_id,
             "aws_secret_access_key": self.aws_secret_access_key,
-            "azure_account_name": self.azure_account_name,
-            "azure_account_key": self.azure_account_key,
-            "azure_container_name": self.azure_container_name,
-            "gcs_project_id": self.gcs_project_id,
-            "gcs_credentials_path": self.gcs_credentials_path,
-            "gcs_bucket": self.gcs_bucket,
+            "azure_storage_account_name": self.azure_storage_account_name,
+            "azure_storage_account_key": self.azure_storage_account_key,
+            "azure_storage_container_name": self.azure_storage_container_name,
+            "google_project_id": self.google_project_id,
+            "google_application_credentials": self.google_application_credentials,
+            "google_bucket": self.google_bucket,
         }
 
 

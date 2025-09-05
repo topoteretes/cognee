@@ -15,7 +15,14 @@ from cognee.modules.data.models.Data import Data
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
-from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.files.storage import (
+    get_file_storage,
+    get_storage_config,
+    StorageProviderRegistry,
+)
+from cognee.infrastructure.databases.relational.sqlalchemy.sqlite_cloud_database_mixin import (
+    SQLiteCloudDatabaseMixin,
+)
 
 from ..ModelBase import Base
 
@@ -23,7 +30,7 @@ from ..ModelBase import Base
 logger = get_logger()
 
 
-class SQLAlchemyAdapter:
+class SQLAlchemyAdapter(SQLiteCloudDatabaseMixin):
     """
     Adapt a SQLAlchemy connection for asynchronous operations with database management
     functions.
@@ -37,7 +44,7 @@ class SQLAlchemyAdapter:
             [prefix, db_path] = connection_string.split("///")
             self.db_path = db_path
 
-            if "s3://" in self.db_path:
+            if self.db_path.startswith(StorageProviderRegistry.get_all_cloud_schemes()):
                 db_dir_path = path.dirname(self.db_path)
                 file_storage = get_file_storage(db_dir_path)
 
@@ -47,7 +54,7 @@ class SQLAlchemyAdapter:
                     self.temp_db_file = temp_file.name
                     connection_string = prefix + "///" + self.temp_db_file
 
-                run_sync(self.pull_from_s3())
+                run_sync(self.pull_from_cloud())
 
         if "sqlite" in connection_string:
             self.engine = create_async_engine(
@@ -61,22 +68,6 @@ class SQLAlchemyAdapter:
             )
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
-
-    async def push_to_s3(self) -> None:
-        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_db_file"):
-            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-
-            s3_file_storage = S3FileStorage("")
-            s3_file_storage.s3.put(self.temp_db_file, self.db_path, recursive=True)
-
-    async def pull_from_s3(self) -> None:
-        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-
-        s3_file_storage = S3FileStorage("")
-        try:
-            s3_file_storage.s3.get(self.db_path, self.temp_db_file, recursive=True)
-        except FileNotFoundError:
-            pass
 
     @asynccontextmanager
     async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
