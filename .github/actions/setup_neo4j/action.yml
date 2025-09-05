@@ -8,7 +8,7 @@ inputs:
   neo4j-password:
     description: 'Password for Neo4j'
     required: false
-    default: 'cognee_test_password'
+    default: 'test-password-123'
 outputs:
   neo4j-url:
     description: 'Neo4j connection URL'
