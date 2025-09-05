@@ -1,8 +1,9 @@
 import os
-from typing import Optional
+from typing import Optional, ClassVar
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
+from baml_py import ClientRegistry
 
 
 class LLMConfig(BaseSettings):
@@ -17,7 +18,7 @@ class LLMConfig(BaseSettings):
     - llm_api_version
     - llm_temperature
     - llm_streaming
-    - llm_max_tokens
+    - llm_max_completion_tokens
     - transcription_model
     - graph_prompt_path
     - llm_rate_limit_enabled
@@ -32,16 +33,27 @@ class LLMConfig(BaseSettings):
     - to_dict
     """
 
+    structured_output_framework: str = "instructor"
     llm_provider: str = "openai"
-    llm_model: str = "gpt-4o-mini"
+    llm_model: str = "gpt-5-mini"
     llm_endpoint: str = ""
     llm_api_key: Optional[str] = None
     llm_api_version: Optional[str] = None
     llm_temperature: float = 0.0
     llm_streaming: bool = False
-    llm_max_tokens: int = 16384
+    llm_max_completion_tokens: int = 16384
+
+    baml_llm_provider: str = "openai"
+    baml_llm_model: str = "gpt-5-mini"
+    baml_llm_endpoint: str = ""
+    baml_llm_api_key: Optional[str] = None
+    baml_llm_temperature: float = 0.0
+    baml_llm_api_version: str = ""
+
     transcription_model: str = "whisper-1"
     graph_prompt_path: str = "generate_graph_prompt.txt"
+    temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
+    event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
     llm_rate_limit_enabled: bool = False
     llm_rate_limit_requests: int = 60
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
@@ -53,7 +65,25 @@ class LLMConfig(BaseSettings):
     fallback_endpoint: str = ""
     fallback_model: str = ""
 
+    baml_registry: ClassVar[ClientRegistry] = ClientRegistry()
+
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
+
+    def model_post_init(self, __context) -> None:
+        """Initialize the BAML registry after the model is created."""
+        self.baml_registry.add_llm_client(
+            name=self.baml_llm_provider,
+            provider=self.baml_llm_provider,
+            options={
+                "model": self.baml_llm_model,
+                "temperature": self.baml_llm_temperature,
+                "api_key": self.baml_llm_api_key,
+                "base_url": self.baml_llm_endpoint,
+                "api_version": self.baml_llm_api_version,
+            },
+        )
+        # Sets the primary client
+        self.baml_registry.set_primary(self.baml_llm_provider)
 
     @model_validator(mode="after")
     def ensure_env_vars_for_ollama(self) -> "LLMConfig":
@@ -143,7 +173,7 @@ class LLMConfig(BaseSettings):
             "api_version": self.llm_api_version,
             "temperature": self.llm_temperature,
             "streaming": self.llm_streaming,
-            "max_tokens": self.llm_max_tokens,
+            "max_completion_tokens": self.llm_max_completion_tokens,
             "transcription_model": self.transcription_model,
             "graph_prompt_path": self.graph_prompt_path,
             "rate_limit_enabled": self.llm_rate_limit_enabled,

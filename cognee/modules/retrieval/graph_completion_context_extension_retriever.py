@@ -1,9 +1,7 @@
 from typing import Any, Optional, List, Type
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 
 logger = get_logger()
 
@@ -28,9 +26,12 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         self,
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
+        system_prompt: Optional[str] = None,
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        save_interaction: bool = False,
+        only_context: bool = False,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -38,10 +39,16 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
+            save_interaction=save_interaction,
+            system_prompt=system_prompt,
+            only_context=only_context,
         )
 
     async def get_completion(
-        self, query: str, context: Optional[Any] = None, context_extension_rounds=4
+        self,
+        query: str,
+        context: Optional[Any] = None,
+        context_extension_rounds=4,
     ) -> List[str]:
         """
         Extends the context for a given query by retrieving related triplets and generating new
@@ -86,6 +93,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 context=context,
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
+                system_prompt=self.system_prompt,
             )
 
             triplets += await self.get_triplets(completion)
@@ -107,11 +115,21 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
             round_idx += 1
 
-        answer = await generate_completion(
+        completion = await generate_completion(
             query=query,
             context=context,
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
+            system_prompt=self.system_prompt,
+            only_context=self.only_context,
         )
 
-        return [answer]
+        if self.save_interaction and context and triplets and completion:
+            await self.save_qa(
+                question=query, answer=completion, context=context, triplets=triplets
+            )
+
+        if self.only_context:
+            return [context]
+        else:
+            return [completion]

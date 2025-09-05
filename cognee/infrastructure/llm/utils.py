@@ -1,6 +1,8 @@
 import litellm
 
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
+    get_llm_client,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -30,13 +32,13 @@ def get_max_chunk_tokens():
 
     # We need to make sure chunk size won't take more than half of LLM max context token size
     # but it also can't be bigger than the embedding engine max token size
-    llm_cutoff_point = llm_client.max_tokens // 2  # Round down the division
-    max_chunk_tokens = min(embedding_engine.max_tokens, llm_cutoff_point)
+    llm_cutoff_point = llm_client.max_completion_tokens // 2  # Round down the division
+    max_chunk_tokens = min(embedding_engine.max_completion_tokens, llm_cutoff_point)
 
     return max_chunk_tokens
 
 
-def get_model_max_tokens(model_name: str):
+def get_model_max_completion_tokens(model_name: str):
     """
     Retrieve the maximum token limit for a specified model name if it exists.
 
@@ -54,15 +56,15 @@ def get_model_max_tokens(model_name: str):
 
         Number of max tokens of model, or None if model is unknown
     """
-    max_tokens = None
+    max_completion_tokens = None
 
     if model_name in litellm.model_cost:
-        max_tokens = litellm.model_cost[model_name]["max_tokens"]
-        logger.debug(f"Max input tokens for {model_name}: {max_tokens}")
+        max_completion_tokens = litellm.model_cost[model_name]["max_tokens"]
+        logger.debug(f"Max input tokens for {model_name}: {max_completion_tokens}")
     else:
         logger.info("Model not found in LiteLLM's model_cost.")
 
-    return max_tokens
+    return max_completion_tokens
 
 
 async def test_llm_connection():

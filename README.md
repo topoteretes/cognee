@@ -79,7 +79,9 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
 
 ## Get Started
 
-Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1jHbWVypDgCLwjE71GSXhRL3YxYhCZzG1?usp=sharing">notebook</a> , <a href="https://deepnote.com/workspace/cognee-382213d0-0444-4c89-8265-13770e333c02/project/cognee-demo-78ffacb9-5832-4611-bb1a-560386068b30/notebook/Notebook-1-75b24cda566d4c24ab348f7150792601?utm_source=share-modal&utm_medium=product-shared-content&utm_campaign=notebook&utm_content=78ffacb9-5832-4611-bb1a-560386068b30">Deepnote notebook</a> or  <a href="https://github.com/topoteretes/cognee-starter">starter repo</a>
+Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1jHbWVypDgCLwjE71GSXhRL3YxYhCZzG1?usp=sharing">notebook</a> , <a href="https://deepnote.com/workspace/cognee-382213d0-0444-4c89-8265-13770e333c02/project/cognee-demo-78ffacb9-5832-4611-bb1a-560386068b30/notebook/Notebook-1-75b24cda566d4c24ab348f7150792601?utm_source=share-modal&utm_medium=product-shared-content&utm_campaign=notebook&utm_content=78ffacb9-5832-4611-bb1a-560386068b30">Deepnote notebook</a> or  <a href="https://github.com/topoteretes/cognee/tree/main/cognee-starter-kit">starter repo</a>
+
+
 
 
 ## Contributing
@@ -92,7 +94,8 @@ Your contributions are at the core of making this a true open source project. An
 ## 📦 Installation
 
 You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager.
-Cognee supports Python 3.8 to 3.12
+
+Cognee supports Python 3.10 to 3.13
 
 ### With pip
 
@@ -102,7 +105,7 @@ pip install cognee
 
 ## Local Cognee installation
 
-You can install the local Cognee repo using **pip**, **poetry** and **uv**.
+You can install the local Cognee repo using **uv**, **pip** and **poetry**.
 For local pip installation please make sure your pip version is above version 21.3.
 
 ### with UV with all optional dependencies
@@ -208,6 +211,11 @@ We are committed to making open source an enjoyable and respectful experience fo
   <img alt="contributors" src="https://contrib.rocks/image?repo=topoteretes/cognee"/>
 </a>
 
+## Sponsors
+
+Thanks to the following companies for sponsoring the ongoing development of cognee.
+
+- [GitHub's Secure Open Source Fund](https://resources.github.com/github-secure-open-source-fund/)
 
 ## Star History
 

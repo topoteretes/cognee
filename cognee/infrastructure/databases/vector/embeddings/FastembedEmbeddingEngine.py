@@ -4,8 +4,10 @@ from fastembed import TextEmbedding
 import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
-from cognee.infrastructure.databases.exceptions.EmbeddingException import EmbeddingException
-from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
+from cognee.infrastructure.databases.exceptions import EmbeddingException
+from cognee.infrastructure.llm.tokenizer.TikToken import (
+    TikTokenTokenizer,
+)
 
 litellm.set_verbose = False
 logger = get_logger("FastembedEmbeddingEngine")
@@ -39,11 +41,11 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         self,
         model: Optional[str] = "openai/text-embedding-3-large",
         dimensions: Optional[int] = 3072,
-        max_tokens: int = 512,
+        max_completion_tokens: int = 512,
     ):
         self.model = model
         self.dimensions = dimensions
-        self.max_tokens = max_tokens
+        self.max_completion_tokens = max_completion_tokens
         self.tokenizer = self.get_tokenizer()
         # self.retry_count = 0
         self.embedding_model = TextEmbedding(model_name=model)
@@ -110,7 +112,9 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
         """
         logger.debug("Loading tokenizer for FastembedEmbeddingEngine...")
 
-        tokenizer = TikTokenTokenizer(model="gpt-4o", max_tokens=self.max_tokens)
+        tokenizer = TikTokenTokenizer(
+            model="gpt-4o", max_completion_tokens=self.max_completion_tokens
+        )
 
         logger.debug("Tokenizer loaded for for FastembedEmbeddingEngine")
         return tokenizer

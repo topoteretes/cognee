@@ -1,0 +1,186 @@
+[project]
+name = "cognee"
+version = "0.2.2.dev0"
+description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
+authors = [
+    { name = "Vasilije Markovic" },
+    { name = "Boris Arzentar" },
+]
+requires-python = ">=3.10,<=3.13"
+readme = "README.md"
+license = "Apache-2.0"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Software Development :: Libraries",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+]
+dependencies = [
+    "openai>=1.80.1,<2",
+    "python-dotenv>=1.0.1,<2.0.0",
+    "pydantic>=2.11.7,<3.0.0",
+    "pydantic-settings>=2.10.1,<3",
+    "typing_extensions>=4.12.2,<5.0.0",
+    "nltk>=3.9.1,<4.0.0",
+    "numpy>=1.26.4, <=4.0.0",
+    "pandas>=2.2.2,<3.0.0",
+    # Note: New s3fs and boto3 versions don't work well together
+    # Always use comaptible fixed versions of these two dependencies
+    "s3fs[boto3]==2025.3.2",
+    "sqlalchemy>=2.0.39,<3.0.0",
+    "aiosqlite>=0.20.0,<1.0.0",
+    "tiktoken>=0.8.0,<1.0.0",
+    "litellm>=1.57.4, <1.71.0",
+    "instructor>=1.9.1,<2.0.0",
+    "langfuse>=2.32.0,<3",
+    "filetype>=1.2.0,<2.0.0",
+    "aiohttp>=3.11.14,<4.0.0",
+    "aiofiles>=23.2.1,<24.0.0",
+    "rdflib>=7.1.4,<7.2.0",
+    "pypdf>=4.1.0,<6.0.0",
+    "jinja2>=3.1.3,<4",
+    "matplotlib>=3.8.3,<4",
+    "networkx>=3.4.2,<4",
+    "lancedb>=0.24.0,<1.0.0",
+    "alembic>=1.13.3,<2",
+    "pre-commit>=4.0.1,<5",
+    "scikit-learn>=1.6.1,<2",
+    "limits>=4.4.1,<5",
+    "fastapi>=0.115.7,<1.0.0",
+    "python-multipart>=0.0.20,<1.0.0",
+    "fastapi-users[sqlalchemy]>=14.0.1,<15.0.0",
+    "dlt[sqlalchemy]>=1.9.0,<2",
+    "sentry-sdk[fastapi]>=2.9.0,<3",
+    "structlog>=25.2.0,<26",
+    "pympler>=1.1,<2.0.0",
+    "onnxruntime>=1.0.0,<2.0.0",
+    "pylance>=0.22.0,<1.0.0",
+    "kuzu (==0.11.0)"
+]
+
+[project.optional-dependencies]
+api = [
+    "uvicorn>=0.34.0,<1.0.0",
+    "gunicorn>=20.1.0,<24",
+    "websockets>=15.0.1,<16.0.0"
+]
+distributed = [
+    "modal>=1.0.5,<2.0.0",
+]
+
+neo4j = ["neo4j>=5.28.0,<6"]
+postgres = [
+    "psycopg2>=2.9.10,<3",
+    "pgvector>=0.3.5,<0.4",
+    "asyncpg>=0.30.0,<1.0.0",
+]
+postgres-binary = [
+    "psycopg2-binary>=2.9.10,<3.0.0",
+    "pgvector>=0.3.5,<0.4",
+    "asyncpg>=0.30.0,<1.0.0",
+]
+notebook = ["notebook>=7.1.0,<8"]
+langchain = [
+    "langsmith>=0.2.3,<1.0.0",
+    "langchain_text_splitters>=0.3.2,<1.0.0",
+]
+llama-index = ["llama-index-core>=0.12.11,<0.13"]
+gemini = ["google-generativeai>=0.8.4,<0.9"]
+huggingface = ["transformers>=4.46.3,<5"]
+ollama = ["transformers>=4.46.3,<5"]
+mistral = ["mistral-common>=1.5.2,<2"]
+anthropic = ["anthropic>=0.26.1,<0.27"]
+deepeval = ["deepeval>=2.0.1,<3"]
+posthog = ["posthog>=3.5.0,<4"]
+falkordb = ["falkordb>=1.0.9,<2.0.0"]
+groq = ["groq>=0.8.0,<1.0.0"]
+chromadb = [
+    "chromadb>=0.3.0,<0.7",
+    "pypika==0.48.8",
+]
+docs = ["unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx]>=0.18.1,<19"]
+codegraph = [
+    "fastembed<=0.6.0 ; python_version < '3.13'",
+    "transformers>=4.46.3,<5",
+    "tree-sitter>=0.24.0,<0.25",
+    "tree-sitter-python>=0.23.6,<0.24",
+]
+evals = [
+    "plotly>=6.0.0,<7",
+    "gdown>=5.2.0,<6",
+]
+gui = [
+    "pyside6>=6.8.3,<7",
+    "qasync>=0.27.1,<0.28",
+]
+graphiti = ["graphiti-core>=0.7.0,<0.8"]
+# Note: New s3fs and boto3 versions don't work well together
+# Always use comaptible fixed versions of these two dependencies
+aws = ["s3fs[boto3]==2025.3.2"]
+dev = [
+    "pytest>=7.4.0,<8",
+    "pytest-cov>=6.1.1,<7.0.0",
+    "pytest-asyncio>=0.21.1,<0.22",
+    "coverage>=7.3.2,<8",
+    "mypy>=1.7.1,<2",
+    "notebook>=7.1.0,<8",
+    "deptry>=0.20.0,<0.21",
+    "pylint>=3.0.3,<4",
+    "ruff>=0.9.2,<1.0.0",
+    "tweepy>=4.14.0,<5.0.0",
+    "gitpython>=3.1.43,<4",
+    "mkdocs-material>=9.5.42,<10",
+    "mkdocs-minify-plugin>=0.8.0,<0.9",
+    "mkdocstrings[python]>=0.26.2,<0.27",
+]
+debug = ["debugpy>=1.8.9,<2.0.0"]
+
+[project.urls]
+Homepage = "https://www.cognee.ai"
+Repository = "https://github.com/topoteretes/cognee"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+exclude = [
+  "/bin",
+  "/dist",
+  "/.data",
+  "/.github",
+  "/alembic",
+  "/deployment",
+  "/cognee-mcp",
+  "/cognee-frontend",
+  "/examples",
+  "/helm",
+  "/licenses",
+  "/logs",
+  "/notebooks",
+  "/profiling",
+  "/tests",
+  "/tools",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["cognee", "distributed"]
+
+[tool.ruff]
+line-length = 100
+exclude = [
+    "migrations/",  # Ignore migrations directory
+    "notebooks/",       # Ignore notebook files
+    "build/",           # Ignore build directory
+    "cognee/pipelines.py",
+    "cognee/modules/users/models/Group.py",
+    "cognee/modules/users/models/ACL.py",
+    "cognee/modules/pipelines/models/Task.py",
+    "cognee/modules/data/models/Dataset.py"
+]
+
+[tool.ruff.lint]
+ignore = ["F401"]

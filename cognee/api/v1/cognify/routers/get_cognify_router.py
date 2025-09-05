@@ -16,7 +16,11 @@ from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.authentication.default.default_jwt_strategy import DefaultJWTStrategy
-from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunInfo
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunCompleted,
+    PipelineRunInfo,
+    PipelineRunErrored,
+)
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
     get_from_queue,
     initialize_queue,
@@ -33,6 +37,9 @@ class CognifyPayloadDTO(InDTO):
     datasets: Optional[List[str]] = Field(default=None)
     dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
+    custom_prompt: Optional[str] = Field(
+        default="", description="Custom prompt for entity extraction and graph generation"
+    )
 
 
 def get_cognify_router() -> APIRouter:
@@ -59,6 +66,7 @@ def get_cognify_router() -> APIRouter:
         - **datasets** (Optional[List[str]]): List of dataset names to process. Dataset names are resolved to datasets owned by the authenticated user.
         - **dataset_ids** (Optional[List[UUID]]): List of existing dataset UUIDs to process. UUIDs allow processing of datasets not owned by the user (if permitted).
         - **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).
+        - **custom_prompt** (Optional[str]): Custom prompt for entity extraction and graph generation. If provided, this prompt will be used instead of the default prompts for knowledge graph extraction.
 
         ## Response
         - **Blocking execution**: Complete pipeline run information with entity counts, processing duration, and success/failure status
@@ -72,7 +80,8 @@ def get_cognify_router() -> APIRouter:
         ```json
         {
             "datasets": ["research_papers", "documentation"],
-            "run_in_background": false
+            "run_in_background": false,
+            "custom_prompt": "Extract entities focusing on technical concepts and their relationships. Identify key technologies, methodologies, and their interconnections."
         }
         ```
 
@@ -102,9 +111,15 @@ def get_cognify_router() -> APIRouter:
             datasets = payload.dataset_ids if payload.dataset_ids else payload.datasets
 
             cognify_run = await cognee_cognify(
-                datasets, user, run_in_background=payload.run_in_background
+                datasets,
+                user,
+                run_in_background=payload.run_in_background,
+                custom_prompt=payload.custom_prompt,
             )
 
+            # If any cognify run errored return JSONResponse with proper error status code
+            if any(isinstance(v, PipelineRunErrored) for v in cognify_run.values()):
+                return JSONResponse(status_code=420, content=cognify_run)
             return cognify_run
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
@@ -157,7 +172,7 @@ def get_cognify_router() -> APIRouter:
                     {
                         "pipeline_run_id": str(pipeline_run_info.pipeline_run_id),
                         "status": pipeline_run_info.status,
-                        "payload": await get_formatted_graph_data(pipeline_run.dataset_id, user.id),
+                        "payload": await get_formatted_graph_data(pipeline_run.dataset_id, user),
                     }
                 )
 

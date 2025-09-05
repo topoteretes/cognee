@@ -2,13 +2,15 @@
 
 import os
 from cognee.base_config import get_base_config
-from cognee.exceptions import InvalidValueError, InvalidAttributeError
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
-from cognee.infrastructure.llm.config import get_llm_config
+from cognee.infrastructure.llm.config import (
+    get_llm_config,
+)
 from cognee.infrastructure.databases.relational import get_relational_config, get_migration_config
+from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
 
 
 class config:
@@ -90,9 +92,7 @@ class config:
             if hasattr(llm_config, key):
                 object.__setattr__(llm_config, key, value)
             else:
-                raise InvalidAttributeError(
-                    message=f"'{key}' is not a valid attribute of the config."
-                )
+                raise InvalidConfigAttributeError(attribute=key)
 
     @staticmethod
     def set_chunk_strategy(chunk_strategy: object):
@@ -129,9 +129,7 @@ class config:
             if hasattr(relational_db_config, key):
                 object.__setattr__(relational_db_config, key, value)
             else:
-                raise InvalidAttributeError(
-                    message=f"'{key}' is not a valid attribute of the config."
-                )
+                raise InvalidConfigAttributeError(attribute=key)
 
     @staticmethod
     def set_migration_db_config(config_dict: dict):
@@ -143,9 +141,7 @@ class config:
             if hasattr(migration_db_config, key):
                 object.__setattr__(migration_db_config, key, value)
             else:
-                raise InvalidAttributeError(
-                    message=f"'{key}' is not a valid attribute of the config."
-                )
+                raise InvalidConfigAttributeError(attribute=key)
 
     @staticmethod
     def set_graph_db_config(config_dict: dict) -> None:
@@ -169,9 +165,7 @@ class config:
             if hasattr(vector_db_config, key):
                 object.__setattr__(vector_db_config, key, value)
             else:
-                raise InvalidAttributeError(
-                    message=f"'{key}' is not a valid attribute of the config."
-                )
+                InvalidConfigAttributeError(attribute=key)
 
     @staticmethod
     def set_vector_db_key(db_key: str):

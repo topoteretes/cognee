@@ -12,6 +12,7 @@ from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.modules.data.models.Data import Data
+from cognee.modules.sync.models.SyncOperation import SyncOperation
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
@@ -53,6 +54,7 @@ class SQLAlchemyAdapter:
             self.engine = create_async_engine(
                 connection_string,
                 poolclass=NullPool,
+                connect_args={"timeout": 30},
             )
         else:
             self.engine = create_async_engine(

@@ -1,9 +1,9 @@
-from typing import Any, Optional, List, Type
+from typing import Any, Optional, List, Tuple, Type
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
+
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 logger = get_logger()
 
@@ -32,16 +32,22 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         validation_system_prompt_path: str = "cot_validation_system_prompt.txt",
         followup_system_prompt_path: str = "cot_followup_system_prompt.txt",
         followup_user_prompt_path: str = "cot_followup_user_prompt.txt",
+        system_prompt: str = None,
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        save_interaction: bool = False,
+        only_context: bool = False,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
             system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
+            only_context=only_context,
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
+            save_interaction=save_interaction,
         )
         self.validation_system_prompt_path = validation_system_prompt_path
         self.validation_user_prompt_path = validation_user_prompt_path
@@ -49,7 +55,10 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         self.followup_user_prompt_path = followup_user_prompt_path
 
     async def get_completion(
-        self, query: str, context: Optional[Any] = None, max_iter=4
+        self,
+        query: str,
+        context: Optional[Any] = None,
+        max_iter=4,
     ) -> List[str]:
         """
         Generate completion responses based on a user query and contextual information.
@@ -73,10 +82,9 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
             - List[str]: A list containing the generated answer to the user's query.
         """
-        llm_client = get_llm_client()
         followup_question = ""
         triplets = []
-        answer = [""]
+        completion = [""]
 
         for round_idx in range(max_iter + 1):
             if round_idx == 0:
@@ -86,40 +94,49 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 triplets += await self.get_triplets(followup_question)
                 context = await self.resolve_edges_to_text(list(set(triplets)))
 
-            answer = await generate_completion(
+            completion = await generate_completion(
                 query=query,
                 context=context,
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
+                system_prompt=self.system_prompt,
             )
-            logger.info(f"Chain-of-thought: round {round_idx} - answer: {answer}")
+            logger.info(f"Chain-of-thought: round {round_idx} - answer: {completion}")
             if round_idx < max_iter:
-                valid_args = {"query": query, "answer": answer, "context": context}
-                valid_user_prompt = render_prompt(
+                valid_args = {"query": query, "answer": completion, "context": context}
+                valid_user_prompt = LLMGateway.render_prompt(
                     filename=self.validation_user_prompt_path, context=valid_args
                 )
-                valid_system_prompt = read_query_prompt(
+                valid_system_prompt = LLMGateway.read_query_prompt(
                     prompt_file_name=self.validation_system_prompt_path
                 )
 
-                reasoning = await llm_client.acreate_structured_output(
+                reasoning = await LLMGateway.acreate_structured_output(
                     text_input=valid_user_prompt,
                     system_prompt=valid_system_prompt,
                     response_model=str,
                 )
-                followup_args = {"query": query, "answer": answer, "reasoning": reasoning}
-                followup_prompt = render_prompt(
+                followup_args = {"query": query, "answer": completion, "reasoning": reasoning}
+                followup_prompt = LLMGateway.render_prompt(
                     filename=self.followup_user_prompt_path, context=followup_args
                 )
-                followup_system = read_query_prompt(
+                followup_system = LLMGateway.read_query_prompt(
                     prompt_file_name=self.followup_system_prompt_path
                 )
 
-                followup_question = await llm_client.acreate_structured_output(
+                followup_question = await LLMGateway.acreate_structured_output(
                     text_input=followup_prompt, system_prompt=followup_system, response_model=str
                 )
                 logger.info(
                     f"Chain-of-thought: round {round_idx} - follow-up question: {followup_question}"
                 )
 
-        return [answer]
+        if self.save_interaction and context and triplets and completion:
+            await self.save_qa(
+                question=query, answer=completion, context=context, triplets=triplets
+            )
+
+        if self.only_context:
+            return [context]
+        else:
+            return [completion]

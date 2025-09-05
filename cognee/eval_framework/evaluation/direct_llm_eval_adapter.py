@@ -1,9 +1,9 @@
 from typing import Any, Dict, List
 from pydantic import BaseModel
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
 from cognee.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
-from cognee.infrastructure.llm.prompts import read_query_prompt, render_prompt
 from cognee.eval_framework.eval_config import EvalConfig
+
+from cognee.infrastructure.llm import LLMGateway
 
 
 class CorrectnessEvaluation(BaseModel):
@@ -19,17 +19,16 @@ class DirectLLMEvalAdapter(BaseEvalAdapter):
         config = EvalConfig()
         self.system_prompt_path = config.direct_llm_system_prompt
         self.eval_prompt_path = config.direct_llm_eval_prompt
-        self.llm_client = get_llm_client()
 
     async def evaluate_correctness(
         self, question: str, answer: str, golden_answer: str
     ) -> Dict[str, Any]:
         args = {"question": question, "answer": answer, "golden_answer": golden_answer}
 
-        user_prompt = render_prompt(self.eval_prompt_path, args)
-        system_prompt = read_query_prompt(self.system_prompt_path)
+        user_prompt = LLMGateway.render_prompt(self.eval_prompt_path, args)
+        system_prompt = LLMGateway.read_query_prompt(self.system_prompt_path)
 
-        evaluation = await self.llm_client.acreate_structured_output(
+        evaluation = await LLMGateway.acreate_structured_output(
             text_input=user_prompt,
             system_prompt=system_prompt,
             response_model=CorrectnessEvaluation,

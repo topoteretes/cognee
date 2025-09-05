@@ -1,6 +1,9 @@
 import os
 from urllib.parse import urlparse
 from typing import List, Union, BinaryIO
+
+from cognee.tasks.ingestion.exceptions import S3FileSystemNotFoundError
+from cognee.exceptions import CogneeSystemError
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
 
 
@@ -40,6 +43,9 @@ async def resolve_data_directories(
                     if include_subdirectories:
                         base_path = item if item.endswith("/") else item + "/"
                         s3_keys = fs.glob(base_path + "**")
+                        # If path is not directory attempt to add item directly
+                        if not s3_keys:
+                            s3_keys = fs.ls(item)
                     else:
                         s3_keys = fs.ls(item)
                     # Filter out keys that represent directories using fs.isdir
@@ -51,6 +57,8 @@ async def resolve_data_directories(
                             else:
                                 s3_files.append(key)
                     resolved_data.extend(s3_files)
+                else:
+                    raise S3FileSystemNotFoundError()
 
             elif os.path.isdir(item):  # If it's a directory
                 if include_subdirectories:

@@ -1,6 +1,3 @@
-import os
-import requests
-import subprocess
 from uuid import UUID
 
 from fastapi import APIRouter
@@ -11,6 +8,7 @@ from typing import List, Optional, Union, Literal
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
+from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -23,7 +21,9 @@ def get_add_router() -> APIRouter:
     async def add(
         data: List[UploadFile] = File(default=None),
         datasetName: Optional[str] = Form(default=None),
+        # Note: Literal is needed for Swagger use
         datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
+        node_set: Optional[List[str]] = Form(default=[""], example=[""]),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -40,6 +40,8 @@ def get_add_router() -> APIRouter:
           - Regular file uploads
         - **datasetName** (Optional[str]): Name of the dataset to add data to
         - **datasetId** (Optional[UUID]): UUID of an already existing dataset
+        - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
+                 Used for grouping related data points in the knowledge graph.
 
         Either datasetName or datasetId must be provided.
 
@@ -56,17 +58,12 @@ def get_add_router() -> APIRouter:
 
         ## Notes
         - To add data to datasets not owned by the user, use dataset_id (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)
-        - GitHub repositories are cloned and all files are processed
-        - HTTP URLs are fetched and their content is processed
-        - The ALLOW_HTTP_REQUESTS environment variable controls URL processing
         - datasetId value can only be the UUID of an already existing dataset
         """
         send_telemetry(
             "Add API Endpoint Invoked",
             user.id,
-            additional_properties={
-                "endpoint": "POST /v1/add",
-            },
+            additional_properties={"endpoint": "POST /v1/add", "node_set": node_set},
         )
 
         from cognee.api.v1.add import add as cognee_add
@@ -75,32 +72,13 @@ def get_add_router() -> APIRouter:
             raise ValueError("Either datasetId or datasetName must be provided.")
 
         try:
-            if (
-                isinstance(data, str)
-                and data.startswith("http")
-                and (os.getenv("ALLOW_HTTP_REQUESTS", "true").lower() == "true")
-            ):
-                if "github" in data:
-                    # Perform git clone if the URL is from GitHub
-                    repo_name = data.split("/")[-1].replace(".git", "")
-                    subprocess.run(["git", "clone", data, f".data/{repo_name}"], check=True)
-                    # TODO: Update add call with dataset info
-                    await cognee_add(
-                        "data://.data/",
-                        f"{repo_name}",
-                    )
-                else:
-                    # Fetch and store the data from other types of URL using curl
-                    response = requests.get(data)
-                    response.raise_for_status()
+            add_run = await cognee_add(
+                data, datasetName, user=user, dataset_id=datasetId, node_set=node_set
+            )
 
-                    file_data = await response.content()
-                    # TODO: Update add call with dataset info
-                    return await cognee_add(file_data)
-            else:
-                add_run = await cognee_add(data, datasetName, user=user, dataset_id=datasetId)
-
-                return add_run.model_dump()
+            if isinstance(add_run, PipelineRunErrored):
+                return JSONResponse(status_code=420, content=add_run.model_dump(mode="json"))
+            return add_run.model_dump()
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
 

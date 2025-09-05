@@ -7,8 +7,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.infrastructure.llm.get_llm_client import get_llm_client
-from cognee.infrastructure.llm.prompts import read_query_prompt
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 logger = get_logger("CodeRetriever")
 
@@ -42,11 +41,10 @@ class CodeRetriever(BaseRetriever):
             f"Processing query with LLM: '{query[:100]}{'...' if len(query) > 100 else ''}'"
         )
 
-        system_prompt = read_query_prompt("codegraph_retriever_system.txt")
-        llm_client = get_llm_client()
+        system_prompt = LLMGateway.read_query_prompt("codegraph_retriever_system.txt")
 
         try:
-            result = await llm_client.acreate_structured_output(
+            result = await LLMGateway.acreate_structured_output(
                 text_input=query,
                 system_prompt=system_prompt,
                 response_model=self.CodeQueryInfo,
@@ -96,7 +94,15 @@ class CodeRetriever(BaseRetriever):
                         {"id": res.id, "score": res.score, "payload": res.payload}
                     )
 
+            existing_collection = []
             for collection in self.classes_and_functions_collections:
+                if await vector_engine.has_collection(collection):
+                    existing_collection.append(collection)
+
+            if not existing_collection:
+                raise RuntimeError("No collection found for code retriever")
+
+            for collection in existing_collection:
                 logger.debug(f"Searching {collection} collection with general query")
                 search_results_code = await vector_engine.search(
                     collection, query, limit=self.top_k

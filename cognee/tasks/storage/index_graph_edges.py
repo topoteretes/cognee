@@ -1,3 +1,4 @@
+from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 from cognee.shared.logging_utils import get_logger, ERROR
 from collections import Counter
 
@@ -49,7 +50,9 @@ async def index_graph_edges(batch_size: int = 1024):
     )
 
     for text, count in edge_types.items():
-        edge = EdgeType(relationship_name=text, number_of_edges=count)
+        edge = EdgeType(
+            id=generate_edge_id(edge_id=text), relationship_name=text, number_of_edges=count
+        )
         data_point_type = type(edge)
 
         for field_name in edge.metadata["index_fields"]:

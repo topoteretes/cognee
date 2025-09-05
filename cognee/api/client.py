@@ -9,22 +9,27 @@ from contextlib import asynccontextmanager
 from fastapi import Request
 from fastapi import FastAPI, status
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 
 from cognee.exceptions import CogneeApiError
 from cognee.shared.logging_utils import get_logger, setup_logging
+from cognee.api.health import health_checker, HealthStatus
+from cognee.api.v1.cloud.routers import get_checks_router
+from cognee.api.v1.notebooks.routers import get_notebooks_router
 from cognee.api.v1.permissions.routers import get_permissions_router
 from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
 from cognee.api.v1.data.routers import get_data_router
 from cognee.api.v1.cognify.routers import get_code_pipeline_router, get_cognify_router
 from cognee.api.v1.search.routers import get_search_router
+from cognee.api.v1.memify.routers import get_memify_router
 from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.delete.routers import get_delete_router
 from cognee.api.v1.responses.routers import get_responses_router
+from cognee.api.v1.sync.routers import get_sync_router
 from cognee.api.v1.users.routers import (
     get_auth_router,
     get_register_router,
@@ -33,6 +38,7 @@ from cognee.api.v1.users.routers import (
     get_users_router,
     get_visualize_router,
 )
+from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
 logger = get_logger()
 
@@ -83,7 +89,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,  # Now controlled by env var
     allow_credentials=True,
-    allow_methods=["OPTIONS", "GET", "POST", "DELETE"],
+    allow_methods=["OPTIONS", "GET", "PUT", "POST", "DELETE"],
     allow_headers=["*"],
 )
 # To allow origins, set CORS_ALLOWED_ORIGINS env variable to a comma-separated list, e.g.:
@@ -110,7 +116,11 @@ def custom_openapi():
         },
     }
 
-    openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
+    if REQUIRE_AUTHENTICATION:
+        openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
+
+    # Remove global security requirement - let individual endpoints specify their own security
+    # openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
 
     app.openapi_schema = openapi_schema
 
@@ -162,11 +172,48 @@ async def root():
 
 
 @app.get("/health")
-def health_check():
+async def health_check():
     """
-    Health check endpoint that returns the server status.
+    Health check endpoint for liveness/readiness probes.
     """
-    return Response(status_code=200)
+    try:
+        health_status = await health_checker.get_health_status(detailed=False)
+        status_code = 503 if health_status.status == HealthStatus.UNHEALTHY else 200
+
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "status": "ready" if status_code == 200 else "not ready",
+                "health": health_status.status,
+                "version": health_status.version,
+            },
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not ready", "reason": f"health check failed: {str(e)}"},
+        )
+
+
+@app.get("/health/detailed")
+async def detailed_health_check():
+    """
+    Comprehensive health status with component details.
+    """
+    try:
+        health_status = await health_checker.get_health_status(detailed=True)
+        status_code = 200
+        if health_status.status == HealthStatus.UNHEALTHY:
+            status_code = 503
+        elif health_status.status == HealthStatus.DEGRADED:
+            status_code = 200  # Degraded is still operational
+
+        return JSONResponse(status_code=status_code, content=health_status.model_dump())
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "error": f"Health check system failure: {str(e)}"},
+        )
 
 
 app.include_router(get_auth_router(), prefix="/api/v1/auth", tags=["auth"])
@@ -193,6 +240,8 @@ app.include_router(get_add_router(), prefix="/api/v1/add", tags=["add"])
 
 app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognify"])
 
+app.include_router(get_memify_router(), prefix="/api/v1/memify", tags=["memify"])
+
 app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"])
 
 app.include_router(
@@ -213,6 +262,8 @@ app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"]
 
 app.include_router(get_responses_router(), prefix="/api/v1/responses", tags=["responses"])
 
+app.include_router(get_sync_router(), prefix="/api/v1/sync", tags=["sync"])
+
 codegraph_routes = get_code_pipeline_router()
 if codegraph_routes:
     app.include_router(codegraph_routes, prefix="/api/v1/code-pipeline", tags=["code-pipeline"])
@@ -221,6 +272,18 @@ app.include_router(
     get_users_router(),
     prefix="/api/v1/users",
     tags=["users"],
+)
+
+app.include_router(
+    get_notebooks_router(),
+    prefix="/api/v1/notebooks",
+    tags=["notebooks"],
+)
+
+app.include_router(
+    get_checks_router(),
+    prefix="/api/v1/checks",
+    tags=["checks"],
 )
 
 

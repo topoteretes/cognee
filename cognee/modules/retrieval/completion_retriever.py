@@ -23,12 +23,16 @@ class CompletionRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
+        system_prompt: str = None,
         top_k: Optional[int] = 1,
+        only_context: bool = False,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 1
+        self.system_prompt = system_prompt
+        self.only_context = only_context
 
     async def get_context(self, query: str) -> str:
         """
@@ -88,6 +92,11 @@ class CompletionRetriever(BaseRetriever):
             context = await self.get_context(query)
 
         completion = await generate_completion(
-            query, context, self.user_prompt_path, self.system_prompt_path
+            query=query,
+            context=context,
+            user_prompt_path=self.user_prompt_path,
+            system_prompt_path=self.system_prompt_path,
+            system_prompt=self.system_prompt,
+            only_context=self.only_context,
         )
-        return completion
+        return [completion]

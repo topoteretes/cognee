@@ -1,6 +1,7 @@
 import os
 import pathlib
 import asyncio
+from typing import Optional
 from cognee.shared.logging_utils import get_logger, setup_logging
 from cognee.modules.observability.get_observe import get_observe
 
@@ -28,7 +29,12 @@ logger = get_logger("code_graph_pipeline")
 
 
 @observe
-async def run_code_graph_pipeline(repo_path, include_docs=False):
+async def run_code_graph_pipeline(
+    repo_path,
+    include_docs=False,
+    excluded_paths: Optional[list[str]] = None,
+    supported_languages: Optional[list[str]] = None,
+):
     import cognee
     from cognee.low_level import setup
 
@@ -41,7 +47,12 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
     detailed_extraction = True
 
     tasks = [
-        Task(get_repo_file_dependencies, detailed_extraction=detailed_extraction),
+        Task(
+            get_repo_file_dependencies,
+            detailed_extraction=detailed_extraction,
+            supported_languages=supported_languages,
+            excluded_paths=excluded_paths,
+        ),
         # Task(summarize_code, task_config={"batch_size": 500}), # This task takes a long time to complete
         Task(add_data_points, task_config={"batch_size": 30}),
     ]
@@ -79,7 +90,9 @@ async def run_code_graph_pipeline(repo_path, include_docs=False):
         async for run_status in non_code_pipeline_run:
             yield run_status
 
-    async for run_status in run_tasks(tasks, dataset.id, repo_path, user, "cognify_code_pipeline"):
+    async for run_status in run_tasks(
+        tasks, dataset.id, repo_path, user, "cognify_code_pipeline", incremental_loading=False
+    ):
         yield run_status
 
 
@@ -87,7 +100,7 @@ if __name__ == "__main__":
 
     async def main():
         async for run_status in run_code_graph_pipeline("REPO_PATH"):
-            print(f"{run_status.pipeline_name}: {run_status.status}")
+            print(f"{run_status.pipeline_run_id}: {run_status.status}")
 
         file_path = os.path.join(
             pathlib.Path(__file__).parent, ".artifacts", "graph_visualization.html"

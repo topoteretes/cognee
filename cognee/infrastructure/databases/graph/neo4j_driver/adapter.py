@@ -11,6 +11,8 @@ from contextlib import asynccontextmanager
 from typing import Optional, Any, List, Dict, Type, Tuple
 
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
+from cognee.tasks.temporal_graph.models import Timestamp
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
@@ -50,6 +52,7 @@ class Neo4jAdapter(GraphDBInterface):
         graph_database_url: str,
         graph_database_username: Optional[str] = None,
         graph_database_password: Optional[str] = None,
+        graph_database_name: Optional[str] = None,
         driver: Optional[Any] = None,
     ):
         # Only use auth if both username and password are provided
@@ -59,7 +62,7 @@ class Neo4jAdapter(GraphDBInterface):
         elif graph_database_username or graph_database_password:
             logger = get_logger(__name__)
             logger.warning("Neo4j credentials incomplete – falling back to anonymous connection.")
-
+        self.graph_database_name = graph_database_name
         self.driver = driver or AsyncGraphDatabase.driver(
             graph_database_url,
             auth=auth,
@@ -80,7 +83,7 @@ class Neo4jAdapter(GraphDBInterface):
         """
         Get a session for database operations.
         """
-        async with self.driver.session() as session:
+        async with self.driver.session(database=self.graph_database_name) as session:
             yield session
 
     @deadlock_retry()
@@ -410,6 +413,38 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
+    def _flatten_edge_properties(self, properties: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Flatten edge properties to handle nested dictionaries like weights.
+
+        Neo4j doesn't support nested dictionaries as property values, so we need to
+        flatten the 'weights' dictionary into individual properties with prefixes.
+
+        Args:
+            properties: Dictionary of edge properties that may contain nested dicts
+
+        Returns:
+            Flattened properties dictionary suitable for Neo4j storage
+        """
+        flattened = {}
+
+        for key, value in properties.items():
+            if key == "weights" and isinstance(value, dict):
+                # Flatten weights dictionary into individual properties
+                for weight_name, weight_value in value.items():
+                    flattened[f"weight_{weight_name}"] = weight_value
+            elif isinstance(value, dict):
+                # For other nested dictionaries, serialize as JSON string
+                flattened[f"{key}_json"] = json.dumps(value, cls=JSONEncoder)
+            elif isinstance(value, list):
+                # For lists, serialize as JSON string
+                flattened[f"{key}_json"] = json.dumps(value, cls=JSONEncoder)
+            else:
+                # Keep primitive types as-is
+                flattened[key] = value
+
+        return flattened
+
     @record_graph_changes
     @override_distributed(queued_add_edges)
     async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
@@ -448,11 +483,13 @@ class Neo4jAdapter(GraphDBInterface):
                 "from_node": str(edge[0]),
                 "to_node": str(edge[1]),
                 "relationship_name": edge[2],
-                "properties": {
-                    **(edge[3] if edge[3] else {}),
-                    "source_node_id": str(edge[0]),
-                    "target_node_id": str(edge[1]),
-                },
+                "properties": self._flatten_edge_properties(
+                    {
+                        **(edge[3] if edge[3] else {}),
+                        "source_node_id": str(edge[0]),
+                        "target_node_id": str(edge[1]),
+                    }
+                ),
             }
             for edge in edges
         ]
@@ -1217,7 +1254,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return mandatory_metrics | optional_metrics
 
-    async def get_document_subgraph(self, content_hash: str):
+    async def get_document_subgraph(self, data_id: str):
         """
         Retrieve a subgraph related to a document identified by its content hash, including
         related entities and chunks.
@@ -1235,21 +1272,21 @@ class Neo4jAdapter(GraphDBInterface):
         """
         query = """
         MATCH (doc)
-        WHERE (doc:TextDocument OR doc:PdfDocument)
-        AND doc.name = 'text_' + $content_hash
+        WHERE (doc:TextDocument OR doc:PdfDocument OR doc:UnstructuredDocument OR doc:AudioDocument or doc:ImageDocument)
+        AND doc.id = $data_id
 
         OPTIONAL MATCH (doc)<-[:is_part_of]-(chunk:DocumentChunk)
         OPTIONAL MATCH (chunk)-[:contains]->(entity:Entity)
         WHERE NOT EXISTS {
             MATCH (entity)<-[:contains]-(otherChunk:DocumentChunk)-[:is_part_of]->(otherDoc)
-            WHERE (otherDoc:TextDocument OR otherDoc:PdfDocument)
+            WHERE (otherDoc:TextDocument OR otherDoc:PdfDocument OR otherDoc:UnstructuredDocument OR otherDoc:AudioDocument or otherDoc:ImageDocument)
             AND otherDoc.id <> doc.id
         }
         OPTIONAL MATCH (chunk)<-[:made_from]-(made_node:TextSummary)
         OPTIONAL MATCH (entity)-[:is_a]->(type:EntityType)
         WHERE NOT EXISTS {
             MATCH (type)<-[:is_a]-(otherEntity:Entity)<-[:contains]-(otherChunk:DocumentChunk)-[:is_part_of]->(otherDoc)
-            WHERE (otherDoc:TextDocument OR otherDoc:PdfDocument)
+            WHERE (otherDoc:TextDocument OR otherDoc:PdfDocument OR otherDoc:UnstructuredDocument OR otherDoc:AudioDocument or otherDoc:ImageDocument)
             AND otherDoc.id <> doc.id
         }
 
@@ -1260,7 +1297,7 @@ class Neo4jAdapter(GraphDBInterface):
             collect(DISTINCT made_node) as made_from_nodes,
             collect(DISTINCT type) as orphan_types
         """
-        result = await self.query(query, {"content_hash": content_hash})
+        result = await self.query(query, {"data_id": data_id})
         return result[0] if result else None
 
     async def get_degree_one_nodes(self, node_type: str):
@@ -1287,3 +1324,139 @@ class Neo4jAdapter(GraphDBInterface):
         """
         result = await self.query(query)
         return [record["n"] for record in result] if result else []
+
+    async def get_last_user_interaction_ids(self, limit: int) -> List[str]:
+        """
+        Retrieve the IDs of the most recent CogneeUserInteraction nodes.
+        Parameters:
+        -----------
+        - limit (int): The maximum number of interaction IDs to return.
+        Returns:
+        --------
+        - List[str]: A list of interaction IDs, sorted by created_at descending.
+        """
+
+        query = """
+        MATCH (n)
+        WHERE n.type = 'CogneeUserInteraction'
+        RETURN n.id as id
+        ORDER BY n.created_at DESC
+        LIMIT $limit
+        """
+        rows = await self.query(query, {"limit": limit})
+
+        id_list = [row["id"] for row in rows if "id" in row]
+        return id_list
+
+    async def apply_feedback_weight(
+        self,
+        node_ids: List[str],
+        weight: float,
+    ) -> None:
+        """
+        Increment `feedback_weight` on relationships `:used_graph_element_to_answer`
+        outgoing from nodes whose `id` is in `node_ids`.
+
+        Args:
+            node_ids: List of node IDs to match.
+            weight: Amount to add to `r.feedback_weight` (can be negative).
+
+        Side effects:
+            Updates relationship property `feedback_weight`, defaulting missing values to 0.
+        """
+        query = """
+        MATCH (n)-[r]->()
+        WHERE n.id IN $node_ids AND r.relationship_name = 'used_graph_element_to_answer'
+        SET r.feedback_weight = coalesce(r.feedback_weight, 0) + $weight
+        """
+        await self.query(
+            query,
+            params={"weight": float(weight), "node_ids": list(node_ids)},
+        )
+
+    async def collect_events(self, ids: List[str]) -> Any:
+        """
+        Collect all Event-type nodes reachable within 1..2 hops
+        from the given node IDs.
+
+        Args:
+            graph_engine: Object exposing an async .query(str) -> Any
+            ids: List of node IDs (strings)
+
+        Returns:
+            List of events
+        """
+
+        event_collection_cypher = """UNWIND [{quoted}] AS uid
+            MATCH (start {{id: uid}})
+            MATCH (start)-[*1..2]-(event)
+            WHERE event.type = 'Event'
+            WITH DISTINCT event
+            RETURN collect(event) AS events;
+        """
+
+        query = event_collection_cypher.format(quoted=ids)
+        return await self.query(query)
+
+    async def collect_time_ids(
+        self,
+        time_from: Optional[Timestamp] = None,
+        time_to: Optional[Timestamp] = None,
+    ) -> str:
+        """
+        Collect IDs of Timestamp nodes between time_from and time_to.
+
+        Args:
+            graph_engine: Object exposing an async .query(query, params) -> list[dict]
+            time_from: Lower bound int (inclusive), optional
+            time_to: Upper bound int (inclusive), optional
+
+        Returns:
+            A string of quoted IDs:  "'id1', 'id2', 'id3'"
+            (ready for use in a Cypher UNWIND clause).
+        """
+
+        ids: List[str] = []
+
+        if time_from and time_to:
+            time_from = date_to_int(time_from)
+            time_to = date_to_int(time_to)
+
+            cypher = """
+            MATCH (n)
+            WHERE n.type = 'Timestamp'
+              AND n.time_at >= $time_from
+              AND n.time_at <= $time_to
+            RETURN n.id AS id
+            """
+            params = {"time_from": time_from, "time_to": time_to}
+
+        elif time_from:
+            time_from = date_to_int(time_from)
+
+            cypher = """
+            MATCH (n)
+            WHERE n.type = 'Timestamp'
+              AND n.time_at >= $time_from
+            RETURN n.id AS id
+            """
+            params = {"time_from": time_from}
+
+        elif time_to:
+            time_to = date_to_int(time_to)
+
+            cypher = """
+            MATCH (n)
+            WHERE n.type = 'Timestamp'
+              AND n.time_at <= $time_to
+            RETURN n.id AS id
+            """
+            params = {"time_to": time_to}
+
+        else:
+            return ids
+
+        time_nodes = await self.query(cypher, params)
+        time_ids_list = [item["id"] for item in time_nodes if "id" in item]
+
+        return ", ".join(f"'{uid}'" for uid in time_ids_list)

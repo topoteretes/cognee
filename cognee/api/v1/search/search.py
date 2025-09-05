@@ -1,6 +1,7 @@
 from uuid import UUID
 from typing import Union, Optional, List, Type
 
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
@@ -16,9 +17,13 @@ async def search(
     datasets: Optional[Union[list[str], str]] = None,
     dataset_ids: Optional[Union[list[UUID], UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
+    system_prompt: Optional[str] = None,
     top_k: int = 10,
-    node_type: Optional[Type] = None,
+    node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
+    save_interaction: bool = False,
+    last_k: Optional[int] = None,
+    only_context: bool = False,
 ) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -71,6 +76,12 @@ async def search(
             Best for: Advanced users, specific graph traversals, debugging.
             Returns: Raw graph query results.
 
+        **FEELING_LUCKY**:
+            Intelligently selects and runs the most appropriate search type.
+            Best for: General-purpose queries or when you're unsure which search type is best.
+            Returns: The results from the automatically selected search type.
+
+
     Args:
         query_text: Your question or search query in natural language.
             Examples:
@@ -101,6 +112,8 @@ async def search(
 
         node_name: Filter results to specific named entities (for targeted search).
 
+        save_interaction: Save interaction (query, context, answer connected to triplet endpoints) results into the graph or not
+
     Returns:
         list: Search results in format determined by query_type:
 
@@ -119,6 +132,9 @@ async def search(
             **CODE**:
                 [List of structured code information with context]
 
+            **FEELING_LUCKY**:
+                [List of results in the format of the search type that is automatically selected]
+
 
 
 
@@ -130,6 +146,7 @@ async def search(
         - **CHUNKS**: Fastest, pure vector similarity search without LLM
         - **SUMMARIES**: Fast, returns pre-computed summaries
         - **CODE**: Medium speed, specialized for code understanding
+        - **FEELING_LUCKY**: Variable speed, uses LLM + search type selection intelligently
         - **top_k**: Start with 10, increase for comprehensive analysis (max 100)
         - **datasets**: Specify datasets to improve speed and relevance
 
@@ -148,13 +165,6 @@ async def search(
         - VECTOR_DB_PROVIDER: Must match what was used during cognify
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
-    Raises:
-        DatasetNotFoundError: If specified datasets don't exist or aren't accessible
-        PermissionDeniedError: If user lacks read access to requested datasets
-        NoDataError: If no relevant data found for the search query
-        InvalidValueError: If LLM_API_KEY is not set (for LLM-based search types)
-        ValueError: If query_text is empty or search parameters are invalid
-        CollectionNotFoundError: If vector collection not found (data not processed)
     """
     # We use lists from now on for datasets
     if isinstance(datasets, UUID) or isinstance(datasets, str):
@@ -176,9 +186,13 @@ async def search(
         dataset_ids=dataset_ids if dataset_ids else datasets,
         user=user,
         system_prompt_path=system_prompt_path,
+        system_prompt=system_prompt,
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
+        save_interaction=save_interaction,
+        last_k=last_k,
+        only_context=only_context,
     )
 
     return filtered_search_results

@@ -1,0 +1,67 @@
+name: 'Setup Neo4j with Graph Data Science'
+description: 'Sets up a Neo4j instance with APOC and Graph Data Science plugins for testing'
+inputs:
+  neo4j-version:
+    description: 'Neo4j version to use'
+    required: false
+    default: '5.21'
+  neo4j-password:
+    description: 'Password for Neo4j'
+    required: false
+    default: 'cognee_test_password'
+outputs:
+  neo4j-url:
+    description: 'Neo4j connection URL'
+    value: 'bolt://localhost:7687'
+  neo4j-username:
+    description: 'Neo4j username'
+    value: 'neo4j'
+  neo4j-password:
+    description: 'Neo4j password'
+    value: ${{ inputs.neo4j-password }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Start Neo4j with GDS
+      shell: bash
+      run: |
+        docker run -d \
+          --name neo4j-test \
+          -p 7474:7474 -p 7687:7687 \
+          -e NEO4J_AUTH="neo4j/${{ inputs.neo4j-password }}" \
+          -e NEO4J_PLUGINS='["apoc", "graph-data-science"]' \
+          -e NEO4J_dbms_security_procedures_unrestricted="apoc.*,gds.*" \
+          -e NEO4J_apoc_export_file_enabled=true \
+          -e NEO4J_apoc_import_file_enabled=true \
+          neo4j:${{ inputs.neo4j-version }}
+    
+    - name: Wait for Neo4j to be ready
+      shell: bash
+      run: |
+        echo "Waiting for Neo4j to start..."
+        timeout=60
+        counter=0
+        
+        while [ $counter -lt $timeout ]; do
+          if docker exec neo4j-test cypher-shell -u neo4j -p "${{ inputs.neo4j-password }}" "RETURN 1" > /dev/null 2>&1; then
+            echo "Neo4j is ready!"
+            break
+          fi
+          echo "Waiting... ($counter/$timeout)"
+          sleep 2
+          counter=$((counter + 2))
+        done
+        
+        if [ $counter -ge $timeout ]; then
+          echo "Neo4j failed to start within $timeout seconds"
+          docker logs neo4j-test
+          exit 1
+        fi
+    
+    - name: Verify GDS is available
+      shell: bash
+      run: |
+        echo "Verifying Graph Data Science library is available..."
+        docker exec neo4j-test cypher-shell -u neo4j -p "${{ inputs.neo4j-password }}" \
+          "CALL gds.version() YIELD gdsVersion RETURN gdsVersion"
+        echo "GDS verification complete!"

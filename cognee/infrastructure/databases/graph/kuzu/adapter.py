@@ -21,6 +21,8 @@ from cognee.infrastructure.databases.graph.graph_db_interface import (
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
+from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
+from cognee.tasks.temporal_graph.models import Timestamp
 
 logger = get_logger()
 
@@ -42,6 +44,7 @@ class KuzuAdapter(GraphDBInterface):
         self.connection: Optional[Connection] = None
         self.executor = ThreadPoolExecutor()
         self._initialize_connection()
+        self.KUZU_ASYNC_LOCK = asyncio.Lock()
 
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
@@ -105,6 +108,18 @@ class KuzuAdapter(GraphDBInterface):
 
             self.db.init_database()
             self.connection = Connection(self.db)
+
+            try:
+                self.connection.execute("INSTALL JSON;")
+            except Exception as e:
+                logger.info(f"JSON extension already installed or not needed: {e}")
+
+            try:
+                self.connection.execute("LOAD EXTENSION JSON;")
+                logger.info("Loaded JSON extension")
+            except Exception as e:
+                logger.info(f"JSON extension already loaded or unavailable: {e}")
+
             # Create node table with essential fields and timestamp
             self.connection.execute("""
                 CREATE NODE TABLE IF NOT EXISTS Node(
@@ -136,6 +151,11 @@ class KuzuAdapter(GraphDBInterface):
             from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
             s3_file_storage = S3FileStorage("")
+
+            if self.connection:
+                async with self.KUZU_ASYNC_LOCK:
+                    self.connection.execute("CHECKPOINT;")
+
             s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
 
     async def pull_from_s3(self) -> None:
@@ -145,7 +165,7 @@ class KuzuAdapter(GraphDBInterface):
         try:
             s3_file_storage.s3.get(self.db_path, self.temp_graph_file, recursive=True)
         except FileNotFoundError:
-            pass
+            logger.warning(f"Kuzu S3 storage file not found: {self.db_path}")
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
@@ -1524,7 +1544,7 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Error during database clearing: {e}")
             raise
 
-    async def get_document_subgraph(self, content_hash: str):
+    async def get_document_subgraph(self, data_id: str):
         """
         Get all nodes that should be deleted when removing a document.
 
@@ -1535,7 +1555,7 @@ class KuzuAdapter(GraphDBInterface):
         Parameters:
         -----------
 
-            - content_hash (str): The identifier for the document to query against.
+            - data_id (str): The identifier for the document to query against.
 
         Returns:
         --------
@@ -1545,7 +1565,7 @@ class KuzuAdapter(GraphDBInterface):
         """
         query = """
         MATCH (doc:Node)
-        WHERE (doc.type = 'TextDocument' OR doc.type = 'PdfDocument') AND doc.name = $content_hash
+        WHERE (doc.type = 'TextDocument' OR doc.type = 'PdfDocument' OR doc.type = 'AudioDocument' OR doc.type = 'ImageDocument' OR doc.type = 'UnstructuredDocument') AND doc.id = $data_id
 
         OPTIONAL MATCH (doc)<-[e1:EDGE]-(chunk:Node)
         WHERE e1.relationship_name = 'is_part_of' AND chunk.type = 'DocumentChunk'
@@ -1556,7 +1576,7 @@ class KuzuAdapter(GraphDBInterface):
             MATCH (entity)<-[e3:EDGE]-(otherChunk:Node)-[e4:EDGE]->(otherDoc:Node)
             WHERE e3.relationship_name = 'contains'
             AND e4.relationship_name = 'is_part_of'
-            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument')
+            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument' OR otherDoc.type = 'AudioDocument' OR otherDoc.type = 'ImageDocument' OR otherDoc.type = 'UnstructuredDocument')
             AND otherDoc.id <> doc.id
         }
 
@@ -1572,7 +1592,7 @@ class KuzuAdapter(GraphDBInterface):
             AND e9.relationship_name = 'is_part_of'
             AND otherEntity.type = 'Entity'
             AND otherChunk.type = 'DocumentChunk'
-            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument')
+            AND (otherDoc.type = 'TextDocument' OR otherDoc.type = 'PdfDocument' OR otherDoc.type = 'AudioDocument' OR otherDoc.type = 'ImageDocument' OR otherDoc.type = 'UnstructuredDocument')
             AND otherDoc.id <> doc.id
         }
 
@@ -1583,7 +1603,7 @@ class KuzuAdapter(GraphDBInterface):
             COLLECT(DISTINCT made_node) as made_from_nodes,
             COLLECT(DISTINCT type) as orphan_types
         """
-        result = await self.query(query, {"content_hash": f"text_{content_hash}"})
+        result = await self.query(query, {"data_id": f"{data_id}"})
         if not result or not result[0]:
             return None
 
@@ -1626,3 +1646,185 @@ class KuzuAdapter(GraphDBInterface):
         """
         result = await self.query(query)
         return [record[0] for record in result] if result else []
+
+    async def get_last_user_interaction_ids(self, limit: int) -> List[str]:
+        """
+        Retrieve the IDs of the most recent CogneeUserInteraction nodes.
+        Parameters:
+        -----------
+        - limit (int): The maximum number of interaction IDs to return.
+        Returns:
+        --------
+        - List[str]: A list of interaction IDs, sorted by created_at descending.
+        """
+
+        query = """
+        MATCH (n)
+        WHERE n.type = 'CogneeUserInteraction'
+        RETURN n.id as id
+        ORDER BY n.created_at DESC
+        LIMIT $limit
+        """
+        rows = await self.query(query, {"limit": limit})
+
+        id_list = [row[0] for row in rows]
+        return id_list
+
+    async def apply_feedback_weight(
+        self,
+        node_ids: List[str],
+        weight: float,
+    ) -> None:
+        """
+        Increment `feedback_weight` inside r.properties JSON for edges where
+        relationship_name = 'used_graph_element_to_answer'.
+
+        """
+        # Step 1: fetch matching edges
+        query = """
+            MATCH (n:Node)-[r:EDGE]->()
+            WHERE n.id IN $node_ids AND r.relationship_name = 'used_graph_element_to_answer'
+            RETURN r.properties, n.id
+            """
+        results = await self.query(query, {"node_ids": node_ids})
+
+        # Step 2: update JSON client-side
+        updates = []
+        for props_json, source_id in results:
+            try:
+                props = json.loads(props_json) if props_json else {}
+            except json.JSONDecodeError:
+                props = {}
+
+            props["feedback_weight"] = props.get("feedback_weight", 0) + weight
+            updates.append((source_id, json.dumps(props)))
+
+        # Step 3: write back
+        for node_id, new_props in updates:
+            update_query = """
+                MATCH (n:Node)-[r:EDGE]->()
+                WHERE n.id = $node_id AND r.relationship_name = 'used_graph_element_to_answer'
+                SET r.properties = $props
+                """
+            await self.query(update_query, {"node_id": node_id, "props": new_props})
+
+    async def collect_events(self, ids: List[str]) -> Any:
+        """
+        Collect all Event-type nodes reachable within 1..2 hops
+        from the given node IDs.
+
+        Args:
+            graph_engine: Object exposing an async .query(str) -> Any
+            ids: List of node IDs (strings)
+
+        Returns:
+            List of events
+        """
+
+        event_collection_cypher = """UNWIND [{quoted}] AS uid
+            MATCH (start {{id: uid}})
+            MATCH (start)-[*1..2]-(event)
+            WHERE event.type = 'Event'
+            WITH DISTINCT event
+            RETURN collect(event) AS events;
+        """
+
+        query = event_collection_cypher.format(quoted=ids)
+        result = await self.query(query)
+        events = []
+        for node in result[0][0]:
+            props = json.loads(node["properties"])
+
+            event = {
+                "id": node["id"],
+                "name": node["name"],
+                "description": props.get("description"),
+            }
+
+            if props.get("location"):
+                event["location"] = props["location"]
+
+            events.append(event)
+
+        return [{"events": events}]
+
+    async def collect_time_ids(
+        self,
+        time_from: Optional[Timestamp] = None,
+        time_to: Optional[Timestamp] = None,
+    ) -> str:
+        """
+        Collect IDs of Timestamp nodes between time_from and time_to.
+
+        Args:
+            graph_engine: Object exposing an async .query(query, params) -> list[dict]
+            time_from: Lower bound int (inclusive), optional
+            time_to: Upper bound int (inclusive), optional
+
+        Returns:
+            A string of quoted IDs:  "'id1', 'id2', 'id3'"
+            (ready for use in a Cypher UNWIND clause).
+        """
+
+        ids: List[str] = []
+
+        if time_from and time_to:
+            time_from = date_to_int(time_from)
+            time_to = date_to_int(time_to)
+
+            cypher = f"""
+            MATCH (n:Node)
+            WHERE n.type = 'Timestamp'
+            // Extract time_at from the JSON string and cast to INT64
+            WITH n, json_extract(n.properties, '$.time_at') AS t_str
+            WITH n,
+                 CASE
+                   WHEN t_str IS NULL OR t_str = '' THEN NULL
+                   ELSE CAST(t_str AS INT64)
+                 END AS t
+            WHERE t >= {time_from}
+            AND t <= {time_to}
+            RETURN n.id as id
+            """
+
+        elif time_from:
+            time_from = date_to_int(time_from)
+
+            cypher = f"""
+            MATCH (n:Node)
+            WHERE n.type = 'Timestamp'
+            // Extract time_at from the JSON string and cast to INT64
+            WITH n, json_extract(n.properties, '$.time_at') AS t_str
+            WITH n,
+                 CASE
+                   WHEN t_str IS NULL OR t_str = '' THEN NULL
+                   ELSE CAST(t_str AS INT64)
+                 END AS t
+            WHERE t >= {time_from}
+            RETURN n.id as id
+            """
+
+        elif time_to:
+            time_to = date_to_int(time_to)
+
+            cypher = f"""
+            MATCH (n:Node)
+            WHERE n.type = 'Timestamp'
+            // Extract time_at from the JSON string and cast to INT64
+            WITH n, json_extract(n.properties, '$.time_at') AS t_str
+            WITH n,
+                 CASE
+                   WHEN t_str IS NULL OR t_str = '' THEN NULL
+                   ELSE CAST(t_str AS INT64)
+                 END AS t
+            WHERE t <= {time_to}
+            RETURN n.id as id
+            """
+
+        else:
+            return ids
+
+        time_nodes = await self.query(cypher)
+        time_ids_list = [item[0] for item in time_nodes]
+
+        return ", ".join(f"'{uid}'" for uid in time_ids_list)

@@ -2,8 +2,11 @@ import time
 from cognee.shared.logging_utils import get_logger
 from typing import List, Dict, Union, Optional, Type
 
-from cognee.exceptions import InvalidValueError
-from cognee.modules.graph.exceptions import EntityNotFoundError, EntityAlreadyExistsError
+from cognee.modules.graph.exceptions import (
+    EntityNotFoundError,
+    EntityAlreadyExistsError,
+    InvalidDimensionsError,
+)
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Node, Edge
 from cognee.modules.graph.cognee_graph.CogneeAbstractGraph import CogneeAbstractGraph
@@ -66,15 +69,14 @@ class CogneeGraph(CogneeAbstractGraph):
         node_name: Optional[List[str]] = None,
     ) -> None:
         if node_dimension < 1 or edge_dimension < 1:
-            raise InvalidValueError(message="Dimensions must be positive integers")
-
+            raise InvalidDimensionsError()
         try:
             import time
 
             start_time = time.time()
 
             # Determine projection strategy
-            if node_type is not None and node_name is not None:
+            if node_type is not None and node_name not in [None, [], ""]:
                 nodes_data, edges_data = await adapter.get_nodeset_subgraph(
                     node_type=node_type, node_name=node_name
                 )
@@ -170,28 +172,19 @@ class CogneeGraph(CogneeAbstractGraph):
 
             for edge in self.edges:
                 relationship_type = edge.attributes.get("relationship_type")
-                if relationship_type and relationship_type in embedding_map:
-                    edge.attributes["vector_distance"] = embedding_map[relationship_type]
+                distance = embedding_map.get(relationship_type, None)
+                if distance is not None:
+                    edge.attributes["vector_distance"] = distance
 
         except Exception as ex:
             logger.error(f"Error mapping vector distances to edges: {str(ex)}")
             raise ex
 
     async def calculate_top_triplet_importances(self, k: int) -> List:
-        min_heap = []
+        def score(edge):
+            n1 = edge.node1.attributes.get("vector_distance", 1)
+            n2 = edge.node2.attributes.get("vector_distance", 1)
+            e = edge.attributes.get("vector_distance", 1)
+            return n1 + n2 + e
 
-        for i, edge in enumerate(self.edges):
-            source_node = self.get_node(edge.node1.id)
-            target_node = self.get_node(edge.node2.id)
-
-            source_distance = source_node.attributes.get("vector_distance", 1) if source_node else 1
-            target_distance = target_node.attributes.get("vector_distance", 1) if target_node else 1
-            edge_distance = edge.attributes.get("vector_distance", 1)
-
-            total_distance = source_distance + target_distance + edge_distance
-
-            heapq.heappush(min_heap, (-total_distance, i, edge))
-            if len(min_heap) > k:
-                heapq.heappop(min_heap)
-
-        return [edge for _, _, edge in sorted(min_heap)]
+        return heapq.nsmallest(k, self.edges, key=score)
