@@ -40,6 +40,22 @@ class Storage(Protocol):
         """
         pass
 
+    def get_size(self, file_path: str) -> int:
+        """
+        Get the size of a specified file in bytes.
+
+        Parameters:
+        -----------
+
+            - file_path (str): The path of the file to get the size of.
+
+        Returns:
+        --------
+
+            - int: The size of the file in bytes.
+        """
+        pass
+
     def store(self, file_path: str, data: Union[BinaryIO, str], overwrite: bool):
         """
         Store data at the specified file path.

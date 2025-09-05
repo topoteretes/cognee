@@ -6,6 +6,7 @@ from functools import reduce
 from fastapi.encoders import jsonable_encoder
 from typing import Callable, List, Optional, Tuple, Type, Union
 
+
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.user_qa_feedback import UserQAFeedback
 from cognee.modules.retrieval.utils.completion import generate_completion

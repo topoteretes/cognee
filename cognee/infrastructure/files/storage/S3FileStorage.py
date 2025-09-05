@@ -146,6 +146,11 @@ class S3FileStorage(Storage):
             self.s3.isfile, os.path.join(self.storage_path.replace("s3://", ""), file_path)
         )
 
+    async def get_size(self, file_path: str) -> int:
+        return await run_async(
+            self.s3.size, os.path.join(self.storage_path.replace("s3://", ""), file_path)
+        )
+
     async def ensure_directory_exists(self, directory_path: str = ""):
         """
         Ensure that the specified directory exists, creating it if necessary.
