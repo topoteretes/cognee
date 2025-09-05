@@ -47,3 +47,7 @@ export default async function fetch(url: string, options: RequestInit = {}): Pro
       return Promise.reject(error);
     });
 }
+
+fetch.checkHealth = () => {
+  return global.fetch(`${backendApiUrl.replace("/api", "")}/health`);
+};
