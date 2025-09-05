@@ -1,48 +1,42 @@
+import os
+from typing import Optional
+from fastapi import Depends, HTTPException
+from ..models import User
 from ..get_fastapi_users import get_fastapi_users
+from .get_default_user import get_default_user
+from cognee.shared.logging_utils import get_logger
 
+
+logger = get_logger("get_authenticated_user")
+
+# Check environment variable to determine authentication requirement
+REQUIRE_AUTHENTICATION = (
+    os.getenv("REQUIRE_AUTHENTICATION", "false").lower() == "true"
+    or os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true"
+)
 
 fastapi_users = get_fastapi_users()
 
-get_authenticated_user = fastapi_users.current_user(active=True)
-
-# from types import SimpleNamespace
-
-# from ..get_fastapi_users import get_fastapi_users
-# from fastapi import HTTPException, Security
-# from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-# import os
-# import jwt
-
-# from uuid import UUID
-
-# fastapi_users = get_fastapi_users()
-
-# # Allows Swagger to understand authorization type and allow single sign on for the Swagger docs to test backend
-# bearer_scheme = HTTPBearer(scheme_name="BearerAuth", description="Paste **Bearer &lt;JWT&gt;**")
+_auth_dependency = fastapi_users.current_user(active=True, optional=not REQUIRE_AUTHENTICATION)
 
 
-# async def get_authenticated_user(
-#     creds: HTTPAuthorizationCredentials = Security(bearer_scheme),
-# ) -> SimpleNamespace:
-#     """
-#     Extract and validate the JWT presented in the Authorization header.
-#     """
-#     if creds is None:  # header missing
-#         raise HTTPException(status_code=401, detail="Not authenticated")
+async def get_authenticated_user(
+    user: Optional[User] = Depends(_auth_dependency),
+) -> User:
+    """
+    Get authenticated user with environment-controlled behavior:
+    - If REQUIRE_AUTHENTICATION=true: Enforces authentication (raises 401 if not authenticated)
+    - If REQUIRE_AUTHENTICATION=false: Falls back to default user if not authenticated
 
-#     if creds.scheme.lower() != "bearer":  # shouldn't happen extra guard
-#         raise HTTPException(status_code=401, detail="Invalid authentication scheme")
+    Always returns a User object for consistent typing.
+    """
+    if user is None:
+        # When authentication is optional and user is None, use default user
+        try:
+            user = await get_default_user()
+        except Exception as e:
+            # Convert any get_default_user failure into a proper HTTP 500 error
+            logger.error(f"Failed to create default user: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to create default user: {str(e)}")
 
-#     token = creds.credentials
-#     try:
-#         payload = jwt.decode(
-#             token, os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret"), algorithms=["HS256"]
-#         )
-
-#         auth_data = SimpleNamespace(id=UUID(payload["user_id"]))
-#         return auth_data
-
-#     except jwt.ExpiredSignatureError:
-#         raise HTTPException(status_code=401, detail="Token has expired")
-#     except jwt.InvalidTokenError:
-#         raise HTTPException(status_code=401, detail="Invalid token")
+    return user

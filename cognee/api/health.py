@@ -1,5 +1,6 @@
 """Health check system for cognee API."""
 
+from io import BytesIO
 import time
 import asyncio
 from datetime import datetime, timezone
@@ -51,8 +52,9 @@ class HealthChecker:
             engine = get_relational_engine()
 
             # Test connection by creating a session
-            async with engine.get_async_session():
-                pass
+            session = engine.get_session()
+            if session:
+                session.close()
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
@@ -116,10 +118,7 @@ class HealthChecker:
             engine = await get_graph_engine()
 
             # Test basic operation with actual graph query
-            if hasattr(engine, "execute"):
-                # For SQL-like graph DBs (Neo4j, Memgraph)
-                await engine.execute("MATCH () RETURN count(*) LIMIT 1")
-            elif hasattr(engine, "query"):
+            if hasattr(engine, "query"):
                 # For other graph engines
                 await engine.query("MATCH () RETURN count(*) LIMIT 1", {})
             # If engine exists but no test method, consider it healthy
@@ -166,8 +165,8 @@ class HealthChecker:
             else:
                 # For S3, test basic operations
                 test_path = "health_check_test"
-                await storage.store(test_path, b"test")
-                await storage.delete(test_path)
+                await storage.store(test_path, BytesIO(b"test"))
+                await storage.remove(test_path)
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
@@ -224,7 +223,7 @@ class HealthChecker:
 
             # Test actual embedding generation with minimal text
             engine = get_embedding_engine()
-            await engine.embed_text("test")
+            await engine.embed_text(["test"])
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(

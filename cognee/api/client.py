@@ -24,6 +24,7 @@ from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
 from cognee.api.v1.cognify.routers import get_code_pipeline_router, get_cognify_router
 from cognee.api.v1.search.routers import get_search_router
+from cognee.api.v1.memify.routers import get_memify_router
 from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.delete.routers import get_delete_router
 from cognee.api.v1.responses.routers import get_responses_router
@@ -36,6 +37,7 @@ from cognee.api.v1.users.routers import (
     get_users_router,
     get_visualize_router,
 )
+from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
 logger = get_logger()
 
@@ -113,7 +115,11 @@ def custom_openapi():
         },
     }
 
-    openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
+    if REQUIRE_AUTHENTICATION:
+        openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
+
+    # Remove global security requirement - let individual endpoints specify their own security
+    # openapi_schema["security"] = [{"BearerAuth": []}, {"CookieAuth": []}]
 
     app.openapi_schema = openapi_schema
 
@@ -232,6 +238,8 @@ app.include_router(
 app.include_router(get_add_router(), prefix="/api/v1/add", tags=["add"])
 
 app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognify"])
+
+app.include_router(get_memify_router(), prefix="/api/v1/memify", tags=["memify"])
 
 app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"])
 
