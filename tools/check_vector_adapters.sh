@@ -6,8 +6,8 @@ set -e  # Exit on any error
 
 echo "🔍 Discovering Vector Database Adapters..."
 
-# Ensure we're in the right directory
-cd "$(dirname "$0")"
+# Ensure we're in the project root directory
+cd "$(dirname "$0")/.."
 
 # Activate virtual environment
 source .venv/bin/activate

@@ -8,12 +8,14 @@ on:
     branches: [ main, dev ]
     paths:
       - 'cognee/infrastructure/databases/**'
+      - 'tools/check_*_adapters.sh'
       - 'mypy.ini'
       - '.github/workflows/database_protocol_mypy_check.yml'
   pull_request:
     branches: [ main, dev ]
     paths:
       - 'cognee/infrastructure/databases/**'
+      - 'tools/check_*_adapters.sh'
       - 'mypy.ini'
       - '.github/workflows/database_protocol_mypy_check.yml'
 
@@ -38,76 +40,13 @@ jobs:
           python-version: '3.11.x'
 
       - name: Discover and Check Vector Database Adapters
-        run: |
-          echo "🔍 Discovering Vector Database Adapters..."
-          
-          # Find all *Adapter.py files in vector database directories
-          vector_adapters=$(find cognee/infrastructure/databases/vector -name "*Adapter.py" -type f | sort)
-          
-          if [ -z "$vector_adapters" ]; then
-            echo "No vector database adapters found"
-          else
-            echo "Found vector database adapters:"
-            echo "$vector_adapters" | sed 's/^/  • /'
-            echo ""
-            
-            echo "Running MyPy on vector database adapters..."
-            for adapter in $vector_adapters; do
-              echo "Checking: $adapter"
-              uv run mypy "$adapter" \
-                --config-file mypy.ini \
-                --show-error-codes \
-                --no-error-summary
-            done
-          fi
+        run: ./tools/check_vector_adapters.sh
 
       - name: Discover and Check Graph Database Adapters
-        run: |
-          echo "🔍 Discovering Graph Database Adapters..."
-          
-          # Find all adapter.py and *adapter.py files in graph database directories, excluding utility files
-          graph_adapters=$(find cognee/infrastructure/databases/graph -name "*adapter.py" -o -name "adapter.py" | grep -v "use_graph_adapter.py" | sort)
-          
-          if [ -z "$graph_adapters" ]; then
-            echo "No graph database adapters found"
-          else
-            echo "Found graph database adapters:"
-            echo "$graph_adapters" | sed 's/^/  • /'
-            echo ""
-            
-            echo "Running MyPy on graph database adapters..."
-            for adapter in $graph_adapters; do
-              echo "Checking: $adapter"
-              uv run mypy "$adapter" \
-                --config-file mypy.ini \
-                --show-error-codes \
-                --no-error-summary
-            done
-          fi
+        run: ./tools/check_graph_adapters.sh
 
       - name: Discover and Check Hybrid Database Adapters
-        run: |
-          echo "🔍 Discovering Hybrid Database Adapters..."
-          
-          # Find all *Adapter.py files in hybrid database directories
-          hybrid_adapters=$(find cognee/infrastructure/databases/hybrid -name "*Adapter.py" -type f | sort)
-          
-          if [ -z "$hybrid_adapters" ]; then
-            echo "No hybrid database adapters found"
-          else
-            echo "Found hybrid database adapters:"
-            echo "$hybrid_adapters" | sed 's/^/  • /'
-            echo ""
-            
-            echo "Running MyPy on hybrid database adapters..."
-            for adapter in $hybrid_adapters; do
-              echo "Checking: $adapter"
-              uv run mypy "$adapter" \
-                --config-file mypy.ini \
-                --show-error-codes \
-                --no-error-summary
-            done
-          fi
+        run: ./tools/check_hybrid_adapters.sh
 
       - name: Protocol Compliance Summary
         run: |
@@ -118,6 +57,12 @@ jobs:
           echo "  • Graph Adapters: cognee/infrastructure/databases/graph/**/*adapter.py"
           echo "  • Hybrid Adapters: cognee/infrastructure/databases/hybrid/**/*Adapter.py"
           echo ""
+          echo "🚀 Using Dedicated Scripts:"
+          echo "  • Vector: ./tools/check_vector_adapters.sh"
+          echo "  • Graph: ./tools/check_graph_adapters.sh"
+          echo "  • Hybrid: ./tools/check_hybrid_adapters.sh"
+          echo "  • All: ./tools/check_all_adapters.sh"
+          echo ""
           echo "🎯 Purpose: Enforce that database adapters are properly typed"
           echo "🔧 MyPy Configuration: mypy.ini (strict mode enabled)"
           echo "🚀 Maintenance-Free: Automatically discovers new adapters"
@@ -126,5 +71,6 @@ jobs:
           echo "   All database adapters must be properly typed."
           echo ""
           echo "🛠️  To fix type issues locally, run:"
-          echo "   source .venv/bin/activate"
-          echo "   mypy <adapter_file_path> --config-file mypy.ini"
+          echo "   ./tools/check_all_adapters.sh  # Check all adapters"
+          echo "   ./tools/check_vector_adapters.sh  # Check vector adapters only"
+          echo "   mypy <adapter_file_path> --config-file mypy.ini  # Check specific file"
