@@ -2,7 +2,7 @@
 
 from cognee.shared.logging_utils import get_logger
 import json
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional, Tuple
 import aiohttp
 from uuid import UUID
 
@@ -14,7 +14,7 @@ logger = get_logger()
 class UUIDEncoder(json.JSONEncoder):
     """Custom JSON encoder that handles UUID objects."""
 
-    def default(self, obj: Union[UUID, Any]) -> Any:
+    def default(self, obj):
         if isinstance(obj, UUID):
             return str(obj)
         return super().default(obj)
@@ -36,7 +36,7 @@ class RemoteKuzuAdapter(KuzuAdapter):
         self.api_url = api_url
         self.username = username
         self.password = password
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session = None
         self._schema_initialized = False
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -45,13 +45,13 @@ class RemoteKuzuAdapter(KuzuAdapter):
             self._session = aiohttp.ClientSession()
         return self._session
 
-    async def close(self) -> None:
+    async def close(self):
         """Close the adapter and its session."""
         if self._session and not self._session.closed:
             await self._session.close()
             self._session = None
 
-    async def _make_request(self, endpoint: str, data: dict[str, Any]) -> dict[str, Any]:
+    async def _make_request(self, endpoint: str, data: dict) -> dict:
         """Make a request to the Kuzu API."""
         url = f"{self.api_url}{endpoint}"
         session = await self._get_session()
@@ -73,15 +73,13 @@ class RemoteKuzuAdapter(KuzuAdapter):
                         status=response.status,
                         message=error_detail,
                     )
-                return await response.json()  # type: ignore
+                return await response.json()
         except aiohttp.ClientError as e:
             logger.error(f"API request failed: {str(e)}")
             logger.error(f"Request data: {data}")
             raise
 
-    async def query(
-        self, query: str, params: Optional[dict[str, Any]] = None
-    ) -> List[Tuple[Any, ...]]:
+    async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """Execute a Kuzu query via the REST API."""
         try:
             # Initialize schema if needed
@@ -128,7 +126,7 @@ class RemoteKuzuAdapter(KuzuAdapter):
             logger.error(f"Failed to check schema: {e}")
             return False
 
-    async def _create_schema(self) -> None:
+    async def _create_schema(self):
         """Create the required schema tables."""
         try:
             # Create Node table if it doesn't exist
@@ -182,7 +180,7 @@ class RemoteKuzuAdapter(KuzuAdapter):
             logger.error(f"Failed to create schema: {e}")
             raise
 
-    async def _initialize_schema(self) -> None:
+    async def _initialize_schema(self):
         """Initialize the database schema if it doesn't exist."""
         if self._schema_initialized:
             return

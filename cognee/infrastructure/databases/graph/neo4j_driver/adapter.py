@@ -8,11 +8,11 @@ from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
 from contextlib import asynccontextmanager
-from typing import Optional, Any, List, Dict, Type, Tuple, Union, AsyncGenerator
+from typing import Optional, Any, List, Dict, Type, Tuple
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
-from cognee.modules.engine.models.Timestamp import Timestamp
+from cognee.tasks.temporal_graph.models import Timestamp
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
@@ -79,14 +79,14 @@ class Neo4jAdapter(GraphDBInterface):
         )
 
     @asynccontextmanager
-    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
+    async def get_session(self) -> AsyncSession:
         """
         Get a session for database operations.
         """
         async with self.driver.session(database=self.graph_database_name) as session:
             yield session
 
-    @deadlock_retry()  # type: ignore
+    @deadlock_retry()
     async def query(
         self,
         query: str,
@@ -112,7 +112,6 @@ class Neo4jAdapter(GraphDBInterface):
             async with self.get_session() as session:
                 result = await session.run(query, parameters=params)
                 data = await result.data()
-                # TODO: why we don't return List[Dict[str, Any]]?
                 return data
         except Neo4jError as error:
             logger.error("Neo4j query error: %s", error, exc_info=True)
@@ -142,29 +141,21 @@ class Neo4jAdapter(GraphDBInterface):
         )
         return results[0]["node_exists"] if len(results) > 0 else False
 
-    async def add_node(
-        self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None
-    ) -> None:
+    async def add_node(self, node: DataPoint):
         """
-        Add a new node to the database based on the provided DataPoint object or string ID.
+        Add a new node to the database based on the provided DataPoint object.
 
         Parameters:
         -----------
 
-            - node (Union[DataPoint, str]): An instance of DataPoint or string ID representing the node to add.
-            - properties (Optional[Dict[str, Any]]): Properties to set on the node when node is a string ID.
+            - node (DataPoint): An instance of DataPoint representing the node to add.
+
+        Returns:
+        --------
+
+            The result of the query execution, typically the ID of the added node.
         """
-        if isinstance(node, str):
-            # TODO: this was not handled in the original code, check if it is correct
-            # Handle string node ID with properties parameter
-            node_id = node
-            node_label = "Node"  # Default label for string nodes
-            serialized_properties = self.serialize_properties(properties or {})
-        else:
-            # Handle DataPoint object
-            node_id = str(node.id)
-            node_label = type(node).__name__
-            serialized_properties = self.serialize_properties(node.model_dump())
+        serialized_properties = self.serialize_properties(node.model_dump())
 
         query = dedent(
             f"""MERGE (node: `{BASE_LABEL}`{{id: $node_id}})
@@ -176,16 +167,16 @@ class Neo4jAdapter(GraphDBInterface):
         )
 
         params = {
-            "node_id": node_id,
-            "node_label": node_label,
+            "node_id": str(node.id),
+            "node_label": type(node).__name__,
             "properties": serialized_properties,
         }
 
-        await self.query(query, params)
+        return await self.query(query, params)
 
-    @record_graph_changes  # type: ignore
-    @override_distributed(queued_add_nodes)  # type: ignore
-    async def add_nodes(self, nodes: List[DataPoint]) -> None:
+    @record_graph_changes
+    @override_distributed(queued_add_nodes)
+    async def add_nodes(self, nodes: list[DataPoint]) -> None:
         """
         Add multiple nodes to the database in a single query.
 
@@ -210,7 +201,7 @@ class Neo4jAdapter(GraphDBInterface):
         RETURN ID(labeledNode) AS internal_id, labeledNode.id AS nodeId
         """
 
-        node_params = [
+        nodes = [
             {
                 "node_id": str(node.id),
                 "label": type(node).__name__,
@@ -219,9 +210,10 @@ class Neo4jAdapter(GraphDBInterface):
             for node in nodes
         ]
 
-        await self.query(query, dict(nodes=node_params))
+        results = await self.query(query, dict(nodes=nodes))
+        return results
 
-    async def extract_node(self, node_id: str) -> Optional[Dict[str, Any]]:
+    async def extract_node(self, node_id: str):
         """
         Retrieve a single node from the database by its ID.
 
@@ -239,7 +231,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return results[0] if len(results) > 0 else None
 
-    async def extract_nodes(self, node_ids: List[str]) -> List[Dict[str, Any]]:
+    async def extract_nodes(self, node_ids: List[str]):
         """
         Retrieve multiple nodes from the database by their IDs.
 
@@ -264,7 +256,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return [result["node"] for result in results]
 
-    async def delete_node(self, node_id: str) -> None:
+    async def delete_node(self, node_id: str):
         """
         Remove a node from the database identified by its ID.
 
@@ -281,7 +273,7 @@ class Neo4jAdapter(GraphDBInterface):
         query = f"MATCH (node: `{BASE_LABEL}`{{id: $node_id}}) DETACH DELETE node"
         params = {"node_id": node_id}
 
-        await self.query(query, params)
+        return await self.query(query, params)
 
     async def delete_nodes(self, node_ids: list[str]) -> None:
         """
@@ -304,18 +296,18 @@ class Neo4jAdapter(GraphDBInterface):
 
         params = {"node_ids": node_ids}
 
-        await self.query(query, params)
+        return await self.query(query, params)
 
-    async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
+    async def has_edge(self, from_node: UUID, to_node: UUID, edge_label: str) -> bool:
         """
         Check if an edge exists between two nodes with the specified IDs and edge label.
 
         Parameters:
         -----------
 
-            - source_id (str): The ID of the node from which the edge originates.
-            - target_id (str): The ID of the node to which the edge points.
-            - relationship_name (str): The label of the edge to check for existence.
+            - from_node (UUID): The ID of the node from which the edge originates.
+            - to_node (UUID): The ID of the node to which the edge points.
+            - edge_label (str): The label of the edge to check for existence.
 
         Returns:
         --------
@@ -323,28 +315,27 @@ class Neo4jAdapter(GraphDBInterface):
             - bool: True if the edge exists, otherwise False.
         """
         query = f"""
-            MATCH (from_node: `{BASE_LABEL}`)-[:`{relationship_name}`]->(to_node: `{BASE_LABEL}`)
-            WHERE from_node.id = $source_id AND to_node.id = $target_id
+            MATCH (from_node: `{BASE_LABEL}`)-[:`{edge_label}`]->(to_node: `{BASE_LABEL}`)
+            WHERE from_node.id = $from_node_id AND to_node.id = $to_node_id
             RETURN COUNT(relationship) > 0 AS edge_exists
         """
 
         params = {
-            "source_id": str(source_id),
-            "target_id": str(target_id),
+            "from_node_id": str(from_node),
+            "to_node_id": str(to_node),
         }
 
         edge_exists = await self.query(query, params)
-        assert isinstance(edge_exists, bool), "Edge existence check should return a boolean"
         return edge_exists
 
-    async def has_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> List[bool]:
+    async def has_edges(self, edges):
         """
         Check if multiple edges exist based on provided edge criteria.
 
         Parameters:
         -----------
 
-            - edges: A list of edge specifications to check for existence. (source_id, target_id, relationship_name, properties)
+            - edges: A list of edge specifications to check for existence.
 
         Returns:
         --------
@@ -378,24 +369,29 @@ class Neo4jAdapter(GraphDBInterface):
 
     async def add_edge(
         self,
-        source_id: str,
-        target_id: str,
+        from_node: UUID,
+        to_node: UUID,
         relationship_name: str,
-        properties: Optional[Dict[str, Any]] = None,
-    ) -> None:
+        edge_properties: Optional[Dict[str, Any]] = {},
+    ):
         """
         Create a new edge between two nodes with specified properties.
 
         Parameters:
         -----------
 
-            - source_id (str): The ID of the source node of the edge.
-            - target_id (str): The ID of the target node of the edge.
+            - from_node (UUID): The ID of the source node of the edge.
+            - to_node (UUID): The ID of the target node of the edge.
             - relationship_name (str): The type/label of the edge to create.
-            - properties (Optional[Dict[str, Any]]): A dictionary of properties to assign
-              to the edge. (default None)
+            - edge_properties (Optional[Dict[str, Any]]): A dictionary of properties to assign
+              to the edge. (default {})
+
+        Returns:
+        --------
+
+            The result of the query execution, typically indicating the created edge.
         """
-        serialized_properties = self.serialize_properties(properties or {})
+        serialized_properties = self.serialize_properties(edge_properties)
 
         query = dedent(
             f"""\
@@ -409,13 +405,13 @@ class Neo4jAdapter(GraphDBInterface):
         )
 
         params = {
-            "from_node": str(source_id),  # Adding str as callsites may still be passing UUID
-            "to_node": str(target_id),
+            "from_node": str(from_node),
+            "to_node": str(to_node),
             "relationship_name": relationship_name,
             "properties": serialized_properties,
         }
 
-        await self.query(query, params)
+        return await self.query(query, params)
 
     def _flatten_edge_properties(self, properties: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -449,9 +445,9 @@ class Neo4jAdapter(GraphDBInterface):
 
         return flattened
 
-    @record_graph_changes  # type: ignore
-    @override_distributed(queued_add_edges)  # type: ignore
-    async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> None:
+    @record_graph_changes
+    @override_distributed(queued_add_edges)
+    async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
         """
         Add multiple edges between nodes in a single query.
 
@@ -482,10 +478,10 @@ class Neo4jAdapter(GraphDBInterface):
             ) YIELD rel
             RETURN rel"""
 
-        edge_params = [
+        edges = [
             {
-                "from_node": str(edge[0]),  # Adding str as callsites may still be passing UUID
-                "to_node": str(edge[1]),  # Adding str as callsites may still be passing UUID
+                "from_node": str(edge[0]),
+                "to_node": str(edge[1]),
                 "relationship_name": edge[2],
                 "properties": self._flatten_edge_properties(
                     {
@@ -499,12 +495,13 @@ class Neo4jAdapter(GraphDBInterface):
         ]
 
         try:
-            await self.query(query, dict(edges=edge_params))
+            results = await self.query(query, dict(edges=edges))
+            return results
         except Neo4jError as error:
             logger.error("Neo4j query error: %s", error, exc_info=True)
             raise error
 
-    async def get_edges(self, node_id: str) -> List[Tuple[str, str, str, Dict[str, Any]]]:
+    async def get_edges(self, node_id: str):
         """
         Retrieve all edges connected to a specified node.
 
