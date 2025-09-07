@@ -136,9 +136,7 @@ class LanceDBAdapter(VectorDBInterface):
             """
 
             id: UUID
-            vector: Vector[
-                vector_size
-            ]
+            vector: Vector[vector_size]
             payload: Dict[str, Any]
 
         if not await self.has_collection(collection_name):
