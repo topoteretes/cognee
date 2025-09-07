@@ -1,5 +1,5 @@
 import os
-from typing import Any, Optional, List, Type
+from typing import Any, Optional, List, Tuple, Type
 
 
 from operator import itemgetter
@@ -101,6 +101,8 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         graph_engine = await get_graph_engine()
 
+        triplets = []
+
         if time_from and time_to:
             ids = await graph_engine.collect_time_ids(time_from=time_from, time_to=time_to)
         elif time_from:
@@ -112,7 +114,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                 "No timestamps identified based on the query, performing retrieval using triplet search on events and entities."
             )
             triplets = await self.get_triplets(query)
-            return await self.resolve_edges_to_text(triplets)
+            return await self.resolve_edges_to_text(triplets), triplets
 
         if ids:
             relevant_events = await graph_engine.collect_events(ids=ids)
@@ -121,7 +123,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                 "No events identified based on timestamp filtering, performing retrieval using triplet search on events and entities."
             )
             triplets = await self.get_triplets(query)
-            return await self.resolve_edges_to_text(triplets)
+            return await self.resolve_edges_to_text(triplets), triplets
 
         vector_engine = get_vector_engine()
         query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
@@ -132,12 +134,12 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         top_k_events = await self.filter_top_k_events(relevant_events, vector_search_results)
 
-        return self.descriptions_to_string(top_k_events)
+        return self.descriptions_to_string(top_k_events), triplets
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
+    async def get_completion(self, query: str, context: Optional[Any] = None) -> List[str]:
         """Generates a response using the query and optional context."""
 
-        context = await self.get_context(query=query)
+        context, triplets = await self.get_context(query=query)
 
         completion = await generate_completion(
             query=query,
