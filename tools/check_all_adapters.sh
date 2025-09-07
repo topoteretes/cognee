@@ -7,26 +7,26 @@ set -e  # Exit on any error
 echo "🚀 Running MyPy checks on all database adapters..."
 echo ""
 
-# Ensure we're in the right directory
-cd "$(dirname "$0")"
+# Ensure we're in the project root directory
+cd "$(dirname "$0")/.."
 
 # Run all three adapter checks
 echo "========================================="
 echo "1️⃣  VECTOR DATABASE ADAPTERS"
 echo "========================================="
-./check_vector_adapters.sh
+./tools/check_vector_adapters.sh
 
 echo ""
 echo "========================================="
 echo "2️⃣  GRAPH DATABASE ADAPTERS"
 echo "========================================="
-./check_graph_adapters.sh
+./tools/check_graph_adapters.sh
 
 echo ""
 echo "========================================="
 echo "3️⃣  HYBRID DATABASE ADAPTERS"
 echo "========================================="
-./check_hybrid_adapters.sh
+./tools/check_hybrid_adapters.sh
 
 echo ""
 echo "🎉 All Database Adapters MyPy Checks Complete!"
