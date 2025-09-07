@@ -16,7 +16,7 @@ metrics_volume = modal.Volume.from_name("evaluation_dashboard_results", create_i
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install("streamlit", "plotly")
+    .pip_install("streamlit", "pandas", "plotly")
     .add_local_file(__file__, "/root/serve_dashboard.py")
 )
 

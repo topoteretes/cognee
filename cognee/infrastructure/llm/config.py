@@ -75,6 +75,13 @@ class LLMConfig(BaseSettings):
 
     def model_post_init(self, __context) -> None:
         """Initialize the BAML registry after the model is created."""
+        # Check if BAML is selected as structured output framework but not available
+        if self.structured_output_framework == "baml" and ClientRegistry is None:
+            raise ImportError(
+                "BAML is selected as structured output framework but not available. "
+                "Please install with 'pip install cognee[baml]' to use BAML extraction features."
+            )
+
         if ClientRegistry is not None:
             self.baml_registry = ClientRegistry()
             self.baml_registry.add_llm_client(

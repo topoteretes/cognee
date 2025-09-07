@@ -16,11 +16,6 @@ async def extract_content_graph(
 
     get_logger(level="INFO")
 
-    if config.baml_registry is None:
-        raise ImportError(
-            "BAML is not available. Please install with 'pip install cognee[baml]' to use BAML extraction features."
-        )
-
     # if response_model:
     #     # tb = TypeBuilder()
     #     # country = tb.union \
