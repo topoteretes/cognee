@@ -114,7 +114,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                 "No timestamps identified based on the query, performing retrieval using triplet search on events and entities."
             )
             triplets = await self.get_triplets(query)
-            return await self.resolve_edges_to_text(triplets), triplets
+            return await self.resolve_edges_to_text(triplets)
 
         if ids:
             relevant_events = await graph_engine.collect_events(ids=ids)
@@ -123,7 +123,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                 "No events identified based on timestamp filtering, performing retrieval using triplet search on events and entities."
             )
             triplets = await self.get_triplets(query)
-            return await self.resolve_edges_to_text(triplets), triplets
+            return await self.resolve_edges_to_text(triplets)
 
         vector_engine = get_vector_engine()
         query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
