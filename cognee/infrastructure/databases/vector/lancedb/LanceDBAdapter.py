@@ -57,7 +57,7 @@ class LanceDBAdapter(VectorDBInterface):
 
     def __init__(
         self,
-        url: Optional[str],  # TODO: consider if we want to make this required and/or api_key
+        url: Optional[str],
         api_key: Optional[str],
         embedding_engine: EmbeddingEngine,
     ):
@@ -138,7 +138,7 @@ class LanceDBAdapter(VectorDBInterface):
             id: UUID
             vector: Vector[
                 vector_size
-            ]  # TODO: double check and consider raising this later in Pydantic
+            ]
             payload: Dict[str, Any]
 
         if not await self.has_collection(collection_name):
