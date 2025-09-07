@@ -1,5 +1,5 @@
 import os
-from typing import Optional, ClassVar
+from typing import Optional, ClassVar, Any
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
@@ -69,7 +69,7 @@ class LLMConfig(BaseSettings):
     fallback_endpoint: str = ""
     fallback_model: str = ""
 
-    baml_registry: ClassVar = None
+    baml_registry: Optional[Any] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
