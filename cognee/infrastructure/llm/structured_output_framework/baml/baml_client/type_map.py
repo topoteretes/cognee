@@ -23,6 +23,8 @@ type_map = {
     "stream_types.DefaultContentPrediction": stream_types.DefaultContentPrediction,
     "types.DynamicKnowledgeGraph": types.DynamicKnowledgeGraph,
     "stream_types.DynamicKnowledgeGraph": stream_types.DynamicKnowledgeGraph,
+    "types.DynamicModel": types.DynamicModel,
+    "stream_types.DynamicModel": stream_types.DynamicModel,
     "types.Edge": types.Edge,
     "stream_types.Edge": stream_types.Edge,
     "types.ImageContent": types.ImageContent,

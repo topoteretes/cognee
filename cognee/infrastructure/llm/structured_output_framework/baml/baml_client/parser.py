@@ -23,6 +23,16 @@ class LlmResponseParser:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
+    def AcreateStructuredOutput(
+        self,
+        llm_response: str,
+        baml_options: BamlCallOptions = {},
+    ) -> types.DynamicModel:
+        result = self.__options.merge_options(baml_options).parse_response(
+            function_name="AcreateStructuredOutput", llm_response=llm_response, mode="request"
+        )
+        return typing.cast(types.DynamicModel, result)
+
     def ExtractCategories(
         self,
         llm_response: str,
@@ -79,6 +89,16 @@ class LlmStreamParser:
 
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
+
+    def AcreateStructuredOutput(
+        self,
+        llm_response: str,
+        baml_options: BamlCallOptions = {},
+    ) -> stream_types.DynamicModel:
+        result = self.__options.merge_options(baml_options).parse_response(
+            function_name="AcreateStructuredOutput", llm_response=llm_response, mode="stream"
+        )
+        return typing.cast(stream_types.DynamicModel, result)
 
     def ExtractCategories(
         self,

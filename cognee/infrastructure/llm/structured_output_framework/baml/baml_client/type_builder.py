@@ -25,6 +25,7 @@ class TypeBuilder(type_builder.TypeBuilder):
                     "ContentLabel",
                     "DefaultContentPrediction",
                     "DynamicKnowledgeGraph",
+                    "DynamicModel",
                     "Edge",
                     "ImageContent",
                     "KnowledgeGraph",
@@ -49,7 +50,7 @@ class TypeBuilder(type_builder.TypeBuilder):
     # #########################################################################
 
     # #########################################################################
-    # Generated classes 17
+    # Generated classes 18
     # #########################################################################
 
     @property
@@ -67,6 +68,10 @@ class TypeBuilder(type_builder.TypeBuilder):
     @property
     def DynamicKnowledgeGraph(self) -> "DynamicKnowledgeGraphBuilder":
         return DynamicKnowledgeGraphBuilder(self)
+
+    @property
+    def DynamicModel(self) -> "DynamicModelBuilder":
+        return DynamicModelBuilder(self)
 
     @property
     def Edge(self) -> "EdgeViewer":
@@ -127,7 +132,7 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
 # #########################################################################
-# Generated classes 17
+# Generated classes 18
 # #########################################################################
 
 
@@ -303,6 +308,53 @@ class DynamicKnowledgeGraphProperties:
         if name not in self.__properties:
             raise AttributeError(f"Property {name} not found.")
         return self.__bldr.property(name)
+
+
+class DynamicModelAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("DynamicModel")
+        self._properties: typing.Set[str] = set(
+            [
+                "test",
+            ]
+        )
+        self._props = DynamicModelProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "DynamicModelProperties":
+        return self._props
+
+
+class DynamicModelBuilder(DynamicModelAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    def add_property(self, name: str, type: baml_py.FieldType) -> baml_py.ClassPropertyBuilder:
+        if name in self._properties:
+            raise ValueError(f"Property {name} already exists.")
+        return self._bldr.property(name).type(type)
+
+    def list_properties(self) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
+        return [(name, self._bldr.property(name)) for name in self._properties]
+
+
+class DynamicModelProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    def __getattr__(self, name: str) -> baml_py.ClassPropertyBuilder:
+        if name not in self.__properties:
+            raise AttributeError(f"Property {name} not found.")
+        return self.__bldr.property(name)
+
+    @property
+    def test(self) -> baml_py.ClassPropertyBuilder:
+        return self.__bldr.property("test")
 
 
 class EdgeAst:

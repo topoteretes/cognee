@@ -48,7 +48,7 @@ def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
 # #########################################################################
 
 # #########################################################################
-# Generated classes (17)
+# Generated classes (18)
 # #########################################################################
 
 
@@ -77,6 +77,11 @@ class DefaultContentPrediction(BaseModel):
 
 class DynamicKnowledgeGraph(BaseModel):
     model_config = ConfigDict(extra="allow")
+
+
+class DynamicModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    test: str
 
 
 class Edge(BaseModel):
