@@ -134,7 +134,7 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         top_k_events = await self.filter_top_k_events(relevant_events, vector_search_results)
 
-        return self.descriptions_to_string(top_k_events), triplets
+        return self.descriptions_to_string(top_k_events)
 
     async def get_completion(self, query: str, context: Optional[str] = None) -> str:
         """Generates a response using the query and optional context."""
