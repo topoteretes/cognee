@@ -93,6 +93,17 @@ export default function Dashboard() {
 
   return (
     <div className="h-full flex flex-col bg-gray-200">
+      <video
+        autoPlay
+        loop
+        muted
+        playsInline
+        className="fixed inset-0 z-0 object-cover w-full h-full"
+      >
+        <source src="/videos/background-video-blur.mp4" type="video/mp4" />
+        Your browser does not support the video tag.
+      </video>
+
       <Header />
 
       <div className="relative flex-1 flex flex-row gap-2.5 items-start w-full max-w-[1920px] max-h-[calc(100% - 3.5rem)] overflow-hidden mx-auto px-2.5 py-2.5">
