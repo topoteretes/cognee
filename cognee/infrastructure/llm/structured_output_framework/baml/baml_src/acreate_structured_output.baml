@@ -1,25 +1,17 @@
-class DynamicInputModel {
-    test string
-    @@dynamic
-}
-
-class DynamicOutputModel {
-    test string
+class ResponseModel {
     @@dynamic
 }
 
 function AcreateStructuredOutput(
-    content: string,
+    text_input: string,
     system_prompt: string,
-    user_prompt: string,
-) -> DynamicOutputModel {
+) -> ResponseModel {
     client OpenAI
 
     prompt #"
         {{ system_prompt }}
         {{ ctx.output_format }}
         {{ _.role('user') }}
-        {{ user_prompt }}
-        {{ content }}
+        {{ text_input }}
     "#
 }

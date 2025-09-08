@@ -3,6 +3,7 @@ import litellm
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
     get_llm_client,
 )
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -76,8 +77,7 @@ async def test_llm_connection():
     the connection attempt and re-raise the exception for further handling.
     """
     try:
-        llm_adapter = get_llm_client()
-        await llm_adapter.acreate_structured_output(
+        await LLMGateway.acreate_structured_output(
             text_input="test",
             system_prompt='Respond to me with the following string: "test"',
             response_model=str,

@@ -94,18 +94,14 @@ class BamlSyncClient:
 
     def AcreateStructuredOutput(
         self,
-        content: str,
+        text_input: str,
         system_prompt: str,
-        user_prompt: str,
         baml_options: BamlCallOptions = {},
-    ) -> types.DynamicOutputModel:
+    ) -> types.ResponseModel:
         # Check if on_tick is provided
         if "on_tick" in baml_options:
             stream = self.stream.AcreateStructuredOutput(
-                content=content,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                baml_options=baml_options,
+                text_input=text_input, system_prompt=system_prompt, baml_options=baml_options
             )
             return stream.get_final_response()
         else:
@@ -113,14 +109,12 @@ class BamlSyncClient:
             result = self.__options.merge_options(baml_options).call_function_sync(
                 function_name="AcreateStructuredOutput",
                 args={
-                    "content": content,
+                    "text_input": text_input,
                     "system_prompt": system_prompt,
-                    "user_prompt": user_prompt,
                 },
             )
             return typing.cast(
-                types.DynamicOutputModel,
-                result.cast_to(types, types, stream_types, False, __runtime__),
+                types.ResponseModel, result.cast_to(types, types, stream_types, False, __runtime__)
             )
 
     def ExtractCategories(
@@ -274,27 +268,24 @@ class BamlStreamClient:
 
     def AcreateStructuredOutput(
         self,
-        content: str,
+        text_input: str,
         system_prompt: str,
-        user_prompt: str,
         baml_options: BamlCallOptions = {},
-    ) -> baml_py.BamlSyncStream[stream_types.DynamicOutputModel, types.DynamicOutputModel]:
+    ) -> baml_py.BamlSyncStream[stream_types.ResponseModel, types.ResponseModel]:
         ctx, result = self.__options.merge_options(baml_options).create_sync_stream(
             function_name="AcreateStructuredOutput",
             args={
-                "content": content,
+                "text_input": text_input,
                 "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
             },
         )
-        return baml_py.BamlSyncStream[stream_types.DynamicOutputModel, types.DynamicOutputModel](
+        return baml_py.BamlSyncStream[stream_types.ResponseModel, types.ResponseModel](
             result,
             lambda x: typing.cast(
-                stream_types.DynamicOutputModel,
-                x.cast_to(types, types, stream_types, True, __runtime__),
+                stream_types.ResponseModel, x.cast_to(types, types, stream_types, True, __runtime__)
             ),
             lambda x: typing.cast(
-                types.DynamicOutputModel, x.cast_to(types, types, stream_types, False, __runtime__)
+                types.ResponseModel, x.cast_to(types, types, stream_types, False, __runtime__)
             ),
             ctx,
         )
@@ -455,17 +446,15 @@ class BamlHttpRequestClient:
 
     def AcreateStructuredOutput(
         self,
-        content: str,
+        text_input: str,
         system_prompt: str,
-        user_prompt: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(
             function_name="AcreateStructuredOutput",
             args={
-                "content": content,
+                "text_input": text_input,
                 "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
             },
             mode="request",
         )
@@ -574,17 +563,15 @@ class BamlHttpStreamRequestClient:
 
     def AcreateStructuredOutput(
         self,
-        content: str,
+        text_input: str,
         system_prompt: str,
-        user_prompt: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(
             function_name="AcreateStructuredOutput",
             args={
-                "content": content,
+                "text_input": text_input,
                 "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
             },
             mode="stream",
         )

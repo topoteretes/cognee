@@ -27,9 +27,7 @@ class TypeBuilder(type_builder.TypeBuilder):
                     "AudioContent",
                     "ContentLabel",
                     "DefaultContentPrediction",
-                    "DynamicInputModel",
                     "DynamicKnowledgeGraph",
-                    "DynamicOutputModel",
                     "Edge",
                     "ImageContent",
                     "KnowledgeGraph",
@@ -37,6 +35,7 @@ class TypeBuilder(type_builder.TypeBuilder):
                     "MultimediaContent",
                     "Node",
                     "ProceduralContent",
+                    "ResponseModel",
                     "SummarizedClass",
                     "SummarizedCode",
                     "SummarizedContent",
@@ -54,7 +53,7 @@ class TypeBuilder(type_builder.TypeBuilder):
     # #########################################################################
 
     # #########################################################################
-    # Generated classes 19
+    # Generated classes 18
     # #########################################################################
 
     @property
@@ -70,16 +69,8 @@ class TypeBuilder(type_builder.TypeBuilder):
         return DefaultContentPredictionViewer(self)
 
     @property
-    def DynamicInputModel(self) -> "DynamicInputModelBuilder":
-        return DynamicInputModelBuilder(self)
-
-    @property
     def DynamicKnowledgeGraph(self) -> "DynamicKnowledgeGraphBuilder":
         return DynamicKnowledgeGraphBuilder(self)
-
-    @property
-    def DynamicOutputModel(self) -> "DynamicOutputModelBuilder":
-        return DynamicOutputModelBuilder(self)
 
     @property
     def Edge(self) -> "EdgeViewer":
@@ -108,6 +99,10 @@ class TypeBuilder(type_builder.TypeBuilder):
     @property
     def ProceduralContent(self) -> "ProceduralContentViewer":
         return ProceduralContentViewer(self)
+
+    @property
+    def ResponseModel(self) -> "ResponseModelBuilder":
+        return ResponseModelBuilder(self)
 
     @property
     def SummarizedClass(self) -> "SummarizedClassViewer":
@@ -140,7 +135,7 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
 # #########################################################################
-# Generated classes 19
+# Generated classes 18
 # #########################################################################
 
 
@@ -279,59 +274,6 @@ class DefaultContentPredictionProperties:
         return type_builder.ClassPropertyViewer(self.__bldr.property("label"))
 
 
-class DynamicInputModelAst:
-    def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
-        self._bldr = _tb.class_("DynamicInputModel")
-        self._properties: typing.Set[str] = set(
-            [
-                "test",
-            ]
-        )
-        self._props = DynamicInputModelProperties(self._bldr, self._properties)
-
-    def type(self) -> baml_py.FieldType:
-        return self._bldr.field()
-
-    @property
-    def props(self) -> "DynamicInputModelProperties":
-        return self._props
-
-
-class DynamicInputModelBuilder(DynamicInputModelAst):
-    def __init__(self, tb: type_builder.TypeBuilder):
-        super().__init__(tb)
-
-    def add_property(self, name: str, type: baml_py.FieldType) -> baml_py.ClassPropertyBuilder:
-        if name in self._properties:
-            raise ValueError(f"Property {name} already exists.")
-        return self._bldr.property(name).type(type)
-
-    def list_properties(self) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
-        return self._bldr.list_properties()
-
-    def remove_property(self, name: str) -> None:
-        self._bldr.remove_property(name)
-
-    def reset(self) -> None:
-        self._bldr.reset()
-
-
-class DynamicInputModelProperties:
-    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
-        self.__bldr = bldr
-        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
-
-    def __getattr__(self, name: str) -> baml_py.ClassPropertyBuilder:
-        if name not in self.__properties:
-            raise AttributeError(f"Property {name} not found.")
-        return self.__bldr.property(name)
-
-    @property
-    def test(self) -> baml_py.ClassPropertyBuilder:
-        return self.__bldr.property("test")
-
-
 class DynamicKnowledgeGraphAst:
     def __init__(self, tb: type_builder.TypeBuilder):
         _tb = tb._tb  # type: ignore (we know how to use this private attribute)
@@ -375,59 +317,6 @@ class DynamicKnowledgeGraphProperties:
         if name not in self.__properties:
             raise AttributeError(f"Property {name} not found.")
         return self.__bldr.property(name)
-
-
-class DynamicOutputModelAst:
-    def __init__(self, tb: type_builder.TypeBuilder):
-        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
-        self._bldr = _tb.class_("DynamicOutputModel")
-        self._properties: typing.Set[str] = set(
-            [
-                "test",
-            ]
-        )
-        self._props = DynamicOutputModelProperties(self._bldr, self._properties)
-
-    def type(self) -> baml_py.FieldType:
-        return self._bldr.field()
-
-    @property
-    def props(self) -> "DynamicOutputModelProperties":
-        return self._props
-
-
-class DynamicOutputModelBuilder(DynamicOutputModelAst):
-    def __init__(self, tb: type_builder.TypeBuilder):
-        super().__init__(tb)
-
-    def add_property(self, name: str, type: baml_py.FieldType) -> baml_py.ClassPropertyBuilder:
-        if name in self._properties:
-            raise ValueError(f"Property {name} already exists.")
-        return self._bldr.property(name).type(type)
-
-    def list_properties(self) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
-        return self._bldr.list_properties()
-
-    def remove_property(self, name: str) -> None:
-        self._bldr.remove_property(name)
-
-    def reset(self) -> None:
-        self._bldr.reset()
-
-
-class DynamicOutputModelProperties:
-    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
-        self.__bldr = bldr
-        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
-
-    def __getattr__(self, name: str) -> baml_py.ClassPropertyBuilder:
-        if name not in self.__properties:
-            raise AttributeError(f"Property {name} not found.")
-        return self.__bldr.property(name)
-
-    @property
-    def test(self) -> baml_py.ClassPropertyBuilder:
-        return self.__bldr.property("test")
 
 
 class EdgeAst:
@@ -771,6 +660,51 @@ class ProceduralContentProperties:
     @property
     def subclass(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("subclass"))
+
+
+class ResponseModelAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb  # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("ResponseModel")
+        self._properties: typing.Set[str] = set([])
+        self._props = ResponseModelProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "ResponseModelProperties":
+        return self._props
+
+
+class ResponseModelBuilder(ResponseModelAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    def add_property(self, name: str, type: baml_py.FieldType) -> baml_py.ClassPropertyBuilder:
+        if name in self._properties:
+            raise ValueError(f"Property {name} already exists.")
+        return self._bldr.property(name).type(type)
+
+    def list_properties(self) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
+        return self._bldr.list_properties()
+
+    def remove_property(self, name: str) -> None:
+        self._bldr.remove_property(name)
+
+    def reset(self) -> None:
+        self._bldr.reset()
+
+
+class ResponseModelProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties  # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    def __getattr__(self, name: str) -> baml_py.ClassPropertyBuilder:
+        if name not in self.__properties:
+            raise AttributeError(f"Property {name} not found.")
+        return self.__bldr.property(name)
 
 
 class SummarizedClassAst:

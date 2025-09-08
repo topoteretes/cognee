@@ -26,7 +26,7 @@ class LLMGateway:
             )
 
             return acreate_structured_output(
-                content=text_input,
+                text_input=text_input,
                 system_prompt=system_prompt,
                 response_model=response_model,
             )
@@ -142,19 +142,19 @@ class LLMGateway:
 
     @staticmethod
     def extract_summary(content: str, response_model: Type[BaseModel]) -> Coroutine:
-        llm_config = get_llm_config()
-        if llm_config.structured_output_framework.upper() == "BAML":
-            from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction import (
-                extract_summary,
-            )
+        # llm_config = get_llm_config()
+        # if llm_config.structured_output_framework.upper() == "BAML":
+        #     from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction import (
+        #         extract_summary,
+        #     )
+        #
+        #     return extract_summary(content=content, response_model=response_model)
+        # else:
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.extraction import (
+            extract_summary,
+        )
 
-            return extract_summary(content=content, response_model=response_model)
-        else:
-            from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.extraction import (
-                extract_summary,
-            )
-
-            return extract_summary(content=content, response_model=response_model)
+        return extract_summary(content=content, response_model=response_model)
 
     @staticmethod
     def extract_event_graph(content: str, response_model: Type[BaseModel]) -> Coroutine:
