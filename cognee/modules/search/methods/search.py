@@ -131,8 +131,8 @@ async def search(
         return [
             SearchResult(
                 search_result=[result],
-                dataset_id=datasets[min(index, len(datasets) - 1)].id,
-                dataset_name=datasets[min(index, len(datasets) - 1)].name,
+                dataset_id=datasets[min(index, len(datasets) - 1)].id if datasets else None,
+                dataset_name=datasets[min(index, len(datasets) - 1)].name if datasets else None,
             )
             for index, (result, _, datasets) in enumerate(search_results)
         ]

@@ -17,5 +17,5 @@ class CombinedSearchResult(BaseModel):
 
 class SearchResult(BaseModel):
     search_result: Any
-    dataset_id: UUID
-    dataset_name: str
+    dataset_id: Optional[UUID]
+    dataset_name: Optional[str]
