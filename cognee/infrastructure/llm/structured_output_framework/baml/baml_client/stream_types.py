@@ -27,7 +27,7 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
 
 
 # #########################################################################
-# Generated classes (18)
+# Generated classes (19)
 # #########################################################################
 
 
@@ -46,11 +46,16 @@ class DefaultContentPrediction(BaseModel):
     label: typing.Optional["ContentLabel"] = None
 
 
+class DynamicInputModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    test: typing.Optional[str] = None
+
+
 class DynamicKnowledgeGraph(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-class DynamicModel(BaseModel):
+class DynamicOutputModel(BaseModel):
     model_config = ConfigDict(extra="allow")
     test: typing.Optional[str] = None
 

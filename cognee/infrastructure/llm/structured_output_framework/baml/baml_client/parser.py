@@ -27,11 +27,11 @@ class LlmResponseParser:
         self,
         llm_response: str,
         baml_options: BamlCallOptions = {},
-    ) -> types.DynamicModel:
+    ) -> types.DynamicOutputModel:
         result = self.__options.merge_options(baml_options).parse_response(
             function_name="AcreateStructuredOutput", llm_response=llm_response, mode="request"
         )
-        return typing.cast(types.DynamicModel, result)
+        return typing.cast(types.DynamicOutputModel, result)
 
     def ExtractCategories(
         self,
@@ -94,11 +94,11 @@ class LlmStreamParser:
         self,
         llm_response: str,
         baml_options: BamlCallOptions = {},
-    ) -> stream_types.DynamicModel:
+    ) -> stream_types.DynamicOutputModel:
         result = self.__options.merge_options(baml_options).parse_response(
             function_name="AcreateStructuredOutput", llm_response=llm_response, mode="stream"
         )
-        return typing.cast(stream_types.DynamicModel, result)
+        return typing.cast(stream_types.DynamicOutputModel, result)
 
     def ExtractCategories(
         self,

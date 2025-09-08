@@ -48,7 +48,7 @@ def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
 # #########################################################################
 
 # #########################################################################
-# Generated classes (18)
+# Generated classes (19)
 # #########################################################################
 
 
@@ -75,11 +75,16 @@ class DefaultContentPrediction(BaseModel):
     label: "ContentLabel"
 
 
+class DynamicInputModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    test: str
+
+
 class DynamicKnowledgeGraph(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-class DynamicModel(BaseModel):
+class DynamicOutputModel(BaseModel):
     model_config = ConfigDict(extra="allow")
     test: str
 

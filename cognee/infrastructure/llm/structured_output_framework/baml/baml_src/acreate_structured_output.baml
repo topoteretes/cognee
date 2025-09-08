@@ -1,4 +1,9 @@
-class DynamicModel {
+class DynamicInputModel {
+    test string
+    @@dynamic
+}
+
+class DynamicOutputModel {
     test string
     @@dynamic
 }
@@ -7,7 +12,7 @@ function AcreateStructuredOutput(
     content: string,
     system_prompt: string,
     user_prompt: string,
-) -> DynamicModel {
+) -> DynamicOutputModel {
     client OpenAI
 
     prompt #"

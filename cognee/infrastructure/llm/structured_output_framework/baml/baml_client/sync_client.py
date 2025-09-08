@@ -98,7 +98,7 @@ class BamlSyncClient:
         system_prompt: str,
         user_prompt: str,
         baml_options: BamlCallOptions = {},
-    ) -> types.DynamicModel:
+    ) -> types.DynamicOutputModel:
         # Check if on_tick is provided
         if "on_tick" in baml_options:
             stream = self.stream.AcreateStructuredOutput(
@@ -119,7 +119,8 @@ class BamlSyncClient:
                 },
             )
             return typing.cast(
-                types.DynamicModel, result.cast_to(types, types, stream_types, False, __runtime__)
+                types.DynamicOutputModel,
+                result.cast_to(types, types, stream_types, False, __runtime__),
             )
 
     def ExtractCategories(
@@ -277,7 +278,7 @@ class BamlStreamClient:
         system_prompt: str,
         user_prompt: str,
         baml_options: BamlCallOptions = {},
-    ) -> baml_py.BamlSyncStream[stream_types.DynamicModel, types.DynamicModel]:
+    ) -> baml_py.BamlSyncStream[stream_types.DynamicOutputModel, types.DynamicOutputModel]:
         ctx, result = self.__options.merge_options(baml_options).create_sync_stream(
             function_name="AcreateStructuredOutput",
             args={
@@ -286,13 +287,14 @@ class BamlStreamClient:
                 "user_prompt": user_prompt,
             },
         )
-        return baml_py.BamlSyncStream[stream_types.DynamicModel, types.DynamicModel](
+        return baml_py.BamlSyncStream[stream_types.DynamicOutputModel, types.DynamicOutputModel](
             result,
             lambda x: typing.cast(
-                stream_types.DynamicModel, x.cast_to(types, types, stream_types, True, __runtime__)
+                stream_types.DynamicOutputModel,
+                x.cast_to(types, types, stream_types, True, __runtime__),
             ),
             lambda x: typing.cast(
-                types.DynamicModel, x.cast_to(types, types, stream_types, False, __runtime__)
+                types.DynamicOutputModel, x.cast_to(types, types, stream_types, False, __runtime__)
             ),
             ctx,
         )
