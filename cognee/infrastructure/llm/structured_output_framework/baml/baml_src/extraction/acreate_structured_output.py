@@ -1,7 +1,7 @@
 import asyncio
 from typing import Type
 from cognee.shared.logging_utils import get_logger
-from cognee.shared.data_models import SummarizedCode
+
 from cognee.infrastructure.llm.config import get_llm_config
 
 from typing import List, Dict, Union, Optional, Literal
@@ -14,94 +14,145 @@ from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.type
 )
 from cognee.infrastructure.llm.structured_output_framework.baml.baml_client import b
 from pydantic import BaseModel
-
+from typing import get_origin, get_args
 
 logger = get_logger("extract_summary_baml")
 
 
-def create_dynamic_baml_type(pydantic_model):
+class SummarizedFunction(BaseModel):
+    name: str
+    description: str
+    inputs: Optional[List[str]] = None
+    outputs: Optional[List[str]] = None
+    decorators: Optional[List[str]] = None
+
+
+class SummarizedClass(BaseModel):
+    name: str
+    description: str
+    methods: Optional[List[SummarizedFunction]] = None
+    decorators: Optional[List[str]] = None
+
+
+class SummarizedCode(BaseModel):
+    high_level_summary: str
+    key_features: List[str]
+    imports: List[str] = []
+    constants: List[str] = []
+    classes: List[SummarizedClass] = []
+    functions: List[SummarizedFunction] = []
+    workflow_description: Optional[str] = None
+
+
+def create_dynamic_baml_type(baml_model, pydantic_model):
     tb = TypeBuilder()
 
-    # if pydantic_model == str:
-    #     b.ResponseModel.add_property("text", tb.string())
-    #     return tb
-    #
-    # def map_type(field_type, field_info):
-    #     # Handle Optional/Union types
-    #     if getattr(field_type, "__origin__", None) == Union:
-    #         # Extract types from Union
-    #         types = field_type.__args__
-    #         # Handle Optional (Union with NoneType)
-    #         if type(None) in types:
-    #             inner_type = next(t for t in types if t != type(None))
-    #             return map_type(inner_type, field_info).optional()
-    #         # Handle regular Union
-    #         mapped_types = [map_type(t, field_info) for t in types]
-    #         return tb.union(*mapped_types)
-    #
-    #     # Handle Lists
-    #     if getattr(field_type, "__origin__", None) == list:
-    #         inner_type = field_type.__args__[0]
-    #         return map_type(inner_type, field_info).list()
-    #
-    #     # Handle Maps/Dictionaries
-    #     if getattr(field_type, "__origin__", None) == dict:
-    #         key_type, value_type = field_type.__args__
-    #         # BAML only supports string or enum keys in maps
-    #         if key_type not in [str, Enum]:
-    #             raise ValueError("Map keys must be strings or enums in BAML")
-    #         return tb.map(map_type(key_type, field_info), map_type(value_type, field_info))
-    #
-    #     # Handle Literal types
-    #     if getattr(field_type, "__origin__", None) == Literal:
-    #         literal_values = field_type.__args__
-    #         return tb.union(*[tb.literal(val) for val in literal_values])
-    #
-    #     # Handle Enums
-    #     if isinstance(field_type, type) and issubclass(field_type, Enum):
-    #         enum_type = tb.add_enum(field_type.__name__)
-    #         for member in field_type:
-    #             enum_type.add_value(member.name)
-    #         return enum_type.type()
-    #
-    #     # Handle primitive and special types
-    #     type_mapping = {
-    #         str: tb.string(),
-    #         int: tb.int(),
-    #         float: tb.float(),
-    #         bool: tb.bool(),
-    #         Image: tb.image(),
-    #         Audio: tb.audio(),
-    #         Video: tb.video(),
-    #         Pdf: tb.pdf(),
-    #         # datetime is not natively supported in BAML, map to string
-    #         datetime: tb.string(),
-    #     }
-    #
-    #     # Handle nested BaseModel classes
-    #     if isinstance(field_type, type) and issubclass(field_type, BaseModel):
-    #         nested_tb = create_dynamic_baml_type(field_type)
-    #         # Get the last created class from the nested TypeBuilder
-    #         return nested_tb.get_last_class().type()
-    #
-    #     if field_type in type_mapping:
-    #         return type_mapping[field_type]
-    #
-    #     raise ValueError(f"Unsupported type: {field_type}")
-    #
-    # fields = pydantic_model.model_fields
-    #
-    # # Add fields
-    # for field_name, field_info in fields.items():
-    #     field_type = field_info.annotation
-    #     baml_type = map_type(field_type, field_info)
-    #
-    #     # Add property with type
-    #     prop = b.ResponseModel.add_property(field_name, baml_type)
-    #
-    #     # Add description if available
-    #     if field_info.description:
-    #         prop.description(field_info.description)
+    if pydantic_model is str:
+        baml_model.add_property("text", tb.string())
+        return tb
+
+    def map_type(field_type, field_info):
+        """
+        Convert a Python / Pydantic type  ->  BAML TypeBuilder representation.
+        """
+
+        origin = get_origin(field_type)  # e.g. list[…]  ->  list
+        args = get_args(field_type)  # e.g. list[int] -> (int,)
+
+        # ------------------------------------------------------------------
+        # 1. Optional / Union  ------------------------------------------------
+        # ------------------------------------------------------------------
+        if origin is Union:
+            non_none_args = [t for t in args if t is not type(None)]
+
+            # Optional[T]  ⇢  exactly (T, NoneType)
+            if len(args) == 2 and len(non_none_args) == 1:
+                return map_type(non_none_args[0], field_info).optional()
+
+            # Plain Union[A, B, …]
+            return tb.union(*(map_type(t, field_info) for t in args))
+
+        # ------------------------------------------------------------------
+        # 2. List / Sequence  -------------------------------------------------
+        # ------------------------------------------------------------------
+        if origin in (list,):
+            (inner_type,) = args  # list has exactly one parameter
+            return map_type(inner_type, field_info).list()
+
+        # ------------------------------------------------------------------
+        # 3. Dict / Map -------------------------------------------------------
+        # ------------------------------------------------------------------
+        def _is_enum_subclass(tp) -> bool:
+            """Guarded issubclass – returns False when tp is not a class."""
+            return isinstance(tp, type) and issubclass(tp, Enum)
+
+        if origin in (dict,):
+            key_type, value_type = args or (str, object)
+
+            if key_type is not str and not _is_enum_subclass(key_type):
+                raise ValueError("BAML maps only allow 'str' or Enum subclasses as keys")
+
+            return tb.map(
+                map_type(key_type, field_info),  # mostly tb.string() or enum
+                map_type(value_type, field_info),
+            )
+
+        # ------------------------------------------------------------------
+        # 4. Literal ----------------------------------------------------------
+        # ------------------------------------------------------------------
+        if origin is Literal:
+            return tb.union(*(tb.literal(v) for v in args))
+
+        # ------------------------------------------------------------------
+        # 5. Enum -------------------------------------------------------------
+        # ------------------------------------------------------------------
+        if _is_enum_subclass(field_type):
+            enum_builder = tb.add_enum(field_type.__name__)
+            for member in field_type:
+                enum_builder.add_value(member.name)
+            return enum_builder.type()
+
+        # ------------------------------------------------------------------
+        # 6. Nested Pydantic model -------------------------------------------
+        # ------------------------------------------------------------------
+        from pydantic import BaseModel  # local import
+
+        if isinstance(field_type, type) and issubclass(field_type, BaseModel):
+            # Create nested class if it doesn't exist
+            try:
+                nested_class = tb.add_class(field_type.__name__)
+            except ValueError:
+                pass
+            # Find dynamic types of nested class
+            create_dynamic_baml_type(nested_class, field_type)
+            # Return nested class model
+            return nested_class.type()
+
+        primitive_map = {
+            str: tb.string(),
+            int: tb.int(),
+            float: tb.float(),
+            bool: tb.bool(),
+            datetime: tb.string(),  # BAML has no native datetime
+        }
+        if field_type in primitive_map:
+            return primitive_map[field_type]
+
+        raise ValueError(f"Unsupported type for BAML mapping: {field_type}")
+
+    fields = pydantic_model.model_fields
+
+    # Add fields
+    for field_name, field_info in fields.items():
+        field_type = field_info.annotation
+        baml_type = map_type(field_type, field_info)
+
+        # Add property with type
+        prop = baml_model.add_property(field_name, baml_type)
+
+        # Add description if available
+        if field_info.description:
+            prop.description(field_info.description)
 
     return tb
 
@@ -120,8 +171,9 @@ async def acreate_structured_output(
         BaseModel: The summarized content in the specified format
     """
     config = get_llm_config()
+    tb = TypeBuilder()
 
-    type_builder = create_dynamic_baml_type(response_model)
+    type_builder = create_dynamic_baml_type(tb.ResponseModel, SummarizedCode)
 
     result = await b.AcreateStructuredOutput(
         text_input=text_input,
@@ -136,6 +188,6 @@ if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        loop.run_until_complete(acreate_structured_output("TEST", SummarizedCode))
+        loop.run_until_complete(acreate_structured_output("TEST", "THIS IS A TEST", SummarizedCode))
     finally:
         loop.run_until_complete(loop.shutdown_asyncgens())
