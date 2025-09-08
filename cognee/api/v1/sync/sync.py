@@ -41,11 +41,11 @@ class CheckMissingHashesRequest(BaseModel):
     hashes: List[str]
 
 
-class CheckMissingHashesResponse(BaseModel):
+class CheckHashesDiffResponse(BaseModel):
     """Response model for missing hashes check"""
 
-    missing: List[str]
-
+    missing_on_remote: List[str]
+    missing_on_local: List[str]
 
 class PruneDatasetRequest(BaseModel):
     """Request model for pruning dataset to specific hashes"""
@@ -197,10 +197,12 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
 
         # Step 2: Check what files are missing on cloud
         local_hashes = [f.content_hash for f in local_files]
-        missing_hashes = await _check_missing_hashes(
+        hashes_diff_response = await _check_hashes_diff(
             cloud_base_url, cloud_auth_token, dataset.id, local_hashes, run_id
         )
-        logger.info(f"Cloud is missing {len(missing_hashes)} out of {len(local_hashes)} files")
+
+        hashes_missing_on_remote = hashes_diff_response.missing_on_remote
+        hashes_missing_on_local = hashes_diff_response.missing_on_local
 
         # Update progress
         try:
@@ -208,11 +210,11 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
         except Exception as e:
             logger.warning(f"Failed to update progress: {str(e)}")
 
-        # Step 3: Upload missing files
+        # Step 3: Upload files that are missing on cloud
         bytes_uploaded = await _upload_missing_files(
-            cloud_base_url, cloud_auth_token, dataset, local_files, missing_hashes, run_id
+            cloud_base_url, cloud_auth_token, dataset, local_files, hashes_missing_on_remote, run_id
         )
-        logger.info(f"Upload complete: {len(missing_hashes)} files, {bytes_uploaded} bytes")
+        logger.info(f"Upload complete: {len(hashes_missing_on_remote)} files, {bytes_uploaded} bytes")
 
         # Update progress
         try:
@@ -221,7 +223,7 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
             logger.warning(f"Failed to update progress: {str(e)}")
 
         # Step 4: Trigger cognify processing on cloud dataset (only if new files were uploaded)
-        if missing_hashes:
+        if hashes_missing_on_remote:
             await _trigger_remote_cognify(cloud_base_url, cloud_auth_token, dataset.id, run_id)
             logger.info(f"Cognify processing triggered for dataset {dataset.id}")
         else:
@@ -345,9 +347,9 @@ async def _get_cloud_auth_token(user: User) -> str:
     return os.getenv("COGNEE_CLOUD_AUTH_TOKEN", "your-auth-token-here")
 
 
-async def _check_missing_hashes(
+async def _check_hashes_diff(
     cloud_base_url: str, auth_token: str, dataset_id: str, local_hashes: List[str], run_id: str
-) -> List[str]:
+) -> CheckHashesDiffResponse:
     """
     Step 1: Check which hashes are missing on cloud.
 
@@ -366,11 +368,9 @@ async def _check_missing_hashes(
             async with session.post(url, json=payload.dict(), headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
-                    missing_response = CheckMissingHashesResponse(**data)
-                    logger.info(
-                        f"Cloud reports {len(missing_response.missing)} missing files out of {len(local_hashes)} total"
-                    )
-                    return missing_response.missing
+                    missing_response = CheckHashesDiffResponse(**data)
+                    logger.info(f"Cloud is missing {len(missing_response.missing_on_remote)} out of {len(local_hashes)} files, local is missing {len(missing_response.missing_on_local)} files")
+                    return missing_response
                 else:
                     error_text = await response.text()
                     logger.error(
@@ -390,7 +390,7 @@ async def _upload_missing_files(
     auth_token: str,
     dataset: Dataset,
     local_files: List[LocalFileInfo],
-    missing_hashes: List[str],
+    hashes_missing_on_remote: List[str],
     run_id: str,
 ) -> int:
     """
@@ -400,7 +400,7 @@ async def _upload_missing_files(
         int: Total bytes uploaded
     """
     # Filter local files to only those with missing hashes
-    files_to_upload = [f for f in local_files if f.content_hash in missing_hashes]
+    files_to_upload = [f for f in local_files if f.content_hash in hashes_missing_on_remote]
 
     logger.info(f"Uploading {len(files_to_upload)} missing files to cloud")
 
