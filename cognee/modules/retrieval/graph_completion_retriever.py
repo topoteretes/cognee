@@ -151,7 +151,9 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
             - Any: A generated completion based on the query and context provided.
         """
-        if context is None:
+        triplets = context
+
+        if triplets is None:
             triplets = await self.get_context(query)
 
         context_text = await resolve_edges_to_text(triplets)
