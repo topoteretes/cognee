@@ -5,6 +5,7 @@ export interface DataFile {
   id: string;
   name: string;
   file: File;
+  datasetId: string;
 }
 
 const useData = () => {
@@ -16,6 +17,7 @@ const useData = () => {
         id: v4(),
         name: file.name,
         file,
+        datasetId: "",
       }))
     );
   }, []);

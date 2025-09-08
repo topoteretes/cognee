@@ -1,6 +1,10 @@
+from uuid import uuid4
 from fastapi_users.exceptions import UserAlreadyExists
-from cognee.modules.users.exceptions import TenantNotFoundError
+
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.notebooks.methods import create_notebook
+from cognee.modules.notebooks.models.Notebook import NotebookCell
+from cognee.modules.users.exceptions import TenantNotFoundError
 from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.modules.users.get_user_db import get_user_db_context
 from cognee.modules.users.models.User import UserCreate
@@ -55,6 +59,27 @@ async def create_user(
 
                     if auto_login:
                         await session.refresh(user)
+
+                    await create_notebook(
+                        user_id=user.id,
+                        notebook_name="Welcome to cognee 🧠",
+                        cells=[
+                            NotebookCell(
+                                id=uuid4(),
+                                name="Welcome",
+                                content="Cognee is your toolkit for turning text into a structured knowledge graph, optionally enhanced by ontologies, and then querying it with advanced retrieval techniques. This notebook will guide you through a simple example.",
+                                type="markdown",
+                            ),
+                            NotebookCell(
+                                id=uuid4(),
+                                name="Example",
+                                content="",
+                                type="code",
+                            ),
+                        ],
+                        deletable=False,
+                        session=session,
+                    )
 
                     return user
     except UserAlreadyExists as error:

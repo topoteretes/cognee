@@ -2,8 +2,11 @@ import os
 import json
 import asyncio
 from uuid import UUID
+from fastapi.encoders import jsonable_encoder
 from typing import Callable, List, Optional, Type, Union
 
+
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.user_qa_feedback import UserQAFeedback
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.context_global_variables import set_database_global_context_variables
@@ -12,6 +15,8 @@ from cognee.modules.retrieval.insights_retriever import InsightsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.modules.retrieval.coding_rules_retriever import CodingRulesRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
@@ -37,11 +42,13 @@ async def search(
     dataset_ids: Union[list[UUID], None],
     user: User,
     system_prompt_path="answer_simple_question.txt",
+    system_prompt: Optional[str] = None,
     top_k: int = 10,
-    node_type: Optional[Type] = None,
+    node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: Optional[bool] = False,
     last_k: Optional[int] = None,
+    only_context: bool = False,
 ):
     """
 
@@ -61,28 +68,34 @@ async def search(
     # Use search function filtered by permissions if access control is enabled
     if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
         return await authorized_search(
-            query_text=query_text,
             query_type=query_type,
+            query_text=query_text,
             user=user,
             dataset_ids=dataset_ids,
             system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
             top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
             save_interaction=save_interaction,
             last_k=last_k,
+            only_context=only_context,
         )
 
     query = await log_query(query_text, query_type.value, user.id)
 
     search_results = await specific_search(
-        query_type,
-        query_text,
-        user,
+        query_type=query_type,
+        query_text=query_text,
+        user=user,
         system_prompt_path=system_prompt_path,
+        system_prompt=system_prompt,
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
         save_interaction=save_interaction,
         last_k=last_k,
+        only_context=only_context,
     )
 
     await log_result(
@@ -98,21 +111,26 @@ async def search(
 
 async def specific_search(
     query_type: SearchType,
-    query: str,
+    query_text: str,
     user: User,
-    system_prompt_path="answer_simple_question.txt",
+    system_prompt_path: str = "answer_simple_question.txt",
+    system_prompt: Optional[str] = None,
     top_k: int = 10,
-    node_type: Optional[Type] = None,
+    node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: Optional[bool] = False,
     last_k: Optional[int] = None,
+    only_context: bool = None,
 ) -> list:
     search_tasks: dict[SearchType, Callable] = {
         SearchType.SUMMARIES: SummariesRetriever(top_k=top_k).get_completion,
         SearchType.INSIGHTS: InsightsRetriever(top_k=top_k).get_completion,
         SearchType.CHUNKS: ChunksRetriever(top_k=top_k).get_completion,
         SearchType.RAG_COMPLETION: CompletionRetriever(
-            system_prompt_path=system_prompt_path, top_k=top_k
+            system_prompt_path=system_prompt_path,
+            top_k=top_k,
+            system_prompt=system_prompt,
+            only_context=only_context,
         ).get_completion,
         SearchType.GRAPH_COMPLETION: GraphCompletionRetriever(
             system_prompt_path=system_prompt_path,
@@ -120,6 +138,8 @@ async def specific_search(
             node_type=node_type,
             node_name=node_name,
             save_interaction=save_interaction,
+            system_prompt=system_prompt,
+            only_context=only_context,
         ).get_completion,
         SearchType.GRAPH_COMPLETION_COT: GraphCompletionCotRetriever(
             system_prompt_path=system_prompt_path,
@@ -127,6 +147,8 @@ async def specific_search(
             node_type=node_type,
             node_name=node_name,
             save_interaction=save_interaction,
+            system_prompt=system_prompt,
+            only_context=only_context,
         ).get_completion,
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: GraphCompletionContextExtensionRetriever(
             system_prompt_path=system_prompt_path,
@@ -134,6 +156,8 @@ async def specific_search(
             node_type=node_type,
             node_name=node_name,
             save_interaction=save_interaction,
+            system_prompt=system_prompt,
+            only_context=only_context,
         ).get_completion,
         SearchType.GRAPH_SUMMARY_COMPLETION: GraphSummaryCompletionRetriever(
             system_prompt_path=system_prompt_path,
@@ -141,16 +165,21 @@ async def specific_search(
             node_type=node_type,
             node_name=node_name,
             save_interaction=save_interaction,
+            system_prompt=system_prompt,
         ).get_completion,
         SearchType.CODE: CodeRetriever(top_k=top_k).get_completion,
         SearchType.CYPHER: CypherSearchRetriever().get_completion,
         SearchType.NATURAL_LANGUAGE: NaturalLanguageRetriever().get_completion,
         SearchType.FEEDBACK: UserQAFeedback(last_k=last_k).add_feedback,
+        SearchType.TEMPORAL: TemporalRetriever(top_k=top_k).get_completion,
+        SearchType.CODING_RULES: CodingRulesRetriever(
+            rules_nodeset_name=node_name
+        ).get_existing_rules,
     }
 
     # If the query type is FEELING_LUCKY, select the search type intelligently
     if query_type is SearchType.FEELING_LUCKY:
-        query_type = await select_search_type(query)
+        query_type = await select_search_type(query_text)
 
     search_task = search_tasks.get(query_type)
 
@@ -159,7 +188,7 @@ async def specific_search(
 
     send_telemetry("cognee.search EXECUTION STARTED", user.id)
 
-    results = await search_task(query)
+    results = await search_task(query_text)
 
     send_telemetry("cognee.search EXECUTION COMPLETED", user.id)
 
@@ -167,14 +196,18 @@ async def specific_search(
 
 
 async def authorized_search(
-    query_text: str,
     query_type: SearchType,
-    user: User = None,
+    query_text: str,
+    user: User,
     dataset_ids: Optional[list[UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
+    system_prompt: Optional[str] = None,
     top_k: int = 10,
-    save_interaction: bool = False,
+    node_type: Optional[Type] = NodeSet,
+    node_name: Optional[List[str]] = None,
+    save_interaction: Optional[bool] = False,
     last_k: Optional[int] = None,
+    only_context: bool = None,
 ) -> list:
     """
     Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
@@ -188,30 +221,38 @@ async def authorized_search(
 
     # Searches all provided datasets and handles setting up of appropriate database context based on permissions
     search_results = await specific_search_by_context(
-        search_datasets,
-        query_text,
-        query_type,
-        user,
-        system_prompt_path,
-        top_k,
-        save_interaction,
+        search_datasets=search_datasets,
+        query_type=query_type,
+        query_text=query_text,
+        user=user,
+        system_prompt_path=system_prompt_path,
+        system_prompt=system_prompt,
+        top_k=top_k,
+        node_type=node_type,
+        node_name=node_name,
+        save_interaction=save_interaction,
         last_k=last_k,
+        only_context=only_context,
     )
 
-    await log_result(query.id, json.dumps(search_results, cls=JSONEncoder), user.id)
+    await log_result(query.id, json.dumps(jsonable_encoder(search_results)), user.id)
 
     return search_results
 
 
 async def specific_search_by_context(
     search_datasets: list[Dataset],
-    query_text: str,
     query_type: SearchType,
+    query_text: str,
     user: User,
-    system_prompt_path: str,
-    top_k: int,
-    save_interaction: bool = False,
+    system_prompt_path: str = "answer_simple_question.txt",
+    system_prompt: Optional[str] = None,
+    top_k: int = 10,
+    node_type: Optional[Type] = NodeSet,
+    node_name: Optional[List[str]] = None,
+    save_interaction: Optional[bool] = False,
     last_k: Optional[int] = None,
+    only_context: bool = None,
 ):
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
@@ -219,21 +260,71 @@ async def specific_search_by_context(
     """
 
     async def _search_by_context(
-        dataset, user, query_type, query_text, system_prompt_path, top_k, last_k
+        dataset: Dataset,
+        query_type: SearchType,
+        query_text: str,
+        user: User,
+        system_prompt_path: str = "answer_simple_question.txt",
+        system_prompt: Optional[str] = None,
+        top_k: int = 10,
+        node_type: Optional[Type] = NodeSet,
+        node_name: Optional[List[str]] = None,
+        save_interaction: Optional[bool] = False,
+        last_k: Optional[int] = None,
+        only_context: bool = None,
     ):
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)
-        search_results = await specific_search(
-            query_type,
-            query_text,
-            user,
+
+        result = await specific_search(
+            query_type=query_type,
+            query_text=query_text,
+            user=user,
             system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
             top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
             save_interaction=save_interaction,
             last_k=last_k,
+            only_context=only_context,
         )
+
+        if isinstance(result, tuple):
+            search_results = result[0]
+            triplets = result[1]
+        else:
+            search_results = result
+            triplets = []
+
         return {
             "search_result": search_results,
+            "graph": [
+                {
+                    "source": {
+                        "id": triplet.node1.id,
+                        "attributes": {
+                            "name": triplet.node1.attributes["name"],
+                            "type": triplet.node1.attributes["type"],
+                            "description": triplet.node1.attributes["description"],
+                            "vector_distance": triplet.node1.attributes["vector_distance"],
+                        },
+                    },
+                    "destination": {
+                        "id": triplet.node2.id,
+                        "attributes": {
+                            "name": triplet.node2.attributes["name"],
+                            "type": triplet.node2.attributes["type"],
+                            "description": triplet.node2.attributes["description"],
+                            "vector_distance": triplet.node2.attributes["vector_distance"],
+                        },
+                    },
+                    "attributes": {
+                        "relationship_name": triplet.attributes["relationship_name"],
+                    },
+                }
+                for triplet in triplets
+            ],
             "dataset_id": dataset.id,
             "dataset_name": dataset.name,
         }
@@ -243,7 +334,18 @@ async def specific_search_by_context(
     for dataset in search_datasets:
         tasks.append(
             _search_by_context(
-                dataset, user, query_type, query_text, system_prompt_path, top_k, last_k
+                dataset=dataset,
+                query_type=query_type,
+                query_text=query_text,
+                user=user,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                top_k=top_k,
+                node_type=node_type,
+                node_name=node_name,
+                save_interaction=save_interaction,
+                last_k=last_k,
+                only_context=only_context,
             )
         )
 

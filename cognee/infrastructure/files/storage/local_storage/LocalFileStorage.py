@@ -191,6 +191,15 @@ class LocalFileStorage(Storage):
 
         return os.path.isfile(os.path.join(parsed_storage_path, file_path))
 
+    def get_size(self, file_path: str) -> int:
+        parsed_storage_path = get_parsed_path(self.storage_path)
+
+        return (
+            os.path.getsize(os.path.join(parsed_storage_path, file_path))
+            if self.file_exists(file_path)
+            else 0
+        )
+
     def ensure_directory_exists(self, directory_path: str = ""):
         """
         Ensure that the specified directory exists, creating it if necessary.

@@ -12,6 +12,6 @@ async def get_dataset_data(dataset_id: UUID) -> list[Data]:
             select(Data).join(Data.datasets).filter((Dataset.id == dataset_id))
         )
 
-        data = result.scalars().all()
+        data = list(result.scalars().all())
 
         return data

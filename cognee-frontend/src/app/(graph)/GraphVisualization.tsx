@@ -1,5 +1,6 @@
 "use client";
 
+import classNames from "classnames";
 import { MutableRefObject, useEffect, useImperativeHandle, useRef, useState, useCallback } from "react";
 import { forceCollide, forceManyBody } from "d3-force-3d";
 import ForceGraph, { ForceGraphMethods, GraphData, LinkObject, NodeObject } from "react-force-graph-2d";
@@ -10,6 +11,7 @@ interface GraphVisuzaliationProps {
   ref: MutableRefObject<GraphVisualizationAPI>;
   data?: GraphData<NodeObject, LinkObject>;
   graphControls: MutableRefObject<GraphControlsAPI>;
+  className?: string;
 }
 
 export interface GraphVisualizationAPI {
@@ -17,7 +19,7 @@ export interface GraphVisualizationAPI {
   setGraphShape: (shape: string) => void;
 }
 
-export default function GraphVisualization({ ref, data, graphControls }: GraphVisuzaliationProps) {
+export default function GraphVisualization({ ref, data, graphControls, className }: GraphVisuzaliationProps) {
   const textSize = 6;
   const nodeSize = 15;
   // const addNodeDistanceFromSourceNode = 15;
@@ -201,7 +203,7 @@ export default function GraphVisualization({ ref, data, graphControls }: GraphVi
     if (typeof window !== "undefined" && data && graphRef.current) {
       // add collision force
       graphRef.current.d3Force("collision", forceCollide(nodeSize * 1.5));
-      graphRef.current.d3Force("charge", forceManyBody().strength(-1500).distanceMin(300).distanceMax(900));
+      graphRef.current.d3Force("charge", forceManyBody().strength(-10).distanceMin(10).distanceMax(50));
     }
   }, [data, graphRef]);
 
@@ -213,7 +215,7 @@ export default function GraphVisualization({ ref, data, graphControls }: GraphVi
   }));
 
   return (
-    <div ref={containerRef} className="w-full h-full" id="graph-container">
+    <div ref={containerRef} className={classNames("w-full h-full", className)} id="graph-container">
       {(data && typeof window !== "undefined") ? (
         <ForceGraph
           ref={graphRef}
