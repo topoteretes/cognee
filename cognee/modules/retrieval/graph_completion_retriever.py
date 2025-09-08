@@ -1,4 +1,4 @@
-from typing import Any, Optional, Type, List, Coroutine
+from typing import Any, Optional, Type, List
 from collections import Counter
 from uuid import NAMESPACE_OID, uuid5
 import string
@@ -106,7 +106,7 @@ class GraphCompletionRetriever(BaseRetriever):
 
         return found_triplets
 
-    async def get_context(self, query: str) -> str | tuple[str, list]:
+    async def get_context(self, query: str) -> tuple[str, list]:
         """
         Retrieves and resolves graph triplets into context based on a query.
 
@@ -135,7 +135,7 @@ class GraphCompletionRetriever(BaseRetriever):
         self,
         query: str,
         context: Optional[Any] = None,
-    ) -> Any:
+    ) -> List[str]:
         """
         Generates a completion using graph connections context based on a query.
 

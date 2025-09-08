@@ -46,6 +46,12 @@ class StorageManager:
         else:
             return self.storage.is_file(file_path)
 
+    async def get_size(self, file_path: str) -> int:
+        if inspect.iscoroutinefunction(self.storage.get_size):
+            return await self.storage.get_size(file_path)
+        else:
+            return self.storage.get_size(file_path)
+
     async def store(self, file_path: str, data: BinaryIO, overwrite: bool = False) -> str:
         """
         Store data at the specified file path.
@@ -84,7 +90,7 @@ class StorageManager:
         """
         # Check the actual storage type by class name to determine if open() is async or sync
 
-        if self.storage.__class__.__name__ == "S3FileStorage" and file_path.startswith("s3://"):
+        if self.storage.__class__.__name__ == "S3FileStorage":
             # S3FileStorage.open() is async
             async with self.storage.open(file_path, *args, **kwargs) as file:
                 yield file

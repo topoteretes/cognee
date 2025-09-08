@@ -2,7 +2,9 @@ import os
 import json
 import asyncio
 from uuid import UUID
+from fastapi.encoders import jsonable_encoder
 from typing import Callable, List, Optional, Type, Union
+
 
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.user_qa_feedback import UserQAFeedback
@@ -233,7 +235,7 @@ async def authorized_search(
         only_context=only_context,
     )
 
-    await log_result(query.id, json.dumps(search_results, cls=JSONEncoder), user.id)
+    await log_result(query.id, json.dumps(jsonable_encoder(search_results)), user.id)
 
     return search_results
 
@@ -273,7 +275,8 @@ async def specific_search_by_context(
     ):
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)
-        search_results = await specific_search(
+
+        result = await specific_search(
             query_type=query_type,
             query_text=query_text,
             user=user,
@@ -286,8 +289,42 @@ async def specific_search_by_context(
             last_k=last_k,
             only_context=only_context,
         )
+
+        if isinstance(result, tuple):
+            search_results = result[0]
+            triplets = result[1]
+        else:
+            search_results = result
+            triplets = []
+
         return {
             "search_result": search_results,
+            "graph": [
+                {
+                    "source": {
+                        "id": triplet.node1.id,
+                        "attributes": {
+                            "name": triplet.node1.attributes["name"],
+                            "type": triplet.node1.attributes["type"],
+                            "description": triplet.node1.attributes["description"],
+                            "vector_distance": triplet.node1.attributes["vector_distance"],
+                        },
+                    },
+                    "destination": {
+                        "id": triplet.node2.id,
+                        "attributes": {
+                            "name": triplet.node2.attributes["name"],
+                            "type": triplet.node2.attributes["type"],
+                            "description": triplet.node2.attributes["description"],
+                            "vector_distance": triplet.node2.attributes["vector_distance"],
+                        },
+                    },
+                    "attributes": {
+                        "relationship_name": triplet.attributes["relationship_name"],
+                    },
+                }
+                for triplet in triplets
+            ],
             "dataset_id": dataset.id,
             "dataset_name": dataset.name,
         }

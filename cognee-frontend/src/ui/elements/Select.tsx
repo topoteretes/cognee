@@ -8,7 +8,7 @@ export default function Select({ children, className, ...props }: SelectHTMLAttr
       <select
         className={
           classNames(
-            "block w-full appearance-none rounded-md bg-white pl-4 pr-8 py-4 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-600",
+            "block w-full appearance-none rounded-3xl bg-white pl-4 pr-8 h-8 text-base text-gray-900 outline-1 -outline-offset-1 outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-600",
             className,
           )
         }
@@ -16,8 +16,8 @@ export default function Select({ children, className, ...props }: SelectHTMLAttr
       >
         {children}
       </select>
-      <span className="pointer-events-none absolute top-1/2 -mt-0.5 right-3 text-indigo-600 rotate-180">
-        <CaretIcon height={8} width={12} />
+      <span className="pointer-events-none absolute top-1/3 -mt-0.5 right-3 text-indigo-600 rotate-180">
+        <CaretIcon />
       </span>
     </div>
   );

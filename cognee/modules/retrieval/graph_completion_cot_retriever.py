@@ -1,4 +1,4 @@
-from typing import Any, Optional, List, Type
+from typing import Any, Optional, List, Tuple, Type
 from cognee.shared.logging_utils import get_logger
 
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
