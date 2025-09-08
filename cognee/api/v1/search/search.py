@@ -3,7 +3,7 @@ from typing import Union, Optional, List, Type
 
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
-from cognee.modules.search.types import SearchType
+from cognee.modules.search.types import SearchResult, SearchType, CombinedSearchResult
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -25,7 +25,7 @@ async def search(
     last_k: Optional[int] = None,
     only_context: bool = False,
     use_combined_context: bool = False,
-) -> list:
+) -> Union[List[SearchResult], CombinedSearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
 

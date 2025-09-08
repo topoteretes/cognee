@@ -1,6 +1,6 @@
-import json
 import pathlib
 import os
+from typing import List
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import (
     get_migration_relational_engine,
@@ -10,7 +10,7 @@ from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
 from cognee.tasks.ingestion import migrate_relational_database
-from cognee.modules.search.types import SearchType
+from cognee.modules.search.types import SearchResult, SearchType
 import cognee
 
 
@@ -45,13 +45,15 @@ async def relational_db_migration():
     await migrate_relational_database(graph_engine, schema=schema)
 
     # 1. Search the graph
-    search_results = await cognee.search(
+    search_results: List[SearchResult] = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION, query_text="Tell me about the artist AC/DC"
-    )
+    )  # type: ignore
     print("Search results:", search_results)
 
     # 2. Assert that the search results contain "AC/DC"
-    assert any("AC/DC" in r for r in search_results), "AC/DC not found in search results!"
+    assert any("AC/DC" in r.search_result for r in search_results), (
+        "AC/DC not found in search results!"
+    )
 
     migration_db_provider = migration_engine.engine.dialect.name
     if migration_db_provider == "postgresql":

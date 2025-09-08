@@ -6,6 +6,7 @@ from dns.e164 import query
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
@@ -46,16 +47,16 @@ async def main():
 
     await cognee.cognify([dataset_name])
 
-    context_gk, _ = await GraphCompletionRetriever().get_context(
+    context_gk = await GraphCompletionRetriever().get_context(
         query="Next to which country is Germany located?"
     )
-    context_gk_cot, _ = await GraphCompletionCotRetriever().get_context(
+    context_gk_cot = await GraphCompletionCotRetriever().get_context(
         query="Next to which country is Germany located?"
     )
-    context_gk_ext, _ = await GraphCompletionContextExtensionRetriever().get_context(
+    context_gk_ext = await GraphCompletionContextExtensionRetriever().get_context(
         query="Next to which country is Germany located?"
     )
-    context_gk_sum, _ = await GraphSummaryCompletionRetriever().get_context(
+    context_gk_sum = await GraphSummaryCompletionRetriever().get_context(
         query="Next to which country is Germany located?"
     )
 
@@ -65,9 +66,11 @@ async def main():
         ("GraphCompletionContextExtensionRetriever", context_gk_ext),
         ("GraphSummaryCompletionRetriever", context_gk_sum),
     ]:
-        assert isinstance(context, str), f"{name}: Context should be a string"
-        assert context.strip(), f"{name}: Context should not be empty"
-        lower = context.lower()
+        assert isinstance(context, list), f"{name}: Context should be a list"
+        assert len(context) > 0, f"{name}: Context should not be empty"
+
+        context_text = await resolve_edges_to_text(context)
+        lower = context_text.lower()
         assert "germany" in lower or "netherlands" in lower, (
             f"{name}: Context did not contain 'germany' or 'netherlands'; got: {context!r}"
         )

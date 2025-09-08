@@ -139,7 +139,7 @@ class TemporalRetriever(GraphCompletionRetriever):
     async def get_completion(self, query: str, context: Optional[str] = None) -> str:
         """Generates a response using the query and optional context."""
         if not context:
-            context, _ = await self.get_context(query=query)
+            context = await self.get_context(query=query)
 
         if context:
             completion = await generate_completion(
