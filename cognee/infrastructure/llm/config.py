@@ -44,7 +44,7 @@ class LLMConfig(BaseSettings):
     llm_max_completion_tokens: int = 16384
 
     baml_llm_provider: str = "openai"
-    baml_llm_model: str = "openai/gpt-4o-mini"
+    baml_llm_model: str = "gpt-4o-mini"
     baml_llm_endpoint: str = ""
     baml_llm_api_key: Optional[str] = None
     baml_llm_temperature: float = 0.0
