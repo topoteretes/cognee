@@ -13,6 +13,9 @@
 import typing
 from baml_py import type_builder
 from baml_py import baml_py
+
+# These are exports, not used here, hence the linter is disabled
+from baml_py.baml_py import FieldType, EnumValueBuilder, EnumBuilder, ClassBuilder  # noqa: F401 # pylint: disable=unused-import
 from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME
 
 
@@ -296,7 +299,13 @@ class DynamicKnowledgeGraphBuilder(DynamicKnowledgeGraphAst):
         return self._bldr.property(name).type(type)
 
     def list_properties(self) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
-        return [(name, self._bldr.property(name)) for name in self._properties]
+        return self._bldr.list_properties()
+
+    def remove_property(self, name: str) -> None:
+        self._bldr.remove_property(name)
+
+    def reset(self) -> None:
+        self._bldr.reset()
 
 
 class DynamicKnowledgeGraphProperties:
@@ -339,7 +348,13 @@ class DynamicModelBuilder(DynamicModelAst):
         return self._bldr.property(name).type(type)
 
     def list_properties(self) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
-        return [(name, self._bldr.property(name)) for name in self._properties]
+        return self._bldr.list_properties()
+
+    def remove_property(self, name: str) -> None:
+        self._bldr.remove_property(name)
+
+    def reset(self) -> None:
+        self._bldr.reset()
 
 
 class DynamicModelProperties:
@@ -619,7 +634,13 @@ class NodeBuilder(NodeAst):
         return self._bldr.property(name).type(type)
 
     def list_properties(self) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
-        return [(name, self._bldr.property(name)) for name in self._properties]
+        return self._bldr.list_properties()
+
+    def remove_property(self, name: str) -> None:
+        self._bldr.remove_property(name)
+
+    def reset(self) -> None:
+        self._bldr.reset()
 
 
 class NodeProperties:

@@ -44,6 +44,7 @@ class BamlAsyncClient:
             typing.Union[baml_py.baml_py.Collector, typing.List[baml_py.baml_py.Collector]]
         ] = None,
         env: typing.Optional[typing.Dict[str, typing.Optional[str]]] = None,
+        on_tick: typing.Optional[typing.Callable[[str, baml_py.baml_py.FunctionLog], None]] = None,
     ) -> "BamlAsyncClient":
         options: BamlCallOptions = {}
         if tb is not None:
@@ -54,6 +55,8 @@ class BamlAsyncClient:
             options["collector"] = collector
         if env is not None:
             options["env"] = env
+        if on_tick is not None:
+            options["on_tick"] = on_tick
         return BamlAsyncClient(self.__options.merge_options(options))
 
     @property
@@ -83,33 +86,52 @@ class BamlAsyncClient:
         user_prompt: str,
         baml_options: BamlCallOptions = {},
     ) -> types.DynamicModel:
-        result = await self.__options.merge_options(baml_options).call_function_async(
-            function_name="AcreateStructuredOutput",
-            args={
-                "content": content,
-                "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
-            },
-        )
-        return typing.cast(
-            types.DynamicModel, result.cast_to(types, types, stream_types, False, __runtime__)
-        )
+        # Check if on_tick is provided
+        if "on_tick" in baml_options:
+            # Use streaming internally when on_tick is provided
+            stream = self.stream.AcreateStructuredOutput(
+                content=content,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                baml_options=baml_options,
+            )
+            return await stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = await self.__options.merge_options(baml_options).call_function_async(
+                function_name="AcreateStructuredOutput",
+                args={
+                    "content": content,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                },
+            )
+            return typing.cast(
+                types.DynamicModel, result.cast_to(types, types, stream_types, False, __runtime__)
+            )
 
     async def ExtractCategories(
         self,
         content: str,
         baml_options: BamlCallOptions = {},
     ) -> types.DefaultContentPrediction:
-        result = await self.__options.merge_options(baml_options).call_function_async(
-            function_name="ExtractCategories",
-            args={
-                "content": content,
-            },
-        )
-        return typing.cast(
-            types.DefaultContentPrediction,
-            result.cast_to(types, types, stream_types, False, __runtime__),
-        )
+        # Check if on_tick is provided
+        if "on_tick" in baml_options:
+            # Use streaming internally when on_tick is provided
+            stream = self.stream.ExtractCategories(content=content, baml_options=baml_options)
+            return await stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = await self.__options.merge_options(baml_options).call_function_async(
+                function_name="ExtractCategories",
+                args={
+                    "content": content,
+                },
+            )
+            return typing.cast(
+                types.DefaultContentPrediction,
+                result.cast_to(types, types, stream_types, False, __runtime__),
+            )
 
     async def ExtractContentGraphGeneric(
         self,
@@ -126,17 +148,29 @@ class BamlAsyncClient:
         custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> types.KnowledgeGraph:
-        result = await self.__options.merge_options(baml_options).call_function_async(
-            function_name="ExtractContentGraphGeneric",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-        )
-        return typing.cast(
-            types.KnowledgeGraph, result.cast_to(types, types, stream_types, False, __runtime__)
-        )
+        # Check if on_tick is provided
+        if "on_tick" in baml_options:
+            # Use streaming internally when on_tick is provided
+            stream = self.stream.ExtractContentGraphGeneric(
+                content=content,
+                mode=mode,
+                custom_prompt_content=custom_prompt_content,
+                baml_options=baml_options,
+            )
+            return await stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = await self.__options.merge_options(baml_options).call_function_async(
+                function_name="ExtractContentGraphGeneric",
+                args={
+                    "content": content,
+                    "mode": mode,
+                    "custom_prompt_content": custom_prompt_content,
+                },
+            )
+            return typing.cast(
+                types.KnowledgeGraph, result.cast_to(types, types, stream_types, False, __runtime__)
+            )
 
     async def ExtractDynamicContentGraph(
         self,
@@ -153,48 +187,75 @@ class BamlAsyncClient:
         custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> types.DynamicKnowledgeGraph:
-        result = await self.__options.merge_options(baml_options).call_function_async(
-            function_name="ExtractDynamicContentGraph",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-        )
-        return typing.cast(
-            types.DynamicKnowledgeGraph,
-            result.cast_to(types, types, stream_types, False, __runtime__),
-        )
+        # Check if on_tick is provided
+        if "on_tick" in baml_options:
+            # Use streaming internally when on_tick is provided
+            stream = self.stream.ExtractDynamicContentGraph(
+                content=content,
+                mode=mode,
+                custom_prompt_content=custom_prompt_content,
+                baml_options=baml_options,
+            )
+            return await stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = await self.__options.merge_options(baml_options).call_function_async(
+                function_name="ExtractDynamicContentGraph",
+                args={
+                    "content": content,
+                    "mode": mode,
+                    "custom_prompt_content": custom_prompt_content,
+                },
+            )
+            return typing.cast(
+                types.DynamicKnowledgeGraph,
+                result.cast_to(types, types, stream_types, False, __runtime__),
+            )
 
     async def SummarizeCode(
         self,
         content: str,
         baml_options: BamlCallOptions = {},
     ) -> types.SummarizedCode:
-        result = await self.__options.merge_options(baml_options).call_function_async(
-            function_name="SummarizeCode",
-            args={
-                "content": content,
-            },
-        )
-        return typing.cast(
-            types.SummarizedCode, result.cast_to(types, types, stream_types, False, __runtime__)
-        )
+        # Check if on_tick is provided
+        if "on_tick" in baml_options:
+            # Use streaming internally when on_tick is provided
+            stream = self.stream.SummarizeCode(content=content, baml_options=baml_options)
+            return await stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = await self.__options.merge_options(baml_options).call_function_async(
+                function_name="SummarizeCode",
+                args={
+                    "content": content,
+                },
+            )
+            return typing.cast(
+                types.SummarizedCode, result.cast_to(types, types, stream_types, False, __runtime__)
+            )
 
     async def SummarizeContent(
         self,
         content: str,
         baml_options: BamlCallOptions = {},
     ) -> types.SummarizedContent:
-        result = await self.__options.merge_options(baml_options).call_function_async(
-            function_name="SummarizeContent",
-            args={
-                "content": content,
-            },
-        )
-        return typing.cast(
-            types.SummarizedContent, result.cast_to(types, types, stream_types, False, __runtime__)
-        )
+        # Check if on_tick is provided
+        if "on_tick" in baml_options:
+            # Use streaming internally when on_tick is provided
+            stream = self.stream.SummarizeContent(content=content, baml_options=baml_options)
+            return await stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = await self.__options.merge_options(baml_options).call_function_async(
+                function_name="SummarizeContent",
+                args={
+                    "content": content,
+                },
+            )
+            return typing.cast(
+                types.SummarizedContent,
+                result.cast_to(types, types, stream_types, False, __runtime__),
+            )
 
 
 class BamlStreamClient:
