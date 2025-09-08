@@ -3,12 +3,13 @@ name: CI
 on:
   push:
     branches:
-      - main
-      - master
+      - '**'   # run on pushes to any branch
+      #- main
+      #- master
   pull_request:
     branches:
-      - main
-      - master
+      - '**'
+  workflow_dispatch:
 
 permissions:
   contents: read
