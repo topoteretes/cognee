@@ -27,6 +27,7 @@ class SearchPayloadDTO(InDTO):
     node_name: Optional[list[str]] = Field(default=None, example=[])
     top_k: Optional[int] = Field(default=10)
     only_context: bool = Field(default=False)
+    use_combined_context: bool = Field(default=False)
 
 
 def get_search_router() -> APIRouter:
@@ -115,6 +116,7 @@ def get_search_router() -> APIRouter:
                 "node_name": payload.node_name,
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
+                "use_combined_context": payload.use_combined_context,
             },
         )
 
@@ -131,6 +133,7 @@ def get_search_router() -> APIRouter:
                 node_name=payload.node_name,
                 top_k=payload.top_k,
                 only_context=payload.only_context,
+                use_combined_context=payload.use_combined_context,
             )
 
             return JSONResponse(content=results)

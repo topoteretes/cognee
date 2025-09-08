@@ -13,7 +13,7 @@ from cognee.modules.data.exceptions import DatasetNotFoundError
 async def search(
     query_text: str,
     query_type: SearchType = SearchType.GRAPH_COMPLETION,
-    user: User = None,
+    user: Optional[User] = None,
     datasets: Optional[Union[list[str], str]] = None,
     dataset_ids: Optional[Union[list[UUID], UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
@@ -24,6 +24,7 @@ async def search(
     save_interaction: bool = False,
     last_k: Optional[int] = None,
     only_context: bool = False,
+    use_combined_context: bool = False,
 ) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -193,6 +194,7 @@ async def search(
         save_interaction=save_interaction,
         last_k=last_k,
         only_context=only_context,
+        use_combined_context=use_combined_context,
     )
 
     return filtered_search_results

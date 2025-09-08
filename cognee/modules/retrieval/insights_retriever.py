@@ -1,17 +1,18 @@
 import asyncio
 from typing import Any, Optional
 
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
+from cognee.modules.retrieval.base_graph_retriever import BaseGraphRetriever
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 
 logger = get_logger("InsightsRetriever")
 
 
-class InsightsRetriever(BaseRetriever):
+class InsightsRetriever(BaseGraphRetriever):
     """
     Retriever for handling graph connection-based insights.
 
@@ -95,7 +96,17 @@ class InsightsRetriever(BaseRetriever):
                 unique_node_connections_map[unique_id] = True
                 unique_node_connections.append(node_connection)
 
-        return unique_node_connections
+        return [
+            Edge(
+                node1=Node(node_id=connection[0]["id"], attributes=connection[0]),
+                node2=Node(node_id=connection[2]["id"], attributes=connection[2]),
+                attributes={
+                    **connection[1],
+                    "relationship_type": connection[1]["relationship_name"],
+                },
+            )
+            for connection in unique_node_connections
+        ]
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         """
