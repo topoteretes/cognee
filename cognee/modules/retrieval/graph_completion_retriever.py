@@ -153,7 +153,8 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         """
         if context is None:
             triplets = await self.get_context(query)
-            context_text = await resolve_edges_to_text(triplets)
+
+        context_text = await resolve_edges_to_text(triplets)
 
         completion = await generate_completion(
             query=query,

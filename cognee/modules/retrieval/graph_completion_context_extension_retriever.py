@@ -73,11 +73,12 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             - List[str]: A list containing the generated answer based on the query and the
               extended context.
         """
-        triplets = []
+        triplets = context
 
-        if context is None:
+        if triplets is None:
             triplets = await self.get_context(query)
-            context_text = await self.resolve_edges_to_text(triplets)
+
+        context_text = await self.resolve_edges_to_text(triplets)
 
         round_idx = 1
 
