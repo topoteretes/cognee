@@ -31,12 +31,17 @@ async def no_access_control_search(
         save_interaction=save_interaction,
         last_k=last_k,
     )
-    (get_completion, get_context) = search_tools
+    if len(search_tools) == 2:
+        [get_completion, get_context] = search_tools
 
-    if only_context:
-        return await get_context(query_text)
+        if only_context:
+            return await get_context(query_text)
 
-    context = await get_context(query_text)
-    completion = await get_completion(query_text, context)
+        context = await get_context(query_text)
+        result = await get_completion(query_text, context)
+    else:
+        unknown_tool = search_tools[0]
+        result = await unknown_tool(query_text)
+        context = ""
 
-    return completion, context, []
+    return result, context, []

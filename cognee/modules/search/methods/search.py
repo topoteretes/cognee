@@ -130,7 +130,7 @@ async def search(
     else:
         return [
             SearchResult(
-                search_result=[result],
+                search_result=result,
                 dataset_id=datasets[min(index, len(datasets) - 1)].id if datasets else None,
                 dataset_name=datasets[min(index, len(datasets) - 1)].name if datasets else None,
             )
@@ -198,7 +198,11 @@ async def authorized_search(
             save_interaction=save_interaction,
             last_k=last_k,
         )
-        (get_completion, _) = specific_search_tools
+        search_tools = specific_search_tools
+        if len(search_tools) == 2:
+            [get_completion, _] = search_tools
+        else:
+            get_completion = search_tools[0]
 
         def prepare_combined_context(
             context,
@@ -283,15 +287,21 @@ async def search_in_datasets_context(
             save_interaction=save_interaction,
             last_k=last_k,
         )
-        (get_completion, get_context) = specific_search_tools
+        search_tools = specific_search_tools
+        if len(search_tools) == 2:
+            [get_completion, get_context] = search_tools
 
-        if only_context:
-            return None, await get_context(query_text), [dataset]
+            if only_context:
+                return None, await get_context(query_text), [dataset]
 
-        search_context = context or await get_context(query_text)
-        search_result = await get_completion(query_text, search_context)
+            search_context = context or await get_context(query_text)
+            search_result = await get_completion(query_text, search_context)
 
-        return search_result, search_context, [dataset]
+            return search_result, search_context, [dataset]
+        else:
+            unknown_tool = search_tools[0]
+
+            return await unknown_tool(query_text), "", [dataset]
 
     # Search every dataset async based on query and appropriate database configuration
     tasks = []
