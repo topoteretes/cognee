@@ -11,6 +11,6 @@ class BaseRetriever(ABC):
         pass
 
     @abstractmethod
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> str:
+    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         """Generates a response using the query and optional context."""
         pass
