@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  lint_and_compatibility:
+    name: Lint and Compatibility Matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.11', '3.12']
+        dep: ['lowest', 'latest']
+    steps:
+      - &checkout
+        name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - &install_uv
+        name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.dep }}" = "lowest" ]; then
+            uv pip install --system -c constraints-lowest.txt -e .
+          else
+            uv pip install --system -e .
+          fi
+
+      - name: Run linting
+        uses: astral-sh/ruff-action@v2
+        with:
+          args: check .
+
+      - name: Show pip cache (for debugging)
+        run: echo "${PIP_CACHE_DIR:-$HOME/.cache/pip}"
+
+      - name: Install OpenAI dependency (latest only)
+        if: matrix.dep == 'latest'
+        run: |
+          set -euo pipefail
+          if uv pip install --system -e . 'openai>=2,<3'; then
+            true
+          else
+            echo '::notice::OpenAI 2.x not available; installing without constraint.'
+            uv pip install --system -e .
+          fi
+
+      - name: Run import smoke test
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          try:
+              import cognee
+              print({"import_ok": True})
+          except Exception as e:
+              print({"import_ok": False, "error": str(e)})
+              raise
+          PY
+
+      - name: Run tests (if present)
+        run: |
+          set -euo pipefail
+          if [ -d tests ] || ls -1 *.py 2>/dev/null | grep -qE '(^|/)test_'; then
+            uv pip install --system pytest pytest-asyncio pytest-cov
+            pytest -q
+          else
+            echo '::notice::No pytest configuration or tests directory. Skipping.'
+          fi
