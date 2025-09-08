@@ -2,7 +2,7 @@ from typing import List, cast
 
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.search.utils import transform_context_to_graph
+from cognee.modules.search.utils.transform_context_to_graph import transform_context_to_graph
 
 
 async def prepare_search_result(search_result):

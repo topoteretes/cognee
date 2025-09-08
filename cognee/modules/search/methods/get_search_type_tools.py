@@ -7,7 +7,6 @@ from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 
 # Retrievers
 from cognee.modules.retrieval.user_qa_feedback import UserQAFeedback
-from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.insights_retriever import InsightsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
