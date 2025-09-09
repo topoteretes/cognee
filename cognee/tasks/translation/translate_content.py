@@ -118,7 +118,7 @@ try:
                         model=self.model,
                         messages=[
                             {"role": "system", "content": "You are a helpful translator. Translate the user text to the target language exactly and nothing else."},
-                            {"role": "user", "content": f"Translate to {target_language}:\n\n{text[:3000]}"},
+                            {"role": "user", "content": f"Translate to {target_language}:\n\n{text}"},
                         ],
                         timeout=self.timeout,
                     )
@@ -128,9 +128,9 @@ try:
                         model=self.model,
                         messages=[
                             {"role": "system", "content": "You are a helpful translator. Translate the user text to the target language exactly and nothing else."},
-                            {"role": "user", "content": f"Translate to {target_language}:\n\n{text[:3000]}"},
+                            {"role": "user", "content": f"Translate to {target_language}:\n\n{text}"},
                         ],
-                        max_tokens=1000,
+                        max_tokens=2000,
                         request_timeout=self.timeout,
                     )
                 translated = (resp.choices[0].message.content or "").strip()
@@ -182,6 +182,9 @@ async def translate_content(
         except Exception:
             logger.exception("language detection failed for content_id=%s", content_id)
             lang, conf = "unknown", 0.0
+        
+        # Normalize for comparisons/metrics
+        lang = (lang or "unknown").lower()
 
         requires_translation = (lang != target_language) and (conf >= confidence_threshold)
         lang_meta = LanguageMetadata(
@@ -201,8 +204,16 @@ async def translate_content(
             try:
                 translated_text, t_conf = await provider.translate(text, target_language)
             except Exception:
-                logger.exception("translation failed")
+                logger.exception("translation failed for content_id=%s", content_id)
                 translated_text, t_conf = text, 0.0
+
+            # Determine the actual provider that handled the translation
+            if OpenAIProvider is not None and isinstance(provider, OpenAIProvider):
+                effective_provider = "openai"
+            elif hasattr(provider, '__class__') and 'LangDetectProvider' in provider.__class__.__name__:
+                effective_provider = "langdetect"
+            else:
+                effective_provider = "noop"
 
             trans = TranslatedContent(
                 original_chunk_id=str(content_id),
@@ -210,7 +221,7 @@ async def translate_content(
                 translated_text=translated_text,
                 source_language=lang,
                 target_language=target_language,
-                translation_provider=translation_provider,
+                translation_provider=effective_provider,
                 confidence_score=t_conf,
             )
             if translated_text != text:
