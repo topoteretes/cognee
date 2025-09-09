@@ -11,7 +11,7 @@ from cognee.modules.graph.utils import (
     retrieve_existing_edges,
 )
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
     InvalidDataChunksError,
@@ -86,7 +86,7 @@ async def extract_graph_from_data(
 
     chunk_graphs = await asyncio.gather(
         *[
-            LLMGateway.extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt)
+            extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt)
             for chunk in data_chunks
         ]
     )

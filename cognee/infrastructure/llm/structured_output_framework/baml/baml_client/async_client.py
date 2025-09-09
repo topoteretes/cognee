@@ -44,6 +44,7 @@ class BamlAsyncClient:
             typing.Union[baml_py.baml_py.Collector, typing.List[baml_py.baml_py.Collector]]
         ] = None,
         env: typing.Optional[typing.Dict[str, typing.Optional[str]]] = None,
+        on_tick: typing.Optional[typing.Callable[[str, baml_py.baml_py.FunctionLog], None]] = None,
     ) -> "BamlAsyncClient":
         options: BamlCallOptions = {}
         if tb is not None:
@@ -54,6 +55,8 @@ class BamlAsyncClient:
             options["collector"] = collector
         if env is not None:
             options["env"] = env
+        if on_tick is not None:
+            options["on_tick"] = on_tick
         return BamlAsyncClient(self.__options.merge_options(options))
 
     @property
@@ -76,106 +79,31 @@ class BamlAsyncClient:
     def parse_stream(self):
         return self.__llm_stream_parser
 
-    async def ExtractCategories(
+    async def AcreateStructuredOutput(
         self,
-        content: str,
+        text_input: str,
+        system_prompt: str,
         baml_options: BamlCallOptions = {},
-    ) -> types.DefaultContentPrediction:
-        result = await self.__options.merge_options(baml_options).call_function_async(
-            function_name="ExtractCategories",
-            args={
-                "content": content,
-            },
-        )
-        return typing.cast(
-            types.DefaultContentPrediction,
-            result.cast_to(types, types, stream_types, False, __runtime__),
-        )
-
-    async def ExtractContentGraphGeneric(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
-        baml_options: BamlCallOptions = {},
-    ) -> types.KnowledgeGraph:
-        result = await self.__options.merge_options(baml_options).call_function_async(
-            function_name="ExtractContentGraphGeneric",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-        )
-        return typing.cast(
-            types.KnowledgeGraph, result.cast_to(types, types, stream_types, False, __runtime__)
-        )
-
-    async def ExtractDynamicContentGraph(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
-        baml_options: BamlCallOptions = {},
-    ) -> types.DynamicKnowledgeGraph:
-        result = await self.__options.merge_options(baml_options).call_function_async(
-            function_name="ExtractDynamicContentGraph",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-        )
-        return typing.cast(
-            types.DynamicKnowledgeGraph,
-            result.cast_to(types, types, stream_types, False, __runtime__),
-        )
-
-    async def SummarizeCode(
-        self,
-        content: str,
-        baml_options: BamlCallOptions = {},
-    ) -> types.SummarizedCode:
-        result = await self.__options.merge_options(baml_options).call_function_async(
-            function_name="SummarizeCode",
-            args={
-                "content": content,
-            },
-        )
-        return typing.cast(
-            types.SummarizedCode, result.cast_to(types, types, stream_types, False, __runtime__)
-        )
-
-    async def SummarizeContent(
-        self,
-        content: str,
-        baml_options: BamlCallOptions = {},
-    ) -> types.SummarizedContent:
-        result = await self.__options.merge_options(baml_options).call_function_async(
-            function_name="SummarizeContent",
-            args={
-                "content": content,
-            },
-        )
-        return typing.cast(
-            types.SummarizedContent, result.cast_to(types, types, stream_types, False, __runtime__)
-        )
+    ) -> types.ResponseModel:
+        # Check if on_tick is provided
+        if "on_tick" in baml_options:
+            # Use streaming internally when on_tick is provided
+            stream = self.stream.AcreateStructuredOutput(
+                text_input=text_input, system_prompt=system_prompt, baml_options=baml_options
+            )
+            return await stream.get_final_response()
+        else:
+            # Original non-streaming code
+            result = await self.__options.merge_options(baml_options).call_function_async(
+                function_name="AcreateStructuredOutput",
+                args={
+                    "text_input": text_input,
+                    "system_prompt": system_prompt,
+                },
+            )
+            return typing.cast(
+                types.ResponseModel, result.cast_to(types, types, stream_types, False, __runtime__)
+            )
 
 
 class BamlStreamClient:
@@ -184,145 +112,26 @@ class BamlStreamClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    def ExtractCategories(
+    def AcreateStructuredOutput(
         self,
-        content: str,
+        text_input: str,
+        system_prompt: str,
         baml_options: BamlCallOptions = {},
-    ) -> baml_py.BamlStream[stream_types.DefaultContentPrediction, types.DefaultContentPrediction]:
+    ) -> baml_py.BamlStream[stream_types.ResponseModel, types.ResponseModel]:
         ctx, result = self.__options.merge_options(baml_options).create_async_stream(
-            function_name="ExtractCategories",
+            function_name="AcreateStructuredOutput",
             args={
-                "content": content,
+                "text_input": text_input,
+                "system_prompt": system_prompt,
             },
         )
-        return baml_py.BamlStream[
-            stream_types.DefaultContentPrediction, types.DefaultContentPrediction
-        ](
+        return baml_py.BamlStream[stream_types.ResponseModel, types.ResponseModel](
             result,
             lambda x: typing.cast(
-                stream_types.DefaultContentPrediction,
-                x.cast_to(types, types, stream_types, True, __runtime__),
+                stream_types.ResponseModel, x.cast_to(types, types, stream_types, True, __runtime__)
             ),
             lambda x: typing.cast(
-                types.DefaultContentPrediction,
-                x.cast_to(types, types, stream_types, False, __runtime__),
-            ),
-            ctx,
-        )
-
-    def ExtractContentGraphGeneric(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.BamlStream[stream_types.KnowledgeGraph, types.KnowledgeGraph]:
-        ctx, result = self.__options.merge_options(baml_options).create_async_stream(
-            function_name="ExtractContentGraphGeneric",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-        )
-        return baml_py.BamlStream[stream_types.KnowledgeGraph, types.KnowledgeGraph](
-            result,
-            lambda x: typing.cast(
-                stream_types.KnowledgeGraph,
-                x.cast_to(types, types, stream_types, True, __runtime__),
-            ),
-            lambda x: typing.cast(
-                types.KnowledgeGraph, x.cast_to(types, types, stream_types, False, __runtime__)
-            ),
-            ctx,
-        )
-
-    def ExtractDynamicContentGraph(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.BamlStream[stream_types.DynamicKnowledgeGraph, types.DynamicKnowledgeGraph]:
-        ctx, result = self.__options.merge_options(baml_options).create_async_stream(
-            function_name="ExtractDynamicContentGraph",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-        )
-        return baml_py.BamlStream[stream_types.DynamicKnowledgeGraph, types.DynamicKnowledgeGraph](
-            result,
-            lambda x: typing.cast(
-                stream_types.DynamicKnowledgeGraph,
-                x.cast_to(types, types, stream_types, True, __runtime__),
-            ),
-            lambda x: typing.cast(
-                types.DynamicKnowledgeGraph,
-                x.cast_to(types, types, stream_types, False, __runtime__),
-            ),
-            ctx,
-        )
-
-    def SummarizeCode(
-        self,
-        content: str,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.BamlStream[stream_types.SummarizedCode, types.SummarizedCode]:
-        ctx, result = self.__options.merge_options(baml_options).create_async_stream(
-            function_name="SummarizeCode",
-            args={
-                "content": content,
-            },
-        )
-        return baml_py.BamlStream[stream_types.SummarizedCode, types.SummarizedCode](
-            result,
-            lambda x: typing.cast(
-                stream_types.SummarizedCode,
-                x.cast_to(types, types, stream_types, True, __runtime__),
-            ),
-            lambda x: typing.cast(
-                types.SummarizedCode, x.cast_to(types, types, stream_types, False, __runtime__)
-            ),
-            ctx,
-        )
-
-    def SummarizeContent(
-        self,
-        content: str,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.BamlStream[stream_types.SummarizedContent, types.SummarizedContent]:
-        ctx, result = self.__options.merge_options(baml_options).create_async_stream(
-            function_name="SummarizeContent",
-            args={
-                "content": content,
-            },
-        )
-        return baml_py.BamlStream[stream_types.SummarizedContent, types.SummarizedContent](
-            result,
-            lambda x: typing.cast(
-                stream_types.SummarizedContent,
-                x.cast_to(types, types, stream_types, True, __runtime__),
-            ),
-            lambda x: typing.cast(
-                types.SummarizedContent, x.cast_to(types, types, stream_types, False, __runtime__)
+                types.ResponseModel, x.cast_to(types, types, stream_types, False, __runtime__)
             ),
             ctx,
         )
@@ -334,95 +143,17 @@ class BamlHttpRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    async def ExtractCategories(
+    async def AcreateStructuredOutput(
         self,
-        content: str,
+        text_input: str,
+        system_prompt: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
         result = await self.__options.merge_options(baml_options).create_http_request_async(
-            function_name="ExtractCategories",
+            function_name="AcreateStructuredOutput",
             args={
-                "content": content,
-            },
-            mode="request",
-        )
-        return result
-
-    async def ExtractContentGraphGeneric(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
-            function_name="ExtractContentGraphGeneric",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-            mode="request",
-        )
-        return result
-
-    async def ExtractDynamicContentGraph(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
-            function_name="ExtractDynamicContentGraph",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-            mode="request",
-        )
-        return result
-
-    async def SummarizeCode(
-        self,
-        content: str,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
-            function_name="SummarizeCode",
-            args={
-                "content": content,
-            },
-            mode="request",
-        )
-        return result
-
-    async def SummarizeContent(
-        self,
-        content: str,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
-            function_name="SummarizeContent",
-            args={
-                "content": content,
+                "text_input": text_input,
+                "system_prompt": system_prompt,
             },
             mode="request",
         )
@@ -435,95 +166,17 @@ class BamlHttpStreamRequestClient:
     def __init__(self, options: DoNotUseDirectlyCallManager):
         self.__options = options
 
-    async def ExtractCategories(
+    async def AcreateStructuredOutput(
         self,
-        content: str,
+        text_input: str,
+        system_prompt: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
         result = await self.__options.merge_options(baml_options).create_http_request_async(
-            function_name="ExtractCategories",
+            function_name="AcreateStructuredOutput",
             args={
-                "content": content,
-            },
-            mode="stream",
-        )
-        return result
-
-    async def ExtractContentGraphGeneric(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
-            function_name="ExtractContentGraphGeneric",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-            mode="stream",
-        )
-        return result
-
-    async def ExtractDynamicContentGraph(
-        self,
-        content: str,
-        mode: typing.Optional[
-            typing.Union[
-                typing_extensions.Literal["simple"],
-                typing_extensions.Literal["base"],
-                typing_extensions.Literal["guided"],
-                typing_extensions.Literal["strict"],
-                typing_extensions.Literal["custom"],
-            ]
-        ] = None,
-        custom_prompt_content: typing.Optional[str] = None,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
-            function_name="ExtractDynamicContentGraph",
-            args={
-                "content": content,
-                "mode": mode,
-                "custom_prompt_content": custom_prompt_content,
-            },
-            mode="stream",
-        )
-        return result
-
-    async def SummarizeCode(
-        self,
-        content: str,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
-            function_name="SummarizeCode",
-            args={
-                "content": content,
-            },
-            mode="stream",
-        )
-        return result
-
-    async def SummarizeContent(
-        self,
-        content: str,
-        baml_options: BamlCallOptions = {},
-    ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
-            function_name="SummarizeContent",
-            args={
-                "content": content,
+                "text_input": text_input,
+                "system_prompt": system_prompt,
             },
             mode="stream",
         )

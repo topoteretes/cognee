@@ -10,7 +10,7 @@
 # BAML files and re-generate this code using: baml-cli generate
 # baml-cli is available with the baml package.
 
-__version__ = "0.201.0"
+__version__ = "0.206.0"
 
 try:
     from baml_py.safe_import import EnsureBamlPyImport
@@ -39,7 +39,7 @@ with EnsureBamlPyImport(__version__) as e:
     from . import config
     from .config import reset_baml_env_vars
 
-    from .sync_client import b
+    from .async_client import b
 
 
 # FOR LEGACY COMPATIBILITY, expose "partial_types" as an alias for "stream_types"

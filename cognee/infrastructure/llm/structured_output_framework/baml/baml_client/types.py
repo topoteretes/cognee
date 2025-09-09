@@ -48,117 +48,12 @@ def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
 # #########################################################################
 
 # #########################################################################
-# Generated classes (17)
+# Generated classes (1)
 # #########################################################################
 
 
-class AudioContent(BaseModel):
-    type: str
-    subclass: typing.List[str]
-
-
-class ContentLabel(BaseModel):
-    content_type: typing.Union[
-        typing_extensions.Literal["text"],
-        typing_extensions.Literal["audio"],
-        typing_extensions.Literal["image"],
-        typing_extensions.Literal["video"],
-        typing_extensions.Literal["multimedia"],
-        typing_extensions.Literal["3d_model"],
-        typing_extensions.Literal["procedural"],
-    ]
-    type: str
-    subclass: typing.List[str]
-
-
-class DefaultContentPrediction(BaseModel):
-    label: "ContentLabel"
-
-
-class DynamicKnowledgeGraph(BaseModel):
+class ResponseModel(BaseModel):
     model_config = ConfigDict(extra="allow")
-
-
-class Edge(BaseModel):
-    # doc string for edge
-    # doc string for source_node_id
-
-    source_node_id: str
-    target_node_id: str
-    relationship_name: str
-
-
-class ImageContent(BaseModel):
-    type: str
-    subclass: typing.List[str]
-
-
-class KnowledgeGraph(BaseModel):
-    nodes: typing.List["Node"]
-    edges: typing.List["Edge"]
-
-
-class Model3DContent(BaseModel):
-    type: str
-    subclass: typing.List[str]
-
-
-class MultimediaContent(BaseModel):
-    type: str
-    subclass: typing.List[str]
-
-
-class Node(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    id: str
-    name: str
-    type: str
-    description: str
-
-
-class ProceduralContent(BaseModel):
-    type: str
-    subclass: typing.List[str]
-
-
-class SummarizedClass(BaseModel):
-    name: str
-    description: str
-    methods: typing.Optional[typing.List["SummarizedFunction"]] = None
-    decorators: typing.Optional[typing.List[str]] = None
-
-
-class SummarizedCode(BaseModel):
-    high_level_summary: str
-    key_features: typing.List[str]
-    imports: typing.List[str]
-    constants: typing.List[str]
-    classes: typing.List["SummarizedClass"]
-    functions: typing.List["SummarizedFunction"]
-    workflow_description: typing.Optional[str] = None
-
-
-class SummarizedContent(BaseModel):
-    summary: str
-    description: str
-
-
-class SummarizedFunction(BaseModel):
-    name: str
-    description: str
-    inputs: typing.Optional[typing.List[str]] = None
-    outputs: typing.Optional[typing.List[str]] = None
-    decorators: typing.Optional[typing.List[str]] = None
-
-
-class TextContent(BaseModel):
-    type: str
-    subclass: typing.List[str]
-
-
-class VideoContent(BaseModel):
-    type: str
-    subclass: typing.List[str]
 
 
 # #########################################################################

@@ -36,29 +36,3 @@ class LLMInterface(Protocol):
               output.
         """
         raise NotImplementedError
-
-    def show_prompt(self, text_input: str, system_prompt: str) -> str:
-        """
-        Format and display the prompt for a user query.
-
-        Parameters:
-        -----------
-
-            - text_input (str): Input text from the user to be included in the prompt.
-            - system_prompt (str): The system prompt that will be shown alongside the user
-              input.
-
-        Returns:
-        --------
-
-            - str: The formatted prompt string combining system prompt and user input.
-        """
-        if not text_input:
-            text_input = "No user input provided."
-        if not system_prompt:
-            raise ValueError("No system prompt path provided.")
-        system_prompt = LLMGateway.read_query_prompt(system_prompt)
-
-        formatted_prompt = f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
-
-        return formatted_prompt

@@ -328,35 +328,3 @@ class OpenAIAdapter(LLMInterface):
             max_completion_tokens=300,
             max_retries=self.MAX_RETRIES,
         )
-
-    def show_prompt(self, text_input: str, system_prompt: str) -> str:
-        """
-        Format and display the prompt for a user query.
-
-        This method formats the prompt using the provided user input and system prompt,
-        returning a string representation. Raises MissingSystemPromptPathError if the system prompt is not
-        provided.
-
-        Parameters:
-        -----------
-
-            - text_input (str): The input text provided by the user.
-            - system_prompt (str): The system's prompt to guide the model's response.
-
-        Returns:
-        --------
-
-            - str: A formatted string representing the user input and system prompt.
-        """
-        if not text_input:
-            text_input = "No user input provided."
-        if not system_prompt:
-            raise MissingSystemPromptPathError()
-        system_prompt = LLMGateway.read_query_prompt(system_prompt)
-
-        formatted_prompt = (
-            f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
-            if system_prompt
-            else None
-        )
-        return formatted_prompt

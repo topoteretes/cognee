@@ -1,5 +1,6 @@
 from typing import List
 
+from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.root_dir import get_absolute_path
@@ -26,10 +27,10 @@ async def extract_edge_triplets(
         }
 
         base_directory = get_absolute_path("./tasks/graph/cascade_extract/prompts")
-        text_input = LLMGateway.render_prompt(
+        text_input = render_prompt(
             "extract_graph_edge_triplets_prompt_input.txt", context, base_directory=base_directory
         )
-        system_prompt = LLMGateway.read_query_prompt(
+        system_prompt = read_query_prompt(
             "extract_graph_edge_triplets_prompt_system.txt", base_directory=base_directory
         )
         extracted_graph = await LLMGateway.acreate_structured_output(

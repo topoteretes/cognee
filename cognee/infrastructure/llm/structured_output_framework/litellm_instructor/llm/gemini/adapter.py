@@ -113,34 +113,3 @@ class GeminiAdapter(LLMInterface):
             logger.error(f"Schema validation failed: {str(e)}")
             logger.debug(f"Raw response: {e.raw_response}")
             raise ValueError(f"Response failed schema validation: {str(e)}")
-
-    def show_prompt(self, text_input: str, system_prompt: str) -> str:
-        """
-        Format and display the prompt for a user query.
-
-        Raises an MissingQueryParameterError if no system prompt is provided.
-
-        Parameters:
-        -----------
-
-            - text_input (str): The user input text to display along with the system prompt.
-            - system_prompt (str): The path or content of the system prompt to be read and
-              displayed.
-
-        Returns:
-        --------
-
-            - str: Returns a formatted string containing the system prompt and user input.
-        """
-        if not text_input:
-            text_input = "No user input provided."
-        if not system_prompt:
-            raise MissingSystemPromptPathError()
-        system_prompt = LLMGateway.read_query_prompt(system_prompt)
-
-        formatted_prompt = (
-            f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
-            if system_prompt
-            else None
-        )
-        return formatted_prompt

@@ -1,6 +1,6 @@
 from typing import List
 
-from cognee.infrastructure.llm import LLMGateway
+from cognee.infrastructure.llm.extraction import extract_event_entities
 from cognee.modules.engine.models import Event
 from cognee.tasks.temporal_graph.models import EventWithEntities, EventEntityList
 
@@ -29,6 +29,6 @@ async def enrich_events(events: List[Event]) -> List[EventWithEntities]:
     events_json_str = json.dumps(events_json)
 
     # Extract entities from events
-    entity_result = await LLMGateway.extract_event_entities(events_json_str, EventEntityList)
+    entity_result = await extract_event_entities(events_json_str, EventEntityList)
 
     return entity_result.events
