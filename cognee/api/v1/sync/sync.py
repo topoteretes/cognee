@@ -1,3 +1,4 @@
+import io
 import os
 import uuid
 import asyncio
@@ -7,6 +8,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 
 from cognee.infrastructure.files.storage import get_file_storage
+from cognee.tasks.ingestion.ingest_data import ingest_data
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.data.models import Dataset
@@ -218,7 +220,7 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
 
         # Update progress
         try:
-            await update_sync_operation(run_id, progress_percentage=75)
+            await update_sync_operation(run_id, progress_percentage=50)
         except Exception as e:
             logger.warning(f"Failed to update progress: {str(e)}")
 
@@ -230,6 +232,16 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
             logger.info(
                 f"Skipping cognify processing - no new files were uploaded for dataset {dataset.id}"
             )
+        
+        # Update progress
+        try:
+            await update_sync_operation(run_id, progress_percentage=75)
+        except Exception as e:
+            logger.warning(f"Failed to update progress: {str(e)}")
+        
+        # Step 5: download files that are missing on local
+        await _download_missing_files(cloud_base_url, cloud_auth_token, dataset, hashes_missing_on_local, user)
+        logger.info(f"Download complete: {len(hashes_missing_on_local)} files")
 
         # Final progress
         try:
@@ -383,6 +395,114 @@ async def _check_hashes_diff(
     except Exception as e:
         logger.error(f"Error checking missing hashes: {str(e)}")
         raise ConnectionError(f"Failed to check missing hashes: {str(e)}")
+
+
+async def _download_missing_files(
+    cloud_base_url: str,
+    auth_token: str,
+    dataset: Dataset,
+    hashes_missing_on_local: List[str],
+    user: User,
+) -> int:
+    """
+    Step 5: Download files that are missing locally from the cloud.
+
+    Returns:
+        int: Total bytes downloaded
+    """
+    logger.info(f"Downloading {len(hashes_missing_on_local)} missing files from cloud")
+
+    if not hashes_missing_on_local:
+        logger.info("No files need to be downloaded - all files already exist locally")
+        return 0
+
+    total_bytes_downloaded = 0
+    downloaded_count = 0
+
+    headers = {"X-Api-Key": auth_token}
+
+    async with aiohttp.ClientSession() as session:
+        for file_hash in hashes_missing_on_local:
+            try:
+                # Download file from cloud by hash
+                download_url = f"{cloud_base_url}/api/sync/{dataset.id}/data/{file_hash}"
+                
+                logger.debug(f"Downloading file with hash: {file_hash}")
+                
+                async with session.get(download_url, headers=headers) as response:
+                    if response.status == 200:
+                        file_content = await response.read()
+                        file_size = len(file_content)
+                        
+                        # Get file metadata from response headers
+                        file_name = response.headers.get('X-File-Name', f'file_{file_hash}')
+                        
+                        # Save file locally using ingestion pipeline
+                        await _save_downloaded_file(dataset, file_hash, file_name, file_content, user)
+                        
+                        total_bytes_downloaded += file_size
+                        downloaded_count += 1
+                        
+                        logger.debug(f"Successfully downloaded {file_name} ({file_size} bytes)")
+                        
+                    elif response.status == 404:
+                        logger.warning(f"File with hash {file_hash} not found on cloud")
+                        continue
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"Failed to download file {file_hash}: Status {response.status} - {error_text}")
+                        continue
+
+            except Exception as e:
+                logger.error(f"Error downloading file {file_hash}: {str(e)}", exc_info=True)
+                continue
+
+    logger.info(f"Download summary: {downloaded_count}/{len(hashes_missing_on_local)} files downloaded, {total_bytes_downloaded} bytes total")
+    return total_bytes_downloaded
+
+
+class InMemoryDownload:
+    def __init__(self, data: bytes, filename: str):
+        self.file = io.BufferedReader(io.BytesIO(data))
+        self.filename = filename
+
+async def _save_downloaded_file(
+    dataset: Dataset,
+    file_hash: str,
+    file_name: str,
+    file_content: bytes,
+    user: User,
+) -> None:
+    """
+    Save a downloaded file to local storage and register it in the dataset.
+    Uses the existing ingest_data function for consistency with normal ingestion.
+    
+    Args:
+        dataset: The dataset to add the file to
+        file_hash: MD5 hash of the file content
+        file_name: Original file name
+        file_content: Raw file content bytes
+    """
+    try:
+        # Create a temporary file-like object from the bytes
+        file_obj = InMemoryDownload(file_content, file_name)
+        
+        # User is injected as dependency
+        
+        # Use the existing ingest_data function to properly handle the file
+        # This ensures consistency with normal file ingestion
+        await ingest_data(
+            data=file_obj,
+            dataset_name=dataset.name,
+            user=user,
+            dataset_id=dataset.id,
+        )
+        
+        logger.debug(f"Successfully saved downloaded file: {file_name} (hash: {file_hash})")
+        
+    except Exception as e:
+        logger.error(f"Failed to save downloaded file {file_name}: {str(e)}")
+        raise
 
 
 async def _upload_missing_files(

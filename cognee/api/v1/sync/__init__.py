@@ -3,7 +3,7 @@ from .sync import (
     SyncResponse,
     LocalFileInfo,
     CheckMissingHashesRequest,
-    CheckMissingHashesResponse,
+    CheckHashesDiffResponse,
     PruneDatasetRequest,
 )
 
@@ -12,6 +12,6 @@ __all__ = [
     "SyncResponse",
     "LocalFileInfo",
     "CheckMissingHashesRequest",
-    "CheckMissingHashesResponse",
+    "CheckHashesDiffResponse",
     "PruneDatasetRequest",
 ]
