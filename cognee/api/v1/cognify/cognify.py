@@ -69,10 +69,11 @@ async def cognify(
         1. **Document Classification**: Identifies document types and structures
         2. **Permission Validation**: Ensures user has processing rights
         3. **Text Chunking**: Breaks content into semantically meaningful segments
-        4. **Entity Extraction**: Identifies key concepts, people, places, organizations
-        5. **Relationship Detection**: Discovers connections between entities
-        6. **Graph Construction**: Builds semantic knowledge graph with embeddings
-        7. **Content Summarization**: Creates hierarchical summaries for navigation
+        4. **Translation**: Auto-translates non-English chunks to English and attaches metadata
+        5. **Entity Extraction**: Identifies key concepts, people, places, organizations
+        6. **Relationship Detection**: Discovers connections between entities
+        7. **Graph Construction**: Builds semantic knowledge graph with embeddings
+        8. **Content Summarization**: Creates hierarchical summaries for navigation
 
     Graph Model Customization:
         The `graph_model` parameter allows custom knowledge structures:
@@ -108,6 +109,11 @@ async def cognify(
                       If provided, this prompt will be used instead of the default prompts for
                       knowledge graph extraction. The prompt should guide the LLM on how to
                       extract entities and relationships from the text content.
+        translation_provider: Translation service to use for multilingual content.
+                            - "noop": No translation (default, safe fallback)
+                            - "langdetect": Local language detection without translation
+                            - "openai": OpenAI-powered translation (requires OPENAI_API_KEY)
+                            Enables cross-language search by translating non-English content to English.
 
     Returns:
         Union[dict, list[PipelineRunInfo]]:
