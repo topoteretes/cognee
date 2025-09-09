@@ -29,7 +29,7 @@ def get_max_chunk_tokens():
 
     # Calculate max chunk size based on the following formula
     embedding_engine = get_vector_engine().embedding_engine
-    llm_client = get_llm_client()
+    llm_client = get_llm_client(raise_api_key_error=False)
 
     # We need to make sure chunk size won't take more than half of LLM max context token size
     # but it also can't be bigger than the embedding engine max token size
