@@ -21,7 +21,7 @@ from cognee.modules.sync.methods import (
     mark_sync_failed,
 )
 
-logger = get_logger()
+logger = get_logger('sync')
 
 
 class LocalFileInfo(BaseModel):
@@ -145,7 +145,23 @@ async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) ->
         await mark_sync_started(run_id)
 
         # Perform the actual sync operation
-        records_processed, bytes_transferred = await _sync_to_cognee_cloud(dataset, user, run_id)
+        MAX_RETRY_COUNT = 3
+        retry_count = 0
+        while retry_count < MAX_RETRY_COUNT:
+            try:
+                records_processed, bytes_transferred = await _sync_to_cognee_cloud(dataset, user, run_id)
+                break
+            except Exception as e:
+                retry_count += 1
+                logger.error(f"Background sync {run_id}: Failed after {retry_count} retries with error: {str(e)}")
+                await update_sync_operation(run_id, retry_count=retry_count)
+                await asyncio.sleep(2**retry_count)
+                continue
+
+        if retry_count == MAX_RETRY_COUNT:
+            logger.error(f"Background sync {run_id}: Failed after {MAX_RETRY_COUNT} retries")
+            await mark_sync_failed(run_id, "Failed after 3 retries")
+            return
 
         end_time = datetime.now(timezone.utc)
         duration = (end_time - start_time).total_seconds()
@@ -175,7 +191,6 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
     3. Prune cloud dataset to match local state
     """
     logger.info(f"Starting sync to Cognee Cloud: dataset {dataset.name} ({dataset.id})")
-
     try:
         # Get cloud configuration
         cloud_base_url = await _get_cloud_base_url()
