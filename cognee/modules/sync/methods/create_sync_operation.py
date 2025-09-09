@@ -10,7 +10,9 @@ async def create_sync_operation(
     dataset_id: UUID,
     dataset_name: str,
     user_id: UUID,
-    total_records: Optional[int] = None,
+    total_records_to_sync: Optional[int] = None,
+    total_records_to_download: Optional[int] = None,
+    total_records_to_upload: Optional[int] = None,
 ) -> SyncOperation:
     """
     Create a new sync operation record in the database.
@@ -20,7 +22,9 @@ async def create_sync_operation(
         dataset_id: UUID of the dataset being synced
         dataset_name: Name of the dataset being synced
         user_id: UUID of the user who initiated the sync
-        total_records: Total number of records to sync (if known)
+        total_records_to_sync: Total number of records to sync (if known)
+        total_records_to_download: Total number of records to download (if known)
+        total_records_to_upload: Total number of records to upload (if known)
 
     Returns:
         SyncOperation: The created sync operation record
@@ -33,7 +37,9 @@ async def create_sync_operation(
         dataset_name=dataset_name,
         user_id=user_id,
         status=SyncStatus.STARTED,
-        total_records=total_records,
+        total_records_to_sync=total_records_to_sync,
+        total_records_to_download=total_records_to_download,
+        total_records_to_upload=total_records_to_upload,
         created_at=datetime.now(timezone.utc),
     )
 

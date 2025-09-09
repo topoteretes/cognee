@@ -149,7 +149,7 @@ async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) ->
         retry_count = 0
         while retry_count < MAX_RETRY_COUNT:
             try:
-                records_processed, bytes_transferred = await _sync_to_cognee_cloud(dataset, user, run_id)
+                records_downloaded, records_uploaded, bytes_downloaded, bytes_uploaded = await _sync_to_cognee_cloud(dataset, user, run_id)
                 break
             except Exception as e:
                 retry_count += 1
@@ -167,11 +167,11 @@ async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) ->
         duration = (end_time - start_time).total_seconds()
 
         logger.info(
-            f"Background sync {run_id}: Completed successfully. Records: {records_processed}, Bytes: {bytes_transferred}, Duration: {duration}s"
+            f"Background sync {run_id}: Completed successfully. Downloaded: {records_downloaded} records/{bytes_downloaded} bytes, Uploaded: {records_uploaded} records/{bytes_uploaded} bytes, Duration: {duration}s"
         )
 
         # Mark sync as completed with final stats
-        await mark_sync_completed(run_id, records_processed, bytes_transferred)
+        await mark_sync_completed(run_id, records_downloaded, records_uploaded, bytes_downloaded, bytes_uploaded)
 
     except Exception as e:
         end_time = datetime.now(timezone.utc)
@@ -183,7 +183,7 @@ async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) ->
         await mark_sync_failed(run_id, str(e))
 
 
-async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tuple[int, int]:
+async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tuple[int, int, int, int]:
     """
     Sync local data to Cognee Cloud using three-step idempotent process:
     1. Extract local files with stored MD5 hashes and check what's missing on cloud
@@ -202,15 +202,15 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
         local_files = await _extract_local_files_with_hashes(dataset, user, run_id)
         logger.info(f"Found {len(local_files)} local files to sync")
 
-        # Update sync operation with total file count
+        # Update sync operation with initial counts
         try:
-            await update_sync_operation(run_id, processed_records=0)
+            await update_sync_operation(run_id, records_downloaded=0, records_uploaded=0)
         except Exception as e:
             logger.warning(f"Failed to initialize sync progress: {str(e)}")
 
         if not local_files:
             logger.info("No files to sync - dataset is empty")
-            return 0, 0
+            return 0, 0, 0, 0  # records_downloaded, records_uploaded, bytes_downloaded, bytes_uploaded
 
         # Step 2: Check what files are missing on cloud
         local_hashes = [f.content_hash for f in local_files]
@@ -255,8 +255,8 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
             logger.warning(f"Failed to update progress: {str(e)}")
         
         # Step 5: download files that are missing on local
-        await _download_missing_files(cloud_base_url, cloud_auth_token, dataset, hashes_missing_on_local, user)
-        logger.info(f"Download complete: {len(hashes_missing_on_local)} files")
+        bytes_downloaded = await _download_missing_files(cloud_base_url, cloud_auth_token, dataset, hashes_missing_on_local, user)
+        logger.info(f"Download complete: {len(hashes_missing_on_local)} files, {bytes_downloaded} bytes")
 
         # Final progress
         try:
@@ -264,13 +264,14 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
         except Exception as e:
             logger.warning(f"Failed to update final progress: {str(e)}")
 
-        records_processed = len(local_files)
+        records_downloaded = len(hashes_missing_on_local)
+        records_uploaded = len(hashes_missing_on_remote)
 
         logger.info(
-            f"Sync completed successfully: {records_processed} records, {bytes_uploaded} bytes uploaded"
+            f"Sync completed successfully: downloaded {records_downloaded} records/{bytes_downloaded} bytes, uploaded {records_uploaded} records/{bytes_uploaded} bytes"
         )
 
-        return records_processed, bytes_uploaded
+        return records_downloaded, records_uploaded, bytes_downloaded, bytes_uploaded
 
     except Exception as e:
         logger.error(f"Sync failed: {str(e)}")

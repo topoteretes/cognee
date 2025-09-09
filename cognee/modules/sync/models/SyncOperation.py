@@ -54,17 +54,18 @@ class SyncOperation(Base):
     )
 
     # Operation details
-    total_records = Column(Integer, doc="Total number of records to sync")
-    processed_records = Column(Integer, default=0, doc="Number of records successfully processed")
-    bytes_transferred = Column(Integer, default=0, doc="Total bytes transferred to cloud")
+    total_records_to_sync = Column(Integer, doc="Total number of records to sync")
+    total_records_to_download = Column(Integer, doc="Total number of records to download")
+    total_records_to_upload = Column(Integer, doc="Total number of records to upload")
+    
+    records_downloaded = Column(Integer, default=0, doc="Number of records successfully downloaded")
+    records_uploaded = Column(Integer, default=0, doc="Number of records successfully uploaded")
+    bytes_downloaded = Column(Integer, default=0, doc="Total bytes downloaded from cloud")
+    bytes_uploaded = Column(Integer, default=0, doc="Total bytes uploaded to cloud")
 
     # Error handling
     error_message = Column(Text, doc="Error message if sync failed")
     retry_count = Column(Integer, default=0, doc="Number of retry attempts")
-
-    # Additional metadata (can be added later when needed)
-    # cloud_endpoint = Column(Text, doc="Cloud endpoint used for sync")
-    # compression_enabled = Column(Text, doc="Whether compression was used")
 
     def get_duration_seconds(self) -> Optional[float]:
         """Get the duration of the sync operation in seconds."""
@@ -76,11 +77,18 @@ class SyncOperation(Base):
 
     def get_progress_info(self) -> dict:
         """Get comprehensive progress information."""
+        total_records_processed = (self.records_downloaded or 0) + (self.records_uploaded or 0)
+        total_bytes_transferred = (self.bytes_downloaded or 0) + (self.bytes_uploaded or 0)
+        
         return {
             "status": self.status.value,
             "progress_percentage": self.progress_percentage,
-            "records_processed": f"{self.processed_records or 0}/{self.total_records or 'unknown'}",
-            "bytes_transferred": self.bytes_transferred or 0,
+            "records_processed": f"{total_records_processed}/{self.total_records_to_sync or 'unknown'}",
+            "records_downloaded": self.records_downloaded or 0,
+            "records_uploaded": self.records_uploaded or 0,
+            "bytes_transferred": total_bytes_transferred,
+            "bytes_downloaded": self.bytes_downloaded or 0,
+            "bytes_uploaded": self.bytes_uploaded or 0,
             "duration_seconds": self.get_duration_seconds(),
             "error_message": self.error_message,
         }

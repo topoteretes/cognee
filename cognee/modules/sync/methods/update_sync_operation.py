@@ -9,8 +9,10 @@ async def update_sync_operation(
     run_id: str,
     status: Optional[SyncStatus] = None,
     progress_percentage: Optional[int] = None,
-    processed_records: Optional[int] = None,
-    bytes_transferred: Optional[int] = None,
+    records_downloaded: Optional[int] = None,
+    records_uploaded: Optional[int] = None,
+    bytes_downloaded: Optional[int] = None,
+    bytes_uploaded: Optional[int] = None,
     error_message: Optional[str] = None,
     retry_count: Optional[int] = None,
     started_at: Optional[datetime] = None,
@@ -23,8 +25,10 @@ async def update_sync_operation(
         run_id: The public run_id of the sync operation to update
         status: New status for the operation
         progress_percentage: Progress percentage (0-100)
-        processed_records: Number of records processed so far
-        bytes_transferred: Total bytes transferred
+        records_downloaded: Number of records downloaded so far
+        records_uploaded: Number of records uploaded so far
+        bytes_downloaded: Total bytes downloaded from cloud
+        bytes_uploaded: Total bytes uploaded to cloud
         error_message: Error message if operation failed
         retry_count: Number of retry attempts
         started_at: When the actual processing started
@@ -51,11 +55,17 @@ async def update_sync_operation(
         if progress_percentage is not None:
             sync_operation.progress_percentage = max(0, min(100, progress_percentage))
 
-        if processed_records is not None:
-            sync_operation.processed_records = processed_records
+        if records_downloaded is not None:
+            sync_operation.records_downloaded = records_downloaded
 
-        if bytes_transferred is not None:
-            sync_operation.bytes_transferred = bytes_transferred
+        if records_uploaded is not None:
+            sync_operation.records_uploaded = records_uploaded
+
+        if bytes_downloaded is not None:
+            sync_operation.bytes_downloaded = bytes_downloaded
+
+        if bytes_uploaded is not None:
+            sync_operation.bytes_uploaded = bytes_uploaded
 
         if error_message is not None:
             sync_operation.error_message = error_message
@@ -94,15 +104,21 @@ async def mark_sync_started(run_id: str) -> Optional[SyncOperation]:
 
 
 async def mark_sync_completed(
-    run_id: str, processed_records: int, bytes_transferred: int
+    run_id: str,
+    records_downloaded: int = 0,
+    records_uploaded: int = 0,
+    bytes_downloaded: int = 0,
+    bytes_uploaded: int = 0,
 ) -> Optional[SyncOperation]:
     """Convenience method to mark a sync operation as completed successfully."""
     return await update_sync_operation(
         run_id=run_id,
         status=SyncStatus.COMPLETED,
         progress_percentage=100,
-        processed_records=processed_records,
-        bytes_transferred=bytes_transferred,
+        records_downloaded=records_downloaded,
+        records_uploaded=records_uploaded,
+        bytes_downloaded=bytes_downloaded,
+        bytes_uploaded=bytes_uploaded,
         completed_at=datetime.now(timezone.utc),
     )
 
