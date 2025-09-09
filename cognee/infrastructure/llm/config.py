@@ -76,10 +76,10 @@ class LLMConfig(BaseSettings):
             provider=self.baml_llm_provider,
             options={
                 "model": self.baml_llm_model,
-                "temperature": self.baml_llm_temperature,
+                # "temperature": self.baml_llm_temperature,
                 "api_key": self.baml_llm_api_key,
-                "base_url": self.baml_llm_endpoint,
-                "api_version": self.baml_llm_api_version,
+                # "base_url": self.baml_llm_endpoint,
+                # "api_version": self.baml_llm_api_version,
             },
         )
         # Sets the primary client

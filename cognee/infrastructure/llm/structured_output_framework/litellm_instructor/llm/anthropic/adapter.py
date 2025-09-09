@@ -68,35 +68,3 @@ class AnthropicAdapter(LLMInterface):
             ],
             response_model=response_model,
         )
-
-    def show_prompt(self, text_input: str, system_prompt: str) -> str:
-        """
-        Format and display the prompt for a user query.
-
-        Parameters:
-        -----------
-
-            - text_input (str): The input text from the user, defaults to a placeholder if
-              empty.
-            - system_prompt (str): The path to the system prompt to be read and formatted.
-
-        Returns:
-        --------
-
-            - str: A formatted string displaying the system prompt and user input.
-        """
-
-        if not text_input:
-            text_input = "No user input provided."
-        if not system_prompt:
-            raise MissingSystemPromptPathError()
-
-        system_prompt = LLMGateway.read_query_prompt(system_prompt)
-
-        formatted_prompt = (
-            f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
-            if system_prompt
-            else None
-        )
-
-        return formatted_prompt

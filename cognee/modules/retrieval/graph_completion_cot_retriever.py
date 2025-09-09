@@ -1,9 +1,10 @@
-from typing import Any, Optional, List, Tuple, Type
+from typing import Any, Optional, List, Type
 from cognee.shared.logging_utils import get_logger
 
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 
 logger = get_logger()
 
@@ -104,10 +105,10 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             logger.info(f"Chain-of-thought: round {round_idx} - answer: {completion}")
             if round_idx < max_iter:
                 valid_args = {"query": query, "answer": completion, "context": context}
-                valid_user_prompt = LLMGateway.render_prompt(
+                valid_user_prompt = render_prompt(
                     filename=self.validation_user_prompt_path, context=valid_args
                 )
-                valid_system_prompt = LLMGateway.read_query_prompt(
+                valid_system_prompt = read_query_prompt(
                     prompt_file_name=self.validation_system_prompt_path
                 )
 
@@ -117,10 +118,10 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                     response_model=str,
                 )
                 followup_args = {"query": query, "answer": completion, "reasoning": reasoning}
-                followup_prompt = LLMGateway.render_prompt(
+                followup_prompt = render_prompt(
                     filename=self.followup_user_prompt_path, context=followup_args
                 )
-                followup_system = LLMGateway.read_query_prompt(
+                followup_system = read_query_prompt(
                     prompt_file_name=self.followup_system_prompt_path
                 )
 
