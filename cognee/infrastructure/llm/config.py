@@ -71,16 +71,18 @@ class LLMConfig(BaseSettings):
 
     def model_post_init(self, __context) -> None:
         """Initialize the BAML registry after the model is created."""
+        raw_options = {
+            "model": self.baml_llm_model,
+            "temperature": self.baml_llm_temperature,
+            "api_key": self.baml_llm_api_key,
+            "base_url": self.baml_llm_endpoint,
+            "api_version": self.baml_llm_api_version,
+        }
+
+        # Note: keep the item only when the value is not None or an empty string (they would override baml default values)
+        options = {k: v for k, v in raw_options.items() if v not in (None, "")}
         self.baml_registry.add_llm_client(
-            name=self.baml_llm_provider,
-            provider=self.baml_llm_provider,
-            options={
-                "model": self.baml_llm_model,
-                # "temperature": self.baml_llm_temperature,
-                "api_key": self.baml_llm_api_key,
-                # "base_url": self.baml_llm_endpoint,
-                # "api_version": self.baml_llm_api_version,
-            },
+            name=self.baml_llm_provider, provider=self.baml_llm_provider, options=options
         )
         # Sets the primary client
         self.baml_registry.set_primary(self.baml_llm_provider)
