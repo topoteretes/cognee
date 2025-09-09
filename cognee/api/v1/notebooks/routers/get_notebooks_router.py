@@ -36,7 +36,9 @@ def get_notebooks_router():
     async def create_notebook_endpoint(
         notebook_data: NotebookData, user: User = Depends(get_authenticated_user)
     ):
-        return await create_notebook(user.id, notebook_data.name, notebook_data.cells)
+        return await create_notebook(
+            user.id, notebook_data.name, notebook_data.cells, deletable=True
+        )
 
     @router.put("/{notebook_id}")
     async def update_notebook_endpoint(
