@@ -5,7 +5,7 @@ from baml_py.baml_py import ClassBuilder
 
 from cognee.infrastructure.llm.config import get_llm_config
 
-from typing import List, Union, Optional, Literal
+from typing import Union, Literal
 from enum import Enum
 from datetime import datetime
 
@@ -16,32 +16,7 @@ from cognee.infrastructure.llm.structured_output_framework.baml.baml_client impo
 from pydantic import BaseModel
 from typing import get_origin, get_args
 
-logger = get_logger("extract_summary_baml")
-
-
-class SummarizedFunction(BaseModel):
-    name: str
-    description: str
-    inputs: Optional[List[str]] = None
-    outputs: Optional[List[str]] = None
-    decorators: Optional[List[str]] = None
-
-
-class SummarizedClass(BaseModel):
-    name: str
-    description: str
-    methods: Optional[List[SummarizedFunction]] = None
-    decorators: Optional[List[str]] = None
-
-
-class SummarizedCode(BaseModel):
-    high_level_summary: str
-    key_features: List[str]
-    imports: List[str] = []
-    constants: List[str] = []
-    classes: List[SummarizedClass] = []
-    functions: List[SummarizedFunction] = []
-    workflow_description: Optional[str] = None
+logger = get_logger()
 
 
 def create_dynamic_baml_type(tb, baml_model, pydantic_model):
@@ -179,7 +154,7 @@ async def acreate_structured_output(
     config = get_llm_config()
     tb = TypeBuilder()
 
-    type_builder = create_dynamic_baml_type(tb, tb.ResponseModel, SummarizedCode)
+    type_builder = create_dynamic_baml_type(tb, tb.ResponseModel, response_model)
 
     result = await b.AcreateStructuredOutput(
         text_input=text_input,
@@ -187,13 +162,15 @@ async def acreate_structured_output(
         baml_options={"client_registry": config.baml_registry, "tb": type_builder},
     )
 
-    return result
+    if response_model is str:
+        return result
+    return response_model.model_validate(result.dict())
 
 
 if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        loop.run_until_complete(acreate_structured_output("TEST", "THIS IS A TEST", SummarizedCode))
+        loop.run_until_complete(acreate_structured_output("TEST", "THIS IS A TEST", str))
     finally:
         loop.run_until_complete(loop.shutdown_asyncgens())
