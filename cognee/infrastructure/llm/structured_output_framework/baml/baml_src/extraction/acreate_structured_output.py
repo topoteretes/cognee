@@ -152,8 +152,9 @@ async def acreate_structured_output(
         BaseModel: The summarized content in the specified format
     """
     config = get_llm_config()
-    tb = TypeBuilder()
 
+    # Dynamically create BAML response model
+    tb = TypeBuilder()
     type_builder = create_dynamic_baml_type(tb, tb.ResponseModel, response_model)
 
     result = await b.AcreateStructuredOutput(
@@ -162,8 +163,9 @@ async def acreate_structured_output(
         baml_options={"client_registry": config.baml_registry, "tb": type_builder},
     )
 
+    # Transform BAML response to proper pydantic reponse model
     if response_model is str:
-        return result
+        return str(result)
     return response_model.model_validate(result.dict())
 
 
