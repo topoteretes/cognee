@@ -21,6 +21,7 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
+from cognee.tasks.translation import translate_content
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
 logger = get_logger("cognify")
@@ -40,6 +41,7 @@ async def cognify(
     run_in_background: bool = False,
     incremental_loading: bool = True,
     custom_prompt: Optional[str] = None,
+    translation_provider: str = "noop",
 ):
     """
     Transform ingested data into a structured knowledge graph.
@@ -183,7 +185,7 @@ async def cognify(
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
     tasks = await get_default_tasks(
-        user, graph_model, chunker, chunk_size, ontology_file_path, custom_prompt
+        user, graph_model, chunker, chunk_size, ontology_file_path, custom_prompt, translation_provider
     )
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
@@ -209,6 +211,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunk_size: int = None,
     ontology_file_path: Optional[str] = None,
     custom_prompt: Optional[str] = None,
+    translation_provider: str = "noop",
 ) -> list[Task]:
     default_tasks = [
         Task(classify_documents),
@@ -218,6 +221,12 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
             chunker=chunker,
         ),  # Extract text chunks based on the document type.
+        Task(
+            translate_content,
+            target_language="en",
+            translation_provider=translation_provider,
+            confidence_threshold=0.8,
+        ),  # Auto-translate non-English content and attach metadata
         Task(
             extract_graph_from_data,
             graph_model=graph_model,
