@@ -30,9 +30,9 @@ class NoOpProvider:
         except UnicodeEncodeError:
             return "unknown", 0.4
 
-    async def translate(self, text: str, target_language: str) -> Tuple[str, float]:
+    async def translate(self, text: str, _target_language: str) -> Tuple[str, float]:
         # No translation performed
-        return text, 1.0
+        return text, 0.0
 
 
 try:
@@ -58,22 +58,42 @@ try:
     import openai
 
     class OpenAIProvider:
-        def __init__(self):
+        def __init__(self, model: Optional[str] = None, timeout: float = 30.0):
+            # Prefer modern client; fall back to legacy globals.
+            self.model = model or os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-4o-mini")
+            self.timeout = float(os.getenv("OPENAI_TIMEOUT", timeout))
             key = os.getenv("OPENAI_API_KEY")
-            if key:
+            # If the new client exists, use it; otherwise fall back to global api_key
+            self._client = getattr(openai, "OpenAI", None)
+            if self._client:
+                # instantiate client with key if provided
+                self._client = self._client(api_key=key) if key else self._client()
+            elif key and hasattr(openai, "api_key"):
                 openai.api_key = key
 
         async def detect_language(self, text: str) -> Tuple[str, float]:
             try:
-                resp = await asyncio.to_thread(
-                    openai.ChatCompletion.create,
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": "You are a language detection assistant."},
-                        {"role": "user", "content": f"What language is this? Reply with 'lang: <code>' and 'confidence: <0-1>'\nText:\n{text[:1000]}"},
-                    ],
-                    max_tokens=20,
-                )
+                if self._client:
+                    resp = await asyncio.to_thread(
+                        self._client.chat.completions.create,
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": "You are a language detection assistant."},
+                            {"role": "user", "content": f"What language is this? Reply with 'lang: <code>' and 'confidence: <0-1>'\nText:\n{text[:1000]}"},
+                        ],
+                        timeout=self.timeout,
+                    )
+                else:
+                    resp = await asyncio.to_thread(
+                        openai.ChatCompletion.create,
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": "You are a language detection assistant."},
+                            {"role": "user", "content": f"What language is this? Reply with 'lang: <code>' and 'confidence: <0-1>'\nText:\n{text[:1000]}"},
+                        ],
+                        max_tokens=20,
+                        request_timeout=self.timeout,
+                    )
                 out = resp.choices[0].message.content or ""
                 # naive parse
                 lang = "unknown"
@@ -92,15 +112,27 @@ try:
 
         async def translate(self, text: str, target_language: str) -> Tuple[str, float]:
             try:
-                resp = await asyncio.to_thread(
-                    openai.ChatCompletion.create,
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": "You are a helpful translator. Translate the user text to the target language exactly and nothing else."},
-                        {"role": "user", "content": f"Translate to {target_language}:\n\n{text[:3000]}"},
-                    ],
-                    max_tokens=1000,
-                )
+                if self._client:
+                    resp = await asyncio.to_thread(
+                        self._client.chat.completions.create,
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": "You are a helpful translator. Translate the user text to the target language exactly and nothing else."},
+                            {"role": "user", "content": f"Translate to {target_language}:\n\n{text[:3000]}"},
+                        ],
+                        timeout=self.timeout,
+                    )
+                else:
+                    resp = await asyncio.to_thread(
+                        openai.ChatCompletion.create,
+                        model=self.model,
+                        messages=[
+                            {"role": "system", "content": "You are a helpful translator. Translate the user text to the target language exactly and nothing else."},
+                            {"role": "user", "content": f"Translate to {target_language}:\n\n{text[:3000]}"},
+                        ],
+                        max_tokens=1000,
+                        request_timeout=self.timeout,
+                    )
                 translated = (resp.choices[0].message.content or "").strip()
                 return translated, 0.9
             except Exception:
@@ -112,12 +144,12 @@ except Exception:
 
 def _get_provider(name: str) -> TranslationProvider:
     """Get translation provider by name."""
+    name = (name or "noop").lower()
     if name == "openai" and OpenAIProvider is not None:
         return OpenAIProvider()
-    elif name == "langdetect":
+    if name == "langdetect":
         return LangDetectProvider()
-    else:
-        return NoOpProvider()
+    return NoOpProvider()
 
 
 async def translate_content(
@@ -148,7 +180,7 @@ async def translate_content(
         try:
             lang, conf = await provider.detect_language(text)
         except Exception:
-            logger.exception("language detection failed")
+            logger.exception("language detection failed for content_id=%s", content_id)
             lang, conf = "unknown", 0.0
 
         requires_translation = (lang != target_language) and (conf >= confidence_threshold)
@@ -162,7 +194,7 @@ async def translate_content(
 
         # attach language metadata to chunk.metadata
         chunk.metadata = getattr(chunk, "metadata", {}) or {}
-        chunk.metadata["language"] = lang_meta
+        chunk.metadata["language"] = lang_meta.model_dump()
 
         # perform translation when necessary
         if requires_translation:
@@ -181,10 +213,15 @@ async def translate_content(
                 translation_provider=translation_provider,
                 confidence_score=t_conf,
             )
-            chunk.metadata["translation"] = trans
-            
-            # Use translated content for subsequent tasks
-            chunk.text = translated_text
+            if translated_text != text:
+                chunk.metadata["translation"] = trans.model_dump()
+                # Use translated content for subsequent tasks
+                chunk.text = translated_text
+            else:
+                logger.info(
+                    "Skipping translation metadata; provider returned unchanged text for content_id=%s",
+                    content_id,
+                )
 
         enhanced.append(chunk)
 
