@@ -8,47 +8,51 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.calculate_backoff import calculate_backoff
 
-logger = get_logger('sync.db_operations')
+logger = get_logger("sync.db_operations")
 
 
 async def _retry_db_operation(operation_func, run_id: str, max_retries: int = 3):
     """
     Retry database operations with exponential backoff for transient failures.
-    
+
     Args:
         operation_func: Async function to retry
         run_id: Run ID for logging context
         max_retries: Maximum number of retry attempts
-        
+
     Returns:
         Result of the operation function
-        
+
     Raises:
         Exception: Re-raises the last exception if all retries fail
     """
     attempt = 0
     last_exception = None
-    
+
     while attempt < max_retries:
         try:
             return await operation_func()
         except (DisconnectionError, OperationalError, TimeoutError) as e:
             attempt += 1
             last_exception = e
-            
+
             if attempt >= max_retries:
-                logger.error(f"Database operation failed after {max_retries} attempts for run_id {run_id}: {str(e)}")
+                logger.error(
+                    f"Database operation failed after {max_retries} attempts for run_id {run_id}: {str(e)}"
+                )
                 break
-                
+
             backoff_time = calculate_backoff(attempt - 1)  # calculate_backoff is 0-indexed
-            logger.warning(f"Database operation failed for run_id {run_id}, retrying in {backoff_time:.2f}s (attempt {attempt}/{max_retries}): {str(e)}")
+            logger.warning(
+                f"Database operation failed for run_id {run_id}, retrying in {backoff_time:.2f}s (attempt {attempt}/{max_retries}): {str(e)}"
+            )
             await asyncio.sleep(backoff_time)
-            
+
         except Exception as e:
             # Non-transient errors should not be retried
             logger.error(f"Non-retryable database error for run_id {run_id}: {str(e)}")
             raise
-    
+
     # If we get here, all retries failed
     raise last_exception
 
@@ -91,9 +95,10 @@ async def update_sync_operation(
     Returns:
         SyncOperation: The updated sync operation record, or None if not found
     """
+
     async def _perform_update():
         db_engine = get_relational_engine()
-        
+
         async with db_engine.get_async_session() as session:
             try:
                 # Find the sync operation
@@ -121,7 +126,7 @@ async def update_sync_operation(
                     updates.append(f"total_download={total_records_to_download}")
                 if total_records_to_upload is not None:
                     updates.append(f"total_upload={total_records_to_upload}")
-                
+
                 if updates:
                     logger.debug(f"Updating sync operation {run_id}: {', '.join(updates)}")
 
@@ -183,11 +188,15 @@ async def update_sync_operation(
                 return sync_operation
 
             except SQLAlchemyError as e:
-                logger.error(f"Database error updating sync operation {run_id}: {str(e)}", exc_info=True)
+                logger.error(
+                    f"Database error updating sync operation {run_id}: {str(e)}", exc_info=True
+                )
                 await session.rollback()
                 raise
             except Exception as e:
-                logger.error(f"Unexpected error updating sync operation {run_id}: {str(e)}", exc_info=True)
+                logger.error(
+                    f"Unexpected error updating sync operation {run_id}: {str(e)}", exc_info=True
+                )
                 await session.rollback()
                 raise
 

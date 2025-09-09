@@ -57,7 +57,7 @@ class SyncOperation(Base):
     total_records_to_sync = Column(Integer, doc="Total number of records to sync")
     total_records_to_download = Column(Integer, doc="Total number of records to download")
     total_records_to_upload = Column(Integer, doc="Total number of records to upload")
-    
+
     records_downloaded = Column(Integer, default=0, doc="Number of records successfully downloaded")
     records_uploaded = Column(Integer, default=0, doc="Number of records successfully uploaded")
     bytes_downloaded = Column(Integer, default=0, doc="Total bytes downloaded from cloud")
@@ -79,7 +79,7 @@ class SyncOperation(Base):
         """Get comprehensive progress information."""
         total_records_processed = (self.records_downloaded or 0) + (self.records_uploaded or 0)
         total_bytes_transferred = (self.bytes_downloaded or 0) + (self.bytes_uploaded or 0)
-        
+
         return {
             "status": self.status.value,
             "progress_percentage": self.progress_percentage,

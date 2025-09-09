@@ -21,13 +21,13 @@ from cognee.modules.sync.methods import (
     mark_sync_failed,
 )
 
-logger = get_logger('sync')
+logger = get_logger("sync")
 
 
 async def _safe_update_progress(run_id: str, progress_percentage: int, stage: str, **kwargs):
     """
     Safely update sync progress with better error handling and context.
-    
+
     Args:
         run_id: Sync operation run ID
         progress_percentage: Progress percentage (0-100)
@@ -39,7 +39,9 @@ async def _safe_update_progress(run_id: str, progress_percentage: int, stage: st
         logger.info(f"Sync {run_id}: Progress updated to {progress_percentage}% during {stage}")
     except Exception as e:
         # Log error but don't fail the sync - progress updates are nice-to-have
-        logger.warning(f"Sync {run_id}: Non-critical progress update failed during {stage} (attempted {progress_percentage}%): {str(e)}")
+        logger.warning(
+            f"Sync {run_id}: Non-critical progress update failed during {stage} (attempted {progress_percentage}%): {str(e)}"
+        )
         # Continue without raising - sync operation is more important than progress tracking
 
 
@@ -67,6 +69,7 @@ class CheckHashesDiffResponse(BaseModel):
 
     missing_on_remote: List[str]
     missing_on_local: List[str]
+
 
 class PruneDatasetRequest(BaseModel):
     """Request model for pruning dataset to specific hashes"""
@@ -168,11 +171,18 @@ async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) ->
         retry_count = 0
         while retry_count < MAX_RETRY_COUNT:
             try:
-                records_downloaded, records_uploaded, bytes_downloaded, bytes_uploaded = await _sync_to_cognee_cloud(dataset, user, run_id)
+                (
+                    records_downloaded,
+                    records_uploaded,
+                    bytes_downloaded,
+                    bytes_uploaded,
+                ) = await _sync_to_cognee_cloud(dataset, user, run_id)
                 break
             except Exception as e:
                 retry_count += 1
-                logger.error(f"Background sync {run_id}: Failed after {retry_count} retries with error: {str(e)}")
+                logger.error(
+                    f"Background sync {run_id}: Failed after {retry_count} retries with error: {str(e)}"
+                )
                 await update_sync_operation(run_id, retry_count=retry_count)
                 await asyncio.sleep(2**retry_count)
                 continue
@@ -190,7 +200,9 @@ async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) ->
         )
 
         # Mark sync as completed with final stats
-        await mark_sync_completed(run_id, records_downloaded, records_uploaded, bytes_downloaded, bytes_uploaded)
+        await mark_sync_completed(
+            run_id, records_downloaded, records_uploaded, bytes_downloaded, bytes_uploaded
+        )
 
     except Exception as e:
         end_time = datetime.now(timezone.utc)
@@ -202,7 +214,9 @@ async def _perform_background_sync(run_id: str, dataset: Dataset, user: User) ->
         await mark_sync_failed(run_id, str(e))
 
 
-async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tuple[int, int, int, int]:
+async def _sync_to_cognee_cloud(
+    dataset: Dataset, user: User, run_id: str
+) -> tuple[int, int, int, int]:
     """
     Sync local data to Cognee Cloud using three-step idempotent process:
     1. Extract local files with stored MD5 hashes and check what's missing on cloud
@@ -229,7 +243,12 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
 
         if not local_files:
             logger.info("No files to sync - dataset is empty")
-            return 0, 0, 0, 0  # records_downloaded, records_uploaded, bytes_downloaded, bytes_uploaded
+            return (
+                0,
+                0,
+                0,
+                0,
+            )  # records_downloaded, records_uploaded, bytes_downloaded, bytes_uploaded
 
         # Step 2: Check what files are missing on cloud
         local_hashes = [f.content_hash for f in local_files]
@@ -242,24 +261,37 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
 
         # Update sync operation with total record counts and initial progress
         try:
-            await update_sync_operation(run_id, 
-                                      progress_percentage=25,
-                                      total_records_to_sync=len(hashes_missing_on_remote) + len(hashes_missing_on_local),
-                                      total_records_to_download=len(hashes_missing_on_local), 
-                                      total_records_to_upload=len(hashes_missing_on_remote))
-            logger.info(f"Sync {run_id}: Updated total records and progress to 25% after hash diff check")
-            logger.info(f"Sync {run_id}: Total records to sync: {len(hashes_missing_on_remote) + len(hashes_missing_on_local)} (upload: {len(hashes_missing_on_remote)}, download: {len(hashes_missing_on_local)})")
+            await update_sync_operation(
+                run_id,
+                progress_percentage=25,
+                total_records_to_sync=len(hashes_missing_on_remote) + len(hashes_missing_on_local),
+                total_records_to_download=len(hashes_missing_on_local),
+                total_records_to_upload=len(hashes_missing_on_remote),
+            )
+            logger.info(
+                f"Sync {run_id}: Updated total records and progress to 25% after hash diff check"
+            )
+            logger.info(
+                f"Sync {run_id}: Total records to sync: {len(hashes_missing_on_remote) + len(hashes_missing_on_local)} (upload: {len(hashes_missing_on_remote)}, download: {len(hashes_missing_on_local)})"
+            )
         except Exception as e:
-            logger.error(f"Sync {run_id}: Failed to update total record counts and progress: {str(e)}", exc_info=True)
+            logger.error(
+                f"Sync {run_id}: Failed to update total record counts and progress: {str(e)}",
+                exc_info=True,
+            )
 
         # Step 3: Upload files that are missing on cloud
         bytes_uploaded = await _upload_missing_files(
             cloud_base_url, cloud_auth_token, dataset, local_files, hashes_missing_on_remote, run_id
         )
-        logger.info(f"Upload complete: {len(hashes_missing_on_remote)} files, {bytes_uploaded} bytes")
+        logger.info(
+            f"Upload complete: {len(hashes_missing_on_remote)} files, {bytes_uploaded} bytes"
+        )
 
         # Update progress after uploading files
-        await _safe_update_progress(run_id, 50, "file upload", records_uploaded=len(hashes_missing_on_remote))
+        await _safe_update_progress(
+            run_id, 50, "file upload", records_uploaded=len(hashes_missing_on_remote)
+        )
 
         # Step 4: Trigger cognify processing on cloud dataset (only if new files were uploaded)
         if hashes_missing_on_remote:
@@ -269,16 +301,22 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
             logger.info(
                 f"Skipping cognify processing - no new files were uploaded for dataset {dataset.id}"
             )
-        
+
         # Update progress after triggering cognify
         await _safe_update_progress(run_id, 75, "cognify processing remote")
-        
+
         # Step 5: download files that are missing on local
-        bytes_downloaded = await _download_missing_files(cloud_base_url, cloud_auth_token, dataset, hashes_missing_on_local, user)
-        logger.info(f"Download complete: {len(hashes_missing_on_local)} files, {bytes_downloaded} bytes")
+        bytes_downloaded = await _download_missing_files(
+            cloud_base_url, cloud_auth_token, dataset, hashes_missing_on_local, user
+        )
+        logger.info(
+            f"Download complete: {len(hashes_missing_on_local)} files, {bytes_downloaded} bytes"
+        )
 
         # Final progress update before completion
-        await _safe_update_progress(run_id, 100, "file download", records_downloaded=len(hashes_missing_on_local))
+        await _safe_update_progress(
+            run_id, 100, "file download", records_downloaded=len(hashes_missing_on_local)
+        )
 
         records_downloaded = len(hashes_missing_on_local)
         records_uploaded = len(hashes_missing_on_remote)
@@ -413,7 +451,9 @@ async def _check_hashes_diff(
                 if response.status == 200:
                     data = await response.json()
                     missing_response = CheckHashesDiffResponse(**data)
-                    logger.info(f"Cloud is missing {len(missing_response.missing_on_remote)} out of {len(local_hashes)} files, local is missing {len(missing_response.missing_on_local)} files")
+                    logger.info(
+                        f"Cloud is missing {len(missing_response.missing_on_remote)} out of {len(local_hashes)} files, local is missing {len(missing_response.missing_on_local)} files"
+                    )
                     return missing_response
                 else:
                     error_text = await response.text()
@@ -458,38 +498,44 @@ async def _download_missing_files(
             try:
                 # Download file from cloud by hash
                 download_url = f"{cloud_base_url}/api/sync/{dataset.id}/data/{file_hash}"
-                
+
                 logger.debug(f"Downloading file with hash: {file_hash}")
-                
+
                 async with session.get(download_url, headers=headers) as response:
                     if response.status == 200:
                         file_content = await response.read()
                         file_size = len(file_content)
-                        
+
                         # Get file metadata from response headers
-                        file_name = response.headers.get('X-File-Name', f'file_{file_hash}')
-                        
+                        file_name = response.headers.get("X-File-Name", f"file_{file_hash}")
+
                         # Save file locally using ingestion pipeline
-                        await _save_downloaded_file(dataset, file_hash, file_name, file_content, user)
-                        
+                        await _save_downloaded_file(
+                            dataset, file_hash, file_name, file_content, user
+                        )
+
                         total_bytes_downloaded += file_size
                         downloaded_count += 1
-                        
+
                         logger.debug(f"Successfully downloaded {file_name} ({file_size} bytes)")
-                        
+
                     elif response.status == 404:
                         logger.warning(f"File with hash {file_hash} not found on cloud")
                         continue
                     else:
                         error_text = await response.text()
-                        logger.error(f"Failed to download file {file_hash}: Status {response.status} - {error_text}")
+                        logger.error(
+                            f"Failed to download file {file_hash}: Status {response.status} - {error_text}"
+                        )
                         continue
 
             except Exception as e:
                 logger.error(f"Error downloading file {file_hash}: {str(e)}", exc_info=True)
                 continue
 
-    logger.info(f"Download summary: {downloaded_count}/{len(hashes_missing_on_local)} files downloaded, {total_bytes_downloaded} bytes total")
+    logger.info(
+        f"Download summary: {downloaded_count}/{len(hashes_missing_on_local)} files downloaded, {total_bytes_downloaded} bytes total"
+    )
     return total_bytes_downloaded
 
 
@@ -497,6 +543,7 @@ class InMemoryDownload:
     def __init__(self, data: bytes, filename: str):
         self.file = io.BufferedReader(io.BytesIO(data))
         self.filename = filename
+
 
 async def _save_downloaded_file(
     dataset: Dataset,
@@ -508,7 +555,7 @@ async def _save_downloaded_file(
     """
     Save a downloaded file to local storage and register it in the dataset.
     Uses the existing ingest_data function for consistency with normal ingestion.
-    
+
     Args:
         dataset: The dataset to add the file to
         file_hash: MD5 hash of the file content
@@ -518,9 +565,9 @@ async def _save_downloaded_file(
     try:
         # Create a temporary file-like object from the bytes
         file_obj = InMemoryDownload(file_content, file_name)
-        
+
         # User is injected as dependency
-        
+
         # Use the existing ingest_data function to properly handle the file
         # This ensures consistency with normal file ingestion
         await ingest_data(
@@ -529,9 +576,9 @@ async def _save_downloaded_file(
             user=user,
             dataset_id=dataset.id,
         )
-        
+
         logger.debug(f"Successfully saved downloaded file: {file_name} (hash: {file_hash})")
-        
+
     except Exception as e:
         logger.error(f"Failed to save downloaded file {file_name}: {str(e)}")
         raise
