@@ -60,7 +60,7 @@ class SQLAlchemyAdapter:
                 connection_string,
                 pool_size=1,  # one physical session per container
                 max_overflow=1,
-                pool_recycle=280,  # keep below RDS 300 s idle kill
+                pool_recycle=280,
                 pool_pre_ping=True,
             )
 
