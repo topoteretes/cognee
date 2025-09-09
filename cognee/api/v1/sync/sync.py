@@ -426,7 +426,7 @@ async def _get_cloud_auth_token(user: User) -> str:
     """Get authentication token for Cognee Cloud API."""
     # TODO: Implement proper authentication with Cognee Cloud
     # This should get or refresh an API token for the user
-    return os.getenv("COGNEE_CLOUD_AUTH_TOKEN", "9611fd02214a51f0930ca0d6d445daea63bc5392d85746fb")
+    return os.getenv("COGNEE_CLOUD_AUTH_TOKEN", "your-auth-token")
 
 
 async def _check_hashes_diff(
