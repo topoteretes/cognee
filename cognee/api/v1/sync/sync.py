@@ -24,6 +24,25 @@ from cognee.modules.sync.methods import (
 logger = get_logger('sync')
 
 
+async def _safe_update_progress(run_id: str, progress_percentage: int, stage: str, **kwargs):
+    """
+    Safely update sync progress with better error handling and context.
+    
+    Args:
+        run_id: Sync operation run ID
+        progress_percentage: Progress percentage (0-100)
+        stage: Description of current stage for logging
+        **kwargs: Additional fields to update (records_downloaded, records_uploaded, etc.)
+    """
+    try:
+        await update_sync_operation(run_id, progress_percentage=progress_percentage, **kwargs)
+        logger.info(f"Sync {run_id}: Progress updated to {progress_percentage}% during {stage}")
+    except Exception as e:
+        # Log error but don't fail the sync - progress updates are nice-to-have
+        logger.warning(f"Sync {run_id}: Non-critical progress update failed during {stage} (attempted {progress_percentage}%): {str(e)}")
+        # Continue without raising - sync operation is more important than progress tracking
+
+
 class LocalFileInfo(BaseModel):
     """Model for local file information with hash."""
 
@@ -221,11 +240,17 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
         hashes_missing_on_remote = hashes_diff_response.missing_on_remote
         hashes_missing_on_local = hashes_diff_response.missing_on_local
 
-        # Update progress
+        # Update sync operation with total record counts and initial progress
         try:
-            await update_sync_operation(run_id, progress_percentage=25)
+            await update_sync_operation(run_id, 
+                                      progress_percentage=25,
+                                      total_records_to_sync=len(hashes_missing_on_remote) + len(hashes_missing_on_local),
+                                      total_records_to_download=len(hashes_missing_on_local), 
+                                      total_records_to_upload=len(hashes_missing_on_remote))
+            logger.info(f"Sync {run_id}: Updated total records and progress to 25% after hash diff check")
+            logger.info(f"Sync {run_id}: Total records to sync: {len(hashes_missing_on_remote) + len(hashes_missing_on_local)} (upload: {len(hashes_missing_on_remote)}, download: {len(hashes_missing_on_local)})")
         except Exception as e:
-            logger.warning(f"Failed to update progress: {str(e)}")
+            logger.error(f"Sync {run_id}: Failed to update total record counts and progress: {str(e)}", exc_info=True)
 
         # Step 3: Upload files that are missing on cloud
         bytes_uploaded = await _upload_missing_files(
@@ -233,11 +258,8 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
         )
         logger.info(f"Upload complete: {len(hashes_missing_on_remote)} files, {bytes_uploaded} bytes")
 
-        # Update progress
-        try:
-            await update_sync_operation(run_id, progress_percentage=50)
-        except Exception as e:
-            logger.warning(f"Failed to update progress: {str(e)}")
+        # Update progress after uploading files
+        await _safe_update_progress(run_id, 50, "file upload", records_uploaded=len(hashes_missing_on_remote))
 
         # Step 4: Trigger cognify processing on cloud dataset (only if new files were uploaded)
         if hashes_missing_on_remote:
@@ -248,21 +270,15 @@ async def _sync_to_cognee_cloud(dataset: Dataset, user: User, run_id: str) -> tu
                 f"Skipping cognify processing - no new files were uploaded for dataset {dataset.id}"
             )
         
-        # Update progress
-        try:
-            await update_sync_operation(run_id, progress_percentage=75)
-        except Exception as e:
-            logger.warning(f"Failed to update progress: {str(e)}")
+        # Update progress after triggering cognify
+        await _safe_update_progress(run_id, 75, "cognify processing remote")
         
         # Step 5: download files that are missing on local
         bytes_downloaded = await _download_missing_files(cloud_base_url, cloud_auth_token, dataset, hashes_missing_on_local, user)
         logger.info(f"Download complete: {len(hashes_missing_on_local)} files, {bytes_downloaded} bytes")
 
-        # Final progress
-        try:
-            await update_sync_operation(run_id, progress_percentage=100)
-        except Exception as e:
-            logger.warning(f"Failed to update final progress: {str(e)}")
+        # Final progress update before completion
+        await _safe_update_progress(run_id, 100, "file download", records_downloaded=len(hashes_missing_on_local))
 
         records_downloaded = len(hashes_missing_on_local)
         records_uploaded = len(hashes_missing_on_remote)
@@ -372,7 +388,7 @@ async def _get_cloud_auth_token(user: User) -> str:
     """Get authentication token for Cognee Cloud API."""
     # TODO: Implement proper authentication with Cognee Cloud
     # This should get or refresh an API token for the user
-    return os.getenv("COGNEE_CLOUD_AUTH_TOKEN", "your-auth-token-here")
+    return os.getenv("COGNEE_CLOUD_AUTH_TOKEN", "9611fd02214a51f0930ca0d6d445daea63bc5392d85746fb")
 
 
 async def _check_hashes_diff(
