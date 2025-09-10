@@ -27,10 +27,10 @@ export default function Header() {
 
   return (
     <>
-      <header className="relative bg-[rgba(244,244,244,0.5)] flex flex-row h-14 min-h-14 px-5 items-center justify-between w-full max-w-[1920px] mx-auto">
+      <header className="relative bg-[rgba(244,244,244,0.3)] flex flex-row h-14 min-h-14 px-5 items-center justify-between w-full max-w-[1920px] mx-auto">
         <div className="flex flex-row gap-4 items-center">
           <CogneeIcon />
-          <div className="text-lg">Cognee Graph Interface</div>
+          <div className="text-lg">Cognee Local</div>
         </div>
 
         <div className="flex flex-row items-center gap-2.5">
