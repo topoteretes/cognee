@@ -121,7 +121,7 @@ async def main():
 
     # Search the translated content
     print(f"Searching translated content for: '{query_text}'")
-    search_results_translated = await cognee.search(SearchType.INSIGHTS, query_text)
+    search_results_translated = await cognee.search(query_text, query_type=SearchType.INSIGHTS)
     
     print("Search results from translation pipeline:")
     for result in search_results_translated[:3]:  # Show first 3 results
