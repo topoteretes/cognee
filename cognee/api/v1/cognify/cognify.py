@@ -1,6 +1,6 @@
 import asyncio
 from pydantic import BaseModel
-from typing import Union, Optional
+from typing import Union, Optional, Literal
 from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
@@ -247,7 +247,7 @@ async def get_default_tasks_with_translation(
     chunk_size: Optional[int] = None,
     ontology_file_path: Optional[str] = None,
     custom_prompt: Optional[str] = None,
-    translation_provider: str = "noop",
+    translation_provider: Literal["noop", "langdetect", "openai"] = "noop",
 ) -> list[Task]:
     """
     Get default pipeline tasks with translation capability.
@@ -271,9 +271,7 @@ async def get_default_tasks_with_translation(
     # Fail fast on unknown providers (keeps errors close to the API surface)
     providers = set(get_available_providers())
     if translation_provider not in providers:
-        raise ValueError(
-            f"Unknown translation_provider '{translation_provider}'. Available: {sorted(providers)}"
-        )
+        raise ValueError(f"Unknown translation_provider: {translation_provider}")
     
     default_tasks = [
         Task(classify_documents),

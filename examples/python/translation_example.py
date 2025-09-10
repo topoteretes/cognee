@@ -5,10 +5,26 @@ from cognee.api.v1.search import SearchType
 from cognee.api.v1.cognify.cognify import get_default_tasks_with_translation
 from cognee.modules.pipelines.operations.pipeline import run_pipeline
 
+# Shared multilingual sample texts
+MULTILINGUAL_TEXTS = [
+    """
+    El procesamiento de lenguaje natural (PLN) es un subcampo interdisciplinario 
+    de las ciencias de la computación y la recuperación de información.
+    """,
+    """
+    Le traitement automatique du langage naturel (TALN) est un domaine 
+    interdisciplinaire de l'informatique et de la recherche d'information.
+    """,
+    """
+    Natural language processing (NLP) is an interdisciplinary subfield 
+    of computer science and information retrieval.
+    """
+]
+
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
-# 2. Add your OpenAI API key to the `.env` file in the `LLM_API_KEY` field:
-#    LLM_API_KEY = "your_key_here"
+# 2. Add your OpenAI API key to the `.env` file in the `OPENAI_API_KEY` field:
+#    OPENAI_API_KEY = "your_key_here"
 # 3. Optionally install langdetect for better language detection:
 #    pip install langdetect
 
@@ -21,24 +37,8 @@ async def setup_demo_data():
     await cognee.prune.prune_system(metadata=True)
     print("Data reset complete.\n")
 
-    # Sample multilingual content for demonstration
-    multilingual_texts = [
-        """
-        El procesamiento de lenguaje natural (PLN) es un subcampo interdisciplinario 
-        de las ciencias de la computación y la recuperación de información.
-        """,
-        """
-        Le traitement automatique du langage naturel (TALN) est un domaine 
-        interdisciplinaire de l'informatique et de la recherche d'information.
-        """,
-        """
-        Natural language processing (NLP) is an interdisciplinary subfield 
-        of computer science and information retrieval.
-        """
-    ]
-
     print("Adding multilingual texts to cognee:")
-    for i, text in enumerate(multilingual_texts, 1):
+    for i, text in enumerate(MULTILINGUAL_TEXTS, 1):
         print(f"\nText {i}: {text.strip()}")
         # Add each text as a separate document
         await cognee.add(text, dataset_name=f"multilingual_demo_{i}")
@@ -85,7 +85,7 @@ async def demo_standard_pipeline():
     await cognee.prune.prune_system(metadata=True)
     
     # Re-add the texts
-    for i, text in enumerate(multilingual_texts, 1):
+    for i, text in enumerate(MULTILINGUAL_TEXTS, 1):
         await cognee.add(text, dataset_name=f"multilingual_demo_translation_{i}")
 
     # Demonstration 2: Using translation pipeline
