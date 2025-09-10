@@ -32,30 +32,30 @@ def get_frontend_download_info() -> Tuple[str, str]:
     Downloads the real frontend from GitHub releases, matching the installed version.
     """
     version = get_cognee_version()
-    
+
     # Clean up version string (remove -local suffix for development)
-    clean_version = version.replace('-local', '')
-    
+    clean_version = version.replace("-local", "")
+
     # Download from specific release tag to ensure version compatibility
     download_url = f"https://github.com/topoteretes/cognee/archive/refs/tags/v{clean_version}.zip"
-    
+
     return download_url, version
 
 
 def download_frontend_assets(force: bool = False) -> bool:
     """
     Download and cache frontend assets.
-    
+
     Args:
         force: If True, re-download even if already cached
-        
+
     Returns:
         bool: True if successful, False otherwise
     """
     cache_dir = get_frontend_cache_dir()
     frontend_dir = cache_dir / "frontend"
     version_file = cache_dir / "version.txt"
-    
+
     # Check if already downloaded and up to date
     if not force and frontend_dir.exists() and version_file.exists():
         try:
@@ -66,37 +66,39 @@ def download_frontend_assets(force: bool = False) -> bool:
                 return True
         except Exception as e:
             logger.debug(f"Error checking cached version: {e}")
-    
+
     download_url, version = get_frontend_download_info()
-    
+
     logger.info("Downloading cognee frontend assets...")
     logger.info("This is a one-time download and will be cached for future use.")
-    
+
     try:
         # Create a temporary directory for download
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             archive_path = temp_path / "cognee-main.zip"
-            
+
             # Download the actual cognee repository from releases
-            logger.info(f"Downloading cognee v{version.replace('-local', '')} from GitHub releases...")
+            logger.info(
+                f"Downloading cognee v{version.replace('-local', '')} from GitHub releases..."
+            )
             logger.info(f"URL: {download_url}")
             response = requests.get(download_url, stream=True, timeout=60)
             response.raise_for_status()
-            
-            with open(archive_path, 'wb') as f:
+
+            with open(archive_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
-            
+
             # Extract the archive and find the cognee-frontend directory
             if frontend_dir.exists():
                 shutil.rmtree(frontend_dir)
-            
-            with zipfile.ZipFile(archive_path, 'r') as zip_file:
+
+            with zipfile.ZipFile(archive_path, "r") as zip_file:
                 # Extract to temp directory first
                 extract_dir = temp_path / "extracted"
                 zip_file.extractall(extract_dir)
-                
+
                 # Find the cognee-frontend directory in the extracted content
                 # The archive structure will be: cognee-{version}/cognee-frontend/
                 cognee_frontend_source = None
@@ -104,26 +106,32 @@ def download_frontend_assets(force: bool = False) -> bool:
                     if "cognee-frontend" in dirs:
                         cognee_frontend_source = Path(root) / "cognee-frontend"
                         break
-                
+
                 if not cognee_frontend_source or not cognee_frontend_source.exists():
-                    logger.error("Could not find cognee-frontend directory in downloaded release archive")
+                    logger.error(
+                        "Could not find cognee-frontend directory in downloaded release archive"
+                    )
                     logger.error("This might indicate a version mismatch or missing release.")
                     return False
-                
+
                 # Copy the cognee-frontend to our cache
                 shutil.copytree(cognee_frontend_source, frontend_dir)
                 logger.debug(f"Frontend extracted to: {frontend_dir}")
-            
+
             # Write version info
             version_file.write_text(version)
-            
-            logger.info(f"✓ Cognee frontend v{version.replace('-local', '')} downloaded and cached successfully!")
+
+            logger.info(
+                f"✓ Cognee frontend v{version.replace('-local', '')} downloaded and cached successfully!"
+            )
             return True
-        
+
     except requests.exceptions.RequestException as e:
         if "404" in str(e):
             logger.error(f"Release v{version.replace('-local', '')} not found on GitHub.")
-            logger.error("This version might not have been released yet, or you're using a development version.")
+            logger.error(
+                "This version might not have been released yet, or you're using a development version."
+            )
             logger.error("Try using a stable release version of cognee.")
         else:
             logger.error(f"Failed to download from GitHub: {str(e)}")
@@ -135,35 +143,33 @@ def download_frontend_assets(force: bool = False) -> bool:
         return False
 
 
-
-
 def find_frontend_path() -> Optional[Path]:
     """
     Find the cognee-frontend directory.
     Checks both development location and cached download location.
     """
     current_file = Path(__file__)
-    
+
     # First, try development paths (for contributors/developers)
     dev_search_paths = [
         current_file.parents[4] / "cognee-frontend",  # from cognee/api/v1/ui/ui.py to project root
-        current_file.parents[3] / "cognee-frontend",  # fallback path  
+        current_file.parents[3] / "cognee-frontend",  # fallback path
         current_file.parents[2] / "cognee-frontend",  # another fallback
     ]
-    
+
     for path in dev_search_paths:
         if path.exists() and (path / "package.json").exists():
             logger.debug(f"Found development frontend at: {path}")
             return path
-    
+
     # Then try cached download location (for pip-installed users)
     cache_dir = get_frontend_cache_dir()
     cached_frontend = cache_dir / "frontend"
-    
+
     if cached_frontend.exists() and (cached_frontend / "package.json").exists():
         logger.debug(f"Found cached frontend at: {cached_frontend}")
         return cached_frontend
-    
+
     return None
 
 
@@ -174,25 +180,23 @@ def check_node_npm() -> tuple[bool, str]:
     """
     try:
         # Check Node.js
-        result = subprocess.run(["node", "--version"], 
-                              capture_output=True, text=True, timeout=10)
+        result = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
             return False, "Node.js is not installed or not in PATH"
-        
+
         node_version = result.stdout.strip()
         logger.debug(f"Found Node.js version: {node_version}")
-        
+
         # Check npm
-        result = subprocess.run(["npm", "--version"], 
-                              capture_output=True, text=True, timeout=10)
+        result = subprocess.run(["npm", "--version"], capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
             return False, "npm is not installed or not in PATH"
-        
+
         npm_version = result.stdout.strip()
         logger.debug(f"Found npm version: {npm_version}")
-        
+
         return True, f"Node.js {node_version}, npm {npm_version}"
-    
+
     except subprocess.TimeoutExpired:
         return False, "Timeout checking Node.js/npm installation"
     except FileNotFoundError:
@@ -210,25 +214,25 @@ def install_frontend_dependencies(frontend_path: Path) -> bool:
     if node_modules.exists():
         logger.debug("Frontend dependencies already installed")
         return True
-    
+
     logger.info("Installing frontend dependencies (this may take a few minutes)...")
-    
+
     try:
         result = subprocess.run(
             ["npm", "install"],
             cwd=frontend_path,
             capture_output=True,
             text=True,
-            timeout=300  # 5 minutes timeout
+            timeout=300,  # 5 minutes timeout
         )
-        
+
         if result.returncode == 0:
             logger.info("Frontend dependencies installed successfully")
             return True
         else:
             logger.error(f"Failed to install dependencies: {result.stderr}")
             return False
-    
+
     except subprocess.TimeoutExpired:
         logger.error("Timeout installing frontend dependencies")
         return False
@@ -244,16 +248,17 @@ def is_development_frontend(frontend_path: Path) -> bool:
     package_json_path = frontend_path / "package.json"
     if not package_json_path.exists():
         return False
-    
+
     try:
         import json
+
         with open(package_json_path) as f:
             package_data = json.load(f)
-        
+
         # Development frontend has Next.js as dependency
         dependencies = package_data.get("dependencies", {})
         dev_dependencies = package_data.get("devDependencies", {})
-        
+
         return "next" in dependencies or "next" in dev_dependencies
     except Exception:
         return False
@@ -268,27 +273,20 @@ def start_python_server(frontend_path: Path, host: str, port: int) -> Optional[s
         # Change to the frontend directory
         original_cwd = os.getcwd()
         os.chdir(frontend_path)
-        
+
         # Use subprocess to run the server so we can return a process handle
-        cmd = [
-            "python", "-m", "http.server", str(port),
-            "--bind", host
-        ]
-        
+        cmd = ["python", "-m", "http.server", str(port), "--bind", host]
+
         process = subprocess.Popen(
-            cmd,
-            cwd=frontend_path,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            cmd, cwd=frontend_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
-        
+
         # Restore original directory
         os.chdir(original_cwd)
-        
+
         # Give it a moment to start
         time.sleep(2)
-        
+
         # Check if process is still running
         if process.poll() is not None:
             stdout, stderr = process.communicate()
@@ -296,9 +294,9 @@ def start_python_server(frontend_path: Path, host: str, port: int) -> Optional[s
             logger.error(f"stdout: {stdout}")
             logger.error(f"stderr: {stderr}")
             return None
-        
+
         return process
-        
+
     except Exception as e:
         logger.error(f"Failed to start Python HTTP server: {str(e)}")
         # Restore original directory on error
@@ -315,9 +313,9 @@ def prompt_user_for_download() -> bool:
     Returns True if user consents, False otherwise.
     """
     try:
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("🎨 Cognee UI Setup Required")
-        print("="*60)
+        print("=" * 60)
         print("The cognee frontend is not available on your system.")
         print("This is required to use the web interface.")
         print("\nWhat will happen:")
@@ -326,34 +324,39 @@ def prompt_user_for_download() -> bool:
         print("• Install dependencies with npm (requires Node.js)")
         print("• This is a one-time setup per cognee version")
         print("\nThe frontend will then be available offline for future use.")
-        
+
         response = input("\nWould you like to download the frontend now? (y/N): ").strip().lower()
-        return response in ['y', 'yes']
+        return response in ["y", "yes"]
     except (KeyboardInterrupt, EOFError):
         print("\nOperation cancelled by user.")
         return False
 
 
-def start_ui(host: str = "localhost", port: int = 3000, open_browser: bool = True, auto_download: bool = False) -> Optional[subprocess.Popen]:
+def start_ui(
+    host: str = "localhost",
+    port: int = 3000,
+    open_browser: bool = True,
+    auto_download: bool = False,
+) -> Optional[subprocess.Popen]:
     """
     Start the cognee frontend UI server.
-    
+
     This function will:
     1. Find the cognee-frontend directory (development) or download it (pip install)
     2. Check if Node.js and npm are available (for development mode)
     3. Install dependencies if needed (development mode)
     4. Start the appropriate server
     5. Optionally open the browser
-    
+
     Args:
         host: Host to bind the server to (default: localhost)
         port: Port to run the server on (default: 3000)
         open_browser: Whether to open the browser automatically (default: True)
         auto_download: If True, download frontend without prompting (default: False)
-        
+
     Returns:
         subprocess.Popen object representing the running server, or None if failed
-        
+
     Example:
         >>> import cognee
         >>> server = cognee.start_ui()
@@ -362,19 +365,21 @@ def start_ui(host: str = "localhost", port: int = 3000, open_browser: bool = Tru
         >>> server.terminate()
     """
     logger.info("Starting cognee UI...")
-    
+
     # Find frontend directory
     frontend_path = find_frontend_path()
-    
+
     if not frontend_path:
         logger.info("Frontend not found locally. This is normal for pip-installed cognee.")
-        
+
         # Offer to download the frontend
         if auto_download or prompt_user_for_download():
             if download_frontend_assets():
                 frontend_path = find_frontend_path()
                 if not frontend_path:
-                    logger.error("Download succeeded but frontend still not found. This is unexpected.")
+                    logger.error(
+                        "Download succeeded but frontend still not found. This is unexpected."
+                    )
                     return None
             else:
                 logger.error("Failed to download frontend assets.")
@@ -383,30 +388,30 @@ def start_ui(host: str = "localhost", port: int = 3000, open_browser: bool = Tru
             logger.info("Frontend download declined. UI functionality not available.")
             logger.info("You can still use all other cognee features without the web interface.")
             return None
-    
+
     # Check Node.js and npm
     node_available, node_message = check_node_npm()
     if not node_available:
         logger.error(f"Cannot start UI: {node_message}")
         logger.error("Please install Node.js from https://nodejs.org/ to use the UI functionality")
         return None
-    
+
     logger.debug(f"Environment check passed: {node_message}")
-    
+
     # Install dependencies if needed
     if not install_frontend_dependencies(frontend_path):
         logger.error("Failed to install frontend dependencies")
         return None
-    
+
     # Prepare environment variables
     env = os.environ.copy()
-    env['HOST'] = host
-    env['PORT'] = str(port)
-    
+    env["HOST"] = host
+    env["PORT"] = str(port)
+
     # Start the development server
     logger.info(f"Starting frontend server at http://{host}:{port}")
     logger.info("This may take a moment to compile and start...")
-    
+
     try:
         process = subprocess.Popen(
             ["npm", "run", "dev"],
@@ -414,12 +419,12 @@ def start_ui(host: str = "localhost", port: int = 3000, open_browser: bool = Tru
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
-        
+
         # Give it a moment to start up
         time.sleep(3)
-        
+
         # Check if process is still running
         if process.poll() is not None:
             stdout, stderr = process.communicate()
@@ -427,25 +432,26 @@ def start_ui(host: str = "localhost", port: int = 3000, open_browser: bool = Tru
             logger.error(f"stdout: {stdout}")
             logger.error(f"stderr: {stderr}")
             return None
-        
+
         # Open browser if requested
         if open_browser:
+
             def open_browser_delayed():
                 time.sleep(5)  # Give Next.js time to fully start
                 try:
-                    webbrowser.open(f"http://{host}:{port}") # TODO: use dashboard url?
+                    webbrowser.open(f"http://{host}:{port}")  # TODO: use dashboard url?
                 except Exception as e:
                     logger.warning(f"Could not open browser automatically: {e}")
-            
+
             browser_thread = threading.Thread(target=open_browser_delayed, daemon=True)
             browser_thread.start()
-        
+
         logger.info("✓ Cognee UI is starting up...")
         logger.info(f"✓ Open your browser to: http://{host}:{port}")
         logger.info("✓ The UI will be available once Next.js finishes compiling")
-        
+
         return process
-    
+
     except Exception as e:
         logger.error(f"Failed to start frontend server: {str(e)}")
         return None
@@ -454,16 +460,16 @@ def start_ui(host: str = "localhost", port: int = 3000, open_browser: bool = Tru
 def stop_ui(process: subprocess.Popen) -> bool:
     """
     Stop a running UI server process.
-    
+
     Args:
         process: The subprocess.Popen object returned by start_ui()
-        
+
     Returns:
         bool: True if stopped successfully, False otherwise
     """
     if not process:
         return False
-    
+
     try:
         process.terminate()
         try:
@@ -472,10 +478,10 @@ def stop_ui(process: subprocess.Popen) -> bool:
             logger.warning("Process didn't terminate gracefully, forcing kill")
             process.kill()
             process.wait()
-        
+
         logger.info("UI server stopped")
         return True
-    
+
     except Exception as e:
         logger.error(f"Error stopping UI server: {str(e)}")
         return False
