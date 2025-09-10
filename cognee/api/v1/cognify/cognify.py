@@ -28,7 +28,7 @@ async def cognify(
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
-    chunk_size: int = None,
+    chunk_size: Optional[int] = None,
     ontology_file_path: Optional[str] = None,
     vector_db_config: dict = None,
     graph_db_config: dict = None,
@@ -205,7 +205,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
-    chunk_size: int = None,
+    chunk_size: Optional[int] = None,
     ontology_file_path: Optional[str] = None,
     custom_prompt: Optional[str] = None,
 ) -> list[Task]:

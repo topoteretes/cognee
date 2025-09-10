@@ -25,15 +25,19 @@ MULTILINGUAL_TEXTS = [
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
-# 2. Add your API keys to the `.env` file:
-#    OPENAI_API_KEY = "your_openai_key_here"            # For OpenAI provider
-#    AZURE_TRANSLATOR_KEY = "your_azure_key_here"       # For Azure provider  
-#    AZURE_TRANSLATOR_ENDPOINT = "your_azure_endpoint"  # Optional for Azure
-#    AZURE_TRANSLATOR_REGION = "your_azure_region"      # Optional for Azure
+# 2. Add your API keys to the `.env` file (depending on provider choice):
+#    OPENAI_API_KEY = "your_openai_key_here"            # Required for OpenAI provider
+#    AZURE_TRANSLATOR_KEY = "your_azure_key_here"       # Required for Azure provider  
+#    AZURE_TRANSLATOR_ENDPOINT = "your_azure_endpoint"  # Optional for Azure (has default)
+#    AZURE_TRANSLATOR_REGION = "your_azure_region"      # Optional for Azure (defaults to global)
+#    # Note: Google Translate provider uses free googletrans library (no API key needed)
 # 3. Optionally set translation provider via environment variable:
-#    COGNEE_TRANSLATION_PROVIDER = "openai" | "google" | "azure" | "langdetect" | "noop"  # tip: "noop" is the safest default
-# 4. Optionally install translation libraries:
-#    pip install langdetect googletrans==4.0.0rc1 azure-ai-translation-text
+#    COGNEE_TRANSLATION_PROVIDER = "openai" | "google" | "azure" | "langdetect" | "noop"  
+#    # Recommendations: "noop" (safest, no dependencies), "langdetect" (offline), "google" (free)
+# 4. Install optional translation libraries as needed:
+#    pip install langdetect                    # For langdetect provider (offline detection)
+#    pip install googletrans==4.0.0rc1        # For google provider (free translation)
+#    pip install azure-ai-translation-text    # For azure provider (requires API key)
 
 
 async def setup_demo_data():
