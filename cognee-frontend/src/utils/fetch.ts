@@ -6,7 +6,11 @@ const isAuth0Enabled = process.env.USE_AUTH0_AUTHORIZATION?.toLowerCase() === "t
 
 const backendApiUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:8000/api";
 
-export default async function fetch(url: string, options: RequestInit = {}): Promise<Response> {
+const cloudApiUrl = process.env.NEXT_PUBLIC_CLOUD_API_URL || "http://localhost:8001/api";
+
+let apiKey: string | null = null;
+
+export default async function fetch(url: string, options: RequestInit = {}, useCloud = false): Promise<Response> {
   function retry(lastError: Response) {
     if (!isAuth0Enabled) {
       return Promise.reject(lastError);
@@ -24,10 +28,17 @@ export default async function fetch(url: string, options: RequestInit = {}): Pro
       });
   }
 
-  return global.fetch(backendApiUrl + url, {
-    ...options,
-    credentials: "include",
-  })
+  return global.fetch(
+    (useCloud ? cloudApiUrl : backendApiUrl) + (useCloud ? url.replace("/v1", "") : url),
+    {
+      ...options,
+      headers: {
+        ...options.headers,
+        ...(useCloud ? {"X-Api-Key": apiKey!} : {}),
+      },
+      credentials: "include",
+    },
+  )
     .then((response) => handleServerErrors(response, retry))
     .then((response) => {
       numberOfRetries = 0;
@@ -50,4 +61,8 @@ export default async function fetch(url: string, options: RequestInit = {}): Pro
 
 fetch.checkHealth = () => {
   return global.fetch(`${backendApiUrl.replace("/api", "")}/health`);
+};
+
+fetch.setApiKey = (newApiKey: string) => {
+  apiKey = newApiKey;
 };

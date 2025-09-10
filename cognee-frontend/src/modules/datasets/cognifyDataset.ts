@@ -7,7 +7,7 @@ import { Dataset } from "../ingestion/useDatasets";
 //   edges: { source: string; target: string; label: string }[];
 // }
 
-export default async function cognifyDataset(dataset: Dataset) {
+export default async function cognifyDataset(dataset: Dataset, useCloud: boolean = false) {
   // const data = await (
   return fetch("/v1/cognify", {
     method: "POST",
@@ -18,7 +18,7 @@ export default async function cognifyDataset(dataset: Dataset) {
       datasetIds: [dataset.id],
       runInBackground: false,
     }),
-  })
+  }, useCloud)
   .then((response) => response.json());
   // .then(() => {
   //   return getDatasetGraph(dataset)

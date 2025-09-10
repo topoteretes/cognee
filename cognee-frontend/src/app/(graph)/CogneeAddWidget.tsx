@@ -26,9 +26,10 @@ export interface NodesAndEdges {
 
 interface CogneeAddWidgetProps {
   onData: (data: NodesAndLinks) => void;
+  useCloud?: boolean;
 }
 
-export default function CogneeAddWidget({ onData }: CogneeAddWidgetProps) {
+export default function CogneeAddWidget({ onData, useCloud = false }: CogneeAddWidgetProps) {
   const {
     datasets,
     refreshDatasets,
@@ -76,17 +77,18 @@ export default function CogneeAddWidget({ onData }: CogneeAddWidgetProps) {
 
     return addData(dataset, files)
       .then(() => {
-        const onUpdate = (data: NodesAndEdges) => {
-          onData({
-            nodes: data.nodes,
-            links: data.edges,
-          });
-          setProcessingFilesDone();
-        };
+        // const onUpdate = (data: NodesAndEdges) => {
+        //   onData({
+        //     nodes: data.nodes,
+        //     links: data.edges,
+        //   });
+        //   setProcessingFilesDone();
+        // };
 
-        return cognifyDataset(dataset, onUpdate)
+        return cognifyDataset(dataset, useCloud)
           .then(() => {
             refreshDatasets();
+            setProcessingFilesDone();
           });
       });
   };
