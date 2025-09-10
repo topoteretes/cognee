@@ -231,3 +231,5 @@ def get_sync_router() -> APIRouter:
         except Exception as e:
             logger.error(f"Failed to get sync status overview: {str(e)}")
             return JSONResponse(status_code=500, content={"error": "Failed to get sync status overview"})
+
+    return router
