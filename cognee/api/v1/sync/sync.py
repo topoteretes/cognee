@@ -287,7 +287,7 @@ async def _sync_to_cognee_cloud(
                     )
             except Exception as e:
                 completed_datasets += 1
-                logger.error(f"Dataset file sync failed: {str(e)}", exc_info=True)
+                logger.error(f"Dataset file sync failed: {str(e)}")
                 # Update progress even for failed datasets
                 file_sync_progress = int((completed_datasets / len(datasets)) * 80)
                 await _safe_update_progress(run_id, "file_sync", progress_percentage=file_sync_progress)
@@ -414,7 +414,7 @@ async def _sync_dataset_files(
         )
         
     except Exception as e:
-        logger.error(f"Failed to sync files for dataset {dataset.name} ({dataset.id}): {str(e)}", exc_info=True)
+        logger.error(f"Failed to sync files for dataset {dataset.name} ({dataset.id}): {str(e)}")
         raise  # Re-raise to be handled by the caller
 
 async def _extract_local_files_with_hashes(
@@ -612,7 +612,7 @@ async def _download_missing_files(
                         continue
 
             except Exception as e:
-                logger.error(f"Error downloading file {file_hash}: {str(e)}", exc_info=True)
+                logger.error(f"Error downloading file {file_hash}: {str(e)}")
                 continue
 
     logger.info(
