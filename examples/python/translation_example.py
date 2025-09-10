@@ -63,7 +63,7 @@ async def main():
     # Search for content
     query_text = "Tell me about NLP"
     print(f"Searching for: '{query_text}'")
-    search_results = await cognee.search(SearchType.INSIGHTS, query_text)
+    search_results = await cognee.search(query_text, query_type=SearchType.INSIGHTS)
     
     print("Search results from standard pipeline:")
     for result in search_results[:2]:  # Show first 2 results
@@ -109,9 +109,9 @@ async def main():
         tasks=tasks_with_translation,
         # Specify datasets created above
         dataset_ids=[
-            await get_dataset_id_by_name("multilingual_demo_translation_1"),
-            await get_dataset_id_by_name("multilingual_demo_translation_2"), 
-            await get_dataset_id_by_name("multilingual_demo_translation_3"),
+            get_dataset_id_by_name("multilingual_demo_translation_1"),
+            get_dataset_id_by_name("multilingual_demo_translation_2"),
+            get_dataset_id_by_name("multilingual_demo_translation_3"),
         ]
     ):
         if hasattr(result, 'payload'):
@@ -137,7 +137,7 @@ async def main():
     from cognee.tasks.translation import register_translation_provider, TranslationProvider
     from typing import Tuple
     
-    class MockTranslationProvider:
+    class MockTranslationProvider(TranslationProvider):
         """Example custom translation provider that adds [TRANSLATED] prefix."""
         
         async def detect_language(self, text: str) -> Tuple[str, float]:
@@ -172,7 +172,7 @@ async def main():
     await cognee.add(spanish_text, dataset_name="custom_provider_demo")
     
     # Get tasks with custom provider
-    custom_tasks = await get_default_tasks_with_translation(
+    _ = await get_default_tasks_with_translation(
         translation_provider="mock"
     )
     
@@ -190,7 +190,7 @@ async def main():
     print("\nTranslation enhances Cognee's multilingual capabilities! 🌍")
 
 
-async def get_dataset_id_by_name(dataset_name: str):
+def get_dataset_id_by_name(dataset_name: str):
     """Helper function to get dataset ID by name."""
     # This is a simplified version - in practice you'd query the database
     # For demo purposes, we'll use a mock UUID
@@ -210,9 +210,10 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nDemo interrupted by user.")
-    except Exception as e:
+    except (ValueError, RuntimeError) as e:
         print(f"\nDemo failed with error: {e}")
         print("Make sure you have:")
         print("1. Set up your .env file with OpenAI API key")
         print("2. Installed required dependencies")
         print("3. Run from the cognee project root directory")
+        raise
