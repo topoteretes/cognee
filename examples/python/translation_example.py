@@ -50,11 +50,6 @@ async def demo_standard_pipeline():
     print("=" * 60)
     print("DEMO 1: Standard Pipeline (No Translation)")
     print("=" * 60)
-
-    # Demonstration 1: Using standard pipeline (no translation)
-    print("=" * 60)
-    print("DEMO 1: Standard Pipeline (No Translation)")
-    print("=" * 60)
     
     print("Running cognify with standard pipeline...\n")
     print("Pipeline steps:")
@@ -179,12 +174,17 @@ async def demo_standard_pipeline():
     await cognee.prune.prune_data()
     await cognee.add(spanish_text, dataset_name="custom_provider_demo")
     
-    # Get tasks with custom provider
-    _ = await get_default_tasks_with_translation(
+    # Get tasks with custom provider and run the pipeline
+    tasks_with_mock = await get_default_tasks_with_translation(
         translation_provider="mock"
     )
     
-    # This would show the custom translation in action
+    async for _ in run_pipeline(
+        tasks=tasks_with_mock,
+        datasets=["custom_provider_demo"],
+    ):
+        pass
+    
     print("Custom provider demo complete!")
 
     print("\n" + "=" * 60)
