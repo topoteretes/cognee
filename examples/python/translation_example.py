@@ -5,7 +5,6 @@ from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
 from cognee.api.v1.cognify.cognify import get_default_tasks_with_translation
 from cognee.modules.pipelines.operations.pipeline import run_pipeline
-from typing import Tuple
 
 # Shared constants for demo
 DEMO_DATASET_PREFIX = "multilingual_demo"
@@ -123,8 +122,15 @@ async def demo_standard_pipeline():
             translation_provider=provider
         )
         print(f"Using translation provider: '{provider}'\n")
-    except (ValueError, ImportError, Exception) as e:
+    except (ValueError, ImportError) as e:
         print(f"Error setting up translation provider '{provider}': {e}")
+        print("Falling back to 'noop' provider for safety...")
+        tasks_with_translation = get_default_tasks_with_translation(
+            translation_provider="noop"
+        )
+        provider = "noop"
+    except Exception as e:
+        print(f"Unexpected error setting up provider '{provider}': {e}")
         print("Falling back to 'noop' provider for safety...")
         tasks_with_translation = get_default_tasks_with_translation(
             translation_provider="noop"
@@ -167,7 +173,7 @@ async def demo_standard_pipeline():
     class MockTranslationProvider(TranslationProvider):
         """Example custom translation provider that adds [TRANSLATED] prefix."""
         
-        async def detect_language(self, text: str) -> Tuple[str, float]:
+        async def detect_language(self, text: str) -> tuple[str, float]:
             # Simple mock detection
             if "El " in text or "es " in text:
                 return "es", 0.9
@@ -175,7 +181,7 @@ async def demo_standard_pipeline():
                 return "fr", 0.9
             return "en", 0.9
                 
-        async def translate(self, text: str, target_language: str) -> Tuple[str, float]:
+        async def translate(self, text: str, target_language: str) -> tuple[str, float]:
             # Mock translation - just adds a prefix
             if target_language == "en":
                 return f"[MOCK TRANSLATED] {text}", 0.8
@@ -251,5 +257,5 @@ if __name__ == "__main__":
         print("2. Ensure translation provider is available")
         print("3. Try using 'noop' provider: COGNEE_TRANSLATION_PROVIDER=noop")
         print("4. Check internet connection for online providers")
-        print("3. Run from the cognee project root directory")
+        print("5. Run from the cognee project root directory")
         raise

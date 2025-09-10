@@ -184,7 +184,7 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
-    tasks = await get_default_tasks(
+    tasks = get_default_tasks(
         user, graph_model, chunker, chunk_size, ontology_file_path, custom_prompt
     )
 
@@ -204,7 +204,7 @@ async def cognify(
     )
 
 
-async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
+def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
     user: Optional[User] = None,
     graph_model: Type[BaseModel] = KnowledgeGraph,
     chunker=TextChunker,
@@ -273,10 +273,8 @@ def get_default_tasks_with_translation(
     providers = {p.lower() for p in get_available_providers()}
     normalized = (translation_provider or "noop").strip().lower()
     if normalized not in providers:
-        raise ValueError(
-            f"Unknown translation_provider '{translation_provider}'. "
-            f"Available: {sorted(providers)}"
-        )
+        available = ", ".join(sorted(providers))
+        raise ValueError(f"Unknown translation_provider '{translation_provider}'. Available: {available}")
     translation_provider = normalized
     
     default_tasks = [
