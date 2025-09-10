@@ -32,7 +32,7 @@ async def resolve_data_directories(
         import s3fs
 
         fs = s3fs.S3FileSystem(
-            key=s3_config.aws_access_key_id, secret=s3_config.aws_secret_access_key, anon=False
+            key=s3_config.aws_access_key_id, secret=s3_config.aws_secret_access_key,token=s3_config.aws_session_token, anon=False
         )
 
     for item in data:

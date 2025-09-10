@@ -21,10 +21,11 @@ class S3FileStorage(Storage):
     def __init__(self, storage_path: str):
         self.storage_path = storage_path
         s3_config = get_s3_config()
-        if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
+        if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None and s3_config.aws_session_token is not None:
             self.s3 = s3fs.S3FileSystem(
                 key=s3_config.aws_access_key_id,
                 secret=s3_config.aws_secret_access_key,
+                token=s3_config.aws_session_token,
                 anon=False,
                 endpoint_url=s3_config.aws_endpoint_url,
                 client_kwargs={"region_name": s3_config.aws_region},
@@ -144,6 +145,11 @@ class S3FileStorage(Storage):
         """
         return await run_async(
             self.s3.isfile, os.path.join(self.storage_path.replace("s3://", ""), file_path)
+        )
+
+    async def get_size(self, file_path: str) -> int:
+        return await run_async(
+            self.s3.size, os.path.join(self.storage_path.replace("s3://", ""), file_path)
         )
 
     async def ensure_directory_exists(self, directory_path: str = ""):
