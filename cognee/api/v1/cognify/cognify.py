@@ -21,7 +21,7 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
-from cognee.tasks.translation import translate_content
+from cognee.tasks.translation import translate_content, get_available_providers
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
 logger = get_logger("cognify")
@@ -268,6 +268,13 @@ async def get_default_tasks_with_translation(
     Returns:
         List of Tasks including translation step
     """
+    # Fail fast on unknown providers (keeps errors close to the API surface)
+    providers = set(get_available_providers())
+    if translation_provider not in providers:
+        raise ValueError(
+            f"Unknown translation_provider '{translation_provider}'. Available: {sorted(providers)}"
+        )
+    
     default_tasks = [
         Task(classify_documents),
         Task(check_permissions_on_dataset, user=user, permissions=["write"]),

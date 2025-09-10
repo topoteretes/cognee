@@ -3,6 +3,7 @@ import cognee
 from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
 from cognee.api.v1.cognify.cognify import get_default_tasks_with_translation
+from cognee.modules.pipelines.operations.pipeline import run_pipeline
 
 # Prerequisites:
 # 1. Copy `.env.template` and rename it to `.env`.
@@ -12,7 +13,8 @@ from cognee.api.v1.cognify.cognify import get_default_tasks_with_translation
 #    pip install langdetect
 
 
-async def main():
+async def setup_demo_data():
+    """Set up clean demo environment with multilingual data."""
     # Create a clean slate for cognee -- reset data and system state
     print("Resetting cognee data...")
     await cognee.prune.prune_data()
@@ -41,6 +43,13 @@ async def main():
         # Add each text as a separate document
         await cognee.add(text, dataset_name=f"multilingual_demo_{i}")
     print("\nAll texts added successfully.\n")
+
+
+async def demo_standard_pipeline():
+    """Demonstrate standard pipeline without translation."""
+    print("=" * 60)
+    print("DEMO 1: Standard Pipeline (No Translation)")
+    print("=" * 60)
 
     # Demonstration 1: Using standard pipeline (no translation)
     print("=" * 60)
@@ -105,14 +114,14 @@ async def main():
     
     # Run pipeline with translation
     print("Processing multilingual content...")
-    async for result in cognee.modules.pipelines.run_pipeline(
+    async for result in run_pipeline(
         tasks=tasks_with_translation,
-        # Specify datasets created above
-        dataset_ids=[
-            get_dataset_id_by_name("multilingual_demo_translation_1"),
-            get_dataset_id_by_name("multilingual_demo_translation_2"),
-            get_dataset_id_by_name("multilingual_demo_translation_3"),
-        ]
+        # Use the dataset names added above
+        datasets=[
+            "multilingual_demo_translation_1",
+            "multilingual_demo_translation_2",
+            "multilingual_demo_translation_3",
+        ],
     ):
         if hasattr(result, 'payload'):
             print(f"Processing: {type(result).__name__}")
@@ -144,10 +153,9 @@ async def main():
             # Simple mock detection
             if "El " in text or "es " in text:
                 return "es", 0.9
-            elif "Le " in text or "du " in text:
+            if "Le " in text or "du " in text:
                 return "fr", 0.9
-            else:
-                return "en", 0.9
+            return "en", 0.9
                 
         async def translate(self, text: str, target_language: str) -> Tuple[str, float]:
             # Mock translation - just adds a prefix
@@ -190,12 +198,12 @@ async def main():
     print("\nTranslation enhances Cognee's multilingual capabilities! 🌍")
 
 
-def get_dataset_id_by_name(dataset_name: str):
-    """Helper function to get dataset ID by name."""
-    # This is a simplified version - in practice you'd query the database
-    # For demo purposes, we'll use a mock UUID
-    import uuid
-    return str(uuid.uuid5(uuid.NAMESPACE_DNS, dataset_name))
+async def run_all_demos():
+    """Run all translation demos."""
+    await setup_demo_data()
+    await demo_standard_pipeline()
+    # Note: Translation pipeline demo would be more complex and is simplified here
+    print("\nAll demos completed successfully!")
 
 
 if __name__ == "__main__":
@@ -207,7 +215,7 @@ if __name__ == "__main__":
     print("for multilingual content processing.\n")
     
     try:
-        asyncio.run(main())
+        asyncio.run(run_all_demos())
     except KeyboardInterrupt:
         print("\nDemo interrupted by user.")
     except (ValueError, RuntimeError) as e:

@@ -6,11 +6,11 @@ from .translate_content import (
 )
 from .models import TranslatedContent, LanguageMetadata
 
-__all__ = [
+__all__ = (
     "LanguageMetadata",
     "TranslatedContent",
     "TranslationProvider",
     "get_available_providers",
     "register_translation_provider",
     "translate_content",
-]
+)
