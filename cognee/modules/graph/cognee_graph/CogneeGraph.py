@@ -180,7 +180,7 @@ class CogneeGraph(CogneeAbstractGraph):
             logger.error(f"Error mapping vector distances to edges: {str(ex)}")
             raise ex
 
-    async def calculate_top_triplet_importances(self, k: int) -> List:
+    async def calculate_top_triplet_importances(self, k: int) -> List[Edge]:
         def score(edge):
             n1 = edge.node1.attributes.get("vector_distance", 1)
             n2 = edge.node2.attributes.get("vector_distance", 1)

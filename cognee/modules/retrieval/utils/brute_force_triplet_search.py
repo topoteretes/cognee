@@ -8,7 +8,7 @@ from cognee.infrastructure.databases.vector.exceptions import CollectionNotFound
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
-from cognee.modules.users.methods import get_default_user
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 
@@ -88,40 +88,14 @@ async def get_memory_fragment(
 
 async def brute_force_triplet_search(
     query: str,
-    user: User = None,
-    top_k: int = 5,
-    collections: List[str] = None,
-    properties_to_project: List[str] = None,
-    memory_fragment: Optional[CogneeGraph] = None,
-    node_type: Optional[Type] = None,
-    node_name: Optional[List[str]] = None,
-) -> list:
-    if user is None:
-        user = await get_default_user()
-
-    retrieved_results = await brute_force_search(
-        query,
-        user,
-        top_k,
-        collections=collections,
-        properties_to_project=properties_to_project,
-        memory_fragment=memory_fragment,
-        node_type=node_type,
-        node_name=node_name,
-    )
-    return retrieved_results
-
-
-async def brute_force_search(
-    query: str,
     user: User,
-    top_k: int,
-    collections: List[str] = None,
-    properties_to_project: List[str] = None,
+    top_k: int = 5,
+    collections: Optional[List[str]] = None,
+    properties_to_project: Optional[List[str]] = None,
     memory_fragment: Optional[CogneeGraph] = None,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
-) -> list:
+) -> List[Edge]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
 

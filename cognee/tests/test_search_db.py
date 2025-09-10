@@ -1,11 +1,7 @@
-import os
-import pathlib
-
-from dns.e164 import query
-
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
@@ -14,11 +10,8 @@ from cognee.modules.retrieval.graph_completion_cot_retriever import GraphComplet
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
-from cognee.modules.search.operations import get_history
-from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
-from cognee.modules.engine.models import NodeSet
 from collections import Counter
 
 logger = get_logger()
@@ -46,16 +39,16 @@ async def main():
 
     await cognee.cognify([dataset_name])
 
-    context_gk, _ = await GraphCompletionRetriever().get_context(
+    context_gk = await GraphCompletionRetriever().get_context(
         query="Next to which country is Germany located?"
     )
-    context_gk_cot, _ = await GraphCompletionCotRetriever().get_context(
+    context_gk_cot = await GraphCompletionCotRetriever().get_context(
         query="Next to which country is Germany located?"
     )
-    context_gk_ext, _ = await GraphCompletionContextExtensionRetriever().get_context(
+    context_gk_ext = await GraphCompletionContextExtensionRetriever().get_context(
         query="Next to which country is Germany located?"
     )
-    context_gk_sum, _ = await GraphSummaryCompletionRetriever().get_context(
+    context_gk_sum = await GraphSummaryCompletionRetriever().get_context(
         query="Next to which country is Germany located?"
     )
 
@@ -65,9 +58,11 @@ async def main():
         ("GraphCompletionContextExtensionRetriever", context_gk_ext),
         ("GraphSummaryCompletionRetriever", context_gk_sum),
     ]:
-        assert isinstance(context, str), f"{name}: Context should be a string"
-        assert context.strip(), f"{name}: Context should not be empty"
-        lower = context.lower()
+        assert isinstance(context, list), f"{name}: Context should be a list"
+        assert len(context) > 0, f"{name}: Context should not be empty"
+
+        context_text = await resolve_edges_to_text(context)
+        lower = context_text.lower()
         assert "germany" in lower or "netherlands" in lower, (
             f"{name}: Context did not contain 'germany' or 'netherlands'; got: {context!r}"
         )
@@ -143,20 +138,19 @@ async def main():
         last_k=1,
     )
 
-    for name, completion in [
+    for name, search_results in [
         ("GRAPH_COMPLETION", completion_gk),
         ("GRAPH_COMPLETION_COT", completion_cot),
         ("GRAPH_COMPLETION_CONTEXT_EXTENSION", completion_ext),
         ("GRAPH_SUMMARY_COMPLETION", completion_sum),
     ]:
-        assert isinstance(completion, list), f"{name}: should return a list"
-        assert len(completion) == 1, f"{name}: expected single-element list, got {len(completion)}"
-        text = completion[0]
-        assert isinstance(text, str), f"{name}: element should be a string"
-        assert text.strip(), f"{name}: string should not be empty"
-        assert "netherlands" in text.lower(), (
-            f"{name}: expected 'netherlands' in result, got: {text!r}"
-        )
+        for search_result in search_results:
+            completion = search_result.search_result
+            assert isinstance(completion, str), f"{name}: should return a string"
+            assert completion.strip(), f"{name}: string should not be empty"
+            assert "netherlands" in completion.lower(), (
+                f"{name}: expected 'netherlands' in result, got: {completion!r}"
+            )
 
     graph_engine = await get_graph_engine()
     graph = await graph_engine.get_graph_data()
