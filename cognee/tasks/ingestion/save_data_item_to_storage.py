@@ -5,7 +5,10 @@ from typing import Union, BinaryIO, Any
 
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
+from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = get_logger()
 
 
 class SaveDataSettings(BaseSettings):
@@ -30,9 +33,16 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
 
     if isinstance(data_item, str):
         parsed_url = urlparse(data_item)
-        # In case data item is a string with a relative path transform data item to absolute path and check
-        # if the file exists
-        abs_path = (Path.cwd() / Path(data_item)).resolve()
+
+        try:
+            # In case data item is a string with a relative path transform data item to absolute path and check
+            # if the file exists
+            abs_path = (Path.cwd() / Path(data_item)).resolve()
+            abs_path.is_file()
+        except (OSError, ValueError):
+            # In case file path is too long it's most likely not a relative path
+            logger.debug(f"Data item was too long to be a possible file path: {abs_path}")
+            abs_path = Path("")
 
         # data is s3 file path
         if parsed_url.scheme == "s3":
