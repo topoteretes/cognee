@@ -312,8 +312,8 @@ async def _sync_to_cognee_cloud(
         # Update final progress
         try:
             await _safe_update_progress(
-                "final",
                 run_id,
+                "final",
                 progress_percentage=100,
                 total_records_to_sync=total_records_uploaded + total_records_downloaded,
                 total_records_to_download=total_records_downloaded,
