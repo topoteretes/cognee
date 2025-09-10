@@ -11,6 +11,7 @@ class S3Config(BaseSettings):
     aws_session_token: Optional[str] = None
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
+
 @lru_cache
 def get_s3_config():
     return S3Config()
