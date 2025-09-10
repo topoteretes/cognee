@@ -6,7 +6,7 @@ const isAuth0Enabled = process.env.USE_AUTH0_AUTHORIZATION?.toLowerCase() === "t
 
 const backendApiUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:8000/api";
 
-const cloudApiUrl = process.env.NEXT_PUBLIC_CLOUD_API_URL || "http://localhost:8001/api";
+const cloudApiUrl = process.env.NEXT_PUBLIC_CLOUD_API_URL || "https://api.cognee.ai/api";
 
 let apiKey: string | null = null;
 
