@@ -1,9 +1,11 @@
 import asyncio
+import os
 import cognee
 from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
 from cognee.api.v1.cognify.cognify import get_default_tasks_with_translation
 from cognee.modules.pipelines.operations.pipeline import run_pipeline
+from typing import Tuple
 
 # Shared multilingual sample texts
 MULTILINGUAL_TEXTS = [
@@ -25,7 +27,9 @@ MULTILINGUAL_TEXTS = [
 # 1. Copy `.env.template` and rename it to `.env`.
 # 2. Add your OpenAI API key to the `.env` file in the `OPENAI_API_KEY` field:
 #    OPENAI_API_KEY = "your_key_here"
-# 3. Optionally install langdetect for better language detection:
+# 3. Optionally set translation provider via environment variable:
+#    COGNEE_TRANSLATION_PROVIDER = "openai" (default) | "langdetect" | "noop"
+# 4. Optionally install langdetect for better language detection:
 #    pip install langdetect
 
 
@@ -102,9 +106,10 @@ async def demo_standard_pipeline():
     print("6. Summarizing text")
     print("7. Adding data points\n")
 
-    # Get translation-enabled tasks
+    # Get translation-enabled tasks with configurable provider
+    provider = os.getenv("COGNEE_TRANSLATION_PROVIDER", "openai")
     tasks_with_translation = await get_default_tasks_with_translation(
-        translation_provider="openai"  # or "langdetect" for local detection only
+        translation_provider=provider
     )
     
     # Run pipeline with translation
@@ -139,7 +144,6 @@ async def demo_standard_pipeline():
     
     # Import the translation system
     from cognee.tasks.translation import register_translation_provider, TranslationProvider
-    from typing import Tuple
     
     class MockTranslationProvider(TranslationProvider):
         """Example custom translation provider that adds [TRANSLATED] prefix."""

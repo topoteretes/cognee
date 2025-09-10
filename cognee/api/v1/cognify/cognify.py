@@ -1,9 +1,8 @@
-import asyncio
 from pydantic import BaseModel
-from typing import Union, Optional, Literal
+from typing import Union, Optional
 from uuid import UUID
 
-from cognee.shared.logging_utils import get_logger
+
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm import get_max_chunk_tokens
 
@@ -23,11 +22,6 @@ from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.tasks.translation import translate_content, get_available_providers
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
-
-logger = get_logger("cognify")
-
-update_status_lock = asyncio.Lock()
-
 
 async def cognify(
     datasets: Union[str, list[str], list[UUID]] = None,
@@ -247,7 +241,7 @@ async def get_default_tasks_with_translation(
     chunk_size: Optional[int] = None,
     ontology_file_path: Optional[str] = None,
     custom_prompt: Optional[str] = None,
-    translation_provider: Literal["noop", "langdetect", "openai"] = "noop",
+    translation_provider: str = "noop",
 ) -> list[Task]:
     """
     Get default pipeline tasks with translation capability.
@@ -263,7 +257,8 @@ async def get_default_tasks_with_translation(
         chunk_size: Maximum chunk size in tokens
         ontology_file_path: Path to ontology file for structured extraction
         custom_prompt: Custom prompt for graph extraction
-        translation_provider: Translation provider ("noop", "langdetect", "openai")
+        translation_provider: Name of a registered provider (see get_available_providers()).
+                             Common options: "noop", "langdetect", "openai"; plugins allowed.
         
     Returns:
         List of Tasks including translation step
@@ -286,6 +281,7 @@ async def get_default_tasks_with_translation(
             target_language="en",
             translation_provider=translation_provider,
             confidence_threshold=0.8,
+            task_config={"batch_size": 10},
         ),  # Auto-translate non-English content and attach metadata
         Task(
             extract_graph_from_data,
