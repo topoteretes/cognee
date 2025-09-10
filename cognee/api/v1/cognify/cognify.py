@@ -258,7 +258,7 @@ def get_default_tasks_with_translation(
         ontology_file_path: Path to ontology file for structured extraction
         custom_prompt: Custom prompt for graph extraction
         translation_provider: Name of a registered provider (see get_available_providers()).
-                             Common options: "noop", "langdetect", "openai"; plugins allowed.
+                             Common options: "noop", "langdetect", "openai", "google", "azure"; plugins allowed.
         
     Returns:
         List of Tasks including translation step
