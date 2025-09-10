@@ -27,6 +27,7 @@ from .api.v1.visualize import visualize_graph, start_visualization_server
 from cognee.modules.visualization.cognee_network_visualization import (
     cognee_network_visualization,
 )
+from .api.v1.ui import start_ui
 
 # Pipelines
 from .modules import pipelines
