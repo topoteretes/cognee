@@ -418,14 +418,11 @@ async def _get_file_size(file_path: str) -> int:
 
 async def _get_cloud_base_url() -> str:
     """Get Cognee Cloud API base URL."""
-    # TODO: Make this configurable via environment variable or config
     return os.getenv("COGNEE_CLOUD_API_URL", "http://localhost:8001")
 
 
 async def _get_cloud_auth_token(user: User) -> str:
     """Get authentication token for Cognee Cloud API."""
-    # TODO: Implement proper authentication with Cognee Cloud
-    # This should get or refresh an API token for the user
     return os.getenv("COGNEE_CLOUD_AUTH_TOKEN", "your-auth-token")
 
 
