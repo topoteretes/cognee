@@ -10,9 +10,10 @@ import cognifyDataset from "@/modules/datasets/cognifyDataset";
 interface AddDataToCogneeProps {
   datasets: Dataset[];
   refreshDatasets: () => void;
+  useCloud?: boolean;
 }
 
-export default function AddDataToCognee({ datasets, refreshDatasets }: AddDataToCogneeProps) {
+export default function AddDataToCognee({ datasets, refreshDatasets, useCloud = false }: AddDataToCogneeProps) {
   const [filesForUpload, setFilesForUpload] = useState<FileList | null>(null);
 
   const prepareFiles = useCallback((event: FormEvent<HTMLInputElement>) => {
@@ -49,9 +50,9 @@ export default function AddDataToCognee({ datasets, refreshDatasets }: AddDataTo
           name: dataset_name,
           data: [],  // not important, just to mimick Dataset
           status: "",  // not important, just to mimick Dataset
-        });
+        }, useCloud);
       });
-  }, [filesForUpload, refreshDatasets]);
+  }, [filesForUpload, refreshDatasets, useCloud]);
 
   const {
     isModalOpen: isAddDataModalOpen,
