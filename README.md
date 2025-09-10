@@ -1,3 +1,32 @@
+## OWL/RDF Ontology Pipeline Integration
+
+Cognee now supports ingesting, processing, and searching OWL/RDF ontology files.
+
+### Usage
+
+1. **Load Ontology**
+  - Use `OntologyEngine.load_data('path/to/ontology.owl')` to ingest OWL/RDF files.
+
+2. **Semantic Extraction & Embeddings**
+  - Ontology nodes and edges are extracted and embeddings are generated automatically.
+
+3. **Search**
+  - All search types (summaries, insights, chunks, code, etc.) are enabled for ontology content and relationships.
+
+4. **Testing & Validation**
+  - Comprehensive unit and integration tests cover loader, semantic extraction, embedding generation, and search operations.
+
+### Example
+
+```python
+from cognee.tasks.graph.infer_data_ontology import OntologyEngine
+
+engine = OntologyEngine()
+ontology_data = await engine.load_data('ontology.owl')
+# ontology_data['nodes'], ontology_data['edges'], ontology_data['embeddings']
+```
+
+Refer to the documentation for advanced configuration and troubleshooting.
 <div align="center">
   <a href="https://github.com/topoteretes/cognee">
     <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee-logo-transparent.png" alt="Cognee Logo" height="60">
