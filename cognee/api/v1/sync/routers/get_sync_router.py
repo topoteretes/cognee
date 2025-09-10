@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
@@ -20,7 +20,7 @@ logger = get_logger()
 class SyncRequest(InDTO):
     """Request model for sync operations."""
 
-    dataset_id: Optional[UUID] = None
+    dataset_ids: Optional[List[UUID]] = None
 
 
 def get_sync_router() -> APIRouter:
@@ -41,7 +41,7 @@ def get_sync_router() -> APIRouter:
         ## Request Body (JSON)
         ```json
         {
-            "dataset_id": "123e4567-e89b-12d3-a456-426614174000"
+            "dataset_ids": ["123e4567-e89b-12d3-a456-426614174000", "456e7890-e12b-34c5-d678-901234567000"]
         }
         ```
 
@@ -49,8 +49,8 @@ def get_sync_router() -> APIRouter:
         Returns immediate response for the sync operation:
         - **run_id**: Unique identifier for tracking the background sync operation
         - **status**: Always "started" (operation runs in background)
-        - **dataset_id**: ID of the dataset being synced
-        - **dataset_name**: Name of the dataset being synced
+        - **dataset_ids**: List of dataset IDs being synced
+        - **dataset_names**: List of dataset names being synced
         - **message**: Description of the background operation
         - **timestamp**: When the sync was initiated
         - **user_id**: User who initiated the sync
@@ -65,15 +65,21 @@ def get_sync_router() -> APIRouter:
 
         ## Example Usage
         ```bash
-        # Sync dataset to cloud by ID (JSON request)
+        # Sync multiple datasets to cloud by IDs (JSON request)
         curl -X POST "http://localhost:8000/api/v1/sync" \\
           -H "Content-Type: application/json" \\
           -H "Cookie: auth_token=your-token" \\
-          -d '{"dataset_id": "123e4567-e89b-12d3-a456-426614174000"}'
+          -d '{"dataset_ids": ["123e4567-e89b-12d3-a456-426614174000", "456e7890-e12b-34c5-d678-901234567000"]}'
+        
+        # Sync all user datasets (empty request body or null dataset_ids)
+        curl -X POST "http://localhost:8000/api/v1/sync" \\
+          -H "Content-Type: application/json" \\
+          -H "Cookie: auth_token=your-token" \\
+          -d '{}'
         ```
 
         ## Error Codes
-        - **400 Bad Request**: Invalid dataset_id format
+        - **400 Bad Request**: Invalid dataset_ids format
         - **401 Unauthorized**: Invalid or missing authentication
         - **403 Forbidden**: User doesn't have permission to access dataset
         - **404 Not Found**: Dataset not found
@@ -93,7 +99,7 @@ def get_sync_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "POST /v1/sync",
-                "dataset_id": str(request.dataset_id) if request.dataset_id else "*",
+                "dataset_ids": [str(id) for id in request.dataset_ids] if request.dataset_ids else "*",
             },
         )
 
@@ -112,8 +118,8 @@ def get_sync_router() -> APIRouter:
                         "details": {
                             "run_id": existing_sync.run_id,
                             "status": "already_running",
-                            "dataset_id": str(existing_sync.dataset_id),
-                            "dataset_name": existing_sync.dataset_name,
+                            "dataset_ids": existing_sync.dataset_ids,
+                            "dataset_names": existing_sync.dataset_names,
                             "message": f"You have a sync operation already in progress with run_id '{existing_sync.run_id}'. Use the status endpoint to monitor progress, or wait for it to complete before starting a new sync.",
                             "timestamp": existing_sync.created_at.isoformat(),
                             "progress_percentage": existing_sync.progress_percentage
@@ -123,22 +129,16 @@ def get_sync_router() -> APIRouter:
 
             # Retrieve existing dataset and check permissions
             datasets = await get_specific_user_permission_datasets(
-                user.id, "write", [request.dataset_id] if request.dataset_id else None
+                user.id, "write", request.dataset_ids if request.dataset_ids else None
             )
 
-            sync_results = {}
+            # Execute new cloud sync operation for all datasets
+            sync_result = await cognee_sync(
+                datasets=datasets,
+                user=user,
+            )
 
-            for dataset in datasets:
-                await set_database_global_context_variables(dataset.id, dataset.owner_id)
-
-                # Execute new cloud sync operation
-                sync_result = await cognee_sync(
-                    dataset=dataset,
-                    user=user,
-                )
-                sync_results[str(dataset.id)] = sync_result
-
-            return sync_results
+            return sync_result
 
         except ValueError as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
@@ -220,7 +220,8 @@ def get_sync_router() -> APIRouter:
                 latest_sync = running_syncs[0]  # Already ordered by created_at desc
                 response["latest_running_sync"] = {
                     "run_id": latest_sync.run_id,
-                    "dataset_name": latest_sync.dataset_name,
+                    "dataset_ids": latest_sync.dataset_ids,
+                    "dataset_names": latest_sync.dataset_names,
                     "progress_percentage": latest_sync.progress_percentage,
                     "created_at": latest_sync.created_at.isoformat() if latest_sync.created_at else None
                 }

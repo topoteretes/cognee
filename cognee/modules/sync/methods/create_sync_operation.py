@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timezone
 from cognee.modules.sync.models import SyncOperation, SyncStatus
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -7,8 +7,8 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 
 async def create_sync_operation(
     run_id: str,
-    dataset_id: UUID,
-    dataset_name: str,
+    dataset_ids: List[UUID],
+    dataset_names: List[str],
     user_id: UUID,
     total_records_to_sync: Optional[int] = None,
     total_records_to_download: Optional[int] = None,
@@ -19,8 +19,8 @@ async def create_sync_operation(
 
     Args:
         run_id: Unique public identifier for this sync operation
-        dataset_id: UUID of the dataset being synced
-        dataset_name: Name of the dataset being synced
+        dataset_ids: List of dataset UUIDs being synced
+        dataset_names: List of dataset names being synced
         user_id: UUID of the user who initiated the sync
         total_records_to_sync: Total number of records to sync (if known)
         total_records_to_download: Total number of records to download (if known)
@@ -33,8 +33,8 @@ async def create_sync_operation(
 
     sync_operation = SyncOperation(
         run_id=run_id,
-        dataset_id=dataset_id,
-        dataset_name=dataset_name,
+        dataset_ids=dataset_ids,
+        dataset_names=dataset_names,
         user_id=user_id,
         status=SyncStatus.STARTED,
         total_records_to_sync=total_records_to_sync,
