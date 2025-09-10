@@ -1,3 +1,3 @@
-export { default } from "./(graph)/GraphView";
+export { default } from "./dashboard/Dashboard";
 
 export const dynamic = "force-dynamic";
