@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from urllib.parse import urlparse
 from typing import Union, BinaryIO, Any
 
@@ -29,6 +30,9 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
 
     if isinstance(data_item, str):
         parsed_url = urlparse(data_item)
+        # In case data item is a string with a relative path transform data item to absolute path and check
+        # if the file exists
+        abs_path = (Path.cwd() / Path(data_item)).resolve()
 
         # data is s3 file path
         if parsed_url.scheme == "s3":
@@ -56,6 +60,15 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
                 return file_path
             else:
                 raise IngestionError(message="Local files are not accepted.")
+        # Data is a relative file path
+        elif abs_path.is_file():
+            if settings.accept_local_file_path:
+                # Normalize path separators before creating file URL
+                normalized_path = os.path.normpath(abs_path)
+                # Use forward slashes in file URLs for consistency
+                url_path = normalized_path.replace(os.sep, "/")
+                file_path = "file://" + url_path
+                return file_path
 
         # data is text, save it to data storage and return the file path
         return await save_data_to_file(data_item)

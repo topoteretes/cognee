@@ -75,17 +75,6 @@ async def data_item_to_text_file(
             else:
                 raise IngestionError(message="Local files are not accepted.")
 
-        # data is a relative file path (e.g., "file.json", "data/file.txt")
-        elif parsed_url.scheme == "" and not Path(data_item_path).is_absolute():
-            # This is a relative file path - check if it exists and can be loaded
-            if settings.accept_local_file_path:
-                loader = get_loader_engine()
-                return await loader.load_file(data_item_path, preferred_loaders), loader.get_loader(
-                    data_item_path, preferred_loaders
-                )
-            else:
-                raise IngestionError(message="Local files are not accepted.")
-
         # data has unsupported URL scheme or format
         else:
             raise IngestionError(message=f"Unsupported data source format: {data_item_path}")
