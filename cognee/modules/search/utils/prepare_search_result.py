@@ -13,10 +13,10 @@ async def prepare_search_result(search_result):
     context_texts = {}
 
     if isinstance(context, List) and len(context) > 0 and isinstance(context[0], Edge):
-        result_graph = transform_context_to_graph(context)
+        context_graph = transform_context_to_graph(context)
 
         graphs = {
-            "*": result_graph,
+            "*": context_graph,
         }
         context_texts = {
             "*": await resolve_edges_to_text(context),
