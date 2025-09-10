@@ -1,10 +1,11 @@
 import { FormEvent, useCallback, useState } from "react";
 import { CloseIcon, PlusIcon } from "@/ui/Icons";
 import { useModal } from "@/ui/elements/Modal";
-import { CTAButton, GhostButton, IconButton, Modal, Select } from "@/ui/elements";
+import { CTAButton, GhostButton, IconButton, Modal, NeutralButton, Select } from "@/ui/elements";
 
 import addData from "@/modules/ingestion/addData";
 import { Dataset } from "@/modules/ingestion/useDatasets";
+import cognifyDataset from "@/modules/datasets/cognifyDataset";
 
 interface AddDataToCogneeProps {
   datasets: Dataset[];
@@ -39,9 +40,16 @@ export default function AddDataToCognee({ datasets, refreshDatasets }: AddDataTo
       },
       Array.from(filesForUpload)
     )
-      .then(() => {
+      .then(({ dataset_id, dataset_name }) => {
         refreshDatasets();
         setFilesForUpload(null);
+
+        return cognifyDataset({
+          id: dataset_id,
+          name: dataset_name,
+          data: [],  // not important, just to mimick Dataset
+          status: "",  // not important, just to mimick Dataset
+        });
       });
   }, [filesForUpload, refreshDatasets]);
 
@@ -64,20 +72,22 @@ export default function AddDataToCognee({ datasets, refreshDatasets }: AddDataTo
         <div className="w-full max-w-2xl">
           <div className="flex flex-row items-center justify-between">
             <span className="text-2xl">Add new data to a dataset?</span>
-            <IconButton onClick={closeAddDataModal}><CloseIcon /></IconButton>
+            <IconButton disabled={isProcessingDataWithCognee} onClick={closeAddDataModal}><CloseIcon /></IconButton>
           </div>
           <div className="mt-8 mb-6">Please select a dataset to add data in.<br/> If you don&apos;t have any, don&apos;t worry, we will create one for you.</div>
           <form onSubmit={submitDataToCognee}>
             <div className="max-w-md flex flex-col gap-4">
               <Select name="datasetName">
-                <option value="">select a dataset</option>
-                {datasets.map((dataset: Dataset) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
+                {!datasets.length && <option value="">main_dataset</option>}
+                {datasets.map((dataset: Dataset, index) => (
+                  <option selected={index===0} key={dataset.id} value={dataset.id}>{dataset.name}</option>
+                ))}
               </Select>
 
-              <GhostButton className="w-full relative justify-start pl-4">
+              <NeutralButton className="w-full relative justify-start pl-4">
                 <input onChange={prepareFiles} required name="files" tabIndex={-1} type="file" multiple className="absolute w-full h-full cursor-pointer opacity-0" />
                 <span>select files</span>
-              </GhostButton>
+              </NeutralButton>
 
               {filesForUpload?.length && (
                 <div className="pt-4 mt-4 border-t-1 border-t-gray-100">
@@ -91,7 +101,7 @@ export default function AddDataToCognee({ datasets, refreshDatasets }: AddDataTo
               )}
             </div>
             <div className="flex flex-row gap-4 mt-4 justify-end">
-              <GhostButton type="button" onClick={() => closeAddDataModal()}>cancel</GhostButton>
+              <GhostButton disabled={isProcessingDataWithCognee} type="button" onClick={() => closeAddDataModal()}>cancel</GhostButton>
               <CTAButton disabled={isProcessingDataWithCognee} type="submit">
                 {isProcessingDataWithCognee ? "processing..." : "add"}
               </CTAButton>
