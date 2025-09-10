@@ -7,6 +7,9 @@ from cognee.api.v1.cognify.cognify import get_default_tasks_with_translation
 from cognee.modules.pipelines.operations.pipeline import run_pipeline
 from typing import Tuple
 
+# Shared constants for demo
+DEMO_DATASET_PREFIX = "multilingual_demo"
+
 # Shared multilingual sample texts
 MULTILINGUAL_TEXTS = [
     """
@@ -33,7 +36,7 @@ MULTILINGUAL_TEXTS = [
 #    # Note: Google Translate provider uses free googletrans library (no API key needed)
 # 3. Optionally set translation provider via environment variable:
 #    COGNEE_TRANSLATION_PROVIDER = "openai" | "google" | "azure" | "langdetect" | "noop"  
-#    # Recommendations: "noop" (safest, no dependencies), "langdetect" (offline), "google" (free)
+#    # Default: "noop" (safest, no dependencies). Also: "langdetect" (offline), "google" (free)
 # 4. Install optional translation libraries as needed:
 #    pip install langdetect                    # For langdetect provider (offline detection)
 #    pip install googletrans==4.0.0rc1        # For google provider (free translation)
@@ -52,7 +55,7 @@ async def setup_demo_data():
     for i, text in enumerate(MULTILINGUAL_TEXTS, 1):
         print(f"\nText {i}: {text.strip()}")
         # Add each text as a separate document
-        await cognee.add(text, dataset_name=f"multilingual_demo_{i}")
+        await cognee.add(text, dataset_name=f"{DEMO_DATASET_PREFIX}_{i}")
     print("\nAll texts added successfully.\n")
 
 
@@ -92,7 +95,7 @@ async def demo_standard_pipeline():
     
     # Re-add the texts
     for i, text in enumerate(MULTILINGUAL_TEXTS, 1):
-        await cognee.add(text, dataset_name=f"multilingual_demo_translation_{i}")
+        await cognee.add(text, dataset_name=f"{DEMO_DATASET_PREFIX}_translation_{i}")
 
     # Demonstration 2: Using translation pipeline
     print("\n" + "=" * 60)
@@ -114,16 +117,19 @@ async def demo_standard_pipeline():
     print("7. Adding data points\n")
 
     # Get translation-enabled tasks with configurable provider
-    provider = os.getenv("COGNEE_TRANSLATION_PROVIDER", "openai")
+    provider = os.getenv("COGNEE_TRANSLATION_PROVIDER", "noop")  # Default to safest option
     try:
         tasks_with_translation = get_default_tasks_with_translation(
             translation_provider=provider
         )
-    except ValueError as e:
-        print(f"{e}\nFalling back to 'noop' provider for the demo.")
+        print(f"Using translation provider: '{provider}'\n")
+    except (ValueError, ImportError, Exception) as e:
+        print(f"Error setting up translation provider '{provider}': {e}")
+        print("Falling back to 'noop' provider for safety...")
         tasks_with_translation = get_default_tasks_with_translation(
             translation_provider="noop"
         )
+        provider = "noop"
     
     # Run pipeline with translation
     print("Processing multilingual content...")
@@ -131,9 +137,9 @@ async def demo_standard_pipeline():
         tasks=tasks_with_translation,
         # Use the dataset names added above
         datasets=[
-            "multilingual_demo_translation_1",
-            "multilingual_demo_translation_2",
-            "multilingual_demo_translation_3",
+            f"{DEMO_DATASET_PREFIX}_translation_1",
+            f"{DEMO_DATASET_PREFIX}_translation_2",
+            f"{DEMO_DATASET_PREFIX}_translation_3",
         ],
     ):
         if hasattr(result, 'payload'):
@@ -234,10 +240,16 @@ if __name__ == "__main__":
         asyncio.run(run_all_demos())
     except KeyboardInterrupt:
         print("\nDemo interrupted by user.")
-    except (ValueError, RuntimeError) as e:
+    except ImportError as e:
+        print(f"\nMissing dependency: {e}")
+        print("Install optional packages as needed:")
+        print("  pip install langdetect googletrans==4.0.0rc1 azure-ai-translation-text")
+    except (ValueError, RuntimeError, Exception) as e:
         print(f"\nDemo failed with error: {e}")
-        print("Make sure you have:")
-        print("1. Set up your .env file with OpenAI API key")
-        print("2. Installed required dependencies")
+        print("Troubleshooting:")
+        print("1. Check your .env file has required API keys")
+        print("2. Ensure translation provider is available")
+        print("3. Try using 'noop' provider: COGNEE_TRANSLATION_PROVIDER=noop")
+        print("4. Check internet connection for online providers")
         print("3. Run from the cognee project root directory")
         raise

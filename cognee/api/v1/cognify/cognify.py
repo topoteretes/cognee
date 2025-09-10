@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Union, Optional
+from typing import Union, Optional, Type
 from uuid import UUID
 
 
@@ -23,15 +23,18 @@ from cognee.tasks.summarization import summarize_text
 from cognee.tasks.translation import translate_content, get_available_providers
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
+# Constants for batch processing
+DEFAULT_BATCH_SIZE = 10
+
 async def cognify(
-    datasets: Union[str, list[str], list[UUID]] = None,
-    user: User = None,
-    graph_model: BaseModel = KnowledgeGraph,
+    datasets: Optional[Union[str, list[str], list[UUID]]] = None,
+    user: Optional[User] = None,
+    graph_model: Type[BaseModel] = KnowledgeGraph,
     chunker=TextChunker,
     chunk_size: Optional[int] = None,
     ontology_file_path: Optional[str] = None,
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
+    vector_db_config: Optional[dict] = None,
+    graph_db_config: Optional[dict] = None,
     run_in_background: bool = False,
     incremental_loading: bool = True,
     custom_prompt: Optional[str] = None,
@@ -202,13 +205,16 @@ async def cognify(
 
 
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
-    user: User = None,
-    graph_model: BaseModel = KnowledgeGraph,
+    user: Optional[User] = None,
+    graph_model: Type[BaseModel] = KnowledgeGraph,
     chunker=TextChunker,
     chunk_size: Optional[int] = None,
     ontology_file_path: Optional[str] = None,
     custom_prompt: Optional[str] = None,
 ) -> list[Task]:
+    """
+    Build the default pipeline (no translation). See get_default_tasks_with_translation for the translation-enabled variant.
+    """
     default_tasks = [
         Task(classify_documents),
         Task(check_permissions_on_dataset, user=user, permissions=["write"]),
@@ -222,21 +228,21 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             graph_model=graph_model,
             ontology_adapter=OntologyResolver(ontology_file=ontology_file_path),
             custom_prompt=custom_prompt,
-            task_config={"batch_size": 10},
+            task_config={"batch_size": DEFAULT_BATCH_SIZE},
         ),  # Generate knowledge graphs from the document chunks.
         Task(
             summarize_text,
-            task_config={"batch_size": 10},
+            task_config={"batch_size": DEFAULT_BATCH_SIZE},
         ),
-        Task(add_data_points, task_config={"batch_size": 10}),
+        Task(add_data_points, task_config={"batch_size": DEFAULT_BATCH_SIZE}),
     ]
 
     return default_tasks
 
 
 def get_default_tasks_with_translation(
-    user: User = None,
-    graph_model: BaseModel = KnowledgeGraph,
+    user: Optional[User] = None,
+    graph_model: Type[BaseModel] = KnowledgeGraph,
     chunker=TextChunker,
     chunk_size: Optional[int] = None,
     ontology_file_path: Optional[str] = None,
@@ -286,20 +292,20 @@ def get_default_tasks_with_translation(
             target_language="en",
             translation_provider=translation_provider,
             confidence_threshold=0.8,
-            task_config={"batch_size": 10},
+            task_config={"batch_size": DEFAULT_BATCH_SIZE},
         ),  # Auto-translate non-English content and attach metadata
         Task(
             extract_graph_from_data,
             graph_model=graph_model,
             ontology_adapter=OntologyResolver(ontology_file=ontology_file_path),
             custom_prompt=custom_prompt,
-            task_config={"batch_size": 10},
+            task_config={"batch_size": DEFAULT_BATCH_SIZE},
         ),  # Generate knowledge graphs from the document chunks.
         Task(
             summarize_text,
-            task_config={"batch_size": 10},
+            task_config={"batch_size": DEFAULT_BATCH_SIZE},
         ),
-        Task(add_data_points, task_config={"batch_size": 10}),
+        Task(add_data_points, task_config={"batch_size": DEFAULT_BATCH_SIZE}),
     ]
 
     return default_tasks
