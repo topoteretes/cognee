@@ -28,7 +28,7 @@ MULTILINGUAL_TEXTS = [
 # 2. Add your OpenAI API key to the `.env` file in the `OPENAI_API_KEY` field:
 #    OPENAI_API_KEY = "your_key_here"
 # 3. Optionally set translation provider via environment variable:
-#    COGNEE_TRANSLATION_PROVIDER = "openai" (default) | "langdetect" | "noop"
+#    COGNEE_TRANSLATION_PROVIDER = "openai" | "langdetect" | "noop"  # tip: "noop" is the safest default
 # 4. Optionally install langdetect for better language detection:
 #    pip install langdetect
 
@@ -108,9 +108,15 @@ async def demo_standard_pipeline():
 
     # Get translation-enabled tasks with configurable provider
     provider = os.getenv("COGNEE_TRANSLATION_PROVIDER", "openai")
-    tasks_with_translation = await get_default_tasks_with_translation(
-        translation_provider=provider
-    )
+    try:
+        tasks_with_translation = get_default_tasks_with_translation(
+            translation_provider=provider
+        )
+    except ValueError as e:
+        print(f"{e}\nFalling back to 'noop' provider for the demo.")
+        tasks_with_translation = get_default_tasks_with_translation(
+            translation_provider="noop"
+        )
     
     # Run pipeline with translation
     print("Processing multilingual content...")
@@ -179,7 +185,7 @@ async def demo_standard_pipeline():
     await cognee.add(spanish_text, dataset_name="custom_provider_demo")
     
     # Get tasks with custom provider and run the pipeline
-    tasks_with_mock = await get_default_tasks_with_translation(
+    tasks_with_mock = get_default_tasks_with_translation(
         translation_provider="mock"
     )
     
@@ -206,7 +212,6 @@ async def run_all_demos():
     """Run all translation demos."""
     await setup_demo_data()
     await demo_standard_pipeline()
-    # Note: Translation pipeline demo would be more complex and is simplified here
     print("\nAll demos completed successfully!")
 
 

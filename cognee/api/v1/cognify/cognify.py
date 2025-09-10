@@ -234,7 +234,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     return default_tasks
 
 
-async def get_default_tasks_with_translation(
+def get_default_tasks_with_translation(
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
@@ -264,9 +264,14 @@ async def get_default_tasks_with_translation(
         List of Tasks including translation step
     """
     # Fail fast on unknown providers (keeps errors close to the API surface)
-    providers = set(get_available_providers())
-    if translation_provider not in providers:
-        raise ValueError(f"Unknown translation_provider: {translation_provider}")
+    providers = {p.lower() for p in get_available_providers()}
+    normalized = (translation_provider or "noop").strip().lower()
+    if normalized not in providers:
+        raise ValueError(
+            f"Unknown translation_provider '{translation_provider}'. "
+            f"Available: {sorted(providers)}"
+        )
+    translation_provider = normalized
     
     default_tasks = [
         Task(classify_documents),
