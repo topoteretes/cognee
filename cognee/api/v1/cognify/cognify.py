@@ -41,7 +41,6 @@ async def cognify(
     run_in_background: bool = False,
     incremental_loading: bool = True,
     custom_prompt: Optional[str] = None,
-    translation_provider: str = "noop",
 ):
     """
     Transform ingested data into a structured knowledge graph.
@@ -191,7 +190,7 @@ async def cognify(
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
     tasks = await get_default_tasks(
-        user, graph_model, chunker, chunk_size, ontology_file_path, custom_prompt, translation_provider
+        user, graph_model, chunker, chunk_size, ontology_file_path, custom_prompt
     )
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
@@ -217,8 +216,60 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunk_size: int = None,
     ontology_file_path: Optional[str] = None,
     custom_prompt: Optional[str] = None,
+) -> list[Task]:
+    default_tasks = [
+        Task(classify_documents),
+        Task(check_permissions_on_dataset, user=user, permissions=["write"]),
+        Task(
+            extract_chunks_from_documents,
+            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            chunker=chunker,
+        ),  # Extract text chunks based on the document type.
+        Task(
+            extract_graph_from_data,
+            graph_model=graph_model,
+            ontology_adapter=OntologyResolver(ontology_file=ontology_file_path),
+            custom_prompt=custom_prompt,
+            task_config={"batch_size": 10},
+        ),  # Generate knowledge graphs from the document chunks.
+        Task(
+            summarize_text,
+            task_config={"batch_size": 10},
+        ),
+        Task(add_data_points, task_config={"batch_size": 10}),
+    ]
+
+    return default_tasks
+
+
+async def get_default_tasks_with_translation(
+    user: User = None,
+    graph_model: BaseModel = KnowledgeGraph,
+    chunker=TextChunker,
+    chunk_size: int = None,
+    ontology_file_path: Optional[str] = None,
+    custom_prompt: Optional[str] = None,
     translation_provider: str = "noop",
 ) -> list[Task]:
+    """
+    Get default pipeline tasks with translation capability.
+    
+    This function returns the standard Cognee processing pipeline with an added
+    translation step that automatically detects and translates non-English content
+    to English before graph extraction.
+    
+    Args:
+        user: User context for permissions
+        graph_model: Model for knowledge graph structure
+        chunker: Text chunking strategy
+        chunk_size: Maximum chunk size in tokens
+        ontology_file_path: Path to ontology file for structured extraction
+        custom_prompt: Custom prompt for graph extraction
+        translation_provider: Translation provider ("noop", "langdetect", "openai")
+        
+    Returns:
+        List of Tasks including translation step
+    """
     default_tasks = [
         Task(classify_documents),
         Task(check_permissions_on_dataset, user=user, permissions=["write"]),
