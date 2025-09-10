@@ -243,8 +243,6 @@ async def _sync_to_cognee_cloud(
         cloud_base_url = await _get_cloud_base_url()
         cloud_auth_token = await _get_cloud_auth_token(user)
 
-        logger.info(f"Cloud API URL: {cloud_base_url}")
-
         # Step 1: Sync files for all datasets concurrently
         sync_files_tasks = [
             _sync_dataset_files(dataset, cloud_base_url, cloud_auth_token, user, run_id)
@@ -314,6 +312,7 @@ async def _sync_to_cognee_cloud(
         # Update final progress
         try:
             await _safe_update_progress(
+                "final",
                 run_id,
                 progress_percentage=100,
                 total_records_to_sync=total_records_uploaded + total_records_downloaded,
