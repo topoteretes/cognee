@@ -139,16 +139,14 @@ class OntologyEngine:
 
     async def load_data(self, file_path: str) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """
-        Load data from a specified JSON or CSV file and return it in a structured format.
+        Load data from a specified JSON, CSV, or OWL/RDF file and return it in a structured format.
 
         Parameters:
         -----------
-
             - file_path (str): The path to the file to load data from.
 
         Returns:
         --------
-
             - Union[List[Dict[str, Any]], Dict[str, Any]]: Parsed data from the file as either a
               list of dictionaries or a single dictionary depending on content type.
         """
@@ -162,6 +160,44 @@ class OntologyEngine:
                     content = await f.read()
                     reader = csv.DictReader(content.splitlines())
                     return list(reader)
+            elif file_path.endswith(".owl") or file_path.endswith(".rdf"):
+                from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
+                from cognee.infrastructure.llm.LLMGateway import LLMGateway
+                resolver = OntologyResolver(ontology_file=file_path)
+                nodes = []
+                edges = []
+                embeddings = {}
+                llm = LLMGateway()
+                for category in ["classes", "individuals"]:
+                    for key, uri in resolver.lookup.get(category, {}).items():
+                        node_info = {"id": key, "uri": str(uri), "category": category}
+                        # Semantic extraction: get label and description if available
+                        node_info["label"] = key
+                        node_info["description"] = str(uri)
+                        # Generate embedding for node
+                        try:
+                            embedding = llm.generate_embedding(text=node_info["label"] + " " + node_info["description"])
+                        except Exception:
+                            embedding = None
+                        node_info["embedding"] = embedding
+                        embeddings[key] = embedding
+                        nodes.append(node_info)
+                for node in nodes:
+                    _, node_edges, _ = resolver.get_subgraph(node_name=node["id"], node_type=node["category"])
+                    for edge in node_edges:
+                        edge_info = {"source": edge[0], "relation": edge[1], "target": edge[2]}
+                        # Generate embedding for edge relation
+                        try:
+                            edge_embedding = llm.generate_embedding(text=edge[1])
+                        except Exception:
+                            edge_embedding = None
+                        edge_info["embedding"] = edge_embedding
+                        edges.append(edge_info)
+                # Store ontology data for search integration
+                self.ontology_nodes = nodes
+                self.ontology_edges = edges
+                self.ontology_embeddings = embeddings
+                return {"nodes": nodes, "edges": edges, "embeddings": embeddings}
             else:
                 raise IngestionError(message="Unsupported file format")
         except Exception as e:
