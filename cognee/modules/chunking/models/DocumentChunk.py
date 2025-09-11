@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.processing.document_types import Document
@@ -29,7 +29,7 @@ class DocumentChunk(DataPoint):
     chunk_size: int
     chunk_index: int
     cut_type: str
-    is_part_of: Document
+    is_part_of: Optional[Document] = None
     contains: List[Entity] = None
 
     metadata: dict = {"index_fields": ["text"]}

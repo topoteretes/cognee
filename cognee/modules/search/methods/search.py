@@ -12,6 +12,7 @@ from cognee.modules.retrieval.insights_retriever import InsightsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.jaccard_retrival import JaccardChunksRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
@@ -106,6 +107,7 @@ async def specific_search(
     node_name: Optional[List[str]] = None,
     save_interaction: Optional[bool] = False,
     last_k: Optional[int] = None,
+    with_scores: bool = False,
 ) -> list:
     search_tasks: dict[SearchType, Callable] = {
         SearchType.SUMMARIES: SummariesRetriever(top_k=top_k).get_completion,
@@ -146,6 +148,7 @@ async def specific_search(
         SearchType.CYPHER: CypherSearchRetriever().get_completion,
         SearchType.NATURAL_LANGUAGE: NaturalLanguageRetriever().get_completion,
         SearchType.FEEDBACK: UserQAFeedback(last_k=last_k).add_feedback,
+        SearchType.CHUNKS_LEXICAL: JaccardChunksRetriever(top_k=top_k,with_scores = with_scores).get_completion,
     }
 
     # If the query type is FEELING_LUCKY, select the search type intelligently

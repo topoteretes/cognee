@@ -3,8 +3,6 @@ import pathlib
 import asyncio
 import cognee
 from cognee.modules.search.types import SearchType
-
-
 async def main():
     """
     Example script demonstrating how to use Cognee with Neo4j
@@ -61,7 +59,6 @@ async def main():
 
     # Process the added document to extract knowledge
     await cognee.cognify([dataset_name])
-
     # Now let's perform some searches
     # 1. Search for insights related to "Neo4j"
     insights_results = await cognee.search(query_type=SearchType.INSIGHTS, query_text="Neo4j")
@@ -71,7 +68,7 @@ async def main():
 
     # 2. Search for text chunks related to "graph database"
     chunks_results = await cognee.search(
-        query_type=SearchType.CHUNKS, query_text="graph database", datasets=[dataset_name]
+        query_type=SearchType.CHUNKS_LEXICAL, query_text="graph database", datasets=[dataset_name]
     )
     print("\nChunks about graph database:")
     for result in chunks_results:
