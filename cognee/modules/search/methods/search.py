@@ -98,7 +98,9 @@ async def search(
         query.id,
         json.dumps(
             jsonable_encoder(
-                await prepare_search_result(search_results)
+                await prepare_search_result(
+                    search_results[0] if isinstance(search_results, list) else search_results
+                )
                 if use_combined_context
                 else [
                     await prepare_search_result(search_result) for search_result in search_results
@@ -109,7 +111,9 @@ async def search(
     )
 
     if use_combined_context:
-        prepared_search_results = await prepare_search_result(search_results)
+        prepared_search_results = await prepare_search_result(
+            search_results[0] if isinstance(search_results, list) else search_results
+        )
         result = prepared_search_results["result"]
         graphs = prepared_search_results["graphs"]
         context = prepared_search_results["context"]

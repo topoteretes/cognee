@@ -294,17 +294,19 @@ function CellResult({ content = [] }) {
             <span className="block px-2 py-2">{line["result"]}</span>
           </div>
         );
-        parsedContent.push(
-          <div className="w-full h-full bg-white">
-            <span className="text-sm pl-2 mb-4">reasoning graph</span>
-            <GraphVisualization
-              data={transformToVisualizationData(line["graphs"]["*"])}
-              ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
-              graphControls={graphControls}
-              className="min-h-48"
-            />
-          </div>
-        );
+        if (line["graphs"]) {
+          parsedContent.push(
+            <div className="w-full h-full bg-white">
+              <span className="text-sm pl-2 mb-4">reasoning graph</span>
+              <GraphVisualization
+                data={transformToVisualizationData(line["graphs"]["*"])}
+                ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
+                graphControls={graphControls}
+                className="min-h-48"
+              />
+            </div>
+          );
+        }
       }
     } catch (error) {
       console.error(error);

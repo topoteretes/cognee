@@ -5,7 +5,6 @@ import traceback
 
 def wrap_in_async_handler(user_code: str) -> str:
     return (
-        "import asyncio\n\n"
         "from cognee.infrastructure.utils.run_sync import run_sync\n\n"
         "async def __user_main__():\n"
         + "\n".join("    " + line for line in user_code.strip().split("\n"))
@@ -27,19 +26,6 @@ def run_in_local_sandbox(code, environment=None):
     error = None
 
     printOutput = []
-
-    # def process_output(output):
-    #     try:
-    #         result = json.loads(
-    #             re.sub(
-    #                 r"'([^']*)'", r'"\1"',
-    #                 re.sub(r"\bNone\b", "null", output)
-    #             )
-    #         )
-    #         result = json.loads(output)
-    #         return result
-    #     except json.JSONDecodeError:
-    #         return output
 
     def customPrintFunction(output):
         printOutput.append(output)

@@ -63,9 +63,10 @@ async def get_memory_fragment(
     if properties_to_project is None:
         properties_to_project = ["id", "description", "name", "type", "text"]
 
+    memory_fragment = CogneeGraph()
+
     try:
         graph_engine = await get_graph_engine()
-        memory_fragment = CogneeGraph()
 
         await memory_fragment.project_graph_from_db(
             graph_engine,
