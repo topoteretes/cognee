@@ -25,6 +25,7 @@ async def search(
     last_k: Optional[int] = None,
     only_context: bool = False,
     use_combined_context: bool = False,
+    with_scores: bool = False,
 ) -> Union[List[SearchResult], CombinedSearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -195,6 +196,7 @@ async def search(
         last_k=last_k,
         only_context=only_context,
         use_combined_context=use_combined_context,
-    )
+        with_scores=with_scores
+  )
 
     return filtered_search_results

@@ -68,12 +68,18 @@ async def main():
 
     # 2. Search for text chunks related to "graph database"
     chunks_results = await cognee.search(
-        query_type=SearchType.CHUNKS_LEXICAL, query_text="graph database", datasets=[dataset_name]
+        query_type=SearchType.CHUNKS_LEXICAL, query_text="graph database", datasets=[dataset_name],with_scores=True
     )
     print("\nChunks about graph database:")
     for result in chunks_results:
         print(f"- {result}")
 
+    chunks_results = await cognee.search(
+        query_type=SearchType.CHUNKS, query_text="graph database", datasets=[dataset_name],with_scores=True
+    )
+    print("\nChunks about graph non lexical database:")
+    for result in chunks_results:
+        print(f"- {result}")
     # 3. Get graph completion related to databases
     graph_completion_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION, query_text="database"
