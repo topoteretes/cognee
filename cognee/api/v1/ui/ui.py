@@ -7,7 +7,7 @@ import webbrowser
 import zipfile
 import requests
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 import tempfile
 import shutil
 
@@ -326,6 +326,7 @@ def prompt_user_for_download() -> bool:
 
 
 def start_ui(
+    pid_callback: Callable[[int], None],
     host: str = "localhost",
     port: int = 3000,
     open_browser: bool = True,
@@ -346,6 +347,7 @@ def start_ui(
     6. Optionally open the browser
 
     Args:
+        pid_callback: Callback to notify with PID of each spawned process
         host: Host to bind the frontend server to (default: localhost)
         port: Port to run the frontend server on (default: 3000)
         open_browser: Whether to open the browser automatically (default: True)
@@ -391,20 +393,19 @@ def start_ui(
                     "--port",
                     str(backend_port),
                 ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+                # Inherit stdout/stderr from parent process to show logs
+                stdout=None,
+                stderr=None,
                 preexec_fn=os.setsid if hasattr(os, "setsid") else None,
             )
+
+            pid_callback(backend_process.pid)
 
             # Give the backend a moment to start
             time.sleep(2)
 
             if backend_process.poll() is not None:
-                stdout, stderr = backend_process.communicate()
-                logger.error("Backend server failed to start:")
-                logger.error(f"stdout: {stdout}")
-                logger.error(f"stderr: {stderr}")
+                logger.error("Backend server failed to start - process exited early")
                 return None
 
             logger.info(f"✓ Backend API started at http://{backend_host}:{backend_port}")
@@ -460,7 +461,7 @@ def start_ui(
     logger.info("This may take a moment to compile and start...")
 
     try:
-        # Use process group to ensure all child processes get terminated together
+        # Create frontend in its own process group for clean termination
         process = subprocess.Popen(
             ["npm", "run", "dev"],
             cwd=frontend_path,
@@ -468,10 +469,10 @@ def start_ui(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            preexec_fn=os.setsid
-            if hasattr(os, "setsid")
-            else None,  # Create new process group on Unix
+            preexec_fn=os.setsid if hasattr(os, "setsid") else None,
         )
+
+        pid_callback(process.pid)
 
         # Give it a moment to start up
         time.sleep(3)
