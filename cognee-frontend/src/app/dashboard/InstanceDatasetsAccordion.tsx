@@ -36,8 +36,6 @@ export default function InstanceDatasetsAccordion({ onDatasetsChange }: Instance
     };
 
     checkConnectionToLocalCognee();
-
-    checkConnectionToCloudCognee();
   }, [checkConnectionToCloudCognee, setCloudCogneeConnected, setLocalCogneeConnected]);
 
   const {
