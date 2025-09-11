@@ -9,6 +9,11 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger(__name__)
 
 
+class CsvLoadError(Exception):
+    """Exception raised when CSV loading fails."""
+    pass
+
+
 class CsvLoader(LoaderInterface):
     """
     CSV loader that preserves row-column relationships for structured data ingestion.
@@ -20,7 +25,7 @@ class CsvLoader(LoaderInterface):
     @property
     def supported_extensions(self) -> List[str]:
         """Supported CSV file extensions."""
-        return ["csv"]
+        return [".csv"]
 
     @property
     def supported_mime_types(self) -> List[str]:
@@ -43,6 +48,9 @@ class CsvLoader(LoaderInterface):
         Returns:
             True if file can be handled, False otherwise
         """
+        # Normalize extension to include dot prefix
+        if not extension.startswith('.'):
+            extension = f".{extension}"
         return extension in self.supported_extensions and mime_type in self.supported_mime_types
 
     async def load(
@@ -51,7 +59,6 @@ class CsvLoader(LoaderInterface):
         encoding: str = "utf-8",
         delimiter: str = ",",
         quotechar: str = '"',
-        **kwargs,
     ) -> str:
         """
         Load and process the CSV file, preserving row-column relationships.
@@ -61,7 +68,6 @@ class CsvLoader(LoaderInterface):
             encoding: Text encoding to use (default: utf-8)
             delimiter: CSV field delimiter (default: comma)
             quotechar: CSV quote character (default: double quote)
-            **kwargs: Additional configuration
 
         Returns:
             Path to the processed text file containing structured CSV data
@@ -89,7 +95,8 @@ class CsvLoader(LoaderInterface):
 
                 try:
                     dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
-                    if delimiter == ",":  # Only use detected delimiter if not explicitly set
+                    # Only use detected values if defaults are being used
+                    if delimiter == "," and quotechar == '"':
                         delimiter = dialect.delimiter
                         quotechar = dialect.quotechar
                 except csv.Error:
@@ -99,6 +106,7 @@ class CsvLoader(LoaderInterface):
                 reader = csv.DictReader(csvfile, delimiter=delimiter, quotechar=quotechar)
 
                 structured_content = self._process_csv_rows(reader)
+                column_count = len(reader.fieldnames or [])
 
             # Store the processed content
             storage_config = get_storage_config()
@@ -108,13 +116,13 @@ class CsvLoader(LoaderInterface):
             full_file_path = await storage.store(storage_file_name, structured_content)
 
             logger.info(
-                f"Successfully processed CSV file with {len(reader.fieldnames or [])} columns"
+                f"Successfully processed CSV file with {column_count} columns"
             )
             return full_file_path
 
         except Exception as e:
-            logger.error(f"Failed to process CSV {file_path}: {e}")
-            raise Exception(f"CSV processing failed: {e}") from e
+            logger.exception(f"Failed to process CSV {file_path}")
+            raise CsvLoadError(f"CSV processing failed: {e}") from e
 
     def _process_csv_rows(self, reader: csv.DictReader) -> str:
         """
@@ -140,7 +148,7 @@ class CsvLoader(LoaderInterface):
                 content_parts.append(row_content)
                 row_count += 1
 
-            except Exception as e:
+            except (ValueError, KeyError, AttributeError) as e:
                 logger.warning(f"Failed to process row {row_num}: {e}")
                 continue
 
@@ -164,13 +172,10 @@ class CsvLoader(LoaderInterface):
         for field in fieldnames:
             value = row.get(field, "")
             # Clean and format the value
-            if value is not None:
-                value_str = str(value).strip()
-                if value_str:
-                    row_parts.append(f"  {field}: {value_str}")
-                else:
-                    row_parts.append(f"  {field}: [empty]")
+            value_str = str(value).strip()
+            if value_str:
+                row_parts.append(f"  {field}: {value_str}")
             else:
-                row_parts.append(f"  {field}: [null]")
+                row_parts.append(f"  {field}: [empty]")
 
         return "\n".join(row_parts) + "\n"

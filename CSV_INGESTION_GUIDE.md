@@ -68,7 +68,7 @@ async for chunk in chunker.read():
 
 The CSV loader converts raw CSV data into a structured text format:
 
-```
+```text
 CSV Data with columns: Name, Age, Department, Salary, Location, Start_Date
 
 Row 1:
@@ -99,7 +99,7 @@ Each chunk produced by CSVChunker includes:
 - **Rich Metadata**: Detailed information about the chunk contents
 
 Example chunk content:
-```
+```text
 CSV Data with columns: Name, Age, Department, Salary, Location, Start_Date
 
 Row 1:

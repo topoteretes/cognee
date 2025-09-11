@@ -4,7 +4,7 @@ from .TextChunker import TextChunker
 from .CSVChunker import CSVChunker
 
 # Conditionally import LangchainChunker if dependencies are available
-__all__ = ["DocumentChunk", "Chunker", "TextChunker", "CSVChunker"]
+__all__ = ["CSVChunker", "Chunker", "DocumentChunk", "TextChunker"]
 
 try:
     from .LangchainChunker import LangchainChunker

@@ -57,7 +57,7 @@ I have successfully implemented a dedicated CSV ingestion pipeline for Cognee th
 1. **File Detection**: CsvLoader identifies CSV files by extension and MIME type
 2. **CSV Parsing**: Reads CSV with automatic dialect detection
 3. **Structure Creation**: Converts each row into a structured text format:
-   ```
+   ```text
    CSV Data with columns: Name, Age, Department, Salary, Location, Start_Date
 
    Row 1:

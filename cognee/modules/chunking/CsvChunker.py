@@ -36,6 +36,8 @@ class CsvChunker(Chunker):
             rows_per_chunk: Number of CSV rows per chunk (default: 1)
         """
         super().__init__(document, get_text, max_chunk_tokens)
+        if rows_per_chunk <= 0:
+            raise ValueError("rows_per_chunk must be >= 1")
         self.chunk_size = chunk_size
         self.rows_per_chunk = rows_per_chunk
         self.header_info = ""
@@ -54,7 +56,7 @@ class CsvChunker(Chunker):
                 
                 if not csv_data:
                     logger.warning("No valid CSV data found in content")
-                    return
+                    continue
                 
                 # Extract header information
                 self.header_info = csv_data.get("header", "")
@@ -62,14 +64,14 @@ class CsvChunker(Chunker):
                 
                 if not rows:
                     logger.warning("No data rows found in CSV content")
-                    return
+                    continue
                 
                 # Chunk rows while preserving column context
                 async for chunk in self._chunk_csv_rows(rows):
                     yield chunk
                     
-            except Exception as e:
-                logger.error(f"Error processing CSV content: {e}")
+            except Exception:
+                logger.exception("Error processing CSV content")
                 raise
 
     def _parse_csv_content(self, content: str) -> Dict[str, Any]:
@@ -82,13 +84,13 @@ class CsvChunker(Chunker):
         Returns:
             Dictionary with header and rows information
         """
-        lines = content.strip().split('\n')
+        lines = content.strip().splitlines()
         
         if not lines:
             return {}
         
         # Extract header information (first line should contain column info)
-        header_line = lines[0] if lines else ""
+        header_line = lines[0]
         
         # Parse individual rows
         rows = []
@@ -182,6 +184,15 @@ class CsvChunker(Chunker):
         Yields:
             DocumentChunk instances
         """
+        # Initialize tokenizer once
+        tokenizer = None
+        try:
+            from cognee.infrastructure.databases.vector import get_vector_engine
+            embedding_engine = get_vector_engine().embedding_engine
+            tokenizer = getattr(embedding_engine, "tokenizer", None)
+        except (ModuleNotFoundError, AttributeError):
+            tokenizer = None
+
         # Group rows into chunks
         for i in range(0, len(rows), self.rows_per_chunk):
             chunk_rows = rows[i:i + self.rows_per_chunk]
@@ -207,17 +218,15 @@ class CsvChunker(Chunker):
                 "csv_metadata": {
                     "row_numbers": [row["row_number"] for row in chunk_rows],
                     "row_count": len(chunk_rows),
-                    "columns": list(chunk_rows[0]["data"].keys()) if chunk_rows else [],
+                    "columns": sorted({col for row in chunk_rows for col in row["data"].keys()}),
                     "chunk_type": "csv_rows"
                 }
             }
             
             # Calculate token count if possible
-            try:
-                from cognee.infrastructure.databases.vector import get_vector_engine
-                embedding_engine = get_vector_engine().embedding_engine
-                token_count = embedding_engine.tokenizer.count_tokens(chunk_text)
-            except Exception:
+            if tokenizer is not None:
+                token_count = tokenizer.count_tokens(chunk_text)
+            else:
                 # Fallback to word count if tokenizer not available
                 token_count = len(chunk_text.split())
             
@@ -230,7 +239,7 @@ class CsvChunker(Chunker):
             
             # Create and yield the chunk
             chunk = DocumentChunk(
-                id=uuid5(NAMESPACE_OID, f"{str(self.document.id)}-csv-{self.chunk_index}"),
+                id=uuid5(NAMESPACE_OID, f"{self.document.id!s}-csv-{self.chunk_index}"),
                 text=chunk_text,
                 chunk_size=token_count,
                 is_part_of=self.document,

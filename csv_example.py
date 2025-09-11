@@ -98,7 +98,7 @@ async def csv_ingestion_example():
         # Show chunk content (first 3 lines)
         chunk_lines = chunk.text.split("\n")
         print("   - Content preview:")
-        for i, line in enumerate(chunk_lines[:5]):
+        for _, line in enumerate(chunk_lines[:5]):
             print(f"     {line}")
         if len(chunk_lines) > 5:
             print(f"     ... ({len(chunk_lines) - 5} more lines)")
@@ -147,10 +147,9 @@ async def main():
     try:
         await csv_ingestion_example()
         await cognee_integration_example()
-    except Exception as e:
-        print(f"Error: {e}")
+    except Exception:
         import traceback
-
+        print("Error during CSV example run:")
         traceback.print_exc()
 
 

@@ -9,8 +9,6 @@ to ensure proper row-column relationship preservation.
 import asyncio
 import os
 import sys
-import tempfile
-from pathlib import Path
 from urllib.parse import urlparse
 
 # Add the cognee module path
@@ -126,7 +124,7 @@ async def test_csv_chunker(content: str):
         print(f"Number of rows parsed: {len(csv_data.get('rows', []))}")
 
         if csv_data.get("rows"):
-            for i, row in enumerate(csv_data.get("rows", [])[:3]):  # Show first 3 rows
+            for _, row in enumerate(csv_data.get("rows", [])[:3]):  # Show first 3 rows
                 print(f"  Row {row['row_number']}: {list(row['data'].keys())}")
 
         # Process chunks
@@ -152,7 +150,7 @@ async def test_csv_chunker(content: str):
             # Display chunk content preview
             print("  Content preview:")
             lines = chunk.text.split("\n")
-            for i, line in enumerate(lines[:10]):  # Show first 10 lines
+            for _, line in enumerate(lines[:10]):  # Show first 10 lines
                 print(f"    {line}")
             if len(lines) > 10:
                 print(f"    ... ({len(lines) - 10} more lines)")
@@ -190,11 +188,10 @@ async def test_integration():
             print("✅ All tests passed! CSV ingestion pipeline working correctly.")
             print("=" * 60)
             return True
-        else:
-            print("\n" + "=" * 60)
-            print("❌ Some tests failed.")
-            print("=" * 60)
-            return False
+        print("\n" + "=" * 60)
+        print("❌ Some tests failed.")
+        print("=" * 60)
+        return False
 
     except Exception as e:
         print(f"Integration test error: {e}")
