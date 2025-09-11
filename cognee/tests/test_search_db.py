@@ -144,13 +144,16 @@ async def main():
         ("GRAPH_COMPLETION_CONTEXT_EXTENSION", completion_ext),
         ("GRAPH_SUMMARY_COMPLETION", completion_sum),
     ]:
-        for search_result in search_results:
-            completion = search_result.search_result
-            assert isinstance(completion, str), f"{name}: should return a string"
-            assert completion.strip(), f"{name}: string should not be empty"
-            assert "netherlands" in completion.lower(), (
-                f"{name}: expected 'netherlands' in result, got: {completion!r}"
-            )
+        assert isinstance(search_results, list), f"{name}: should return a list"
+        assert len(search_results) == 1, (
+            f"{name}: expected single-element list, got {len(search_results)}"
+        )
+        text = search_results[0]
+        assert isinstance(text, str), f"{name}: element should be a string"
+        assert text.strip(), f"{name}: string should not be empty"
+        assert "netherlands" in text.lower(), (
+            f"{name}: expected 'netherlands' in result, got: {text!r}"
+        )
 
     graph_engine = await get_graph_engine()
     graph = await graph_engine.get_graph_data()
