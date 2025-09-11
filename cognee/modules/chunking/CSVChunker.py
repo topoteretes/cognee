@@ -37,6 +37,8 @@ class CSVChunker(Chunker):
         """
         super().__init__(document, get_text, max_chunk_tokens)
         self.chunk_size = chunk_size
+        if not isinstance(rows_per_chunk, int):
+            raise TypeError("rows_per_chunk must be an integer")
         if rows_per_chunk <= 0:
             raise ValueError("rows_per_chunk must be >= 1")
         self.rows_per_chunk = rows_per_chunk
