@@ -8,6 +8,8 @@ from typing import List, Optional
 from datetime import datetime, timezone
 from dataclasses import dataclass
 
+from cognee.api.v1.cognify import cognify
+
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.tasks.ingestion.ingest_data import ingest_data
 from cognee.shared.logging_utils import get_logger
@@ -256,6 +258,7 @@ async def _sync_to_cognee_cloud(
         logger.info(f"Starting concurrent file sync for {len(datasets)} datasets")
 
         has_any_uploads = False
+        has_any_downloads = False
         processed_datasets = []
         completed_datasets = 0
 
@@ -290,6 +293,8 @@ async def _sync_to_cognee_cloud(
 
                 if dataset_result.has_uploads:
                     has_any_uploads = True
+                if dataset_result.has_downloads:
+                    has_any_downloads = True
 
                 processed_datasets.append(dataset_result.dataset_id)
 
@@ -329,6 +334,22 @@ async def _sync_to_cognee_cloud(
         else:
             logger.info(
                 "Progress: 90% - Skipping cognify processing - no new files were uploaded across any datasets"
+            )
+
+        # Step 3: Trigger local cognify processing if any files were downloaded
+        if has_any_downloads and processed_datasets:
+            logger.info(
+                f"Progress: 95% - Triggering local cognify processing for {len(processed_datasets)} datasets with downloaded files"
+            )
+            try:
+                await cognify()
+                logger.info("Local cognify processing completed successfully for all datasets")
+            except Exception as e:
+                logger.warning(f"Failed to run local cognify processing: {str(e)}")
+                # Don't fail the entire sync if local cognify fails
+        else:
+            logger.info(
+                "Progress: 95% - Skipping local cognify processing - no new files were downloaded across any datasets"
             )
 
         # Update final progress
@@ -374,6 +395,7 @@ class DatasetSyncResult:
     bytes_downloaded: int
     bytes_uploaded: int
     has_uploads: bool  # Whether any files were uploaded (for cognify decision)
+    has_downloads: bool  # Whether any files were downloaded (for cognify decision)
     uploaded_hashes: List[str]  # Content hashes of files uploaded during sync
     downloaded_hashes: List[str]  # Content hashes of files downloaded during sync
 
@@ -436,6 +458,7 @@ async def _sync_dataset_files(
             bytes_downloaded=bytes_downloaded,
             bytes_uploaded=bytes_uploaded,
             has_uploads=len(hashes_missing_on_remote) > 0,
+            has_downloads=len(hashes_missing_on_local) > 0,
             uploaded_hashes=hashes_missing_on_remote,
             downloaded_hashes=hashes_missing_on_local,
         )
