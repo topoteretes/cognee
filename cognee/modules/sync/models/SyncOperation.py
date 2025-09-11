@@ -9,7 +9,6 @@ from sqlalchemy import (
     UUID as SQLAlchemy_UUID,
     Integer,
     Enum as SQLEnum,
-    ARRAY,
     JSON,
 )
 
@@ -47,8 +46,8 @@ class SyncOperation(Base):
     progress_percentage = Column(Integer, default=0, doc="Progress percentage (0-100)")
 
     # Operation metadata
-    dataset_ids = Column(ARRAY(SQLAlchemy_UUID), doc="Array of dataset IDs being synced")
-    dataset_names = Column(ARRAY(Text), doc="Array of dataset names being synced")
+    dataset_ids = Column(JSON, doc="Array of dataset IDs being synced")
+    dataset_names = Column(JSON, doc="Array of dataset names being synced")
     user_id = Column(SQLAlchemy_UUID, index=True, doc="ID of the user who initiated the sync")
 
     # Timing information
