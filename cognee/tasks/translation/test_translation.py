@@ -11,8 +11,9 @@ Tests cover:
 
 import pytest
 import asyncio
-from unittest.mock import Mock, patch, AsyncMock
-from typing import Tuple
+from unittest.mock import Mock
+from typing import Tuple, Optional, Dict
+from pydantic import ValidationError
 
 from cognee.tasks.translation.translate_content import (
     translate_content,
@@ -28,7 +29,7 @@ from cognee.tasks.translation.models import TranslatedContent, LanguageMetadata
 class MockDocumentChunk:
     """Mock document chunk for testing."""
     
-    def __init__(self, text: str, chunk_id: str = "test_chunk", metadata: dict = None):
+    def __init__(self, text: str, chunk_id: str = "test_chunk", metadata: Optional[Dict] = None):
         self.text = text
         self.id = chunk_id
         self.chunk_index = chunk_id
@@ -152,7 +153,7 @@ class TestTranslationModels:
         )
         
         # Invalid confidence scores should raise validation error
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             TranslatedContent(
                 original_chunk_id="test",
                 original_text="test",
@@ -161,7 +162,7 @@ class TestTranslationModels:
                 confidence_score=-0.1
             )
             
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             TranslatedContent(
                 original_chunk_id="test",
                 original_text="test", 
@@ -185,7 +186,7 @@ class TestTranslationModels:
         
     def test_language_metadata_character_count_validation(self):
         """Test character count cannot be negative."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValidationError):
             LanguageMetadata(
                 content_id="test",
                 detected_language="en",
