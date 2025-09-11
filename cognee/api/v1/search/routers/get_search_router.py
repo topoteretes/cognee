@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import Field
 from fastapi import Depends, APIRouter
 from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 
 from cognee.modules.search.types import SearchType
 from cognee.api.DTO import InDTO, OutDTO
@@ -136,7 +137,7 @@ def get_search_router() -> APIRouter:
                 use_combined_context=payload.use_combined_context,
             )
 
-            return JSONResponse(content=results)
+            return jsonable_encoder(results)
         except PermissionDeniedError:
             return []
         except Exception as error:
