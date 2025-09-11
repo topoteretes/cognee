@@ -137,7 +137,7 @@ class LanceDBAdapter(VectorDBInterface):
             """
 
             id: str
-            vector: Vector(vector_size) # type: ignore
+            vector: Vector(vector_size)  # type: ignore
             payload: str  # JSON string for LanceDB compatibility
 
         if not await self.has_collection(collection_name):
@@ -186,7 +186,7 @@ class LanceDBAdapter(VectorDBInterface):
             """
 
             id: str
-            vector: Vector(vector_size) # type: ignore
+            vector: Vector(vector_size)  # type: ignore
             payload: str  # JSON string for LanceDB compatibility
 
         def create_lance_data_point(data_point: DataPoint, vector: List[float]) -> Any:
