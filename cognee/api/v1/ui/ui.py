@@ -264,49 +264,6 @@ def is_development_frontend(frontend_path: Path) -> bool:
         return False
 
 
-def start_python_server(frontend_path: Path, host: str, port: int) -> Optional[subprocess.Popen]:
-    """
-    Start a Python HTTP server to serve downloaded frontend assets.
-    This doesn't require Node.js and works with pre-built assets.
-    """
-    try:
-        # Change to the frontend directory
-        original_cwd = os.getcwd()
-        os.chdir(frontend_path)
-
-        # Use subprocess to run the server so we can return a process handle
-        cmd = ["python", "-m", "http.server", str(port), "--bind", host]
-
-        process = subprocess.Popen(
-            cmd, cwd=frontend_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
-
-        # Restore original directory
-        os.chdir(original_cwd)
-
-        # Give it a moment to start
-        time.sleep(2)
-
-        # Check if process is still running
-        if process.poll() is not None:
-            stdout, stderr = process.communicate()
-            logger.error("Python HTTP server failed to start:")
-            logger.error(f"stdout: {stdout}")
-            logger.error(f"stderr: {stderr}")
-            return None
-
-        return process
-
-    except Exception as e:
-        logger.error(f"Failed to start Python HTTP server: {str(e)}")
-        # Restore original directory on error
-        try:
-            os.chdir(original_cwd)
-        except OSError:
-            pass
-        return None
-
-
 def prompt_user_for_download() -> bool:
     """
     Ask user if they want to download the frontend assets.
