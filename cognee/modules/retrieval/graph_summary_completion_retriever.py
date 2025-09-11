@@ -21,6 +21,7 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
         summarize_prompt_path: str = "summarize_search_results.txt",
+        system_prompt: Optional[str] = None,
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
@@ -34,6 +35,7 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
             node_type=node_type,
             node_name=node_name,
             save_interaction=save_interaction,
+            system_prompt=system_prompt,
         )
         self.summarize_prompt_path = summarize_prompt_path
 
@@ -57,4 +59,4 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
             - str: A summary string representing the content of the retrieved edges.
         """
         direct_text = await super().resolve_edges_to_text(retrieved_edges)
-        return await summarize_text(direct_text, self.summarize_prompt_path)
+        return await summarize_text(direct_text, self.summarize_prompt_path, self.system_prompt)

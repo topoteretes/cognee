@@ -19,6 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     db_engine = get_relational_engine()
+    # we might want to delete this
     await_only(db_engine.create_database())
 
 

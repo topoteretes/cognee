@@ -1,4 +1,5 @@
-from typing import Any, Optional, List, Type
+from typing import Optional, List, Type
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.shared.logging_utils import get_logger
 
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -32,6 +33,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         validation_system_prompt_path: str = "cot_validation_system_prompt.txt",
         followup_system_prompt_path: str = "cot_followup_system_prompt.txt",
         followup_user_prompt_path: str = "cot_followup_user_prompt.txt",
+        system_prompt: Optional[str] = None,
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
@@ -40,6 +42,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         super().__init__(
             user_prompt_path=user_prompt_path,
             system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
@@ -51,8 +54,11 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         self.followup_user_prompt_path = followup_user_prompt_path
 
     async def get_completion(
-        self, query: str, context: Optional[Any] = None, max_iter=4
-    ) -> List[str]:
+        self,
+        query: str,
+        context: Optional[List[Edge]] = None,
+        max_iter=4,
+    ) -> str:
         """
         Generate completion responses based on a user query and contextual information.
 
@@ -77,25 +83,29 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         """
         followup_question = ""
         triplets = []
-        completion = [""]
+        completion = ""
 
         for round_idx in range(max_iter + 1):
             if round_idx == 0:
                 if context is None:
-                    context = await self.get_context(query)
+                    triplets = await self.get_context(query)
+                    context_text = await self.resolve_edges_to_text(triplets)
+                else:
+                    context_text = await self.resolve_edges_to_text(context)
             else:
-                triplets += await self.get_triplets(followup_question)
-                context = await self.resolve_edges_to_text(list(set(triplets)))
+                triplets += await self.get_context(followup_question)
+                context_text = await self.resolve_edges_to_text(list(set(triplets)))
 
             completion = await generate_completion(
                 query=query,
-                context=context,
+                context=context_text,
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
+                system_prompt=self.system_prompt,
             )
             logger.info(f"Chain-of-thought: round {round_idx} - answer: {completion}")
             if round_idx < max_iter:
-                valid_args = {"query": query, "answer": completion, "context": context}
+                valid_args = {"query": query, "answer": completion, "context": context_text}
                 valid_user_prompt = LLMGateway.render_prompt(
                     filename=self.validation_user_prompt_path, context=valid_args
                 )
@@ -125,7 +135,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
         if self.save_interaction and context and triplets and completion:
             await self.save_qa(
-                question=query, answer=completion, context=context, triplets=triplets
+                question=query, answer=completion, context=context_text, triplets=triplets
             )
 
-        return [completion]
+        return completion

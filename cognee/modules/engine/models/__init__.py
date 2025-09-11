@@ -4,3 +4,6 @@ from .TableRow import TableRow
 from .TableType import TableType
 from .node_set import NodeSet
 from .ColumnValue import ColumnValue
+from .Timestamp import Timestamp
+from .Interval import Interval
+from .Event import Event

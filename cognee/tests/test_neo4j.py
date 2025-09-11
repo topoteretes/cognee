@@ -98,21 +98,21 @@ async def main():
 
     await cognee.cognify([dataset_name])
 
-    context_nonempty, _ = await GraphCompletionRetriever(
+    context_nonempty = await GraphCompletionRetriever(
         node_type=NodeSet,
         node_name=["first"],
     ).get_context("What is in the context?")
 
-    context_empty, _ = await GraphCompletionRetriever(
+    context_empty = await GraphCompletionRetriever(
         node_type=NodeSet,
         node_name=["nonexistent"],
     ).get_context("What is in the context?")
 
-    assert isinstance(context_nonempty, str) and context_nonempty != "", (
+    assert isinstance(context_nonempty, list) and context_nonempty != [], (
         f"Nodeset_search_test:Expected non-empty string for context_nonempty, got: {context_nonempty!r}"
     )
 
-    assert context_empty == "", (
+    assert context_empty == [], (
         f"Nodeset_search_test:Expected empty string for context_empty, got: {context_empty!r}"
     )
 
