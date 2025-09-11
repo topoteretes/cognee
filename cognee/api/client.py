@@ -242,6 +242,9 @@ app.include_router(get_cognify_router(), prefix="/api/v1/cognify", tags=["cognif
 app.include_router(get_memify_router(), prefix="/api/v1/memify", tags=["memify"])
 
 app.include_router(get_search_router(), prefix="/api/v1/search", tags=["search"])
+from cognee.api.v1.save.routers.get_save_router import get_save_router
+
+app.include_router(get_save_router(), prefix="/api/v1/save", tags=["save"])
 
 app.include_router(
     get_permissions_router(),

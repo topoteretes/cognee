@@ -11,6 +11,8 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 )
 from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
+from cognee.modules.ingestion import discover_directory_datasets
+import os
 
 
 async def add(
@@ -141,6 +143,56 @@ async def add(
         - GRAPH_DATABASE_PROVIDER: "kuzu" (default), "neo4j"
 
     """
+
+    # Special handling: folder:// scheme maps nested folders to datasets
+    def _is_folder_uri(item: Union[str, BinaryIO]) -> bool:
+        return isinstance(item, str) and item.startswith("folder://")
+
+    items = data if isinstance(data, list) else [data]
+    if any(_is_folder_uri(item) for item in items):
+        await setup()
+        # Support multiple folder:// roots in one call
+        last_run_info = None
+        for item in items:
+            if not _is_folder_uri(item):
+                continue
+
+            root_path = item.replace("folder://", "", 1)
+            if not os.path.isabs(root_path):
+                root_path = os.path.abspath(root_path)
+
+            root_name = os.path.basename(os.path.normpath(root_path)) or "dataset"
+            dataset_map = discover_directory_datasets(root_path, parent_dir=root_name)
+
+            # Process each discovered dataset independently via the pipeline
+            for ds_name, file_list in dataset_map.items():
+                # Authorize/create dataset
+                user, ds = await resolve_authorized_user_dataset(None, ds_name, user)
+
+                await reset_dataset_pipeline_run_status(
+                    ds.id, user, pipeline_names=["add_pipeline", "cognify_pipeline"]
+                )
+
+                tasks = [
+                    # We already have resolved file list per dataset
+                    Task(ingest_data, ds_name, user, node_set, None, preferred_loaders),
+                ]
+
+                async for run_info in run_pipeline(
+                    tasks=tasks,
+                    datasets=[ds.id],
+                    data=file_list,
+                    user=user,
+                    pipeline_name="add_pipeline",
+                    vector_db_config=vector_db_config,
+                    graph_db_config=graph_db_config,
+                    incremental_loading=incremental_loading,
+                ):
+                    last_run_info = run_info
+
+        return last_run_info
+
+    # Default behavior: single dataset ingestion
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),
         Task(ingest_data, dataset_name, user, node_set, dataset_id, preferred_loaders),

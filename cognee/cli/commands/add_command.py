@@ -24,7 +24,8 @@ Supported Input Types:
 - **File paths**: Local file paths (absolute paths starting with "/")  
 - **File URLs**: "file:///absolute/path" or "file://relative/path"
 - **S3 paths**: "s3://bucket-name/path/to/file"
-- **Lists**: Multiple files or text strings in a single call
+- **Folder URIs**: "folder:///abs/path" groups files by subfolders into datasets (prefix with parent)
+- **Lists**: Multiple items in a single call
 
 Supported File Formats:
 - Text files (.txt, .md, .csv)
@@ -41,13 +42,13 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
         parser.add_argument(
             "data",
             nargs="+",
-            help="Data to add: text content, file paths (/path/to/file), file URLs (file://path), S3 paths (s3://bucket/file), or mix of these",
+            help="Data to add: text, files (/path), file://, s3://, folder:///abs/path (datasets by subfolders)",
         )
         parser.add_argument(
             "--dataset-name",
             "-d",
             default="main_dataset",
-            help="Dataset name to organize your data (default: main_dataset)",
+            help="Dataset name (ignored for folder://; subfolders become datasets)",
         )
 
     def execute(self, args: argparse.Namespace) -> None:
@@ -55,20 +56,27 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
             # Import cognee here to avoid circular imports
             import cognee
 
-            fmt.echo(f"Adding {len(args.data)} item(s) to dataset '{args.dataset_name}'...")
+            def contains_folder_uri(items):
+                return any(isinstance(i, str) and i.startswith("folder://") for i in items)
+
+            inputs = args.data
+            dataset_label = args.dataset_name
+
+            if contains_folder_uri(inputs):
+                fmt.echo("Detected folder:// input. Subfolders will be added as separate datasets.")
+            else:
+                fmt.echo(f"Adding {len(inputs)} item(s) to dataset '{dataset_label}'...")
 
             # Run the async add function
             async def run_add():
                 try:
-                    # Pass all data items as a list to cognee.add if multiple items
-                    if len(args.data) == 1:
-                        data_to_add = args.data[0]
-                    else:
-                        data_to_add = args.data
-
+                    data_to_add = inputs if len(inputs) > 1 else inputs[0]
                     fmt.echo("Processing data...")
-                    await cognee.add(data=data_to_add, dataset_name=args.dataset_name)
-                    fmt.success(f"Successfully added data to dataset '{args.dataset_name}'")
+                    await cognee.add(data=data_to_add, dataset_name=dataset_label)
+                    if contains_folder_uri(inputs):
+                        fmt.success("Successfully added folder datasets")
+                    else:
+                        fmt.success(f"Successfully added data to dataset '{dataset_label}'")
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to add data: {str(e)}")
 
