@@ -116,13 +116,13 @@ async def demo_standard_pipeline():
     print("7. Adding data points\n")
 
     # Get translation-enabled tasks with configurable provider
-    provider = os.getenv("COGNEE_TRANSLATION_PROVIDER", "noop")  # Default to safest option
+    provider = os.getenv("COGNEE_TRANSLATION_PROVIDER", "noop").lower()  # Default to safest option
     try:
         tasks_with_translation = get_default_tasks_with_translation(
             translation_provider=provider
         )
         print(f"Using translation provider: '{provider}'\n")
-    except Exception as e:
+    except (ValueError, ImportError) as e:
         print(f"Error setting up translation provider '{provider}': {e}")
         print("Falling back to 'noop' provider for safety...")
         tasks_with_translation = get_default_tasks_with_translation(

@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Union, Optional, Type
 from uuid import UUID
+import os
 
 
 from cognee.shared.data_models import KnowledgeGraph
@@ -24,7 +25,7 @@ from cognee.tasks.translation import translate_content, get_available_providers
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
 # Constants for batch processing
-DEFAULT_BATCH_SIZE = 10
+DEFAULT_BATCH_SIZE = int(os.getenv("COGNEE_DEFAULT_BATCH_SIZE", "10"))
 
 async def cognify(
     datasets: Optional[Union[str, UUID, list[str], list[UUID]]] = None,
@@ -273,7 +274,8 @@ def get_default_tasks_with_translation(
     providers = {p.lower() for p in get_available_providers()}
     normalized = (translation_provider or "noop").strip().lower()
     if normalized not in providers:
-        raise ValueError(f"Unknown provider: {translation_provider!r}")
+        available = ", ".join(sorted(providers))
+        raise ValueError(f"Unknown provider: {translation_provider!r}. Available: {available}")
     translation_provider = normalized
     
     default_tasks = [

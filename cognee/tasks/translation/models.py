@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict
-from pydantic import Field, field_validator
+from typing import Dict, Any
+from pydantic import Field
 
 from cognee.infrastructure.engine.models import DataPoint
 
@@ -23,7 +23,7 @@ class TranslatedContent(DataPoint):
     translation_provider: str = "noop"
     confidence_score: float = Field(0.0, ge=0.0, le=1.0)
     translation_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: Dict = Field(default_factory=lambda: {"index_fields": ["source_language", "original_chunk_id"]})
+    metadata: Dict[str, Any] = Field(default_factory=lambda: {"index_fields": ["source_language", "original_chunk_id"]})
 
 
 class LanguageMetadata(DataPoint):
@@ -37,4 +37,4 @@ class LanguageMetadata(DataPoint):
     language_confidence: float = Field(0.0, ge=0.0, le=1.0)
     requires_translation: bool = False
     character_count: int = Field(0, ge=0)
-    metadata: Dict = Field(default_factory=lambda: {"index_fields": ["detected_language", "content_id"]})
+    metadata: Dict[str, Any] = Field(default_factory=lambda: {"index_fields": ["detected_language", "content_id"]})

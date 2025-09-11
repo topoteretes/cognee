@@ -80,7 +80,7 @@ class TestProviderRegistry:
         # Should be retrievable with different casing
         provider1 = _get_provider("CUSTOM_PROVIDER")
         provider2 = _get_provider("custom_provider")
-        assert type(provider1) == type(provider2)
+        assert type(provider1) is type(provider2)
 
     def test_unknown_provider_fallback(self):
         """Test unknown providers fall back to NoOp."""
