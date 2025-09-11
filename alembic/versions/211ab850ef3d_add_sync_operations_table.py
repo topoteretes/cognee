@@ -46,6 +46,7 @@ def upgrade() -> None:
         sa.Column("records_uploaded", sa.Integer(), nullable=True),
         sa.Column("bytes_downloaded", sa.Integer(), nullable=True),
         sa.Column("bytes_uploaded", sa.Integer(), nullable=True),
+        sa.Column("dataset_sync_hashes", sa.JSON(), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("retry_count", sa.Integer(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
@@ -62,4 +63,7 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_sync_operations_user_id"), table_name="sync_operations")
     op.drop_index(op.f("ix_sync_operations_run_id"), table_name="sync_operations")
     op.drop_table("sync_operations")
+    
+    # Drop the enum type that was created
+    sa.Enum(name='syncstatus').drop(op.get_bind(), checkfirst=True)
     # ### end Alembic commands ###

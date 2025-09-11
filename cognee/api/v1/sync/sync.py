@@ -180,6 +180,7 @@ async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: U
                     records_uploaded,
                     bytes_downloaded,
                     bytes_uploaded,
+                    dataset_sync_hashes,
                 ) = await _sync_to_cognee_cloud(datasets, user, run_id)
                 break
             except Exception as e:
@@ -203,9 +204,10 @@ async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: U
             f"Background sync {run_id}: Completed successfully. Downloaded: {records_downloaded} records/{bytes_downloaded} bytes, Uploaded: {records_uploaded} records/{bytes_uploaded} bytes, Duration: {duration}s"
         )
 
-        # Mark sync as completed with final stats
+        # Mark sync as completed with final stats and data lineage
         await mark_sync_completed(
-            run_id, records_downloaded, records_uploaded, bytes_downloaded, bytes_uploaded
+            run_id, records_downloaded, records_uploaded, bytes_downloaded, bytes_uploaded,
+            dataset_sync_hashes
         )
 
     except Exception as e:
@@ -220,7 +222,7 @@ async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: U
 
 async def _sync_to_cognee_cloud(
     datasets: List[Dataset], user: User, run_id: str
-) -> tuple[int, int, int, int]:
+) -> tuple[int, int, int, int, dict]:
     """
     Sync local data to Cognee Cloud using three-step idempotent process:
     1. Extract local files with stored MD5 hashes and check what's missing on cloud
@@ -234,6 +236,7 @@ async def _sync_to_cognee_cloud(
     total_records_uploaded = 0
     total_bytes_downloaded = 0
     total_bytes_uploaded = 0
+    dataset_sync_hashes = {}
 
     try:
         # Get cloud configuration
@@ -274,6 +277,12 @@ async def _sync_to_cognee_cloud(
                 total_records_uploaded += dataset_result.records_uploaded
                 total_bytes_downloaded += dataset_result.bytes_downloaded
                 total_bytes_uploaded += dataset_result.bytes_uploaded
+
+                # Build per-dataset hash tracking for data lineage
+                dataset_sync_hashes[dataset_result.dataset_id] = {
+                    'uploaded': dataset_result.uploaded_hashes,
+                    'downloaded': dataset_result.downloaded_hashes
+                }
 
                 if dataset_result.has_uploads:
                     has_any_uploads = True
@@ -342,6 +351,7 @@ async def _sync_to_cognee_cloud(
             total_records_uploaded,
             total_bytes_downloaded,
             total_bytes_uploaded,
+            dataset_sync_hashes,
         )
 
     except Exception as e:
@@ -360,6 +370,8 @@ class DatasetSyncResult:
     bytes_downloaded: int
     bytes_uploaded: int
     has_uploads: bool  # Whether any files were uploaded (for cognify decision)
+    uploaded_hashes: List[str]  # Content hashes of files uploaded during sync
+    downloaded_hashes: List[str]  # Content hashes of files downloaded during sync
 
 
 async def _sync_dataset_files(
@@ -420,6 +432,8 @@ async def _sync_dataset_files(
             bytes_downloaded=bytes_downloaded,
             bytes_uploaded=bytes_uploaded,
             has_uploads=len(hashes_missing_on_remote) > 0,
+            uploaded_hashes=hashes_missing_on_remote,
+            downloaded_hashes=hashes_missing_on_local,
         )
 
     except Exception as e:

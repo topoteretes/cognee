@@ -1,5 +1,5 @@
 import asyncio
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError, DisconnectionError, OperationalError, TimeoutError
@@ -68,6 +68,7 @@ async def update_sync_operation(
     records_uploaded: Optional[int] = None,
     bytes_downloaded: Optional[int] = None,
     bytes_uploaded: Optional[int] = None,
+    dataset_sync_hashes: Optional[dict] = None,
     error_message: Optional[str] = None,
     retry_count: Optional[int] = None,
     started_at: Optional[datetime] = None,
@@ -87,6 +88,7 @@ async def update_sync_operation(
         records_uploaded: Number of records uploaded so far
         bytes_downloaded: Total bytes downloaded from cloud
         bytes_uploaded: Total bytes uploaded to cloud
+        dataset_sync_hashes: Dict mapping dataset_id -> {uploaded: [hashes], downloaded: [hashes]}
         error_message: Error message if operation failed
         retry_count: Number of retry attempts
         started_at: When the actual processing started
@@ -158,6 +160,9 @@ async def update_sync_operation(
                 if bytes_uploaded is not None:
                     sync_operation.bytes_uploaded = bytes_uploaded
 
+                if dataset_sync_hashes is not None:
+                    sync_operation.dataset_sync_hashes = dataset_sync_hashes
+
                 if error_message is not None:
                     sync_operation.error_message = error_message
 
@@ -217,6 +222,7 @@ async def mark_sync_completed(
     records_uploaded: int = 0,
     bytes_downloaded: int = 0,
     bytes_uploaded: int = 0,
+    dataset_sync_hashes: Optional[dict] = None,
 ) -> Optional[SyncOperation]:
     """Convenience method to mark a sync operation as completed successfully."""
     return await update_sync_operation(
@@ -227,6 +233,7 @@ async def mark_sync_completed(
         records_uploaded=records_uploaded,
         bytes_downloaded=bytes_downloaded,
         bytes_uploaded=bytes_uploaded,
+        dataset_sync_hashes=dataset_sync_hashes,
         completed_at=datetime.now(timezone.utc),
     )
 
