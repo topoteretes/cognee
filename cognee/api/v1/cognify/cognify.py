@@ -6,7 +6,7 @@ from uuid import UUID
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm import get_max_chunk_tokens
 
-from cognee.modules.pipelines import run_pipeline
+from cognee.modules.pipelines.operations.pipeline import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
@@ -27,7 +27,7 @@ from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline
 DEFAULT_BATCH_SIZE = 10
 
 async def cognify(
-    datasets: Optional[Union[str, list[str], list[UUID]]] = None,
+    datasets: Optional[Union[str, UUID, list[str], list[UUID]]] = None,
     user: Optional[User] = None,
     graph_model: Type[BaseModel] = KnowledgeGraph,
     chunker=TextChunker,
@@ -125,7 +125,7 @@ async def cognify(
 
         ```python
         import cognee
-        from cognee import SearchType
+        from cognee.api.v1.search import SearchType
 
         # Process your data into knowledge graph
         await cognee.cognify()
@@ -273,8 +273,7 @@ def get_default_tasks_with_translation(
     providers = {p.lower() for p in get_available_providers()}
     normalized = (translation_provider or "noop").strip().lower()
     if normalized not in providers:
-        available = ", ".join(sorted(providers))
-        raise ValueError(f"Unknown translation_provider '{translation_provider}'. Available: {available}")
+        raise ValueError(f"Unknown provider: {translation_provider!r}")
     translation_provider = normalized
     
     default_tasks = [

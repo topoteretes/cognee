@@ -108,7 +108,7 @@ async def demo_standard_pipeline():
     print("3. Extracting text chunks") 
     print("4. 🌍 TRANSLATING non-English content to English")
     print("   - Detects language automatically")
-    print("   - Translates if confidence > 80%")
+    print("   - Translates if confidence >= 80%")
     print("   - Stores original and translated text")
     print("   - Uses translated text for graph extraction")
     print("5. Generating knowledge graph (from translated content)")
@@ -122,15 +122,8 @@ async def demo_standard_pipeline():
             translation_provider=provider
         )
         print(f"Using translation provider: '{provider}'\n")
-    except (ValueError, ImportError) as e:
-        print(f"Error setting up translation provider '{provider}': {e}")
-        print("Falling back to 'noop' provider for safety...")
-        tasks_with_translation = get_default_tasks_with_translation(
-            translation_provider="noop"
-        )
-        provider = "noop"
     except Exception as e:
-        print(f"Unexpected error setting up provider '{provider}': {e}")
+        print(f"Error setting up translation provider '{provider}': {e}")
         print("Falling back to 'noop' provider for safety...")
         tasks_with_translation = get_default_tasks_with_translation(
             translation_provider="noop"
@@ -148,8 +141,9 @@ async def demo_standard_pipeline():
             f"{DEMO_DATASET_PREFIX}_translation_3",
         ],
     ):
-        if hasattr(result, 'payload'):
-            print(f"Processing: {type(result).__name__}")
+        items = result if isinstance(result, (list, tuple)) else [result]
+        for item in items:
+            print(f"Processing: {type(item).__name__}")
     
     print("Translation pipeline complete.\n")
 
@@ -184,7 +178,7 @@ async def demo_standard_pipeline():
         async def translate(self, text: str, target_language: str) -> tuple[str, float]:
             # Mock translation - just adds a prefix
             if target_language == "en":
-                return f"[MOCK TRANSLATED] {text}", 0.8
+                return f"[MOCK TRANSLATED] {text}", 0.81
             return text, 0.0
     
     # Register the custom provider
@@ -250,7 +244,7 @@ if __name__ == "__main__":
         print(f"\nMissing dependency: {e}")
         print("Install optional packages as needed:")
         print("  pip install langdetect googletrans==4.0.0rc1 azure-ai-translation-text")
-    except (ValueError, RuntimeError, Exception) as e:
+    except (ValueError, RuntimeError) as e:
         print(f"\nDemo failed with error: {e}")
         print("Troubleshooting:")
         print("1. Check your .env file has required API keys")

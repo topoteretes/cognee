@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Dict
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from cognee.infrastructure.engine.models import DataPoint
 
