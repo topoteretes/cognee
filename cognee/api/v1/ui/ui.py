@@ -330,34 +330,88 @@ def start_ui(
     port: int = 3000,
     open_browser: bool = True,
     auto_download: bool = False,
+    start_backend: bool = False,
+    backend_host: str = "localhost",
+    backend_port: int = 8000,
 ) -> Optional[subprocess.Popen]:
     """
-    Start the cognee frontend UI server.
+    Start the cognee frontend UI server, optionally with the backend API server.
 
     This function will:
-    1. Find the cognee-frontend directory (development) or download it (pip install)
-    2. Check if Node.js and npm are available (for development mode)
-    3. Install dependencies if needed (development mode)
-    4. Start the appropriate server
-    5. Optionally open the browser
+    1. Optionally start the cognee backend API server
+    2. Find the cognee-frontend directory (development) or download it (pip install)
+    3. Check if Node.js and npm are available (for development mode)
+    4. Install dependencies if needed (development mode)
+    5. Start the frontend server
+    6. Optionally open the browser
 
     Args:
-        host: Host to bind the server to (default: localhost)
-        port: Port to run the server on (default: 3000)
+        host: Host to bind the frontend server to (default: localhost)
+        port: Port to run the frontend server on (default: 3000)
         open_browser: Whether to open the browser automatically (default: True)
         auto_download: If True, download frontend without prompting (default: False)
+        start_backend: If True, also start the cognee API backend server (default: False)
+        backend_host: Host to bind the backend server to (default: localhost)
+        backend_port: Port to run the backend server on (default: 8000)
 
     Returns:
-        subprocess.Popen object representing the running server, or None if failed
+        subprocess.Popen object representing the running frontend server, or None if failed
+        Note: If backend is started, it runs in a separate process that will be cleaned up
+        when the frontend process is terminated.
 
     Example:
         >>> import cognee
+        >>> # Start just the frontend
         >>> server = cognee.start_ui()
+        >>>
+        >>> # Start both frontend and backend
+        >>> server = cognee.start_ui(start_backend=True)
         >>> # UI will be available at http://localhost:3000
-        >>> # To stop the server later:
+        >>> # API will be available at http://localhost:8000
+        >>> # To stop both servers later:
         >>> server.terminate()
     """
     logger.info("Starting cognee UI...")
+    backend_process = None
+
+    # Start backend server if requested
+    if start_backend:
+        logger.info("Starting cognee backend API server...")
+        try:
+            import sys
+
+            backend_process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "uvicorn",
+                    "cognee.api.client:app",
+                    "--host",
+                    backend_host,
+                    "--port",
+                    str(backend_port),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+            )
+
+            # Give the backend a moment to start
+            time.sleep(2)
+
+            if backend_process.poll() is not None:
+                stdout, stderr = backend_process.communicate()
+                logger.error("Backend server failed to start:")
+                logger.error(f"stdout: {stdout}")
+                logger.error(f"stderr: {stderr}")
+                return None
+
+            logger.info(f"✓ Backend API started at http://{backend_host}:{backend_port}")
+
+        except Exception as e:
+            logger.error(f"Failed to start backend server: {str(e)}")
+            return None
 
     # Find frontend directory
     frontend_path = find_frontend_path()
@@ -447,16 +501,32 @@ def start_ui(
         logger.info(f"✓ Open your browser to: http://{host}:{port}")
         logger.info("✓ The UI will be available once Next.js finishes compiling")
 
+        # Store backend process reference in the frontend process for cleanup
+        if backend_process:
+            process._cognee_backend_process = backend_process
+
         return process
 
     except Exception as e:
         logger.error(f"Failed to start frontend server: {str(e)}")
+        # Clean up backend process if it was started
+        if backend_process:
+            logger.info("Cleaning up backend process due to frontend failure...")
+            try:
+                backend_process.terminate()
+                backend_process.wait(timeout=5)
+            except (subprocess.TimeoutExpired, OSError, ProcessLookupError):
+                try:
+                    backend_process.kill()
+                    backend_process.wait()
+                except (OSError, ProcessLookupError):
+                    pass
         return None
 
 
 def stop_ui(process: subprocess.Popen) -> bool:
     """
-    Stop a running UI server process and all its children.
+    Stop a running UI server process and backend process (if started), along with all their children.
 
     Args:
         process: The subprocess.Popen object returned by start_ui()
@@ -467,7 +537,29 @@ def stop_ui(process: subprocess.Popen) -> bool:
     if not process:
         return False
 
+    success = True
+
     try:
+        # First, stop the backend process if it exists
+        backend_process = getattr(process, "_cognee_backend_process", None)
+        if backend_process:
+            logger.info("Stopping backend server...")
+            try:
+                backend_process.terminate()
+                try:
+                    backend_process.wait(timeout=5)
+                    logger.info("Backend server stopped gracefully")
+                except subprocess.TimeoutExpired:
+                    logger.warning("Backend didn't terminate gracefully, forcing kill")
+                    backend_process.kill()
+                    backend_process.wait()
+                    logger.info("Backend server stopped")
+            except Exception as e:
+                logger.error(f"Error stopping backend server: {str(e)}")
+                success = False
+
+        # Now stop the frontend process
+        logger.info("Stopping frontend server...")
         # Try to terminate the process group (includes child processes like Next.js)
         if hasattr(os, "killpg"):
             try:
@@ -484,9 +576,9 @@ def stop_ui(process: subprocess.Popen) -> bool:
 
         try:
             process.wait(timeout=10)
-            logger.info("UI server stopped gracefully")
+            logger.info("Frontend server stopped gracefully")
         except subprocess.TimeoutExpired:
-            logger.warning("Process didn't terminate gracefully, forcing kill")
+            logger.warning("Frontend didn't terminate gracefully, forcing kill")
 
             # Force kill the process group
             if hasattr(os, "killpg"):
@@ -502,11 +594,13 @@ def stop_ui(process: subprocess.Popen) -> bool:
 
             process.wait()
 
-        logger.info("UI server stopped")
-        return True
+        if success:
+            logger.info("UI servers stopped successfully")
+
+        return success
 
     except Exception as e:
-        logger.error(f"Error stopping UI server: {str(e)}")
+        logger.error(f"Error stopping UI servers: {str(e)}")
         return False
 
 
