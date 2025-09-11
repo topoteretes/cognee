@@ -14,7 +14,7 @@ import { Cell, Notebook as NotebookType } from "./types";
 
 interface NotebookProps {
   notebook: NotebookType;
-  runCell: (notebook: NotebookType, cell: Cell) => Promise<void>;
+  runCell: (notebook: NotebookType, cell: Cell, cogneeInstance: string) => Promise<void>;
   updateNotebook: (updatedNotebook: NotebookType) => void;
   saveNotebook: (notebook: NotebookType) => void;
 }
@@ -47,8 +47,8 @@ export default function Notebook({ notebook, updateNotebook, saveNotebook, runCe
     }
   }, [notebook, saveNotebook, updateNotebook]);
 
-  const handleCellRun = useCallback((cell: Cell) => {
-    return runCell(notebook, cell);
+  const handleCellRun = useCallback((cell: Cell, cogneeInstance: string) => {
+    return runCell(notebook, cell, cogneeInstance);
   }, [notebook, runCell]);
 
   const handleCellAdd = useCallback((afterCellIndex: number, cellType: "markdown" | "code") => {
@@ -244,7 +244,7 @@ export default function Notebook({ notebook, updateNotebook, saveNotebook, runCe
 }
 
 
-function CellResult({ content = [] }) {
+function CellResult({ content }: { content: [] }) {
   const parsedContent = [];
 
   const graphRef = useRef<GraphVisualizationAPI>();
@@ -256,6 +256,7 @@ function CellResult({ content = [] }) {
   for (const line of content) {
     try {
       if (Array.isArray(line)) {
+        // @ts-expect-error line can be Array or string
         for (const item of line) {
           if (typeof item === "string") {
             parsedContent.push(
@@ -322,7 +323,7 @@ function CellResult({ content = [] }) {
 
 };
 
-function transformToVisualizationData(graph) {
+function transformToVisualizationData(graph: { nodes: [], edges: [] }) {
   // Implementation to transform triplet to visualization data
 
   return {

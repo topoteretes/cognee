@@ -39,7 +39,8 @@ export default function AddDataToCognee({ datasets, refreshDatasets, useCloud = 
       } : {
         name: "main_dataset",
       },
-      Array.from(filesForUpload)
+      Array.from(filesForUpload),
+      useCloud
     )
       .then(({ dataset_id, dataset_name }) => {
         refreshDatasets();
