@@ -4,7 +4,7 @@ on:
   workflow_call:
 
 jobs:
-  test-gemini:
+  test-fastembed:
     name: Run Fastembed Test
     runs-on: ubuntu-22.04
     steps:
