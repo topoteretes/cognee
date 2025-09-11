@@ -205,9 +205,12 @@ class LanceDBAdapter(VectorDBInterface):
         collection = await self.get_collection(collection_name)
 
         if len(data_point_ids) == 1:
-            results = await collection.query().where(f"id = '{data_point_ids[0]}'").to_pandas()
+            results = await collection.query().where(f"id = '{data_point_ids[0]}'")
         else:
-            results = await collection.query().where(f"id IN {tuple(data_point_ids)}").to_pandas()
+            results = await collection.query().where(f"id IN {tuple(data_point_ids)}")
+
+        # Convert query results to list format
+        results_list = results.to_list() if hasattr(results, "to_list") else list(results)
 
         return [
             ScoredResult(
@@ -215,7 +218,7 @@ class LanceDBAdapter(VectorDBInterface):
                 payload=result["payload"],
                 score=0,
             )
-            for result in results.to_dict("index").values()
+            for result in results_list
         ]
 
     async def search(
@@ -242,9 +245,9 @@ class LanceDBAdapter(VectorDBInterface):
         if limit == 0:
             return []
 
-        results = await collection.vector_search(query_vector).limit(limit).to_pandas()
+        result_values = await collection.vector_search(query_vector).limit(limit).to_list()
 
-        result_values = list(results.to_dict("index").values())
+        # result_values = list(results.to_dict("index").values())
 
         if not result_values:
             return []

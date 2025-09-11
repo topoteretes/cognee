@@ -1,6 +1,10 @@
 import os
 import json
-import pandas as pd
+
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
 import subprocess
 import modal
 import streamlit as st
@@ -77,6 +81,12 @@ def main():
                 "avg_correctness": round(total_corr / num_q, 4),
             }
         )
+
+    if pd is None:
+        st.error(
+            "Pandas is required for the evaluation dashboard. Install with 'pip install cognee[evals]' to use this feature."
+        )
+        return
 
     df = pd.DataFrame(records)
     if df.empty:
