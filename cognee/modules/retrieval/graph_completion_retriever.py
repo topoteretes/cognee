@@ -171,7 +171,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                 question=query, answer=completion, context=context_text, triplets=triplets
             )
 
-        return completion
+        return [completion]
 
     async def save_qa(self, question: str, answer: str, context: str, triplets: List) -> None:
         """

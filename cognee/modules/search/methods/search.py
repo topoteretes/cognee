@@ -134,21 +134,27 @@ async def search(
     else:
         # This is for maintaining backwards compatibility
         if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
-            return_value = {}
+            return_value = []
             for search_result in search_results:
                 result, context, datasets = search_result
-                return_value[str(datasets[0].id)] = {
-                    "search_result": result,
-                    "dataset_id": str(datasets[0].id),
-                }
+                return_value.append(
+                    {
+                        "search_result": result,
+                        "dataset_id": datasets[0].id,
+                        "dataset_name": datasets[0].name,
+                    }
+                )
             return return_value
         else:
             return_value = []
             for search_result in search_results:
                 result, context, datasets = search_result
                 return_value.append(result)
-
-            return return_value
+            # For maintaining backwards compatibility
+            if len(return_value) == 1 and isinstance(return_value[0], list):
+                return return_value[0]
+            else:
+                return return_value
         # return [
         #     SearchResult(
         #         search_result=result,

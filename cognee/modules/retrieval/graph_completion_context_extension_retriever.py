@@ -128,4 +128,4 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 question=query, answer=completion, context=context_text, triplets=triplets
             )
 
-        return completion
+        return [completion]

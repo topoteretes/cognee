@@ -149,4 +149,4 @@ class TemporalRetriever(GraphCompletionRetriever):
                 system_prompt_path=self.system_prompt_path,
             )
 
-        return completion
+        return [completion]

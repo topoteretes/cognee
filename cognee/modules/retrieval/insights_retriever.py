@@ -96,17 +96,18 @@ class InsightsRetriever(BaseGraphRetriever):
                 unique_node_connections_map[unique_id] = True
                 unique_node_connections.append(node_connection)
 
-        return [
-            Edge(
-                node1=Node(node_id=connection[0]["id"], attributes=connection[0]),
-                node2=Node(node_id=connection[2]["id"], attributes=connection[2]),
-                attributes={
-                    **connection[1],
-                    "relationship_type": connection[1]["relationship_name"],
-                },
-            )
-            for connection in unique_node_connections
-        ]
+        return unique_node_connections
+        # return [
+        #     Edge(
+        #         node1=Node(node_id=connection[0]["id"], attributes=connection[0]),
+        #         node2=Node(node_id=connection[2]["id"], attributes=connection[2]),
+        #         attributes={
+        #             **connection[1],
+        #             "relationship_type": connection[1]["relationship_name"],
+        #         },
+        #     )
+        #     for connection in unique_node_connections
+        # ]
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         """
