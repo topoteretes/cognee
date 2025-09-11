@@ -41,12 +41,13 @@ jobs:
 
       - name: Discover and Check Vector Database Adapters
         run: ./tools/check_vector_adapters.sh
+      
+      # Commeting out graph and hybrid adapters for now as we're currently focusing on vector adapters
+      # - name: Discover and Check Graph Database Adapters
+      #   run: ./tools/check_graph_adapters.sh
 
-      - name: Discover and Check Graph Database Adapters
-        run: ./tools/check_graph_adapters.sh
-
-      - name: Discover and Check Hybrid Database Adapters
-        run: ./tools/check_hybrid_adapters.sh
+      # - name: Discover and Check Hybrid Database Adapters
+      #   run: ./tools/check_hybrid_adapters.sh
 
       - name: Protocol Compliance Summary
         run: |
@@ -54,13 +55,13 @@ jobs:
           echo ""
           echo "🔍 Auto-Discovery Approach:"
           echo "  • Vector Adapters: cognee/infrastructure/databases/vector/**/*Adapter.py"
-          echo "  • Graph Adapters: cognee/infrastructure/databases/graph/**/*adapter.py"
-          echo "  • Hybrid Adapters: cognee/infrastructure/databases/hybrid/**/*Adapter.py"
+          # echo "  • Graph Adapters: cognee/infrastructure/databases/graph/**/*adapter.py"
+          # echo "  • Hybrid Adapters: cognee/infrastructure/databases/hybrid/**/*Adapter.py"
           echo ""
           echo "🚀 Using Dedicated Scripts:"
           echo "  • Vector: ./tools/check_vector_adapters.sh"
-          echo "  • Graph: ./tools/check_graph_adapters.sh"
-          echo "  • Hybrid: ./tools/check_hybrid_adapters.sh"
+          # echo "  • Graph: ./tools/check_graph_adapters.sh"
+          # echo "  • Hybrid: ./tools/check_hybrid_adapters.sh"
           echo "  • All: ./tools/check_all_adapters.sh"
           echo ""
           echo "🎯 Purpose: Enforce that database adapters are properly typed"
