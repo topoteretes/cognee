@@ -79,7 +79,7 @@ async def main():
     print("\n\nExtracted sentences are:\n")
     for result in search_results:
         print(f"{result}\n")
-    assert search_results[0].dataset_name == "NLP", (
+    assert search_results[0]["dataset_name"] == "NLP", (
         f"Dict must contain dataset name 'NLP': {search_results[0]}"
     )
 
@@ -93,7 +93,7 @@ async def main():
     print("\n\nExtracted sentences are:\n")
     for result in search_results:
         print(f"{result}\n")
-    assert search_results[0].dataset_name == "QUANTUM", (
+    assert search_results[0]["dataset_name"] == "QUANTUM", (
         f"Dict must contain dataset name 'QUANTUM': {search_results[0]}"
     )
 
@@ -170,7 +170,7 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    assert search_results[0].dataset_name == "QUANTUM", (
+    assert search_results[0]["dataset_name"] == "QUANTUM", (
         f"Dict must contain dataset name 'QUANTUM': {search_results[0]}"
     )
 
