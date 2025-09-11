@@ -53,8 +53,8 @@ async def test_csv_loader():
 
         # Test if it can handle CSV files
         print(f"Can handle CSV: {loader.can_handle('csv', 'text/csv')}")
-        print(f"Supported extensions: {loader.supported_extensions}")
-        print(f"Supported MIME types: {loader.supported_mime_types}")
+        print(f"Supported extensions: {loader.supported_extensions()}")
+        print(f"Supported MIME types: {loader.supported_mime_types()}")
 
         # Load the CSV file
         print(f"\nLoading CSV file: {csv_file_path}")

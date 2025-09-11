@@ -1,3 +1,4 @@
+import csv
 import re
 from typing import AsyncGenerator, List, Dict, Any
 from uuid import NAMESPACE_OID, uuid5
@@ -222,18 +223,17 @@ class CSVChunker(Chunker):
             chunk_text = "\n".join(chunk_parts).strip()
 
             # Extract columns in original CSV order from header_info
-            columns = []
-            if self.header_info and "CSV Data with columns:" in self.header_info:
-                try:
-                    # Extract the columns part after "CSV Data with columns:"
-                    columns_part = self.header_info.split("CSV Data with columns:", 1)[1].strip()
-                    # Split by comma and strip whitespace to get ordered column names
-                    columns = [col.strip() for col in columns_part.split(",") if col.strip()]
-                except Exception:
-                    # Fall back to existing behavior if parsing fails
-                    columns = sorted({col for row in chunk_rows for col in row["data"].keys()})
-            else:
-                # Fall back to existing behavior if header_info is empty or malformed
+            columns: List[str] = []
+            if self.header_info:
+                m = re.search(r"CSV Data with columns:\s*(.+)$", self.header_info)
+                if m:
+                    try:
+                        columns_row = next(csv.reader([m.group(1)], skipinitialspace=True))
+                        columns = [c for c in (col.strip() for col in columns_row) if c]
+                    except (StopIteration, csv.Error, ValueError):
+                        pass
+            if not columns:
+                # Fallback: union of keys (order not guaranteed)
                 columns = sorted({col for row in chunk_rows for col in row["data"].keys()})
 
             # Create metadata for the chunk
