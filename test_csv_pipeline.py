@@ -81,7 +81,7 @@ async def test_csv_loader():
             print(f"Error: Processed file not found: {actual_file_path}")
             return False, None
 
-    except Exception as e:
+    except (OSError, ValueError) as e:
         print(f"Error testing CSV loader: {e}")
         import traceback
 
@@ -164,10 +164,9 @@ async def test_csv_chunker(content: str):
         print(f"\nTotal chunks created: {chunk_count}")
         return chunk_count > 0  # Return True if chunks were created
 
-    except Exception as e:
+    except (AssertionError, ValueError, OSError) as e:
         print(f"Error testing CSV chunker: {e}")
         import traceback
-
         traceback.print_exc()
         return False
 
@@ -199,7 +198,7 @@ async def test_integration():
         print("=" * 60)
         return False
 
-    except Exception as e:
+    except (AssertionError, RuntimeError, OSError) as e:
         print(f"Integration test error: {e}")
         import traceback
 

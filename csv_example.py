@@ -50,12 +50,12 @@ async def csv_ingestion_example():
 
     # Step 2: Read the structured content
     print("\n2. Reading structured content...")
-    # Convert file URI to path
+    # Convert possible file URI to filesystem path and read with explicit encoding
     from urllib.parse import urlparse
+    parsed = urlparse(processed_file_path)
+    actual_path = processed_file_path if not parsed.scheme else parsed.path
 
-    actual_path = urlparse(processed_file_path).path
-
-    with open(actual_path, "r") as f:
+    with open(actual_path, "r", encoding="utf-8") as f:
         structured_content = f.read()
 
     # Show first few lines
@@ -70,7 +70,7 @@ async def csv_ingestion_example():
     document = Document(
         id=uuid4(),
         name="employees.csv",
-        raw_data_location=csv_file,
+        raw_data_location=str(csv_file),
         external_metadata="{}",
         mime_type="text/csv",
         metadata={},
@@ -104,7 +104,7 @@ async def csv_ingestion_example():
         # Show chunk content (first 3 lines)
         chunk_lines = chunk.text.split("\n")
         print("   - Content preview:")
-        for _, line in enumerate(chunk_lines[:5]):
+        for line in chunk_lines[:5]:
             print(f"     {line}")
         if len(chunk_lines) > 5:
             print(f"     ... ({len(chunk_lines) - 5} more lines)")
@@ -153,7 +153,7 @@ async def main():
     try:
         await csv_ingestion_example()
         await cognee_integration_example()
-    except Exception:
+    except Exception:  # noqa: BLE001
         import traceback
         print("Error during CSV example run:")
         traceback.print_exc()
