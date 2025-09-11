@@ -173,9 +173,9 @@ def main() -> int:
     args = parser.parse_args()
 
     # Handle UI flag
-    if hasattr(args, 'start_ui') and args.start_ui:
+    if hasattr(args, "start_ui") and args.start_ui:
         server_process = None
-        
+
         def signal_handler(signum, frame):
             """Handle Ctrl+C and other termination signals"""
             nonlocal server_process
@@ -196,39 +196,37 @@ def main() -> int:
                 except Exception as e:
                     fmt.warning(f"Error stopping server: {e}")
             sys.exit(0)
-        
+
         # Set up signal handlers
         signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
         signal.signal(signal.SIGTERM, signal_handler)  # Termination request
-        
+
         try:
             from cognee import start_ui
+
             fmt.echo("Starting cognee UI...")
-            server_process = start_ui(
-                host="localhost",
-                port=3001,
-                open_browser=True
-            )
-            
+            server_process = start_ui(host="localhost", port=3001, open_browser=True)
+
             if server_process:
                 fmt.success("UI server started successfully!")
                 fmt.echo("The interface is available at: http://localhost:3001")
                 fmt.note("Press Ctrl+C to stop the server...")
-                
+
                 try:
                     # Keep the server running
                     import time
+
                     while server_process.poll() is None:  # While process is still running
                         time.sleep(1)
                 except KeyboardInterrupt:
                     # This shouldn't happen now due to signal handler, but kept for safety
                     signal_handler(signal.SIGINT, None)
-                
+
                 return 0
             else:
                 fmt.error("Failed to start UI server. Check the logs above for details.")
                 return 1
-                
+
         except Exception as ex:
             fmt.error(f"Error starting UI: {str(ex)}")
             if debug.is_debug_enabled():

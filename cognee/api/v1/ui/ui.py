@@ -23,7 +23,9 @@ def normalize_version_for_comparison(version: str) -> str:
     Handles development versions and edge cases.
     """
     # Remove common development suffixes for comparison
-    normalized = version.replace("-local", "").replace("-dev", "").replace("-alpha", "").replace("-beta", "")
+    normalized = (
+        version.replace("-local", "").replace("-dev", "").replace("-alpha", "").replace("-beta", "")
+    )
     return normalized.strip()
 
 
@@ -74,16 +76,18 @@ def download_frontend_assets(force: bool = False) -> bool:
         try:
             cached_version = version_file.read_text().strip()
             current_version = get_cognee_version()
-            
+
             # Compare normalized versions to handle development versions
             cached_normalized = normalize_version_for_comparison(cached_version)
             current_normalized = normalize_version_for_comparison(current_version)
-            
+
             if cached_normalized == current_normalized:
                 logger.debug(f"Frontend assets already cached for version {current_version}")
                 return True
             else:
-                logger.info(f"Version mismatch detected: cached={cached_version}, current={current_version}")
+                logger.info(
+                    f"Version mismatch detected: cached={cached_version}, current={current_version}"
+                )
                 logger.info("Updating frontend cache to match current cognee version...")
                 # Clear the old cached version
                 if frontend_dir.exists():
@@ -410,7 +414,9 @@ def start_ui(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            preexec_fn=os.setsid if hasattr(os, 'setsid') else None,  # Create new process group on Unix
+            preexec_fn=os.setsid
+            if hasattr(os, "setsid")
+            else None,  # Create new process group on Unix
         )
 
         # Give it a moment to start up
@@ -463,7 +469,7 @@ def stop_ui(process: subprocess.Popen) -> bool:
 
     try:
         # Try to terminate the process group (includes child processes like Next.js)
-        if hasattr(os, 'killpg'):
+        if hasattr(os, "killpg"):
             try:
                 # Kill the entire process group
                 os.killpg(os.getpgid(process.pid), signal.SIGTERM)
@@ -475,15 +481,15 @@ def stop_ui(process: subprocess.Popen) -> bool:
         else:
             process.terminate()
             logger.debug("Terminated main process (Windows)")
-        
+
         try:
             process.wait(timeout=10)
             logger.info("UI server stopped gracefully")
         except subprocess.TimeoutExpired:
             logger.warning("Process didn't terminate gracefully, forcing kill")
-            
+
             # Force kill the process group
-            if hasattr(os, 'killpg'):
+            if hasattr(os, "killpg"):
                 try:
                     os.killpg(os.getpgid(process.pid), signal.SIGKILL)
                     logger.debug("Sent SIGKILL to process group")
@@ -493,7 +499,7 @@ def stop_ui(process: subprocess.Popen) -> bool:
             else:
                 process.kill()
                 logger.debug("Force killed main process (Windows)")
-            
+
             process.wait()
 
         logger.info("UI server stopped")
