@@ -174,30 +174,23 @@ def main() -> int:
 
     # Handle UI flag
     if hasattr(args, "start_ui") and args.start_ui:
-        server_process = None
+        spawned_pids = []
 
         def signal_handler(signum, frame):
             """Handle Ctrl+C and other termination signals"""
-            nonlocal server_process
+            nonlocal spawned_pids
             fmt.echo("\nShutting down UI server...")
-            if server_process:
+
+            for pid in spawned_pids:
                 try:
-                    # Try graceful termination first
-                    server_process.terminate()
-                    try:
-                        server_process.wait(timeout=5)
-                        fmt.success("UI server stopped gracefully.")
-                    except subprocess.TimeoutExpired:
-                        # If graceful termination fails, force kill
-                        fmt.echo("Force stopping UI server...")
-                        server_process.kill()
-                        server_process.wait()
-                        fmt.success("UI server stopped.")
-                except Exception as e:
-                    fmt.warning(f"Error stopping server: {e}")
+                    pgid = os.getpgid(pid)
+                    os.killpg(pgid, signal.SIGTERM)
+                    fmt.success(f"✓ Process group {pgid} (PID {pid}) terminated.")
+                except (OSError, ProcessLookupError) as e:
+                    fmt.warning(f"Could not terminate process {pid}: {e}")
+
             sys.exit(0)
 
-        # Set up signal handlers
         signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
         signal.signal(signal.SIGTERM, signal_handler)  # Termination request
 
@@ -206,8 +199,18 @@ def main() -> int:
 
             fmt.echo("Starting cognee UI...")
 
+            # Callback to capture PIDs of all spawned processes
+            def pid_callback(pid):
+                nonlocal spawned_pids
+                spawned_pids.append(pid)
+
             server_process = start_ui(
-                host="localhost", port=3000, open_browser=True, start_backend=True
+                host="localhost",
+                port=3000,
+                open_browser=True,
+                start_backend=True,
+                auto_download=True,
+                pid_callback=pid_callback,
             )
 
             if server_process:
@@ -229,10 +232,12 @@ def main() -> int:
                 return 0
             else:
                 fmt.error("Failed to start UI server. Check the logs above for details.")
+                signal_handler(signal.SIGTERM, None)
                 return 1
 
         except Exception as ex:
             fmt.error(f"Error starting UI: {str(ex)}")
+            signal_handler(signal.SIGTERM, None)
             if debug.is_debug_enabled():
                 raise ex
             return 1
