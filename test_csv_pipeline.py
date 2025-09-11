@@ -10,9 +10,15 @@ import asyncio
 import os
 import sys
 from urllib.parse import urlparse
+from pathlib import Path
 
-# Add the cognee module path
-sys.path.insert(0, "/workspaces/cognee")
+# Add the cognee module path - compute repository root dynamically
+script_dir = Path(__file__).resolve().parent
+repo_root = script_dir  # Assuming the script is in repo root, adjust if needed
+cognee_path = str(repo_root)
+
+if cognee_path not in sys.path:
+    sys.path.insert(0, cognee_path)
 
 from cognee.infrastructure.loaders.core.csv_loader import CsvLoader
 from cognee.modules.chunking.CSVChunker import CSVChunker
@@ -35,9 +41,9 @@ async def test_csv_loader():
     print("Testing CSV Loader")
     print("=" * 60)
 
-    csv_file_path = "/workspaces/cognee/test_employees.csv"
+    csv_file_path = script_dir / "test_employees.csv"
 
-    if not os.path.exists(csv_file_path):
+    if not csv_file_path.exists():
         print(f"Error: Test CSV file not found: {csv_file_path}")
         return False
 
@@ -52,7 +58,7 @@ async def test_csv_loader():
 
         # Load the CSV file
         print(f"\nLoading CSV file: {csv_file_path}")
-        result_path = await loader.load(csv_file_path)
+        result_path = await loader.load(str(csv_file_path))
 
         print(f"Processed file saved to: {result_path}")
 

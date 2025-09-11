@@ -221,13 +221,28 @@ class CSVChunker(Chunker):
 
             chunk_text = "\n".join(chunk_parts).strip()
 
+            # Extract columns in original CSV order from header_info
+            columns = []
+            if self.header_info and "CSV Data with columns:" in self.header_info:
+                try:
+                    # Extract the columns part after "CSV Data with columns:"
+                    columns_part = self.header_info.split("CSV Data with columns:", 1)[1].strip()
+                    # Split by comma and strip whitespace to get ordered column names
+                    columns = [col.strip() for col in columns_part.split(",") if col.strip()]
+                except Exception:
+                    # Fall back to existing behavior if parsing fails
+                    columns = sorted({col for row in chunk_rows for col in row["data"].keys()})
+            else:
+                # Fall back to existing behavior if header_info is empty or malformed
+                columns = sorted({col for row in chunk_rows for col in row["data"].keys()})
+
             # Create metadata for the chunk
             chunk_metadata = {
                 "index_fields": ["text"],
                 "csv_metadata": {
                     "row_numbers": [row["row_number"] for row in chunk_rows],
                     "row_count": len(chunk_rows),
-                    "columns": sorted({col for row in chunk_rows for col in row["data"].keys()}),
+                    "columns": columns,
                     "chunk_type": "csv_rows",
                 },
             }

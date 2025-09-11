@@ -11,9 +11,15 @@ This example shows how to:
 import asyncio
 import sys
 import os
+from pathlib import Path
 
-# Add cognee to path
-sys.path.insert(0, "/workspaces/cognee")
+# Add cognee to path - compute repository root dynamically
+script_dir = Path(__file__).resolve().parent
+repo_root = script_dir  # Assuming the script is in repo root, adjust if needed
+cognee_path = str(repo_root)
+
+if cognee_path not in sys.path:
+    sys.path.insert(0, cognee_path)
 
 from cognee.infrastructure.loaders.core.csv_loader import CsvLoader
 from cognee.modules.chunking.CSVChunker import CSVChunker
@@ -27,10 +33,10 @@ async def csv_ingestion_example():
     print("CSV Ingestion Example")
     print("=" * 50)
 
-    # Use the test CSV file
-    csv_file = "/workspaces/cognee/test_employees.csv"
+    # Use the test CSV file - compute path relative to script location
+    csv_file = script_dir / "test_employees.csv"
 
-    if not os.path.exists(csv_file):
+    if not csv_file.exists():
         print(f"Error: CSV file not found: {csv_file}")
         return
 
@@ -39,7 +45,7 @@ async def csv_ingestion_example():
     # Step 1: Load CSV file
     print("\n1. Loading CSV file with CsvLoader...")
     loader = CsvLoader()
-    processed_file_path = await loader.load(csv_file)
+    processed_file_path = await loader.load(str(csv_file))
     print(f"   Processed file saved to: {processed_file_path}")
 
     # Step 2: Read the structured content
