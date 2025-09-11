@@ -121,6 +121,12 @@ jobs:
     uses: ./.github/workflows/test_gemini.yml
     secrets: inherit
 
+  fastembed-tests:
+    name: Fastembed Tests
+    needs: [basic-tests, e2e-tests, cli-tests]
+    uses: ./.github/workflows/test_fastembed.yml
+    secrets: inherit
+
   openrouter-tests:
     name: OpenRouter Tests
     needs: [basic-tests, e2e-tests, cli-tests]
@@ -140,6 +146,7 @@ jobs:
       vector-db-tests,
       example-tests,
       gemini-tests,
+      fastembed-tests,
       openrouter-tests,
       mcp-test,
       relational-db-migration-tests,
@@ -163,6 +170,7 @@ jobs:
       db-examples-tests,
       mcp-test,
       gemini-tests,
+      fastembed-tests,
       openrouter-tests,
       ollama-tests,
       relational-db-migration-tests,
@@ -185,6 +193,7 @@ jobs:
                 "${{ needs.db-examples-tests.result }}" == "success" &&
                 "${{ needs.relational-db-migration-tests.result }}" == "success" &&
                 "${{ needs.gemini-tests.result }}" == "success" &&
+                "${{ needs.fastembed-tests.result }}" == "success" &&
                 "${{ needs.openrouter-tests.result }}" == "success" &&
                 "${{ needs.docker-compose-test.result }}" == "success" &&
                 "${{ needs.docker-ci-test.result }}" == "success" &&

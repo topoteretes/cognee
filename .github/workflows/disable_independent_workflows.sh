@@ -11,6 +11,7 @@ WORKFLOWS=(
   "test_multimetric_qa_eval_run.yaml"
   "test_graphrag_vs_rag_notebook.yml"
   "test_gemini.yml"
+  "test_fastembed.yml"
   "test_multimedia_example.yaml"
   "test_deduplication.yml"
   "test_eval_framework.yml"

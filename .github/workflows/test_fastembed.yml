@@ -1,0 +1,28 @@
+name: test | fastembed
+
+on:
+  workflow_call:
+
+jobs:
+  test-gemini:
+    name: Run Fastembed Test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Fastembed Simple Example
+        env:
+          LLM_PROVIDER: "openai"
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: "gpt-4o-mini"
+          EMBEDDING_PROVIDER: "fastembed"
+          EMBEDDING_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
+          EMBEDDING_DIMENSIONS: "384"
+          EMBEDDING_MAX_TOKENS: "256"
+        run: uv run python ./examples/python/simple_example.py
