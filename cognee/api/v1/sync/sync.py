@@ -64,6 +64,8 @@ class LocalFileInfo(BaseModel):
 class CheckMissingHashesRequest(BaseModel):
     """Request model for checking missing hashes in a dataset"""
 
+    dataset_id: str
+    dataset_name: str
     hashes: List[str]
 
 
@@ -424,7 +426,7 @@ async def _sync_dataset_files(
         # Step 2: Check what files are missing on cloud
         local_hashes = [f.content_hash for f in local_files]
         hashes_diff_response = await _check_hashes_diff(
-            cloud_base_url, cloud_auth_token, dataset.id, local_hashes, run_id
+            cloud_base_url, cloud_auth_token, dataset, local_hashes, run_id
         )
 
         hashes_missing_on_remote = hashes_diff_response.missing_on_remote
@@ -563,7 +565,7 @@ async def _get_cloud_auth_token(user: User) -> str:
 
 
 async def _check_hashes_diff(
-    cloud_base_url: str, auth_token: str, dataset_id: str, local_hashes: List[str], run_id: str
+    cloud_base_url: str, auth_token: str, dataset: Dataset, local_hashes: List[str], run_id: str
 ) -> CheckHashesDiffResponse:
     """
     Check which hashes are missing on cloud.
@@ -571,12 +573,14 @@ async def _check_hashes_diff(
     Returns:
         List[str]: MD5 hashes that need to be uploaded
     """
-    url = f"{cloud_base_url}/api/sync/{dataset_id}/diff"
+    url = f"{cloud_base_url}/api/sync/{dataset.id}/diff"
     headers = {"X-Api-Key": auth_token, "Content-Type": "application/json"}
 
-    payload = CheckMissingHashesRequest(hashes=local_hashes)
+    payload = CheckMissingHashesRequest(
+        dataset_id=str(dataset.id), dataset_name=dataset.name, hashes=local_hashes
+    )
 
-    logger.info(f"Checking missing hashes on cloud for dataset {dataset_id}")
+    logger.info(f"Checking missing hashes on cloud for dataset {dataset.id}")
 
     try:
         async with aiohttp.ClientSession() as session:
