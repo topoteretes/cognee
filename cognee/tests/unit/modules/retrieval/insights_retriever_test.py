@@ -82,7 +82,7 @@ class TestInsightsRetriever:
 
         context = await retriever.get_context("Mike")
 
-        assert context[0].node1.attributes["name"] == "Mike Broski", "Failed to get Mike Broski"
+        assert context[0][0]["name"] == "Mike Broski", "Failed to get Mike Broski"
 
     @pytest.mark.asyncio
     async def test_insights_context_complex(self):
@@ -222,9 +222,7 @@ class TestInsightsRetriever:
 
         context = await retriever.get_context("Christina")
 
-        assert context[0].node1.attributes["name"] == "Christina Mayer", (
-            "Failed to get Christina Mayer"
-        )
+        assert context[0][0]["name"] == "Christina Mayer", "Failed to get Christina Mayer"
 
     @pytest.mark.asyncio
     async def test_insights_context_on_empty_graph(self):
