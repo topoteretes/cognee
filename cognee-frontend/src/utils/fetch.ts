@@ -1,4 +1,5 @@
 import handleServerErrors from "./handleServerErrors";
+import isCloudEnvironment from "./isCloudEnvironment";
 
 let numberOfRetries = 0;
 
@@ -6,9 +7,10 @@ const isAuth0Enabled = process.env.USE_AUTH0_AUTHORIZATION?.toLowerCase() === "t
 
 const backendApiUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:8000/api";
 
-const cloudApiUrl = process.env.NEXT_PUBLIC_CLOUD_API_URL || "https://api.cognee.ai/api";
+const cloudApiUrl = process.env.NEXT_PUBLIC_CLOUD_API_URL || "http://localhost:8001/api";
 
 let apiKey: string | null = null;
+let accessToken: string | null = null;
 
 export default async function fetch(url: string, options: RequestInit = {}, useCloud = false): Promise<Response> {
   function retry(lastError: Response) {
@@ -34,7 +36,10 @@ export default async function fetch(url: string, options: RequestInit = {}, useC
       ...options,
       headers: {
         ...options.headers,
-        ...(useCloud ? {"X-Api-Key": apiKey!} : {}),
+        ...(useCloud && !isCloudEnvironment()
+          ? {"X-Api-Key": apiKey!}
+          : {"Authorization": `Bearer ${accessToken}`}
+        ),
       },
       credentials: "include",
     },
@@ -65,4 +70,8 @@ fetch.checkHealth = () => {
 
 fetch.setApiKey = (newApiKey: string) => {
   apiKey = newApiKey;
+};
+
+fetch.setAccessToken = (newAccessToken: string) => {
+  accessToken = newAccessToken;
 };

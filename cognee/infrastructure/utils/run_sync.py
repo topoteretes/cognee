@@ -8,8 +8,15 @@ def run_sync(coro, timeout=None):
 
     def runner():
         nonlocal result, exception
+
         try:
-            result = asyncio.run(coro)
+            try:
+                running_loop = asyncio.get_running_loop()
+
+                result = asyncio.run_coroutine_threadsafe(coro, running_loop).result(timeout)
+            except RuntimeError:
+                result = asyncio.run(coro)
+
         except Exception as e:
             exception = e
 
