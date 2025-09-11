@@ -1,4 +1,5 @@
 import os
+import signal
 import subprocess
 import threading
 import time
@@ -401,6 +402,7 @@ def start_ui(
     logger.info("This may take a moment to compile and start...")
 
     try:
+        # Use process group to ensure all child processes get terminated together
         process = subprocess.Popen(
             ["npm", "run", "dev"],
             cwd=frontend_path,
@@ -408,6 +410,7 @@ def start_ui(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            preexec_fn=os.setsid if hasattr(os, 'setsid') else None,  # Create new process group on Unix
         )
 
         # Give it a moment to start up
@@ -447,7 +450,7 @@ def start_ui(
 
 def stop_ui(process: subprocess.Popen) -> bool:
     """
-    Stop a running UI server process.
+    Stop a running UI server process and all its children.
 
     Args:
         process: The subprocess.Popen object returned by start_ui()
@@ -459,12 +462,38 @@ def stop_ui(process: subprocess.Popen) -> bool:
         return False
 
     try:
-        process.terminate()
+        # Try to terminate the process group (includes child processes like Next.js)
+        if hasattr(os, 'killpg'):
+            try:
+                # Kill the entire process group
+                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                logger.debug("Sent SIGTERM to process group")
+            except (OSError, ProcessLookupError):
+                # Fall back to terminating just the main process
+                process.terminate()
+                logger.debug("Terminated main process only")
+        else:
+            process.terminate()
+            logger.debug("Terminated main process (Windows)")
+        
         try:
             process.wait(timeout=10)
+            logger.info("UI server stopped gracefully")
         except subprocess.TimeoutExpired:
             logger.warning("Process didn't terminate gracefully, forcing kill")
-            process.kill()
+            
+            # Force kill the process group
+            if hasattr(os, 'killpg'):
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                    logger.debug("Sent SIGKILL to process group")
+                except (OSError, ProcessLookupError):
+                    process.kill()
+                    logger.debug("Force killed main process only")
+            else:
+                process.kill()
+                logger.debug("Force killed main process (Windows)")
+            
             process.wait()
 
         logger.info("UI server stopped")
