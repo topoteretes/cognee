@@ -84,13 +84,13 @@ class CSVChunker(Chunker):
         Returns:
             Dictionary with header and rows information
         """
-        lines = content.strip().split("\n")
+        lines = content.strip().splitlines()
 
         if not lines:
             return {}
 
         # Extract header information (first line should contain column info)
-        header_line = lines[0] if lines else ""
+        header_line = lines[0]
 
         # Parse individual rows
         rows = []

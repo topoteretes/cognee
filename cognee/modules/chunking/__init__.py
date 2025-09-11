@@ -2,9 +2,10 @@ from .models.DocumentChunk import DocumentChunk
 from .Chunker import Chunker
 from .TextChunker import TextChunker
 from .CSVChunker import CSVChunker
+from .CsvChunker import CsvChunker
 
 # Conditionally import LangchainChunker if dependencies are available
-__all__ = ["CSVChunker", "Chunker", "DocumentChunk", "TextChunker"]
+__all__ = ["CSVChunker", "CsvChunker", "Chunker", "DocumentChunk", "TextChunker"]
 
 try:
     from .LangchainChunker import LangchainChunker
