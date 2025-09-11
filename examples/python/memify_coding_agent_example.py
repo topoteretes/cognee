@@ -90,7 +90,8 @@ async def main():
 
     print("Coding rules created by memify:")
     for coding_rule in coding_rules:
-        print("- " + coding_rule)
+        for search_result in coding_rule.search_result:
+            print("- " + search_result)
 
     # Visualize new graph with added memify context
     file_path = os.path.join(
