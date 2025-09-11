@@ -22,16 +22,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Define table with all necessary columns including primary key
-    op.create_table(
-        "notebooks",
-        sa.Column("id", sa.UUID, primary_key=True, default=uuid4),  # Critical for SQLite
-        sa.Column("owner_id", sa.UUID, index=True),
-        sa.Column("name", sa.String(), nullable=False),
-        sa.Column("cells", sa.JSON(), nullable=False),
-        sa.Column("deletable", sa.Boolean(), default=True),
-        sa.Column("created_at", sa.DateTime(), default=lambda: datetime.now(timezone.utc)),
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    if "notebooks" not in inspector.get_table_names():
+        # Define table with all necessary columns including primary key
+        op.create_table(
+            "notebooks",
+            sa.Column("id", sa.UUID, primary_key=True, default=uuid4),  # Critical for SQLite
+            sa.Column("owner_id", sa.UUID, index=True),
+            sa.Column("name", sa.String(), nullable=False),
+            sa.Column("cells", sa.JSON(), nullable=False),
+            sa.Column("deletable", sa.Boolean(), default=True),
+            sa.Column("created_at", sa.DateTime(), default=lambda: datetime.now(timezone.utc)),
+        )
 
 
 def downgrade() -> None:
