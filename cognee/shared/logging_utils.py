@@ -268,7 +268,7 @@ def setup_logging(log_level=None, name=None):
     global _is_structlog_configured
 
     # Regular detailed logging for non-CLI usage
-    log_level = log_level if log_level else log_levels[os.getenv("LOG_LEVEL", "INFO")]
+    log_level = log_level if log_level else log_levels[os.getenv("LOG_LEVEL", "INFO").upper()]
 
     # Configure external library logging early to suppress verbose output
     configure_external_library_logging()

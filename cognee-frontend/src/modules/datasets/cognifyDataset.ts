@@ -1,13 +1,13 @@
 import { fetch } from "@/utils";
-import getDatasetGraph from "./getDatasetGraph";
+// import getDatasetGraph from "./getDatasetGraph";
 import { Dataset } from "../ingestion/useDatasets";
 
-interface GraphData {
-  nodes: { id: string; label: string; properties?: object }[];
-  edges: { source: string; target: string; label: string }[];
-}
+// interface GraphData {
+//   nodes: { id: string; label: string; properties?: object }[];
+//   edges: { source: string; target: string; label: string }[];
+// }
 
-export default async function cognifyDataset(dataset: Dataset, onUpdate: (data: GraphData) => void) {
+export default async function cognifyDataset(dataset: Dataset, useCloud: boolean = false) {
   // const data = await (
   return fetch("/v1/cognify", {
     method: "POST",
@@ -18,17 +18,17 @@ export default async function cognifyDataset(dataset: Dataset, onUpdate: (data: 
       datasetIds: [dataset.id],
       runInBackground: false,
     }),
-  })
-  .then((response) => response.json())
-  .then(() => {
-    return getDatasetGraph(dataset)
-      .then((data) => {
-        onUpdate({
-          nodes: data.nodes,
-          edges: data.edges,
-        });
-      });
-  });
+  }, useCloud)
+  .then((response) => response.json());
+  // .then(() => {
+  //   return getDatasetGraph(dataset)
+  //     .then((data) => {
+  //       onUpdate({
+  //         nodes: data.nodes,
+  //         edges: data.edges,
+  //       });
+  //     });
+  // });
   // )
 
     // const websocket = new WebSocket(`ws://localhost:8000/api/v1/cognify/subscribe/${data.pipeline_run_id}`);
