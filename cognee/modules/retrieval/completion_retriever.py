@@ -23,12 +23,14 @@ class CompletionRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
+        system_prompt: Optional[str] = None,
         top_k: Optional[int] = 1,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 1
+        self.system_prompt = system_prompt
 
     async def get_context(self, query: str) -> str:
         """
@@ -65,7 +67,7 @@ class CompletionRetriever(BaseRetriever):
             logger.error("DocumentChunk_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
+    async def get_completion(self, query: str, context: Optional[Any] = None) -> str:
         """
         Generates an LLM completion using the context.
 
@@ -88,6 +90,10 @@ class CompletionRetriever(BaseRetriever):
             context = await self.get_context(query)
 
         completion = await generate_completion(
-            query, context, self.user_prompt_path, self.system_prompt_path
+            query=query,
+            context=context,
+            user_prompt_path=self.user_prompt_path,
+            system_prompt_path=self.system_prompt_path,
+            system_prompt=self.system_prompt,
         )
-        return [completion]
+        return completion

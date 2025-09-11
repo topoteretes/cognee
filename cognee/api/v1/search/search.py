@@ -1,8 +1,9 @@
 from uuid import UUID
 from typing import Union, Optional, List, Type
 
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
-from cognee.modules.search.types import SearchType
+from cognee.modules.search.types import SearchResult, SearchType, CombinedSearchResult
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -12,16 +13,19 @@ from cognee.modules.data.exceptions import DatasetNotFoundError
 async def search(
     query_text: str,
     query_type: SearchType = SearchType.GRAPH_COMPLETION,
-    user: User = None,
+    user: Optional[User] = None,
     datasets: Optional[Union[list[str], str]] = None,
     dataset_ids: Optional[Union[list[UUID], UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
+    system_prompt: Optional[str] = None,
     top_k: int = 10,
-    node_type: Optional[Type] = None,
+    node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: bool = False,
     last_k: Optional[int] = None,
-) -> list:
+    only_context: bool = False,
+    use_combined_context: bool = False,
+) -> Union[List[SearchResult], CombinedSearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -183,11 +187,14 @@ async def search(
         dataset_ids=dataset_ids if dataset_ids else datasets,
         user=user,
         system_prompt_path=system_prompt_path,
+        system_prompt=system_prompt,
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
         save_interaction=save_interaction,
         last_k=last_k,
+        only_context=only_context,
+        use_combined_context=use_combined_context,
     )
 
     return filtered_search_results

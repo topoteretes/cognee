@@ -1,6 +1,8 @@
 import sys
 import os
 import argparse
+import signal
+import subprocess
 from typing import Any, Sequence, Dict, Type, cast, List
 import click
 
@@ -51,6 +53,31 @@ class DebugAction(argparse.Action):
         fmt.note("Debug mode enabled. Full stack traces will be shown.")
 
 
+class UiAction(argparse.Action):
+    def __init__(
+        self,
+        option_strings: Sequence[str],
+        dest: Any = argparse.SUPPRESS,
+        default: Any = argparse.SUPPRESS,
+        help: str = None,
+    ) -> None:
+        super(UiAction, self).__init__(
+            option_strings=option_strings, dest=dest, default=default, nargs=0, help=help
+        )
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: str = None,
+    ) -> None:
+        # Set a flag to indicate UI should be started
+        global ACTION_EXECUTED
+        ACTION_EXECUTED = True
+        namespace.start_ui = True
+
+
 # Debug functionality is now in cognee.cli.debug module
 
 
@@ -97,6 +124,11 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
         action=DebugAction,
         help="Enable debug mode to show full stack traces on exceptions",
     )
+    parser.add_argument(
+        "-ui",
+        action=UiAction,
+        help="Start the cognee web UI interface",
+    )
 
     subparsers = parser.add_subparsers(title="Available commands", dest="command")
 
@@ -139,6 +171,67 @@ def main() -> int:
     """Main CLI entry point"""
     parser, installed_commands = _create_parser()
     args = parser.parse_args()
+
+    # Handle UI flag
+    if hasattr(args, "start_ui") and args.start_ui:
+        server_process = None
+
+        def signal_handler(signum, frame):
+            """Handle Ctrl+C and other termination signals"""
+            nonlocal server_process
+            fmt.echo("\nShutting down UI server...")
+            if server_process:
+                try:
+                    # Try graceful termination first
+                    server_process.terminate()
+                    try:
+                        server_process.wait(timeout=5)
+                        fmt.success("UI server stopped gracefully.")
+                    except subprocess.TimeoutExpired:
+                        # If graceful termination fails, force kill
+                        fmt.echo("Force stopping UI server...")
+                        server_process.kill()
+                        server_process.wait()
+                        fmt.success("UI server stopped.")
+                except Exception as e:
+                    fmt.warning(f"Error stopping server: {e}")
+            sys.exit(0)
+
+        # Set up signal handlers
+        signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
+        signal.signal(signal.SIGTERM, signal_handler)  # Termination request
+
+        try:
+            from cognee import start_ui
+
+            fmt.echo("Starting cognee UI...")
+            server_process = start_ui(host="localhost", port=3000, open_browser=True)
+
+            if server_process:
+                fmt.success("UI server started successfully!")
+                fmt.echo("The interface is available at: http://localhost:3000")
+                fmt.note("Press Ctrl+C to stop the server...")
+
+                try:
+                    # Keep the server running
+                    import time
+
+                    while server_process.poll() is None:  # While process is still running
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    # This shouldn't happen now due to signal handler, but kept for safety
+                    signal_handler(signal.SIGINT, None)
+
+                return 0
+            else:
+                fmt.error("Failed to start UI server. Check the logs above for details.")
+                return 1
+
+        except Exception as ex:
+            fmt.error(f"Error starting UI: {str(ex)}")
+            if debug.is_debug_enabled():
+                raise ex
+            return 1
 
     if cmd := installed_commands.get(args.command):
         try:

@@ -5,10 +5,12 @@ export default function useBoolean(initialValue: boolean) {
 
   const setTrue = useCallback(() => setValue(true), []);
   const setFalse = useCallback(() => setValue(false), []);
+  const toggle = useCallback(() => setValue((prevValue) => !prevValue), []);
 
   return {
     value,
     setTrue,
     setFalse,
+    toggle,
   };
 }
