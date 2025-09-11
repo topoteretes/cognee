@@ -393,9 +393,9 @@ def start_ui(
                     "--port",
                     str(backend_port),
                 ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+                # Inherit stdout/stderr from parent process to show logs
+                stdout=None,
+                stderr=None,
                 preexec_fn=os.setsid if hasattr(os, "setsid") else None,
             )
 
@@ -405,10 +405,7 @@ def start_ui(
             time.sleep(2)
 
             if backend_process.poll() is not None:
-                stdout, stderr = backend_process.communicate()
-                logger.error("Backend server failed to start:")
-                logger.error(f"stdout: {stdout}")
-                logger.error(f"stderr: {stderr}")
+                logger.error("Backend server failed to start - process exited early")
                 return None
 
             logger.info(f"✓ Backend API started at http://{backend_host}:{backend_port}")
