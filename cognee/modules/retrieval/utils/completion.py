@@ -8,7 +8,6 @@ async def generate_completion(
     user_prompt_path: str,
     system_prompt_path: str,
     system_prompt: Optional[str] = None,
-    only_context: bool = False,
 ) -> str:
     """Generates a completion using LLM with given context and prompts."""
     args = {"question": query, "context": context}
@@ -17,14 +16,11 @@ async def generate_completion(
         system_prompt if system_prompt else LLMGateway.read_query_prompt(system_prompt_path)
     )
 
-    if only_context:
-        return context
-    else:
-        return await LLMGateway.acreate_structured_output(
-            text_input=user_prompt,
-            system_prompt=system_prompt,
-            response_model=str,
-        )
+    return await LLMGateway.acreate_structured_output(
+        text_input=user_prompt,
+        system_prompt=system_prompt,
+        response_model=str,
+    )
 
 
 async def summarize_text(

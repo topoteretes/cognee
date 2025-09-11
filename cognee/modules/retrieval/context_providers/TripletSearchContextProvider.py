@@ -49,6 +49,7 @@ class TripletSearchContextProvider(BaseContextProvider):
         tasks = [
             brute_force_triplet_search(
                 query=f"{entity_text} {query}",
+                user=user,
                 top_k=self.top_k,
                 collections=self.collections,
                 properties_to_project=self.properties_to_project,

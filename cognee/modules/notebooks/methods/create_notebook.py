@@ -15,7 +15,9 @@ async def create_notebook(
     deletable: Optional[bool],
     session: AsyncSession,
 ) -> Notebook:
-    notebook = Notebook(name=notebook_name, owner_id=user_id, cells=cells, deletable=deletable)
+    notebook = Notebook(
+        name=notebook_name, owner_id=user_id, cells=cells, deletable=deletable or True
+    )
 
     session.add(notebook)
 
