@@ -2,7 +2,15 @@ from uuid import uuid4
 from enum import Enum
 from typing import Optional, List
 from datetime import datetime, timezone
-from sqlalchemy import Column, Text, DateTime, UUID as SQLAlchemy_UUID, Integer, Enum as SQLEnum, ARRAY
+from sqlalchemy import (
+    Column,
+    Text,
+    DateTime,
+    UUID as SQLAlchemy_UUID,
+    Integer,
+    Enum as SQLEnum,
+    ARRAY,
+)
 
 from cognee.infrastructure.databases.relational import Base
 
@@ -39,7 +47,7 @@ class SyncOperation(Base):
 
     # Operation metadata
     dataset_ids = Column(ARRAY(SQLAlchemy_UUID), doc="Array of dataset IDs being synced")
-    dataset_names = Column(ARRAY(Text), doc="Array of dataset names being synced") 
+    dataset_names = Column(ARRAY(Text), doc="Array of dataset names being synced")
     user_id = Column(SQLAlchemy_UUID, index=True, doc="ID of the user who initiated the sync")
 
     # Timing information

@@ -99,7 +99,9 @@ def get_sync_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "POST /v1/sync",
-                "dataset_ids": [str(id) for id in request.dataset_ids] if request.dataset_ids else "*",
+                "dataset_ids": [str(id) for id in request.dataset_ids]
+                if request.dataset_ids
+                else "*",
             },
         )
 
@@ -112,7 +114,7 @@ def get_sync_router() -> APIRouter:
                 # Return information about the existing sync operation
                 existing_sync = running_syncs[0]  # Get the most recent running sync
                 return JSONResponse(
-                    status_code=409, 
+                    status_code=409,
                     content={
                         "error": "Sync operation already in progress",
                         "details": {
@@ -122,9 +124,9 @@ def get_sync_router() -> APIRouter:
                             "dataset_names": existing_sync.dataset_names,
                             "message": f"You have a sync operation already in progress with run_id '{existing_sync.run_id}'. Use the status endpoint to monitor progress, or wait for it to complete before starting a new sync.",
                             "timestamp": existing_sync.created_at.isoformat(),
-                            "progress_percentage": existing_sync.progress_percentage
-                        }
-                    }
+                            "progress_percentage": existing_sync.progress_percentage,
+                        },
+                    },
                 )
 
             # Retrieve existing dataset and check permissions
@@ -209,12 +211,12 @@ def get_sync_router() -> APIRouter:
         try:
             # Get any running sync operations for the user
             running_syncs = await get_running_sync_operations_for_user(user.id)
-            
+
             response = {
                 "has_running_sync": len(running_syncs) > 0,
-                "running_sync_count": len(running_syncs)
+                "running_sync_count": len(running_syncs),
             }
-            
+
             # If there are running syncs, include info about the latest one
             if running_syncs:
                 latest_sync = running_syncs[0]  # Already ordered by created_at desc
@@ -223,13 +225,17 @@ def get_sync_router() -> APIRouter:
                     "dataset_ids": latest_sync.dataset_ids,
                     "dataset_names": latest_sync.dataset_names,
                     "progress_percentage": latest_sync.progress_percentage,
-                    "created_at": latest_sync.created_at.isoformat() if latest_sync.created_at else None
+                    "created_at": latest_sync.created_at.isoformat()
+                    if latest_sync.created_at
+                    else None,
                 }
-            
+
             return response
 
         except Exception as e:
             logger.error(f"Failed to get sync status overview: {str(e)}")
-            return JSONResponse(status_code=500, content={"error": "Failed to get sync status overview"})
+            return JSONResponse(
+                status_code=500, content={"error": "Failed to get sync status overview"}
+            )
 
     return router

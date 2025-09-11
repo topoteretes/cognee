@@ -134,10 +134,10 @@ async def sync(
     # Create sync operation record in database (total_records will be set during background sync)
     try:
         await create_sync_operation(
-            run_id=run_id, 
-            dataset_ids=[d.id for d in datasets], 
-            dataset_names=[d.name for d in datasets], 
-            user_id=user.id
+            run_id=run_id,
+            dataset_ids=[d.id for d in datasets],
+            dataset_names=[d.name for d in datasets],
+            user_id=user.id,
         )
         logger.info(f"Created sync operation record for {run_id}")
     except Exception as e:
@@ -165,9 +165,7 @@ async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: U
 
     try:
         dataset_info = ", ".join([f"{d.name} ({d.id})" for d in datasets])
-        logger.info(
-            f"Background sync {run_id}: Starting sync for datasets {dataset_info}"
-        )
+        logger.info(f"Background sync {run_id}: Starting sync for datasets {dataset_info}")
 
         # Mark sync as in progress
         await mark_sync_started(run_id)
@@ -220,7 +218,6 @@ async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: U
         await mark_sync_failed(run_id, str(e))
 
 
-
 async def _sync_to_cognee_cloud(
     datasets: List[Dataset], user: User, run_id: str
 ) -> tuple[int, int, int, int]:
@@ -232,12 +229,12 @@ async def _sync_to_cognee_cloud(
     """
     dataset_info = ", ".join([f"{d.name} ({d.id})" for d in datasets])
     logger.info(f"Starting sync to Cognee Cloud: datasets {dataset_info}")
-    
+
     total_records_downloaded = 0
-    total_records_uploaded = 0 
+    total_records_uploaded = 0
     total_bytes_downloaded = 0
     total_bytes_uploaded = 0
-    
+
     try:
         # Get cloud configuration
         cloud_base_url = await _get_cloud_base_url()
@@ -248,66 +245,78 @@ async def _sync_to_cognee_cloud(
             _sync_dataset_files(dataset, cloud_base_url, cloud_auth_token, user, run_id)
             for dataset in datasets
         ]
-        
+
         logger.info(f"Starting concurrent file sync for {len(datasets)} datasets")
-        
+
         has_any_uploads = False
         processed_datasets = []
         completed_datasets = 0
-        
+
         # Process datasets concurrently and accumulate results
         for completed_task in asyncio.as_completed(sync_files_tasks):
             try:
                 dataset_result = await completed_task
                 completed_datasets += 1
-                
+
                 # Update progress based on completed datasets (0-80% for file sync)
                 file_sync_progress = int((completed_datasets / len(datasets)) * 80)
-                await _safe_update_progress(run_id, "file_sync", progress_percentage=file_sync_progress)
-                
+                await _safe_update_progress(
+                    run_id, "file_sync", progress_percentage=file_sync_progress
+                )
+
                 if dataset_result is None:
-                    logger.info(f"Progress: {completed_datasets}/{len(datasets)} datasets processed ({file_sync_progress}%)")
+                    logger.info(
+                        f"Progress: {completed_datasets}/{len(datasets)} datasets processed ({file_sync_progress}%)"
+                    )
                     continue
-                
+
                 total_records_downloaded += dataset_result.records_downloaded
                 total_records_uploaded += dataset_result.records_uploaded
                 total_bytes_downloaded += dataset_result.bytes_downloaded
                 total_bytes_uploaded += dataset_result.bytes_uploaded
-                    
+
                 if dataset_result.has_uploads:
                     has_any_uploads = True
-                
+
                 processed_datasets.append(dataset_result.dataset_id)
-                
+
                 logger.info(
                     f"Progress: {completed_datasets}/{len(datasets)} datasets processed ({file_sync_progress}%) - "
                     f"Completed file sync for dataset {dataset_result.dataset_name}: "
                     f"↑{dataset_result.records_uploaded} files ({dataset_result.bytes_uploaded} bytes), "
                     f"↓{dataset_result.records_downloaded} files ({dataset_result.bytes_downloaded} bytes)"
-                    )
+                )
             except Exception as e:
                 completed_datasets += 1
                 logger.error(f"Dataset file sync failed: {str(e)}")
                 # Update progress even for failed datasets
                 file_sync_progress = int((completed_datasets / len(datasets)) * 80)
-                await _safe_update_progress(run_id, "file_sync", progress_percentage=file_sync_progress)
+                await _safe_update_progress(
+                    run_id, "file_sync", progress_percentage=file_sync_progress
+                )
                 # Continue with other datasets even if one fails
 
         # Step 2: Trigger cognify processing once for all datasets (only if any files were uploaded)
         # Update progress to 90% before cognify
         await _safe_update_progress(run_id, "cognify", progress_percentage=90)
-        
+
         if has_any_uploads and processed_datasets:
-            logger.info(f"Progress: 90% - Triggering cognify processing for {len(processed_datasets)} datasets with new files")
+            logger.info(
+                f"Progress: 90% - Triggering cognify processing for {len(processed_datasets)} datasets with new files"
+            )
             try:
                 # Trigger cognify for all datasets at once - use first dataset as reference point
-                await _trigger_remote_cognify(cloud_base_url, cloud_auth_token, datasets[0].id, run_id)
+                await _trigger_remote_cognify(
+                    cloud_base_url, cloud_auth_token, datasets[0].id, run_id
+                )
                 logger.info("Cognify processing triggered successfully for all datasets")
             except Exception as e:
                 logger.warning(f"Failed to trigger cognify processing: {str(e)}")
                 # Don't fail the entire sync if cognify fails
         else:
-            logger.info("Progress: 90% - Skipping cognify processing - no new files were uploaded across any datasets")
+            logger.info(
+                "Progress: 90% - Skipping cognify processing - no new files were uploaded across any datasets"
+            )
 
         # Update final progress
         try:
@@ -319,7 +328,7 @@ async def _sync_to_cognee_cloud(
                 total_records_to_download=total_records_downloaded,
                 total_records_to_upload=total_records_uploaded,
                 records_downloaded=total_records_downloaded,
-                records_uploaded=total_records_uploaded
+                records_uploaded=total_records_uploaded,
             )
         except Exception as e:
             logger.warning(f"Failed to update final sync progress: {str(e)}")
@@ -328,7 +337,12 @@ async def _sync_to_cognee_cloud(
             f"Multi-dataset sync completed: {len(datasets)} datasets processed, downloaded {total_records_downloaded} records/{total_bytes_downloaded} bytes, uploaded {total_records_uploaded} records/{total_bytes_uploaded} bytes"
         )
 
-        return total_records_downloaded, total_records_uploaded, total_bytes_downloaded, total_bytes_uploaded
+        return (
+            total_records_downloaded,
+            total_records_uploaded,
+            total_bytes_downloaded,
+            total_bytes_uploaded,
+        )
 
     except Exception as e:
         logger.error(f"Sync failed: {str(e)}")
@@ -338,7 +352,7 @@ async def _sync_to_cognee_cloud(
 @dataclass
 class DatasetSyncResult:
     """Result of syncing files for a single dataset."""
-    
+
     dataset_name: str
     dataset_id: str
     records_downloaded: int
@@ -348,23 +362,18 @@ class DatasetSyncResult:
     has_uploads: bool  # Whether any files were uploaded (for cognify decision)
 
 
-
 async def _sync_dataset_files(
-    dataset: Dataset, 
-    cloud_base_url: str, 
-    cloud_auth_token: str, 
-    user: User, 
-    run_id: str
+    dataset: Dataset, cloud_base_url: str, cloud_auth_token: str, user: User, run_id: str
 ) -> Optional[DatasetSyncResult]:
     """
     Sync files for a single dataset (2-way: upload to cloud, download from cloud).
     Does NOT trigger cognify - that's done separately once for all datasets.
-    
+
     Returns:
         DatasetSyncResult with sync results or None if dataset was empty
     """
     logger.info(f"Syncing files for dataset: {dataset.name} ({dataset.id})")
-    
+
     try:
         # Step 1: Extract local file info with stored hashes
         local_files = await _extract_local_files_with_hashes(dataset, user, run_id)
@@ -410,12 +419,13 @@ async def _sync_dataset_files(
             records_uploaded=len(hashes_missing_on_remote),
             bytes_downloaded=bytes_downloaded,
             bytes_uploaded=bytes_uploaded,
-            has_uploads=len(hashes_missing_on_remote) > 0
+            has_uploads=len(hashes_missing_on_remote) > 0,
         )
-        
+
     except Exception as e:
         logger.error(f"Failed to sync files for dataset {dataset.name} ({dataset.id}): {str(e)}")
         raise  # Re-raise to be handled by the caller
+
 
 async def _extract_local_files_with_hashes(
     dataset: Dataset, user: User, run_id: str

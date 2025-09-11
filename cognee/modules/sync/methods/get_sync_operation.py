@@ -98,7 +98,7 @@ async def get_running_sync_operations_for_user(user_id: UUID) -> List[SyncOperat
             .where(
                 and_(
                     SyncOperation.user_id == user_id,
-                    SyncOperation.status.in_([SyncStatus.STARTED, SyncStatus.IN_PROGRESS])
+                    SyncOperation.status.in_([SyncStatus.STARTED, SyncStatus.IN_PROGRESS]),
                 )
             )
             .order_by(desc(SyncOperation.created_at))
