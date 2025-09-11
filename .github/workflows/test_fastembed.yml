@@ -20,7 +20,7 @@ jobs:
         env:
           LLM_PROVIDER: "openai"
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_MODEL: "gpt-4o-mini"
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
           EMBEDDING_PROVIDER: "fastembed"
           EMBEDDING_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
           EMBEDDING_DIMENSIONS: "384"

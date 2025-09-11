@@ -1,0 +1,25 @@
+name: LLM Test Suites
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+
+jobs:
+  gemini-tests:
+    name: Gemini Tests
+    uses: ./.github/workflows/test_gemini.yml
+    secrets: inherit
+
+  fastembed-tests:
+    name: Fastembed Tests
+    uses: ./.github/workflows/test_fastembed.yml
+    secrets: inherit
+
+  openrouter-tests:
+    name: OpenRouter Tests
+    uses: ./.github/workflows/test_openrouter.yml
+    secrets: inherit
