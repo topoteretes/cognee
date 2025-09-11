@@ -16,10 +16,22 @@ from cognee.version import get_cognee_version
 logger = get_logger()
 
 
+def normalize_version_for_comparison(version: str) -> str:
+    """
+    Normalize version string for comparison.
+    Handles development versions and edge cases.
+    """
+    # Remove common development suffixes for comparison
+    normalized = version.replace("-local", "").replace("-dev", "").replace("-alpha", "").replace("-beta", "")
+    return normalized.strip()
+
+
 def get_frontend_cache_dir() -> Path:
     """
     Get the directory where downloaded frontend assets are cached.
     Uses user's home directory to persist across package updates.
+    Each cached frontend is version-specific and will be re-downloaded
+    when the cognee package version changes.
     """
     cache_dir = Path.home() / ".cognee" / "ui-cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -61,16 +73,34 @@ def download_frontend_assets(force: bool = False) -> bool:
         try:
             cached_version = version_file.read_text().strip()
             current_version = get_cognee_version()
-            if cached_version == current_version:
+            
+            # Compare normalized versions to handle development versions
+            cached_normalized = normalize_version_for_comparison(cached_version)
+            current_normalized = normalize_version_for_comparison(current_version)
+            
+            if cached_normalized == current_normalized:
                 logger.debug(f"Frontend assets already cached for version {current_version}")
                 return True
+            else:
+                logger.info(f"Version mismatch detected: cached={cached_version}, current={current_version}")
+                logger.info("Updating frontend cache to match current cognee version...")
+                # Clear the old cached version
+                if frontend_dir.exists():
+                    shutil.rmtree(frontend_dir)
+                if version_file.exists():
+                    version_file.unlink()
         except Exception as e:
             logger.debug(f"Error checking cached version: {e}")
+            # Clear potentially corrupted cache
+            if frontend_dir.exists():
+                shutil.rmtree(frontend_dir)
+            if version_file.exists():
+                version_file.unlink()
 
     download_url, version = get_frontend_download_info()
 
-    logger.info("Downloading cognee frontend assets...")
-    logger.info("This is a one-time download and will be cached for future use.")
+    logger.info(f"Downloading cognee frontend assets for version {version}...")
+    logger.info("This will be cached and reused until the cognee version changes.")
 
     try:
         # Create a temporary directory for download
@@ -118,8 +148,9 @@ def download_frontend_assets(force: bool = False) -> bool:
                 shutil.copytree(cognee_frontend_source, frontend_dir)
                 logger.debug(f"Frontend extracted to: {frontend_dir}")
 
-            # Write version info
+            # Write version info for future cache validation
             version_file.write_text(version)
+            logger.debug(f"Cached frontend for cognee version: {version}")
 
             logger.info(
                 f"✓ Cognee frontend v{version.replace('-local', '')} downloaded and cached successfully!"
