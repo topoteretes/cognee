@@ -33,7 +33,9 @@ async def create_sync_operation(
 
     sync_operation = SyncOperation(
         run_id=run_id,
-        dataset_ids=[str(uuid) for uuid in dataset_ids],  # Convert UUIDs to strings for JSON storage
+        dataset_ids=[
+            str(uuid) for uuid in dataset_ids
+        ],  # Convert UUIDs to strings for JSON storage
         dataset_names=dataset_names,
         user_id=user_id,
         status=SyncStatus.STARTED,
