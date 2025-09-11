@@ -327,7 +327,7 @@ def prompt_user_for_download() -> bool:
 
 def start_ui(
     host: str = "localhost",
-    port: int = 3001,
+    port: int = 3000,
     open_browser: bool = True,
     auto_download: bool = False,
 ) -> Optional[subprocess.Popen]:
@@ -343,7 +343,7 @@ def start_ui(
 
     Args:
         host: Host to bind the server to (default: localhost)
-        port: Port to run the server on (default: 3001)
+        port: Port to run the server on (default: 3000)
         open_browser: Whether to open the browser automatically (default: True)
         auto_download: If True, download frontend without prompting (default: False)
 
@@ -353,7 +353,7 @@ def start_ui(
     Example:
         >>> import cognee
         >>> server = cognee.start_ui()
-        >>> # UI will be available at http://localhost:3001
+        >>> # UI will be available at http://localhost:3000
         >>> # To stop the server later:
         >>> server.terminate()
     """

@@ -205,11 +205,11 @@ def main() -> int:
             from cognee import start_ui
 
             fmt.echo("Starting cognee UI...")
-            server_process = start_ui(host="localhost", port=3001, open_browser=True)
+            server_process = start_ui(host="localhost", port=3000, open_browser=True)
 
             if server_process:
                 fmt.success("UI server started successfully!")
-                fmt.echo("The interface is available at: http://localhost:3001")
+                fmt.echo("The interface is available at: http://localhost:3000")
                 fmt.note("Press Ctrl+C to stop the server...")
 
                 try:
