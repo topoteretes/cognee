@@ -95,9 +95,11 @@ class CsvLoader(LoaderInterface):
 
                 try:
                     dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
-                    # Only use detected values if defaults are being used
-                    if delimiter == "," and quotechar == '"':
+                    # Only use detected delimiter if not explicitly set
+                    if delimiter == ",":
                         delimiter = dialect.delimiter
+                    # Only use detected quotechar if not explicitly set
+                    if quotechar == '"':
                         quotechar = dialect.quotechar
                 except csv.Error:
                     # Use defaults if detection fails
