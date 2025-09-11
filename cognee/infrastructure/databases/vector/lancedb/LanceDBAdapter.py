@@ -44,7 +44,7 @@ class IndexSchema(DataPoint):
     to include 'text'.
     """
 
-    id: str
+    id: UUID
     text: str
 
     metadata: MetaData = {"index_fields": ["text"], "type": "IndexSchema"}
@@ -311,7 +311,7 @@ class LanceDBAdapter(VectorDBInterface):
             f"{index_name}_{index_property_name}",
             [
                 IndexSchema(
-                    id=str(data_point.id),
+                    id=data_point.id,
                     text=getattr(data_point, data_point.metadata["index_fields"][0]),
                 )
                 for data_point in data_points
