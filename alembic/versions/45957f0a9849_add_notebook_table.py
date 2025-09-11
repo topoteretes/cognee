@@ -39,4 +39,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("notebooks")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    if "notebooks" in inspector.get_table_names():
+        op.drop_table("notebooks")
