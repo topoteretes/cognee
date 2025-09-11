@@ -73,7 +73,9 @@ class SyncOperation(Base):
     bytes_uploaded = Column(Integer, default=0, doc="Total bytes uploaded to cloud")
 
     # Data lineage tracking per dataset
-    dataset_sync_hashes = Column(JSON, doc="Mapping of dataset_id -> {uploaded: [hashes], downloaded: [hashes]}")
+    dataset_sync_hashes = Column(
+        JSON, doc="Mapping of dataset_id -> {uploaded: [hashes], downloaded: [hashes]}"
+    )
 
     # Error handling
     error_message = Column(Text, doc="Error message if sync failed")
@@ -110,31 +112,32 @@ class SyncOperation(Base):
         """Get all content hashes for data created/modified during this sync operation."""
         all_hashes = set()
         dataset_hashes = self.dataset_sync_hashes or {}
-        
+
         for dataset_id, operations in dataset_hashes.items():
             if isinstance(operations, dict):
-                all_hashes.update(operations.get('uploaded', []))
-                all_hashes.update(operations.get('downloaded', []))
-        
+                all_hashes.update(operations.get("uploaded", []))
+                all_hashes.update(operations.get("downloaded", []))
+
         return list(all_hashes)
 
     def _get_dataset_sync_hashes(self, dataset_id: str) -> dict:
         """Get uploaded/downloaded hashes for a specific dataset."""
         dataset_hashes = self.dataset_sync_hashes or {}
-        return dataset_hashes.get(dataset_id, {'uploaded': [], 'downloaded': []})
+        return dataset_hashes.get(dataset_id, {"uploaded": [], "downloaded": []})
 
     def was_data_synced(self, content_hash: str, dataset_id: str = None) -> bool:
         """
         Check if a specific piece of data was part of this sync operation.
-        
+
         Args:
             content_hash: The content hash to check for
             dataset_id: Optional - check only within this dataset
         """
         if dataset_id:
             dataset_hashes = self.get_dataset_sync_hashes(dataset_id)
-            return (content_hash in dataset_hashes.get('uploaded', []) or 
-                    content_hash in dataset_hashes.get('downloaded', []))
-        
+            return content_hash in dataset_hashes.get(
+                "uploaded", []
+            ) or content_hash in dataset_hashes.get("downloaded", [])
+
         all_hashes = self.get_all_sync_hashes()
         return content_hash in all_hashes

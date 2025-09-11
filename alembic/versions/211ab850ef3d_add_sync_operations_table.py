@@ -63,7 +63,7 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_sync_operations_user_id"), table_name="sync_operations")
     op.drop_index(op.f("ix_sync_operations_run_id"), table_name="sync_operations")
     op.drop_table("sync_operations")
-    
+
     # Drop the enum type that was created
-    sa.Enum(name='syncstatus').drop(op.get_bind(), checkfirst=True)
+    sa.Enum(name="syncstatus").drop(op.get_bind(), checkfirst=True)
     # ### end Alembic commands ###

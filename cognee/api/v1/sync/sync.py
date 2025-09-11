@@ -206,8 +206,12 @@ async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: U
 
         # Mark sync as completed with final stats and data lineage
         await mark_sync_completed(
-            run_id, records_downloaded, records_uploaded, bytes_downloaded, bytes_uploaded,
-            dataset_sync_hashes
+            run_id,
+            records_downloaded,
+            records_uploaded,
+            bytes_downloaded,
+            bytes_uploaded,
+            dataset_sync_hashes,
         )
 
     except Exception as e:
@@ -280,8 +284,8 @@ async def _sync_to_cognee_cloud(
 
                 # Build per-dataset hash tracking for data lineage
                 dataset_sync_hashes[dataset_result.dataset_id] = {
-                    'uploaded': dataset_result.uploaded_hashes,
-                    'downloaded': dataset_result.downloaded_hashes
+                    "uploaded": dataset_result.uploaded_hashes,
+                    "downloaded": dataset_result.downloaded_hashes,
                 }
 
                 if dataset_result.has_uploads:
