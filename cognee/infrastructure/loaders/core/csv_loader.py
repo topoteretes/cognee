@@ -26,7 +26,7 @@ class CsvLoader(LoaderInterface):
     @property
     def supported_extensions(self) -> List[str]:
         """Supported CSV file extensions."""
-        return [".csv"]
+        return ["csv"]
 
     @property
     def supported_mime_types(self) -> List[str]:
@@ -47,7 +47,7 @@ class CsvLoader(LoaderInterface):
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """
         Check if this loader can handle the given file.
-        Uses extension-first matching strategy with MIME type fallback.
+        Uses extension-first matching strategy with constrained MIME type fallback.
 
         Args:
             extension: File extension (may be None)
@@ -60,22 +60,29 @@ class CsvLoader(LoaderInterface):
         extension = (extension or "").strip().lower()
         mime_type = (mime_type or "").strip().lower()
         
-        # Normalize extension to include dot prefix if present
-        if extension and not extension.startswith('.'):
-            extension = f".{extension}"
+        # Normalize extension (remove dot prefix for consistency)
+        if extension.startswith('.'):
+            extension = extension[1:]
             
-        # Convert supported lists to lowercase for comparison
-        supported_extensions_lower = [ext.lower() for ext in self.supported_extensions]
-        supported_mime_types_lower = [mt.lower() for mt in self.supported_mime_types]
+        # Use sets for efficient membership testing
+        supported_extensions_set = {ext.lower() for ext in self.supported_extensions}
+        supported_mime_types_set = {mt.lower() for mt in self.supported_mime_types}
         
         # Extension-first matching strategy
         if extension:
-            if extension in supported_extensions_lower:
+            if extension in supported_extensions_set:
                 return True
         
-        # Fallback to MIME type matching
+        # Constrained MIME type fallback - avoid risky MIME types without matching extension
         if mime_type:
-            if mime_type in supported_mime_types_lower:
+            # Risky MIME types that could incorrectly route non-CSV files
+            risky_mime_types = {"text/plain", "application/vnd.ms-excel"}
+            
+            if mime_type in risky_mime_types:
+                # Only accept risky MIME types if extension also matches
+                return extension in supported_extensions_set
+            elif mime_type in supported_mime_types_set:
+                # Safe MIME types can be accepted without extension match
                 return True
         
         # Neither extension nor MIME type matched
@@ -113,11 +120,23 @@ class CsvLoader(LoaderInterface):
         logger.info(f"Loading CSV file: {file_path}")
 
         try:
-            # Get file metadata - use provided stream or open file
+            # Get file metadata - ensure we always pass a binary stream to get_file_metadata
             binary_stream = None
             if file_stream is not None:
-                file_metadata = await get_file_metadata(file_stream)
-                should_close_binary_stream = False
+                # Determine if the provided stream is text or binary
+                if isinstance(file_stream, io.TextIOBase):
+                    # Text stream - need to get underlying binary stream for metadata
+                    if hasattr(file_stream, 'buffer'):
+                        # TextIOWrapper has a buffer attribute pointing to binary stream
+                        file_metadata = await get_file_metadata(file_stream.buffer)
+                    else:
+                        # Cannot extract metadata from text-only stream without binary access
+                        raise CsvLoadError("Cannot extract metadata from text stream without binary buffer access")
+                    should_close_binary_stream = False
+                else:
+                    # Binary stream (including BytesIO) - can use directly for metadata
+                    file_metadata = await get_file_metadata(file_stream)
+                    should_close_binary_stream = False
             else:
                 binary_stream = open(file_path, "rb")
                 file_metadata = await get_file_metadata(binary_stream)
@@ -128,13 +147,15 @@ class CsvLoader(LoaderInterface):
 
             # Read and process CSV content
             if file_stream is not None:
-                # Wrap the provided stream in TextIOWrapper if it's binary
-                if hasattr(file_stream, 'mode') and 'b' in file_stream.mode:
-                    csvfile = io.TextIOWrapper(file_stream, encoding=encoding, newline="")
-                    wrapper_created = True
-                else:
+                # Determine how to handle the provided stream
+                if isinstance(file_stream, io.TextIOBase):
+                    # Already a text stream - use directly
                     csvfile = file_stream
                     wrapper_created = False
+                else:
+                    # Binary stream - wrap in TextIOWrapper
+                    csvfile = io.TextIOWrapper(file_stream, encoding=encoding, newline="")
+                    wrapper_created = True
             else:
                 csvfile = io.TextIOWrapper(binary_stream, encoding=encoding, newline="")
                 wrapper_created = True
