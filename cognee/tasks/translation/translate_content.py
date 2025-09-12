@@ -282,23 +282,21 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
                 logger.exception("Translation failed for content_id=%s", content_id)
                 tr = None
                 
-            if tr:
+            if tr and tr[0] != text:
+                # Translation succeeded and text was actually changed
                 translated_text, t_conf = tr
-                if translated_text != text:
-                    trans = TranslatedContent(
-                        original_chunk_id=str(content_id),
-                        original_text=text,
-                        translated_text=translated_text,
-                        source_language=detected_language,
-                        target_language=target_language,
-                        translation_provider=translation_provider.lower(),
-                        confidence_score=t_conf or 0.0,
-                    )
-                    chunk.metadata["translation"] = trans.model_dump()
-                    chunk.text = translated_text
-                else:
-                    logger.info("Provider returned unchanged text; skipping translation metadata (content_id=%s)", content_id)
-            else:
+                trans = TranslatedContent(
+                    original_chunk_id=str(content_id),
+                    original_text=text,
+                    translated_text=translated_text,
+                    source_language=detected_language,
+                    target_language=target_language,
+                    translation_provider=translation_provider.lower(),
+                    confidence_score=t_conf or 0.0,
+                )
+                chunk.metadata["translation"] = trans.model_dump()
+                chunk.text = translated_text
+            elif tr is None:
                 # Translation call failed (exception or None) — record a no-op entry
                 trans = TranslatedContent(
                     original_chunk_id=str(content_id),
@@ -310,6 +308,9 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
                     confidence_score=0.0,
                 )
                 chunk.metadata["translation"] = trans.model_dump()
+            else:
+                # Provider returned unchanged text (not an error) - skip translation metadata
+                logger.info("Provider returned unchanged text; skipping translation metadata (content_id=%s)", content_id)
                 
         results.append(chunk)
     return results

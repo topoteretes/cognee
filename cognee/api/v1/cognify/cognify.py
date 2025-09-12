@@ -291,8 +291,7 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
         from cognee.tasks.translation.translate_content import _get_provider as _preflight_get_provider
         _preflight_get_provider(translation_provider)
     except Exception as e:
-        msg = f"Provider '{translation_provider}' failed to initialize"
-        raise TranslationProviderError(msg) from e
+        raise TranslationProviderError(f"Provider '{translation_provider}' failed to initialize") from e
     
     default_tasks = [
         Task(classify_documents),
@@ -323,4 +322,5 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
         Task(add_data_points, task_config={"batch_size": DEFAULT_BATCH_SIZE}),
     ]
 
+    return default_tasks
     return default_tasks
