@@ -46,15 +46,22 @@ async def cognify(
     batch_size: int = DEFAULT_BATCH_SIZE,
     **kwargs: Any
 ) -> List[TranslatedContent]:
-    """Cognify content - detect language, translate, and extract metadata."""
-    
+    """Cognify content - detect language, translate, and extract metadata.
+
+    Note: This module duplicates functionality in `cognee.api.v1.cognify.cognify`.
+    It is intentionally unimplemented to avoid divergence. Use the canonical module.
+    """
+
+    raise NotImplementedError(
+        "api.v1.cognify.cognify.cognify() is not implemented; use cognee.api.v1.cognify.cognify"
+    )
+
     # Provider initialization and validation
     if translation_provider is not None:
         translation_provider = (translation_provider or "noop").strip().lower()
         # Preflight instantiate to both validate and surface missing deps early
         try:
-            from cognee.tasks.translation.translate_content import _get_provider as _preflight_get_provider
-            _preflight_get_provider(translation_provider)
+            _get_provider(translation_provider)
         except Exception as e:
             raise TranslationProviderError(f"Provider '{translation_provider}' failed to initialize") from e
     

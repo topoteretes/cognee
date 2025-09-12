@@ -58,9 +58,6 @@ The following charts visualize the benchmark results and performance comparisons
 
 A comprehensive comparison of all evaluated systems across multiple metrics, showing Cognee's performance relative to Mem0, Graphiti, and LightRAG.
 
-
-
-
 #### Optimized Cognee Configurations
 ![Optimized Cognee Configurations](optimized_cognee_configurations.png)
 
@@ -68,6 +65,9 @@ Performance analysis of different Cognee retriever configurations (GRAPH_COMPLET
 
 ## Notes
 
+- **Traditional QA metrics (EM/F1)** miss core value of AI memory systems - measure letter/word differences rather than information content
+- **HotPotQA benchmark mismatch** - designed for multi-hop reasoning but operates in constrained contexts vs. real-world cross-context linking
+- **DeepEval variance** - LLM-as-judge evaluation carries inconsistencies of underlying language model
 - **Traditional QA metrics (EM/F1)** miss core value of AI memory systems - measure letter/word differences rather than information content
 - **HotPotQA benchmark mismatch** - designed for multi-hop reasoning but operates in constrained contexts vs. real-world cross-context linking
 - **DeepEval variance** - LLM-as-judge evaluation carries inconsistencies of underlying language model

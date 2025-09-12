@@ -6,12 +6,15 @@ import os
 
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
+from cognee.shared.logging_utils import get_logger
 
 from cognee.modules.pipelines.operations.pipeline import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.users.models import User
+
+logger = get_logger()
 
 from cognee.tasks.documents import (
     check_permissions_on_dataset,
@@ -21,10 +24,7 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
-try:
-    from cognee.tasks.translation import translate_content, get_available_providers
-except ImportError:  # fallback for alt repo layout
-    from tasks.translation import translate_content, get_available_providers
+from cognee.tasks.translation import translate_content, get_available_providers
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
 
@@ -36,6 +36,17 @@ def _parse_batch_env(var: str, default: int = 10) -> int:
     try:
         return max(1, int(os.getenv(var, str(default))))
     except ValueError:
+        # Optional: log once to aid debugging of misconfigurations
+        try:
+            # Use a module-level set to avoid repeated warnings
+            if not hasattr(_parse_batch_env, "_warned"):
+                _parse_batch_env._warned = set()  # type: ignore[attr-defined]
+            warned = _parse_batch_env._warned  # type: ignore[attr-defined]
+            if var not in warned:
+                logger.warning("Invalid int for %s=%r; using default=%d", var, os.getenv(var), default)
+                warned.add(var)
+        except Exception:
+            pass
         return default
 
 # Constants for batch processing
@@ -230,12 +241,14 @@ def get_default_tasks(  # pylint: disable=too-many-arguments,too-many-positional
     """
     Build the default pipeline (no translation). See get_default_tasks_with_translation for the translation-enabled variant.
     """
+    # Precompute max_chunk_size for stability
+    max_chunk = chunk_size or get_max_chunk_tokens()
     default_tasks = [
         Task(classify_documents),
         Task(check_permissions_on_dataset, user=user, permissions=["write"]),
         Task(
             extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            max_chunk_size=max_chunk,
             chunker=chunker,
         ),  # Extract text chunks based on the document type.
         Task(
@@ -286,26 +299,32 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
     """
     # Fail fast on unknown providers (keeps errors close to the API surface)
     translation_provider = (translation_provider or "noop").strip().lower()
-    # Preflight instantiate to both validate and surface missing deps early
+    # Validate provider using public API
     try:
-        from cognee.tasks.translation.translate_content import _get_provider as _preflight_get_provider
-        _preflight_get_provider(translation_provider)
+        from cognee.tasks.translation import get_available_providers
+        if translation_provider not in get_available_providers():
+            raise ValueError(f"Unknown provider: {translation_provider}")
+        # Instantiate to validate dependencies
+        from cognee.tasks.translation.translate_content import _get_provider
+        _get_provider(translation_provider)
     except Exception as e:
         raise TranslationProviderError(f"Provider '{translation_provider}' failed to initialize") from e
+    
+    # Precompute max_chunk_size for stability
+    max_chunk = chunk_size or get_max_chunk_tokens()
     
     default_tasks = [
         Task(classify_documents),
         Task(check_permissions_on_dataset, user=user, permissions=["write"]),
         Task(
             extract_chunks_from_documents,
-            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            max_chunk_size=max_chunk,
             chunker=chunker,
         ),  # Extract text chunks based on the document type.
         Task(
             translate_content,
             target_language="en",
             translation_provider=translation_provider,
-            confidence_threshold=0.8,
             task_config={"batch_size": DEFAULT_BATCH_SIZE},
         ),  # Auto-translate non-English content and attach metadata
         Task(
@@ -322,5 +341,4 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
         Task(add_data_points, task_config={"batch_size": DEFAULT_BATCH_SIZE}),
     ]
 
-    return default_tasks
     return default_tasks

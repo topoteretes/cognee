@@ -60,6 +60,16 @@ def _get_provider(translation_provider: str) -> TranslationProvider:
         raise ValueError(msg)
     return provider_class()
 
+# Test helpers for registry isolation
+def snapshot_registry() -> Dict[str, Type[TranslationProvider]]:
+    """Return a shallow copy snapshot of the provider registry (for tests)."""
+    return dict(_provider_registry)
+
+def restore_registry(snapshot: Dict[str, Type[TranslationProvider]]) -> None:
+    """Restore the provider registry from a snapshot (for tests)."""
+    _provider_registry.clear()
+    _provider_registry.update(snapshot)
+
 # Built-in Providers
 class NoOpProvider:
     """A provider that does nothing, used for testing or disabling translation."""
@@ -87,11 +97,11 @@ class LangDetectProvider:
         except Exception:
             logger.exception("Error during language detection")
             return None
-        else:
-            if not detections:
-                return None
-            best_detection = detections[0]
-            return best_detection.lang, best_detection.prob
+        
+        if not detections:
+            return None
+        best_detection = detections[0]
+        return best_detection.lang, best_detection.prob
 
     async def translate(self, text: str, _target_language: str) -> Optional[Tuple[str, float]]:
         # This provider only detects language, does not translate.
@@ -121,16 +131,15 @@ class OpenAIProvider:
                     {"role": "system", "content": f"Translate the following text to {target_language}."},
                     {"role": "user", "content": text},
                 ],
-                max_tokens=1024,
                 temperature=0.3,
                 timeout=self.timeout,
             )
         except Exception:
             logger.exception("Error during OpenAI translation (model=%s)", self.model)
             return None
-        else:
-            translated_text = response.choices[0].message.content.strip()
-            return translated_text, 1.0  # OpenAI does not provide a confidence score.
+        
+        translated_text = response.choices[0].message.content.strip()
+        return translated_text, 1.0  # OpenAI does not provide a confidence score.
 
 class GoogleTranslateProvider:
     """A provider that uses the 'googletrans' library for translation."""
@@ -147,8 +156,8 @@ class GoogleTranslateProvider:
         except Exception:
             logger.exception("Error during Google Translate language detection")
             return None
-        else:
-            return detection.lang, detection.confidence
+        
+        return detection.lang, detection.confidence
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         try:
@@ -156,8 +165,8 @@ class GoogleTranslateProvider:
         except Exception:
             logger.exception("Error during Google Translate translation")
             return None
-        else:
-            return translation.text, 1.0  # Confidence score not provided for translation.
+        
+        return translation.text, 1.0  # Confidence score not provided for translation.
 
 class AzureTranslatorProvider:
     """A provider that uses Azure's Translator service."""
@@ -186,9 +195,9 @@ class AzureTranslatorProvider:
         except Exception:
             logger.exception("Error during Azure language detection")
             return None
-        else:
-            detection = response[0].primary_language
-            return detection.language, detection.score
+        
+        detection = response[0].primary_language
+        return detection.language, detection.score
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         try:
@@ -196,9 +205,9 @@ class AzureTranslatorProvider:
         except Exception:
             logger.exception("Error during Azure translation")
             return None
-        else:
-            translation = response[0].translations[0]
-            return translation.text, 1.0  # Confidence score not provided for translation.
+        
+        translation = response[0].translations[0]
+        return translation.text, 1.0  # Confidence score not provided for translation.
 
 # Register built-in providers
 register_translation_provider("noop", NoOpProvider)
@@ -296,6 +305,13 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
                 )
                 chunk.metadata["translation"] = trans.model_dump()
                 chunk.text = translated_text
+                # Update chunk size to reflect translated content
+                if hasattr(chunk, "chunk_size"):
+                    try:
+                        chunk.chunk_size = len(translated_text)
+                    except Exception:
+                        # Best-effort; leave unchanged if not applicable
+                        pass
             elif tr is None:
                 # Translation call failed (exception or None) — record a no-op entry
                 trans = TranslatedContent(

@@ -33,15 +33,14 @@ class TestTranslationError(Exception):  # pylint: disable=too-few-public-methods
     """Test exception for translation failures."""
 
 
-# Ensure registry isolation across tests
+# Ensure registry isolation across tests using public helpers
 @pytest.fixture(autouse=True)
 def _restore_registry():
-    snapshot = tr._provider_registry.copy()
+    snapshot = tr.snapshot_registry()
     try:
         yield
     finally:
-        tr._provider_registry.clear()
-        tr._provider_registry.update(snapshot)
+        tr.restore_registry(snapshot)
 
 
 class MockDocumentChunk:  # pylint: disable=too-few-public-methods
