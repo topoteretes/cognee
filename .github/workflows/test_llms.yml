@@ -52,6 +52,8 @@ jobs:
           LLM_PROVIDER: "openai"
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           EMBEDDING_PROVIDER: "fastembed"
           EMBEDDING_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
           EMBEDDING_DIMENSIONS: "384"
