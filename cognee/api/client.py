@@ -226,7 +226,11 @@ async def cloud_health_check():
 
         return JSONResponse(status_code=status_code, content=health_status.model_dump())
     except Exception as e:
-        return JSONResponse(status_code=503, content={"status": "unhealthy", "error": f"Cloud health check failed: {str(e)}"})
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unhealthy", "error": f"Cloud health check failed: {str(e)}"},
+        )
+
 
 app.include_router(get_auth_router(), prefix="/api/v1/auth", tags=["auth"])
 

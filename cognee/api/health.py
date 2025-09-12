@@ -329,8 +329,10 @@ class HealthChecker:
         start_time = time.time()
         try:
             from cognee.modules.cloud.operations import check_api_key
+
             # TODO: consider moving this to a more appropriate place
             from cognee.api.v1.sync.sync import _get_cloud_auth_token
+
             await check_api_key(_get_cloud_auth_token())
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
@@ -348,6 +350,7 @@ class HealthChecker:
                 response_time_ms=response_time,
                 details=f"Connection failed: {str(e)}",
             )
+
 
 # Global health checker instance
 health_checker = HealthChecker()
