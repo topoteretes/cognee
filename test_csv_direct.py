@@ -6,9 +6,11 @@ Direct test of CSV loader class without full cognee imports.
 import sys
 import io
 import os
+from pathlib import Path
 
-# Add the path and import only what we need
-sys.path.insert(0, '/workspaces/cognee')
+# Add the repository root to path dynamically
+repo_root = Path(__file__).resolve().parent
+sys.path.insert(0, str(repo_root))
 
 # Read the file directly and test the logic
 def test_can_handle_logic():

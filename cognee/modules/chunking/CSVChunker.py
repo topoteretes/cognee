@@ -142,9 +142,12 @@ class CSVChunker(Chunker):
                 field_name = field_match.group(1).strip()
                 field_value = field_match.group(2).strip()
 
-                # Clean up special values
-                if field_value in ["[empty]", "[null]"]:
+                # Handle special values while preserving null semantics
+                if field_value == "[null]":
+                    field_value = None
+                elif field_value == "[empty]":
                     field_value = ""
+                # Otherwise keep the field_value as-is
 
                 current_row[field_name] = field_value
                 continue

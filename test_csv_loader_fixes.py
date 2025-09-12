@@ -6,7 +6,21 @@ Test script to verify CSV loader fixes for MIME type constraints and stream hand
 import sys
 import io
 import os
-sys.path.insert(0, '/workspaces/cognee')
+from pathlib import Path
+
+# Find repository root dynamically by looking for markers
+def find_repo_root():
+    """Find the repository root by looking for pyproject.toml or .git."""
+    current_path = Path(__file__).resolve()
+    for parent in current_path.parents:
+        if (parent / "pyproject.toml").exists() or (parent / ".git").exists():
+            return str(parent)
+    # Fallback to parent directory if no markers found
+    return str(current_path.parent)
+
+# Add repo root to path
+repo_root = find_repo_root()
+sys.path.insert(0, repo_root)
 
 from cognee.infrastructure.loaders.core.csv_loader import CsvLoader
 
