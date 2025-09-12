@@ -49,10 +49,19 @@ class CsvLoader(LoaderInterface):
         Returns:
             True if file can be handled, False otherwise
         """
+        # Normalize inputs for case-insensitive comparison
+        extension = extension.strip().lower()
+        mime_type = mime_type.strip().lower()
+        
         # Normalize extension to include dot prefix
         if not extension.startswith('.'):
             extension = f".{extension}"
-        return extension in self.supported_extensions and mime_type in self.supported_mime_types
+            
+        # Convert supported lists to lowercase for comparison
+        supported_extensions_lower = [ext.lower() for ext in self.supported_extensions]
+        supported_mime_types_lower = [mt.lower() for mt in self.supported_mime_types]
+        
+        return extension in supported_extensions_lower and mime_type in supported_mime_types_lower
 
     async def load(
         self,
