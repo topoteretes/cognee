@@ -135,7 +135,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         self,
         query: str,
         context: Optional[List[Edge]] = None,
-    ) -> Any:
+    ) -> List[str]:
         """
         Generates a completion using graph connections context based on a query.
 
