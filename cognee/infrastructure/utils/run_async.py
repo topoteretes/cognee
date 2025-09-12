@@ -1,13 +1,18 @@
 import asyncio
 from functools import partial
+import inspect
 
 
 async def run_async(func, *args, loop=None, executor=None, **kwargs):
     if loop is None:
         try:
-            running_loop = asyncio.get_running_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            running_loop = asyncio.get_event_loop()
+            loop = asyncio.get_event_loop()
 
-    pfunc = partial(func, *args, **kwargs)
-    return await running_loop.run_in_executor(executor, pfunc)
+    if "loop" in inspect.signature(func).parameters:
+        pfunc = partial(func, *args, loop=loop, **kwargs)
+    else:
+        pfunc = partial(func, *args, **kwargs)
+
+    return await loop.run_in_executor(executor, pfunc)

@@ -31,7 +31,8 @@ def get_notebooks_router():
 
     @router.get("")
     async def get_notebooks_endpoint(user: User = Depends(get_authenticated_user)):
-        return await get_notebooks(user.id)
+        async with get_async_session() as session:
+            return await get_notebooks(user.id, session)
 
     @router.post("")
     async def create_notebook_endpoint(

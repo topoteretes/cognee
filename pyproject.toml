@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.3.2"
+version = "0.3.3"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -147,7 +147,7 @@ Homepage = "https://www.cognee.ai"
 Repository = "https://github.com/topoteretes/cognee"
 
 [project.scripts]
-cognee = "cognee.cli._cognee:main"
+cognee-cli = "cognee.cli._cognee:main"
 
 [build-system]
 requires = ["hatchling"]
