@@ -21,11 +21,18 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
-from cognee.tasks.translation import translate_content, get_available_providers
+try:
+    from cognee.tasks.translation import translate_content, get_available_providers
+except ImportError:  # fallback for alt repo layout
+    from tasks.translation import translate_content, get_available_providers
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
 # Constants for batch processing
-DEFAULT_BATCH_SIZE = int(os.getenv("COGNEE_DEFAULT_BATCH_SIZE", "10"))
+_BATCH_ENV = os.getenv("COGNEE_DEFAULT_BATCH_SIZE", "10")
+try:
+    DEFAULT_BATCH_SIZE = max(1, int(_BATCH_ENV))
+except ValueError:
+    DEFAULT_BATCH_SIZE = 10
 
 async def cognify(
     datasets: Optional[Union[str, UUID, list[str], list[UUID]]] = None,
@@ -265,7 +272,7 @@ def get_default_tasks_with_translation(
         ontology_file_path: Path to ontology file for structured extraction
         custom_prompt: Custom prompt for graph extraction
         translation_provider: Name of a registered provider (see get_available_providers()).
-                             Common options: "noop", "langdetect", "openai", "google", "azure"; plugins allowed.
+                             Common options: "noop", "langdetect", "openai"; plugins/examples allowed (e.g., "google", "azure").
         
     Returns:
         List of Tasks including translation step
@@ -275,7 +282,9 @@ def get_default_tasks_with_translation(
     normalized = (translation_provider or "noop").strip().lower()
     if normalized not in providers:
         available = ", ".join(sorted(providers))
-        raise ValueError(f"Unknown provider: {translation_provider!r}. Available: {available}")
+        raise ValueError(
+            f"Unknown provider {translation_provider!r}. Use one of: {available}"
+        )  # noqa: TRY003
     translation_provider = normalized
     
     default_tasks = [

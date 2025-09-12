@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from pydantic import Field
 
 from cognee.infrastructure.engine.models import DataPoint
@@ -18,12 +18,12 @@ class TranslatedContent(DataPoint):
     original_chunk_id: str
     original_text: str
     translated_text: str
-    source_language: str
-    target_language: str = "en"
+    source_language: str = Field(..., pattern=r"^[a-z]{2}(-[A-Z]{2})?$|^(unknown|und)$")
+    target_language: str = Field("en", pattern=r"^[a-z]{2}(-[A-Z]{2})?$")
     translation_provider: str = "noop"
     confidence_score: float = Field(0.0, ge=0.0, le=1.0)
     translation_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: Dict[str, Any] = Field(default_factory=lambda: {"index_fields": ["source_language", "original_chunk_id"]})
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=lambda: {"index_fields": []})
 
 
 class LanguageMetadata(DataPoint):
@@ -33,8 +33,8 @@ class LanguageMetadata(DataPoint):
     chunk requires translation and a simple character count.
     """
     content_id: str
-    detected_language: str
+    detected_language: str = Field(..., pattern=r"^[a-z]{2}(-[A-Z]{2})?$|^(unknown|und)$")
     language_confidence: float = Field(0.0, ge=0.0, le=1.0)
     requires_translation: bool = False
     character_count: int = Field(0, ge=0)
-    metadata: Dict[str, Any] = Field(default_factory=lambda: {"index_fields": ["detected_language", "content_id"]})
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=lambda: {"index_fields": []})

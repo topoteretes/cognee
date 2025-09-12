@@ -10,8 +10,6 @@ Tests cover:
 """
 
 import pytest
-import asyncio
-from unittest.mock import Mock
 from typing import Tuple, Optional, Dict
 from pydantic import ValidationError
 
@@ -42,7 +40,7 @@ class MockTranslationProvider:
     async def detect_language(self, text: str) -> Tuple[str, float]:
         if "hola" in text.lower():
             return "es", 0.95
-        elif "bonjour" in text.lower():
+        if "bonjour" in text.lower():
             return "fr", 0.90
         return "en", 0.85
     
@@ -80,7 +78,7 @@ class TestProviderRegistry:
         # Should be retrievable with different casing
         provider1 = _get_provider("CUSTOM_PROVIDER")
         provider2 = _get_provider("custom_provider")
-        assert type(provider1) is type(provider2)
+        assert provider1.__class__ is provider2.__class__
 
     def test_unknown_provider_fallback(self):
         """Test unknown providers fall back to NoOp."""
@@ -389,5 +387,4 @@ class TestTranslateContentFunction:
         assert parsed["original_chunk_id"] == "test"
 
 
-if __name__ == "__main__":
-    pytest.main([__file__])
+
