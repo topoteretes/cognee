@@ -7,7 +7,6 @@ from cognee.modules.storage.utils import get_own_properties
 import asyncio
 import json
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from sys import exception
 from heapq import nlargest
 logger = get_logger("LexicalRetriever")
 
@@ -74,11 +73,17 @@ class LexicalRetriever(BaseRetriever):
 
       chunk_count = 0
       for node in nodes:
-          chunk_id, document = node
+          try:
+            chunk_id, document = node
+          except Exception as e:
+            logger.warning("Skipping node with unexpected shape: %r", node)
+            continue
           fixed_document = self.fix_json_strings(document)
           if fixed_document.get("type") == "DocumentChunk" and fixed_document.get("text"):
               try:
                   tokens = self.tokenizer(fixed_document["text"])
+                  if not tokens:
+                    continue
                   document_chunk = DocumentChunk.from_dict(fixed_document)
                   new_document = get_own_properties(document_chunk)
                   new_document["id"] = str(new_document.get("id", chunk_id))

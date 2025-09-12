@@ -20,8 +20,8 @@ class DocumentChunk(DataPoint):
     - chunk_size: The size of the chunk.
     - chunk_index: The index of the chunk in the original document.
     - cut_type: The type of cut that defined this chunk.
-    - is_part_of: The document to which this chunk belongs.
-    - contains: A list of entities or events contained within the chunk (default is None).
+    - contains: Optional list of entities or events contained within the chunk (default: None).
+    - is_part_of: Optional document to which this chunk belongs (default: None).
     - metadata: A dictionary to hold meta information related to the chunk, including index
     fields.
     """
