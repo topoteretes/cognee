@@ -4,7 +4,6 @@ import asyncio
 import os
 from typing import Dict, Type, Protocol, Tuple, Optional
 
-from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
 from .models import TranslatedContent, LanguageMetadata
 
@@ -46,10 +45,10 @@ def _get_provider(translation_provider: str) -> TranslationProvider:
 # Built-in Providers
 class NoOpProvider:
     """A provider that does nothing, used for testing or disabling translation."""
-    async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
+    async def detect_language(self, _text: str) -> Optional[Tuple[str, float]]:
         return None, 0.0
 
-    async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
+    async def translate(self, text: str, _target_language: str) -> Optional[Tuple[str, float]]:
         return text, 0.0
 
 class LangDetectProvider:
@@ -59,12 +58,12 @@ class LangDetectProvider:
     """
     def __init__(self):
         try:
-            from langdetect import detect_langs
+            from langdetect import detect_langs  # type: ignore[import-untyped]
             self._detect_langs = detect_langs
         except ImportError as e:
             raise ImportError(
                 "The 'langdetect' library is required for LangDetectProvider. "
-                "Please install it using: pip install langdetect"
+                "Please install it using: pip install cognee[translation]"
             ) from e
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
@@ -78,7 +77,7 @@ class LangDetectProvider:
             logger.error("Error during language detection: %s", e)
             return None
 
-    async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
+    async def translate(self, text: str, _target_language: str) -> Optional[Tuple[str, float]]:
         # This provider only detects language, does not translate.
         return text, 0.0
 
@@ -86,7 +85,7 @@ class OpenAIProvider:
     """A provider that uses OpenAI's API for translation."""
     def __init__(self):
         try:
-            from openai import AsyncOpenAI
+            from openai import AsyncOpenAI  # type: ignore[import-untyped]
             self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             self.model = os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-4o-mini")
             self.timeout = float(os.getenv("OPENAI_TIMEOUT", "30"))
@@ -123,12 +122,12 @@ class GoogleTranslateProvider:
     """A provider that uses the 'googletrans' library for translation."""
     def __init__(self):
         try:
-            from googletrans import Translator
+            from googletrans import Translator  # type: ignore[import-untyped]
             self.translator = Translator()
         except ImportError as e:
             raise ImportError(
                 "The 'googletrans' library is required for GoogleTranslateProvider. "
-                "Please install it using: pip install googletrans==4.0.0rc1"
+                "Please install it using: pip install cognee[translation]"
             ) from e
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
@@ -151,8 +150,8 @@ class AzureTranslatorProvider:
     """A provider that uses Azure's Translator service."""
     def __init__(self):
         try:
-            from azure.core.credentials import AzureKeyCredential
-            from azure.ai.translation.text import TextTranslationClient
+            from azure.core.credentials import AzureKeyCredential  # type: ignore[import-untyped]
+            from azure.ai.translation.text import TextTranslationClient  # type: ignore[import-untyped]
             
             self.key = os.getenv("AZURE_TRANSLATOR_KEY")
             self.endpoint = os.getenv("AZURE_TRANSLATOR_ENDPOINT", "https://api.cognitive.microsofttranslator.com/")
@@ -168,7 +167,7 @@ class AzureTranslatorProvider:
         except ImportError as e:
             raise ImportError(
                 "The 'azure-ai-translation-text' library is required for AzureTranslatorProvider. "
-                "Please install it using: pip install azure-ai-translation-text"
+                "Please install it using: pip install cognee[translation]"
             ) from e
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
@@ -197,7 +196,7 @@ register_translation_provider("google", GoogleTranslateProvider)
 register_translation_provider("azure", AzureTranslatorProvider)
 
 async def translate_content(
-    data_chunks,
+    *data_chunks,
     target_language: str = TARGET_LANGUAGE,
     translation_provider: str = "noop",
     confidence_threshold: float = CONFIDENCE_THRESHOLD,
@@ -209,7 +208,13 @@ async def translate_content(
     provider = _get_provider(translation_provider)
     results = []
     
-    for chunk in data_chunks:
+    # Support both pipeline varargs and a single list argument
+    if len(data_chunks) == 1 and isinstance(data_chunks[0], list):
+        _chunks = data_chunks[0]
+    else:
+        _chunks = list(data_chunks)
+    
+    for chunk in _chunks:
         text = getattr(chunk, "text", "") or ""
         content_id = getattr(chunk, "id", getattr(chunk, "chunk_index", "unknown"))
         
@@ -220,6 +225,16 @@ async def translate_content(
             logger.exception("Language detection failed for content_id=%s", content_id)
             detection = None
             
+        # Fallback: try 'langdetect' when the chosen provider can't detect
+        if detection is None:
+            fallback_cls = _provider_registry.get("langdetect")
+            if fallback_cls is not None and not isinstance(provider, fallback_cls):
+                try:
+                    detection = await fallback_cls().detect_language(text)
+                except Exception:
+                    logger.exception("Fallback language detection failed for content_id=%s", content_id)
+                    detection = None
+                    
         if detection is None:
             detected_language, conf = "unknown", 0.0
         else:

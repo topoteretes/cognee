@@ -5,7 +5,7 @@ import os
 
 
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.llm import get_max_chunk_tokens
+from cognee.infrastructure.llm.utils import get_max_chunk_tokens
 
 from cognee.modules.pipelines.operations.pipeline import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task

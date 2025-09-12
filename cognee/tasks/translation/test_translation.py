@@ -9,7 +9,7 @@ Tests cover:
 - Model validation and serialization
 """
 
-import pytest
+import pytest  # type: ignore[import-untyped]
 from typing import Tuple, Optional, Dict
 from pydantic import ValidationError
 
@@ -246,6 +246,7 @@ class TestTranslateContentFunction:
         assert "[MOCK TRANSLATED]" in trans_meta["translated_text"]
         assert trans_meta["source_language"] == "es"
         assert trans_meta["target_language"] == "en"
+        assert trans_meta["translation_provider"] == "test_provider"
         
         # Check chunk text was updated
         assert "[MOCK TRANSLATED]" in chunk.text

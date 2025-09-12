@@ -121,6 +121,11 @@ gui = [
     "qasync>=0.27.1,<0.28",
 ]
 graphiti = ["graphiti-core>=0.7.0,<0.8"]
+translation = [
+    "langdetect>=1.0.9,<2.0.0",
+    "googletrans==4.0.0rc1",
+    "azure-ai-translation-text>=1.0.0,<2.0.0",
+]
 # Note: New s3fs and boto3 versions don't work well together
 # Always use comaptible fixed versions of these two dependencies
 aws = ["s3fs[boto3]==2025.3.2"]
