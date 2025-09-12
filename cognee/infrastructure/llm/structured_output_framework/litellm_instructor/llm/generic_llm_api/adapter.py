@@ -110,11 +110,11 @@ class GenericAPIAdapter(LLMInterface):
             ContentPolicyViolationError,
             InstructorRetryException,
         ) as error:
-            # if (
-            #     isinstance(error, InstructorRetryException)
-            #     and "content management policy" not in str(error).lower()
-            # ):
-            #     raise error
+            if (
+                isinstance(error, InstructorRetryException)
+                and "content management policy" not in str(error).lower()
+            ):
+                raise error
 
             if not (self.fallback_model and self.fallback_api_key and self.fallback_endpoint):
                 raise ContentPolicyFilterError(
