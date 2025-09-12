@@ -12,6 +12,7 @@ Tests cover:
 import pytest  # type: ignore[import-untyped]
 from typing import Tuple, Optional, Dict
 from pydantic import ValidationError
+import cognee.tasks.translation.translate_content as tr
 
 from cognee.tasks.translation.translate_content import (
     translate_content,
@@ -22,6 +23,25 @@ from cognee.tasks.translation.translate_content import (
     _get_provider,
 )
 from cognee.tasks.translation.models import TranslatedContent, LanguageMetadata
+
+
+class TestDetectionError(Exception):  # pylint: disable=too-few-public-methods
+    """Test exception for detection failures."""
+
+
+class TestTranslationError(Exception):  # pylint: disable=too-few-public-methods
+    """Test exception for translation failures."""
+
+
+# Ensure registry isolation across tests
+@pytest.fixture(autouse=True)
+def _restore_registry():
+    snapshot = tr._provider_registry.copy()
+    try:
+        yield
+    finally:
+        tr._provider_registry.clear()
+        tr._provider_registry.update(snapshot)
 
 
 class MockDocumentChunk:
@@ -274,21 +294,23 @@ class TestTranslateContentFunction:
     async def test_error_handling_in_detection(self):
         """Test graceful error handling in language detection."""
         class FailingProvider:
-            async def detect_language(self, text: str) -> Tuple[str, float]:
-                raise Exception("Detection failed")
+            async def detect_language(self, _text: str) -> Tuple[str, float]:
+                raise TestDetectionError()
                 
-            async def translate(self, text: str, target_language: str) -> Tuple[str, float]:
+            async def translate(self, text: str, _target_language: str) -> Tuple[str, float]:
                 return text, 0.0
         
         register_translation_provider("failing", FailingProvider)
         
         chunks = [MockDocumentChunk("Test text", "chunk_1")]
         
-        # Should not raise exception, should fallback gracefully
-        result = await translate_content(
-            chunks,
-            translation_provider="failing"
-        )
+        # Disable 'langdetect' fallback to force unknown
+        ld = tr._provider_registry.pop("langdetect", None)
+        try:
+            result = await translate_content(chunks, translation_provider="failing")
+        finally:
+            if ld is not None:
+                tr._provider_registry["langdetect"] = ld
         
         chunk = result[0]
         assert "language" in chunk.metadata
@@ -304,8 +326,8 @@ class TestTranslateContentFunction:
             async def detect_language(self, text: str) -> Tuple[str, float]:
                 return "es", 0.9
                 
-            async def translate(self, text: str, target_language: str) -> Tuple[str, float]:
-                raise Exception("Translation failed")
+            async def translate(self, _text: str, _target_language: str) -> Tuple[str, float]:
+                raise TestTranslationError()
         
         register_translation_provider("partial", PartialProvider)
         

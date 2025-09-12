@@ -9,6 +9,25 @@ from .models import TranslatedContent, LanguageMetadata
 
 logger = get_logger()
 
+# Custom exceptions for better error handling
+class TranslationDependencyError(ImportError):
+    """Raised when a required translation dependency is missing."""
+
+class LangDetectError(TranslationDependencyError):
+    """LangDetect library required."""
+
+class OpenAIError(TranslationDependencyError):
+    """OpenAI library required."""
+
+class GoogleTranslateError(TranslationDependencyError):
+    """GoogleTrans library required."""
+
+class AzureTranslateError(TranslationDependencyError):
+    """Azure AI Translation library required."""
+
+class AzureConfigError(ValueError):
+    """Azure configuration error."""
+
 # Environment variables for configuration
 TARGET_LANGUAGE = os.getenv("COGNEE_TRANSLATION_TARGET_LANGUAGE", "en")
 CONFIDENCE_THRESHOLD = float(os.getenv("COGNEE_TRANSLATION_CONFIDENCE_THRESHOLD", 0.80))
@@ -61,10 +80,7 @@ class LangDetectProvider:
             from langdetect import detect_langs  # type: ignore[import-untyped]
             self._detect_langs = detect_langs
         except ImportError as e:
-            raise ImportError(
-                "The 'langdetect' library is required for LangDetectProvider. "
-                "Please install it using: pip install cognee[translation]"
-            ) from e
+            raise LangDetectError() from e
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
         try:
@@ -73,8 +89,8 @@ class LangDetectProvider:
                 return None
             best_detection = detections[0]
             return best_detection.lang, best_detection.prob
-        except Exception as e:
-            logger.error("Error during language detection: %s", e)
+        except Exception:
+            logger.exception("Error during language detection")
             return None
 
     async def translate(self, text: str, _target_language: str) -> Optional[Tuple[str, float]]:
@@ -90,12 +106,9 @@ class OpenAIProvider:
             self.model = os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-4o-mini")
             self.timeout = float(os.getenv("OPENAI_TIMEOUT", "30"))
         except ImportError as e:
-            raise ImportError(
-                "The 'openai' library is required for OpenAIProvider. "
-                "Please install it using: pip install openai"
-            ) from e
+            raise OpenAIError() from e
 
-    async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
+    async def detect_language(self, _text: str) -> Optional[Tuple[str, float]]:
         # OpenAI's API does not have a separate language detection endpoint.
         # This can be implemented as part of the translation prompt if needed.
         return None
@@ -114,8 +127,8 @@ class OpenAIProvider:
             )
             translated_text = response.choices[0].message.content.strip()
             return translated_text, 1.0  # OpenAI does not provide a confidence score.
-        except Exception as e:
-            logger.exception("Error during OpenAI translation: %s", e)
+        except Exception:
+            logger.exception("Error during OpenAI translation")
             return None
 
 class GoogleTranslateProvider:
@@ -125,25 +138,22 @@ class GoogleTranslateProvider:
             from googletrans import Translator  # type: ignore[import-untyped]
             self.translator = Translator()
         except ImportError as e:
-            raise ImportError(
-                "The 'googletrans' library is required for GoogleTranslateProvider. "
-                "Please install it using: pip install cognee[translation]"
-            ) from e
+            raise GoogleTranslateError() from e
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
         try:
             detection = await asyncio.to_thread(self.translator.detect, text)
             return detection.lang, detection.confidence
-        except Exception as e:
-            logger.exception("Error during Google Translate language detection: %s", e)
+        except Exception:
+            logger.exception("Error during Google Translate language detection")
             return None
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         try:
             translation = await asyncio.to_thread(self.translator.translate, text, dest=target_language)
             return translation.text, 1.0  # Confidence score not provided for translation.
-        except Exception as e:
-            logger.exception("Error during Google Translate translation: %s", e)
+        except Exception:
+            logger.exception("Error during Google Translate translation")
             return None
 
 class AzureTranslatorProvider:
@@ -158,25 +168,22 @@ class AzureTranslatorProvider:
             self.region = os.getenv("AZURE_TRANSLATOR_REGION", "global")
 
             if not self.key:
-                raise ValueError("AZURE_TRANSLATOR_KEY is not set.")
+                raise AzureConfigError()
 
             self.client = TextTranslationClient(
                 endpoint=self.endpoint,
                 credential=AzureKeyCredential(self.key),
             )
         except ImportError as e:
-            raise ImportError(
-                "The 'azure-ai-translation-text' library is required for AzureTranslatorProvider. "
-                "Please install it using: pip install cognee[translation]"
-            ) from e
+            raise AzureTranslateError() from e
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
         try:
             response = await asyncio.to_thread(self.client.detect, content=[text], country_hint=self.region)
             detection = response[0].primary_language
             return detection.language, detection.score
-        except Exception as e:
-            logger.exception("Error during Azure language detection: %s", e)
+        except Exception:
+            logger.exception("Error during Azure language detection")
             return None
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
@@ -184,8 +191,8 @@ class AzureTranslatorProvider:
             response = await asyncio.to_thread(self.client.translate, content=[text], to=[target_language])
             translation = response[0].translations[0]
             return translation.text, 1.0  # Confidence score not provided for translation.
-        except Exception as e:
-            logger.exception("Error during Azure translation: %s", e)
+        except Exception:
+            logger.exception("Error during Azure translation")
             return None
 
 # Register built-in providers
@@ -195,7 +202,7 @@ register_translation_provider("openai", OpenAIProvider)
 register_translation_provider("google", GoogleTranslateProvider)
 register_translation_provider("azure", AzureTranslatorProvider)
 
-async def translate_content(
+async def translate_content(  # pylint: disable=too-many-locals,too-many-branches
     *data_chunks,
     target_language: str = TARGET_LANGUAGE,
     translation_provider: str = "noop",
@@ -239,8 +246,12 @@ async def translate_content(
             detected_language, conf = "unknown", 0.0
         else:
             detected_language, conf = detection
-            
-        requires = (detected_language != target_language) and (conf >= confidence_threshold)
+
+        # If detection is unavailable, allow translators to attempt translation.
+        can_translate = translation_provider.lower() not in ("noop", "langdetect")
+        requires = ((detected_language != target_language) and (conf >= confidence_threshold)) or (
+            detected_language == "unknown" and can_translate and bool(text.strip())
+        )
         
         # 2) Record language metadata
         chunk.metadata = getattr(chunk, "metadata", {}) or {}

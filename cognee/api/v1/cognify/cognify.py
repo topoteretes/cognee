@@ -27,6 +27,11 @@ except ImportError:  # fallback for alt repo layout
     from tasks.translation import translate_content, get_available_providers
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
+
+class TranslationProviderError(ValueError):
+    """Error related to translation provider initialization."""
+
+
 # Constants for batch processing
 _BATCH_ENV = os.getenv("COGNEE_DEFAULT_BATCH_SIZE", "10")
 try:
@@ -34,7 +39,7 @@ try:
 except ValueError:
     DEFAULT_BATCH_SIZE = 10
 
-async def cognify(
+async def cognify(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     datasets: Optional[Union[str, UUID, list[str], list[UUID]]] = None,
     user: Optional[User] = None,
     graph_model: Type[BaseModel] = KnowledgeGraph,
@@ -284,6 +289,13 @@ def get_default_tasks_with_translation(
         available = ", ".join(sorted(providers))
         raise ValueError(f"Unknown provider {translation_provider!r}. Use one of: {available}")
     translation_provider = normalized
+    
+    # Preflight instantiate to surface missing optional deps early
+    try:
+        from cognee.tasks.translation.translate_content import _get_provider as _preflight_get_provider
+        _preflight_get_provider(translation_provider)
+    except Exception as e:
+        raise TranslationProviderError(f"Provider '{translation_provider}' failed to initialize") from e
     
     default_tasks = [
         Task(classify_documents),
