@@ -1,6 +1,8 @@
 import { FormEvent, useCallback, useState } from "react";
-import { CloseIcon, PlusIcon } from "@/ui/Icons";
+
+import { LoadingIndicator } from "@/ui/App";
 import { useModal } from "@/ui/elements/Modal";
+import { CloseIcon, PlusIcon } from "@/ui/Icons";
 import { CTAButton, GhostButton, IconButton, Modal, NeutralButton, Select } from "@/ui/elements";
 
 import addData from "@/modules/ingestion/addData";
@@ -44,14 +46,19 @@ export default function AddDataToCognee({ datasets, refreshDatasets, useCloud = 
     )
       .then(({ dataset_id, dataset_name }) => {
         refreshDatasets();
-        setFilesForUpload(null);
 
-        return cognifyDataset({
-          id: dataset_id,
-          name: dataset_name,
-          data: [],  // not important, just to mimick Dataset
-          status: "",  // not important, just to mimick Dataset
-        }, useCloud);
+        return cognifyDataset(
+          {
+            id: dataset_id,
+            name: dataset_name,
+            data: [],  // not important, just to mimick Dataset
+            status: "",  // not important, just to mimick Dataset
+          },
+          useCloud,
+        )
+          .then(() => {
+            setFilesForUpload(null);
+          });
       });
   }, [filesForUpload, refreshDatasets, useCloud]);
 
@@ -76,7 +83,7 @@ export default function AddDataToCognee({ datasets, refreshDatasets, useCloud = 
             <span className="text-2xl">Add new data to a dataset?</span>
             <IconButton disabled={isProcessingDataWithCognee} onClick={closeAddDataModal}><CloseIcon /></IconButton>
           </div>
-          <div className="mt-8 mb-6">Please select a dataset to add data in.<br/> If you don&apos;t have any, don&apos;t worry, we will create one for you.</div>
+          <div className="mt-8 mb-6">Please select a {useCloud ? "cloud" : "local"} dataset to add data in.<br/> If you don&apos;t have any, don&apos;t worry, we will create one for you.</div>
           <form onSubmit={submitDataToCognee}>
             <div className="max-w-md flex flex-col gap-4">
               <Select name="datasetName">
@@ -105,7 +112,8 @@ export default function AddDataToCognee({ datasets, refreshDatasets, useCloud = 
             <div className="flex flex-row gap-4 mt-4 justify-end">
               <GhostButton disabled={isProcessingDataWithCognee} type="button" onClick={() => closeAddDataModal()}>cancel</GhostButton>
               <CTAButton disabled={isProcessingDataWithCognee} type="submit">
-                {isProcessingDataWithCognee ? "processing..." : "add"}
+                {isProcessingDataWithCognee && <LoadingIndicator color="white" />}
+                add
               </CTAButton>
             </div>
           </form>
