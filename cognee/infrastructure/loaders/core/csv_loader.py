@@ -114,13 +114,14 @@ class CsvLoader(LoaderInterface):
 
         try:
             # Get file metadata - use provided stream or open file
+            binary_stream = None
             if file_stream is not None:
                 file_metadata = await get_file_metadata(file_stream)
-                should_close_stream = False
+                should_close_binary_stream = False
             else:
                 binary_stream = open(file_path, "rb")
                 file_metadata = await get_file_metadata(binary_stream)
-                should_close_stream = True
+                should_close_binary_stream = True
 
             # Name ingested file based on original file content hash
             storage_file_name = "csv_" + file_metadata["content_hash"] + ".txt"
@@ -164,11 +165,11 @@ class CsvLoader(LoaderInterface):
                 # Clean up wrapper if we created it, but preserve original stream
                 if wrapper_created and file_stream is not None:
                     csvfile.detach()  # Detach to avoid closing the underlying stream
-                elif should_close_stream and wrapper_created:
+                elif wrapper_created and should_close_binary_stream:
                     csvfile.close()
 
             # If we opened a binary stream ourselves, close it
-            if should_close_stream and file_stream is None:
+            if should_close_binary_stream and binary_stream is not None:
                 binary_stream.close()
 
             # Store the processed content
