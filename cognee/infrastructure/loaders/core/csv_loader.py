@@ -2,7 +2,8 @@ import csv
 import io
 from typing import List, Dict, Any
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
-from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
+from cognee.infrastructure.files.storage.get_storage_config import get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata, FileMetadata
 from cognee.shared.logging_utils import get_logger
 
@@ -190,11 +191,27 @@ class CsvLoader(LoaderInterface):
 
         for field in fieldnames:
             value = row.get(field, "")
-            # Clean and format the value
-            value_str = str(value).strip()
-            if value_str:
-                row_parts.append(f"  {field}: {value_str}")
+            
+            # Handle None values properly
+            if value is None:
+                row_parts.append(f"  {field}: [null]")
+            elif isinstance(value, str):
+                # Clean and escape multiline values to preserve row boundaries
+                value_str = value.strip()
+                if value_str:
+                    # Replace newlines and other problematic characters to maintain structure
+                    escaped_value = value_str.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                    row_parts.append(f"  {field}: {escaped_value}")
+                else:
+                    row_parts.append(f"  {field}: [empty]")
             else:
-                row_parts.append(f"  {field}: [empty]")
+                # For non-string values, convert safely
+                value_str = str(value).strip()
+                if value_str:
+                    # Escape any newlines that might be in converted string
+                    escaped_value = value_str.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                    row_parts.append(f"  {field}: {escaped_value}")
+                else:
+                    row_parts.append(f"  {field}: [empty]")
 
         return "\n".join(row_parts) + "\n"
