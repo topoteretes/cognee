@@ -30,7 +30,7 @@ class DocumentChunk(DataPoint):
     chunk_size: int
     chunk_index: int
     cut_type: str
-    contains: List[Union[Entity, Event]] = None
+    contains: Optional[List[Union[Entity, Event]]] = None
     is_part_of: Optional[Document] = None
 
     metadata: dict = {"index_fields": ["text"]}

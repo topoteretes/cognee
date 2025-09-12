@@ -7,6 +7,8 @@ from cognee.modules.storage.utils import get_own_properties
 import asyncio
 import json
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from sys import exception
+from heapq import nlargest
 logger = get_logger("LexicalRetriever")
 
 class LexicalRetriever(BaseRetriever):
@@ -49,10 +51,13 @@ class LexicalRetriever(BaseRetriever):
       elif isinstance(obj, list):
           return [self.fix_json_strings(item) for item in obj]
       elif isinstance(obj, str):
-          try:
-              return self.fix_json_strings(json.loads(obj))
-          except (json.JSONDecodeError, TypeError):
-              return obj
+          s = obj.strip()
+          if s.startswith("{") or s.startswith("["):
+              try:
+                  return self.fix_json_strings(json.loads(s))
+              except (json.JSONDecodeError, TypeError):
+                  pass
+          return obj
       return obj
 
   async def initialize(self):
@@ -64,8 +69,8 @@ class LexicalRetriever(BaseRetriever):
           graph_engine = await get_graph_engine()
           nodes, _ = await graph_engine.get_graph_data()
       except Exception as e:
-          logger.error("Graph engine initialization failed: %s", str(e))
-          raise NoDataError(f"Graph engine initialization failed")
+          logger.exception("Graph engine initialization failed")
+          raise NoDataError("Graph engine initialization failed") from e
 
       chunk_count = 0
       for node in nodes:
@@ -129,8 +134,7 @@ class LexicalRetriever(BaseRetriever):
               score = 0.0
           results.append((chunk_id, score))
 
-      results.sort(key=lambda x: x[1], reverse=True)
-      top_results = results[: self.top_k]
+      top_results = nlargest(self.top_k, results, key=lambda x: x[1])
 
       logger.info(
           "Retrieved %d/%d chunks for query (len=%d)",
