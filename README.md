@@ -176,7 +176,7 @@ You can also cognify your files and query using cognee UI.
 
 <img src="assets/cognee-new-ui.webp" width="100%" alt="Cognee UI 2"></a>
 
-Try cognee UI by runnning ``` cognee -ui ``` command on your terminal.
+Try cognee UI by runnning ``` cognee-cli -ui ``` command on your terminal.
 
 ## Understand our architecture
 
