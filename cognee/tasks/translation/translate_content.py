@@ -55,10 +55,9 @@ def _get_provider(translation_provider: str) -> TranslationProvider:
     """Returns a translation provider instance."""
     provider_class = _provider_registry.get(translation_provider.lower())
     if not provider_class:
-        raise ValueError(
-            f"Unknown translation provider: {translation_provider}. "
-            f"Available providers: {', '.join(get_available_providers())}"
-        )
+        available = ', '.join(get_available_providers())
+        msg = f"Unknown translation provider: {translation_provider}. Available providers: {available}"
+        raise ValueError(msg)
     return provider_class()
 
 # Built-in Providers
@@ -85,13 +84,14 @@ class LangDetectProvider:
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
         try:
             detections = self._detect_langs(text)
+        except Exception:
+            logger.exception("Error during language detection")
+            return None
+        else:
             if not detections:
                 return None
             best_detection = detections[0]
             return best_detection.lang, best_detection.prob
-        except Exception:
-            logger.exception("Error during language detection")
-            return None
 
     async def translate(self, text: str, _target_language: str) -> Optional[Tuple[str, float]]:
         # This provider only detects language, does not translate.
@@ -125,11 +125,12 @@ class OpenAIProvider:
                 temperature=0.3,
                 timeout=self.timeout,
             )
+        except Exception:
+            logger.exception("Error during OpenAI translation (model=%s)", self.model)
+            return None
+        else:
             translated_text = response.choices[0].message.content.strip()
             return translated_text, 1.0  # OpenAI does not provide a confidence score.
-        except Exception:
-            logger.exception("Error during OpenAI translation")
-            return None
 
 class GoogleTranslateProvider:
     """A provider that uses the 'googletrans' library for translation."""
@@ -143,18 +144,20 @@ class GoogleTranslateProvider:
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
         try:
             detection = await asyncio.to_thread(self.translator.detect, text)
-            return detection.lang, detection.confidence
         except Exception:
             logger.exception("Error during Google Translate language detection")
             return None
+        else:
+            return detection.lang, detection.confidence
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         try:
             translation = await asyncio.to_thread(self.translator.translate, text, dest=target_language)
-            return translation.text, 1.0  # Confidence score not provided for translation.
         except Exception:
             logger.exception("Error during Google Translate translation")
             return None
+        else:
+            return translation.text, 1.0  # Confidence score not provided for translation.
 
 class AzureTranslatorProvider:
     """A provider that uses Azure's Translator service."""
@@ -180,20 +183,22 @@ class AzureTranslatorProvider:
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
         try:
             response = await asyncio.to_thread(self.client.detect, content=[text], country_hint=self.region)
-            detection = response[0].primary_language
-            return detection.language, detection.score
         except Exception:
             logger.exception("Error during Azure language detection")
             return None
+        else:
+            detection = response[0].primary_language
+            return detection.language, detection.score
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         try:
             response = await asyncio.to_thread(self.client.translate, content=[text], to=[target_language])
-            translation = response[0].translations[0]
-            return translation.text, 1.0  # Confidence score not provided for translation.
         except Exception:
             logger.exception("Error during Azure translation")
             return None
+        else:
+            translation = response[0].translations[0]
+            return translation.text, 1.0  # Confidence score not provided for translation.
 
 # Register built-in providers
 register_translation_provider("noop", NoOpProvider)
@@ -242,10 +247,15 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
                     logger.exception("Fallback language detection failed for content_id=%s", content_id)
                     detection = None
                     
+        # Normalize detection tuple; guard against (None, ""), bad types
         if detection is None:
             detected_language, conf = "unknown", 0.0
         else:
-            detected_language, conf = detection
+            lang_code, conf = detection
+            if not isinstance(lang_code, str) or not lang_code.strip():
+                detected_language, conf = "unknown", 0.0
+            else:
+                detected_language = lang_code.strip()
 
         # If detection is unavailable, allow translators to attempt translation.
         can_translate = translation_provider.lower() not in ("noop", "langdetect")
@@ -289,7 +299,7 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
                 else:
                     logger.info("Provider returned unchanged text; skipping translation metadata (content_id=%s)", content_id)
             else:
-                # Record a safe no-op translation metadata entry
+                # Translation call failed (exception or None) — record a no-op entry
                 trans = TranslatedContent(
                     original_chunk_id=str(content_id),
                     original_text=text,

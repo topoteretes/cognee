@@ -44,7 +44,7 @@ def _restore_registry():
         tr._provider_registry.update(snapshot)
 
 
-class MockDocumentChunk:
+class MockDocumentChunk:  # pylint: disable=too-few-public-methods
     """Mock document chunk for testing."""
     
     def __init__(self, text: str, chunk_id: str = "test_chunk", metadata: Optional[Dict] = None):
@@ -233,6 +233,7 @@ class TestTranslateContentFunction:
         assert len(result) == 2
         for chunk in result:
             assert "language" in chunk.metadata
+            assert chunk.metadata["language"]["detected_language"] == "unknown"
             # No translation should occur with noop provider
             assert "translation" not in chunk.metadata
             
@@ -323,7 +324,7 @@ class TestTranslateContentFunction:
     async def test_error_handling_in_translation(self):
         """Test graceful error handling in translation."""
         class PartialProvider:
-            async def detect_language(self, text: str) -> Tuple[str, float]:
+            async def detect_language(self, _text: str) -> Tuple[str, float]:
                 return "es", 0.9
                 
             async def translate(self, _text: str, _target_language: str) -> Tuple[str, float]:

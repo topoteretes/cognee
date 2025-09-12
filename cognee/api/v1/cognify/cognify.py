@@ -32,12 +32,14 @@ class TranslationProviderError(ValueError):
     """Error related to translation provider initialization."""
 
 
+def _parse_batch_env(var: str, default: int = 10) -> int:
+    try:
+        return max(1, int(os.getenv(var, str(default))))
+    except ValueError:
+        return default
+
 # Constants for batch processing
-_BATCH_ENV = os.getenv("COGNEE_DEFAULT_BATCH_SIZE", "10")
-try:
-    DEFAULT_BATCH_SIZE = max(1, int(_BATCH_ENV))
-except ValueError:
-    DEFAULT_BATCH_SIZE = 10
+DEFAULT_BATCH_SIZE = _parse_batch_env("COGNEE_DEFAULT_BATCH_SIZE", 10)
 
 async def cognify(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     datasets: Optional[Union[str, UUID, list[str], list[UUID]]] = None,
@@ -217,7 +219,7 @@ async def cognify(  # pylint: disable=too-many-arguments,too-many-positional-arg
     )
 
 
-def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
+def get_default_tasks(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     user: Optional[User] = None,
     graph_model: Type[BaseModel] = KnowledgeGraph,
     chunker=TextChunker,
@@ -253,7 +255,7 @@ def get_default_tasks(  # TODO: Find out a better way to do this (Boris's commen
     return default_tasks
 
 
-def get_default_tasks_with_translation(
+def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,too-many-positional-arguments
     user: Optional[User] = None,
     graph_model: Type[BaseModel] = KnowledgeGraph,
     chunker=TextChunker,
@@ -283,19 +285,14 @@ def get_default_tasks_with_translation(
         List of Tasks including translation step
     """
     # Fail fast on unknown providers (keeps errors close to the API surface)
-    providers = {p.lower() for p in get_available_providers()}
-    normalized = (translation_provider or "noop").strip().lower()
-    if normalized not in providers:
-        available = ", ".join(sorted(providers))
-        raise ValueError(f"Unknown provider {translation_provider!r}. Use one of: {available}")
-    translation_provider = normalized
-    
-    # Preflight instantiate to surface missing optional deps early
+    translation_provider = (translation_provider or "noop").strip().lower()
+    # Preflight instantiate to both validate and surface missing deps early
     try:
         from cognee.tasks.translation.translate_content import _get_provider as _preflight_get_provider
         _preflight_get_provider(translation_provider)
     except Exception as e:
-        raise TranslationProviderError(f"Provider '{translation_provider}' failed to initialize") from e
+        msg = f"Provider '{translation_provider}' failed to initialize"
+        raise TranslationProviderError(msg) from e
     
     default_tasks = [
         Task(classify_documents),
