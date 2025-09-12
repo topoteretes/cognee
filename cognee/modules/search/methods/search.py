@@ -9,7 +9,6 @@ from cognee.shared.utils import send_telemetry
 from cognee.context_global_variables import set_database_global_context_variables
 
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.search.types import SearchType
 from cognee.modules.search.types import SearchResult, SearchType, CombinedSearchResult, SearchResultDataset
 
 from cognee.modules.retrieval.jaccard_retrival import JaccardChunksRetriever

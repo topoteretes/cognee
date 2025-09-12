@@ -1,7 +1,7 @@
 from cognee.modules.retrieval.lexical_retriever import LexicalRetriever
 import re
 from collections import Counter
-from typing import Optional, Callable
+from typing import Optional
 class JaccardChunksRetriever(LexicalRetriever):
     """
     Retriever that specializes LexicalRetriever to use Jaccard similarity.
@@ -21,7 +21,7 @@ class JaccardChunksRetriever(LexicalRetriever):
         multiset_jaccard : bool
             If True, use multiset Jaccard (frequency aware).
         """
-        self.stop_words = set(stop_words) if stop_words else set()
+        self.stop_words = {t.lower() for t in stop_words} if stop_words else set()
         self.multiset_jaccard = multiset_jaccard
 
         super().__init__(
