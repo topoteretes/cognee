@@ -1,5 +1,8 @@
 name: LLM Test Suites
 
+permissions:
+  contents: read
+
 on:
   workflow_call:
 
