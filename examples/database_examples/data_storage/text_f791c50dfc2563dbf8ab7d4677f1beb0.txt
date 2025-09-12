@@ -1,6 +1,0 @@
-Neo4j is a graph database management system.
-    It stores data in nodes and relationships rather than tables as in traditional relational databases.
-    Neo4j provides a powerful query language called Cypher for graph traversal and analysis.
-    It now supports vector indexing for similarity search with the vector index plugin.
-    Neo4j allows embedding generation and vector search to be combined with graph operations.
-    Applications can use Neo4j to connect vector search with graph context for more meaningful results.
