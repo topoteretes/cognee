@@ -3,6 +3,7 @@ import os
 import cognee
 from cognee.api.v1.search import SearchType
 from cognee.api.v1.cognify.cognify import get_default_tasks_with_translation
+from cognee.modules.pipelines.operations.pipeline import run_pipeline
 
 # Prerequisites:
 # 1. Set up your environment with API keys for your chosen translation provider.
@@ -36,9 +37,12 @@ async def main():
     print(f"Running cognify with translation provider: {provider}")
     
     try:
-        # Get the default pipeline tasks and add the translation task
-        translation_enabled_tasks = get_default_tasks_with_translation(provider_name=provider)
-        await cognee.cognify(tasks=translation_enabled_tasks)
+        # Build translation-enabled tasks and execute the pipeline
+        translation_enabled_tasks = get_default_tasks_with_translation(
+            translation_provider=provider
+        )
+        async for _ in run_pipeline(tasks=translation_enabled_tasks):
+            pass
         print("Cognify pipeline with translation completed successfully.")
     except (ValueError, ImportError) as e:
         print(f"Error during cognify: {e}")

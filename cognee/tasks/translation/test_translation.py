@@ -80,10 +80,10 @@ class TestProviderRegistry:
         provider2 = _get_provider("custom_provider")
         assert provider1.__class__ is provider2.__class__
 
-    def test_unknown_provider_fallback(self):
-        """Test unknown providers fall back to NoOp."""
-        provider = _get_provider("nonexistent_provider")
-        assert isinstance(provider, NoOpProvider)
+    def test_unknown_provider_raises(self):
+        """Test unknown providers raise ValueError."""
+        with pytest.raises(ValueError):
+            _get_provider("nonexistent_provider")
 
 
 class TestNoOpProvider:
@@ -94,16 +94,16 @@ class TestNoOpProvider:
         """Test language detection for ASCII text."""
         provider = NoOpProvider()
         lang, conf = await provider.detect_language("Hello world")
-        assert lang == "en"
-        assert conf == 0.5  # Lower confidence to avoid false positives
+        assert lang is None
+        assert conf == 0.0
         
     @pytest.mark.asyncio
     async def test_detect_language_unicode(self):
         """Test language detection for Unicode text."""
         provider = NoOpProvider()
         lang, conf = await provider.detect_language("Hëllo wörld")
-        assert lang == "unknown"
-        assert conf == 0.4
+        assert lang is None
+        assert conf == 0.0
         
     @pytest.mark.asyncio 
     async def test_translate_returns_original(self):

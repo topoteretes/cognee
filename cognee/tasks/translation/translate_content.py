@@ -33,12 +33,12 @@ def get_available_providers():
     """Returns a list of available translation providers."""
     return list(_provider_registry.keys())
 
-def _get_provider(provider_name: str) -> TranslationProvider:
+def _get_provider(translation_provider: str) -> TranslationProvider:
     """Returns a translation provider instance."""
-    provider_class = _provider_registry.get(provider_name.lower())
+    provider_class = _provider_registry.get(translation_provider.lower())
     if not provider_class:
         raise ValueError(
-            f"Unknown translation provider: {provider_name}. "
+            f"Unknown translation provider: {translation_provider}. "
             f"Available providers: {', '.join(get_available_providers())}"
         )
     return provider_class()
@@ -88,6 +88,8 @@ class OpenAIProvider:
         try:
             from openai import AsyncOpenAI
             self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            self.model = os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-4o-mini")
+            self.timeout = float(os.getenv("OPENAI_TIMEOUT", "30"))
         except ImportError as e:
             raise ImportError(
                 "The 'openai' library is required for OpenAIProvider. "
@@ -102,18 +104,19 @@ class OpenAIProvider:
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         try:
             response = await self.client.chat.completions.create(
-                model="gpt-4o",
+                model=self.model,
                 messages=[
                     {"role": "system", "content": f"Translate the following text to {target_language}."},
                     {"role": "user", "content": text},
                 ],
                 max_tokens=1024,
                 temperature=0.3,
+                timeout=self.timeout,
             )
             translated_text = response.choices[0].message.content.strip()
             return translated_text, 1.0  # OpenAI does not provide a confidence score.
         except Exception as e:
-            logger.error("Error during OpenAI translation: %s", e)
+            logger.exception("Error during OpenAI translation: %s", e)
             return None
 
 class GoogleTranslateProvider:
@@ -130,18 +133,18 @@ class GoogleTranslateProvider:
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
         try:
-            detection = self.translator.detect(text)
+            detection = await asyncio.to_thread(self.translator.detect, text)
             return detection.lang, detection.confidence
         except Exception as e:
-            logger.error("Error during Google Translate language detection: %s", e)
+            logger.exception("Error during Google Translate language detection: %s", e)
             return None
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         try:
-            translation = self.translator.translate(text, dest=target_language)
+            translation = await asyncio.to_thread(self.translator.translate, text, dest=target_language)
             return translation.text, 1.0  # Confidence score not provided for translation.
         except Exception as e:
-            logger.error("Error during Google Translate translation: %s", e)
+            logger.exception("Error during Google Translate translation: %s", e)
             return None
 
 class AzureTranslatorProvider:
@@ -170,20 +173,20 @@ class AzureTranslatorProvider:
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
         try:
-            response = self.client.detect(content=[text], country_hint=self.region)
+            response = await asyncio.to_thread(self.client.detect, content=[text], country_hint=self.region)
             detection = response[0].primary_language
             return detection.language, detection.score
         except Exception as e:
-            logger.error("Error during Azure language detection: %s", e)
+            logger.exception("Error during Azure language detection: %s", e)
             return None
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         try:
-            response = self.client.translate(content=[text], to=[target_language])
+            response = await asyncio.to_thread(self.client.translate, content=[text], to=[target_language])
             translation = response[0].translations[0]
             return translation.text, 1.0  # Confidence score not provided for translation.
         except Exception as e:
-            logger.error("Error during Azure translation: %s", e)
+            logger.exception("Error during Azure translation: %s", e)
             return None
 
 # Register built-in providers
@@ -194,62 +197,83 @@ register_translation_provider("google", GoogleTranslateProvider)
 register_translation_provider("azure", AzureTranslatorProvider)
 
 async def translate_content(
-    graph: KnowledgeGraph,
-    provider_name: str = "noop",
+    data_chunks,
     target_language: str = TARGET_LANGUAGE,
+    translation_provider: str = "noop",
     confidence_threshold: float = CONFIDENCE_THRESHOLD,
-) -> KnowledgeGraph:
+):
     """
-    Translate the content of a KnowledgeGraph if it's not in the target language.
+    Translate non-English chunks to the target language; attach language/translation metadata.
+    Returns the (possibly modified) list of chunks.
     """
-    provider = _get_provider(provider_name)
-    original_content = graph.source_content
-
-    # 1. Detect language
-    detection_result = await provider.detect_language(original_content)
-    if detection_result is None:
-        logger.warning("Language detection failed. Skipping translation.")
-        return graph
-
-    detected_language, confidence = detection_result
+    provider = _get_provider(translation_provider)
+    results = []
     
-    # 2. Check if translation is needed
-    if detected_language == target_language or confidence < confidence_threshold:
-        logger.info(
-            "Skipping translation for content (lang=%s, conf=%.2f)",
-            detected_language,
-            confidence,
+    for chunk in data_chunks:
+        text = getattr(chunk, "text", "") or ""
+        content_id = getattr(chunk, "id", getattr(chunk, "chunk_index", "unknown"))
+        
+        # 1) Detect language
+        try:
+            detection = await provider.detect_language(text)
+        except Exception:
+            logger.exception("Language detection failed for content_id=%s", content_id)
+            detection = None
+            
+        if detection is None:
+            detected_language, conf = "unknown", 0.0
+        else:
+            detected_language, conf = detection
+            
+        requires = (detected_language != target_language) and (conf >= confidence_threshold)
+        
+        # 2) Record language metadata
+        chunk.metadata = getattr(chunk, "metadata", {}) or {}
+        lang_meta = LanguageMetadata(
+            content_id=str(content_id),
+            detected_language=detected_language,
+            language_confidence=conf,
+            requires_translation=requires,
+            character_count=len(text),
         )
-        return graph
-
-    logger.info(
-        "Translating content from '%s' to '%s' (confidence: %.2f)",
-        detected_language,
-        target_language,
-        confidence,
-    )
-
-    # 3. Translate content
-    translation_result = await provider.translate(original_content, target_language)
-    if translation_result is None:
-        logger.error("Translation failed. Using original content.")
-        return graph
-
-    translated_text, translation_confidence = translation_result
-
-    # 4. Store translation details in metadata
-    graph.translated_content = TranslatedContent(
-        translated_text=translated_text,
-        original_language=LanguageMetadata(
-            language=detected_language,
-            confidence=confidence,
-        ),
-        translation_confidence=translation_confidence,
-        provider=provider_name,
-    )
-
-    # 5. Replace source_content with translated_text for subsequent pipeline steps
-    graph.source_content = translated_text
-    
-    logger.info("Content translated successfully. Provider: %s", provider_name)
-    return graph
+        chunk.metadata["language"] = lang_meta.model_dump()
+        
+        # 3) Translate if required
+        if requires:
+            try:
+                tr = await provider.translate(text, target_language)
+            except Exception:
+                logger.exception("Translation failed for content_id=%s", content_id)
+                tr = None
+                
+            if tr:
+                translated_text, t_conf = tr
+                if translated_text != text:
+                    trans = TranslatedContent(
+                        original_chunk_id=str(content_id),
+                        original_text=text,
+                        translated_text=translated_text,
+                        source_language=detected_language,
+                        target_language=target_language,
+                        translation_provider=translation_provider.lower(),
+                        confidence_score=t_conf or 0.0,
+                    )
+                    chunk.metadata["translation"] = trans.model_dump()
+                    chunk.text = translated_text
+                else:
+                    logger.info("Provider returned unchanged text; skipping translation metadata (content_id=%s)", content_id)
+            else:
+                # Record a safe no-op translation metadata entry
+                trans = TranslatedContent(
+                    original_chunk_id=str(content_id),
+                    original_text=text,
+                    translated_text=text,
+                    source_language=detected_language,
+                    target_language=target_language,
+                    translation_provider=translation_provider.lower(),
+                    confidence_score=0.0,
+                )
+                chunk.metadata["translation"] = trans.model_dump()
+                
+        results.append(chunk)
+    return results

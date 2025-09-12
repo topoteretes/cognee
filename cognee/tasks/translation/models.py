@@ -23,7 +23,7 @@ class TranslatedContent(DataPoint):
     translation_provider: str = "noop"
     confidence_score: float = Field(0.0, ge=0.0, le=1.0)
     translation_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=lambda: {"index_fields": []})
+    # Inherit `metadata` from DataPoint to keep typing and defaults consistent.
 
 
 class LanguageMetadata(DataPoint):
@@ -37,4 +37,4 @@ class LanguageMetadata(DataPoint):
     language_confidence: float = Field(0.0, ge=0.0, le=1.0)
     requires_translation: bool = False
     character_count: int = Field(0, ge=0)
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=lambda: {"index_fields": []})
+    # Inherit `metadata` from DataPoint to keep typing and defaults consistent.

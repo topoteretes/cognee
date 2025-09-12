@@ -282,9 +282,7 @@ def get_default_tasks_with_translation(
     normalized = (translation_provider or "noop").strip().lower()
     if normalized not in providers:
         available = ", ".join(sorted(providers))
-        raise ValueError(
-            f"Unknown provider {translation_provider!r}. Use one of: {available}"
-        )  # noqa: TRY003
+        raise ValueError(f"Unknown provider {translation_provider!r}. Use one of: {available}")
     translation_provider = normalized
     
     default_tasks = [
