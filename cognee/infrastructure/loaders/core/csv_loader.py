@@ -1,6 +1,6 @@
 import csv
 import io
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
 from cognee.infrastructure.files.storage.get_storage_config import get_storage_config
@@ -31,7 +31,13 @@ class CsvLoader(LoaderInterface):
     @property
     def supported_mime_types(self) -> List[str]:
         """Supported MIME types for CSV content."""
-        return ["text/csv", "application/csv"]
+        return [
+            "text/csv", 
+            "application/csv", 
+            "application/vnd.ms-excel", 
+            "text/plain", 
+            "text/x-csv"
+        ]
 
     @property
     def loader_name(self) -> str:
@@ -41,27 +47,39 @@ class CsvLoader(LoaderInterface):
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """
         Check if this loader can handle the given file.
+        Uses extension-first matching strategy with MIME type fallback.
 
         Args:
-            extension: File extension
-            mime_type: MIME type of the file
+            extension: File extension (may be None)
+            mime_type: MIME type of the file (may be None)
 
         Returns:
             True if file can be handled, False otherwise
         """
-        # Normalize inputs for case-insensitive comparison
-        extension = extension.strip().lower()
-        mime_type = mime_type.strip().lower()
+        # Guard against None values and normalize inputs
+        extension = (extension or "").strip().lower()
+        mime_type = (mime_type or "").strip().lower()
         
-        # Normalize extension to include dot prefix
-        if not extension.startswith('.'):
+        # Normalize extension to include dot prefix if present
+        if extension and not extension.startswith('.'):
             extension = f".{extension}"
             
         # Convert supported lists to lowercase for comparison
         supported_extensions_lower = [ext.lower() for ext in self.supported_extensions]
         supported_mime_types_lower = [mt.lower() for mt in self.supported_mime_types]
         
-        return extension in supported_extensions_lower and mime_type in supported_mime_types_lower
+        # Extension-first matching strategy
+        if extension:
+            if extension in supported_extensions_lower:
+                return True
+        
+        # Fallback to MIME type matching
+        if mime_type:
+            if mime_type in supported_mime_types_lower:
+                return True
+        
+        # Neither extension nor MIME type matched
+        return False
 
     async def load(
         self,
@@ -69,6 +87,7 @@ class CsvLoader(LoaderInterface):
         encoding: str = "utf-8",
         delimiter: str = ",",
         quotechar: str = '"',
+        file_stream: Optional[io.IOBase] = None,
         **kwargs
     ) -> str:
         """
@@ -79,6 +98,7 @@ class CsvLoader(LoaderInterface):
             encoding: Text encoding to use (default: utf-8)
             delimiter: CSV field delimiter (default: comma)
             quotechar: CSV quote character (default: double quote)
+            file_stream: Optional file stream to use instead of opening file_path
             **kwargs: Additional keyword arguments (accepted for compatibility)
 
         Returns:
@@ -93,14 +113,32 @@ class CsvLoader(LoaderInterface):
         logger.info(f"Loading CSV file: {file_path}")
 
         try:
-            with open(file_path, "rb") as f:
-                file_metadata = await get_file_metadata(f)
+            # Get file metadata - use provided stream or open file
+            if file_stream is not None:
+                file_metadata = await get_file_metadata(file_stream)
+                should_close_stream = False
+            else:
+                binary_stream = open(file_path, "rb")
+                file_metadata = await get_file_metadata(binary_stream)
+                should_close_stream = True
 
             # Name ingested file based on original file content hash
             storage_file_name = "csv_" + file_metadata["content_hash"] + ".txt"
 
             # Read and process CSV content
-            with open(file_path, "r", encoding=encoding, newline="") as csvfile:
+            if file_stream is not None:
+                # Wrap the provided stream in TextIOWrapper if it's binary
+                if hasattr(file_stream, 'mode') and 'b' in file_stream.mode:
+                    csvfile = io.TextIOWrapper(file_stream, encoding=encoding, newline="")
+                    wrapper_created = True
+                else:
+                    csvfile = file_stream
+                    wrapper_created = False
+            else:
+                csvfile = io.TextIOWrapper(binary_stream, encoding=encoding, newline="")
+                wrapper_created = True
+
+            try:
                 # Detect dialect if not specified
                 sample = csvfile.read(1024)
                 csvfile.seek(0)
@@ -121,6 +159,17 @@ class CsvLoader(LoaderInterface):
 
                 structured_content = self._process_csv_rows(reader)
                 column_count = len(reader.fieldnames or [])
+
+            finally:
+                # Clean up wrapper if we created it, but preserve original stream
+                if wrapper_created and file_stream is not None:
+                    csvfile.detach()  # Detach to avoid closing the underlying stream
+                elif should_close_stream and wrapper_created:
+                    csvfile.close()
+
+            # If we opened a binary stream ourselves, close it
+            if should_close_stream and file_stream is None:
+                binary_stream.close()
 
             # Store the processed content
             storage_config = get_storage_config()
