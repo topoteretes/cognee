@@ -16,22 +16,9 @@ interface NotebookProps {
   notebook: NotebookType;
   runCell: (notebook: NotebookType, cell: Cell, cogneeInstance: string) => Promise<void>;
   updateNotebook: (updatedNotebook: NotebookType) => void;
-  saveNotebook: (notebook: NotebookType) => void;
 }
 
-export default function Notebook({ notebook, updateNotebook, saveNotebook, runCell }: NotebookProps) {
-  const saveCells = useCallback(() => {
-    saveNotebook(notebook);
-  }, [notebook, saveNotebook]);
-
-  useEffect(() => {
-    window.addEventListener("beforeunload", saveCells);
-
-    return () => {
-      window.removeEventListener("beforeunload", saveCells);
-    };
-  }, [saveCells]);
-
+export default function Notebook({ notebook, updateNotebook, runCell }: NotebookProps) {
   useEffect(() => {
     if (notebook.cells.length === 0) {
       const newCell: Cell = {
@@ -44,8 +31,9 @@ export default function Notebook({ notebook, updateNotebook, saveNotebook, runCe
        ...notebook,
         cells: [newCell],
       });
+      toggleCellOpen(newCell.id)
     }
-  }, [notebook, saveNotebook, updateNotebook]);
+  }, [notebook, updateNotebook]);
 
   const handleCellRun = useCallback((cell: Cell, cogneeInstance: string) => {
     return runCell(notebook, cell, cogneeInstance);
@@ -289,9 +277,14 @@ function CellResult({ content }: { content: [] }) {
         }
       }
       if (typeof(line) === "object" && line["result"]) {
+        const datasets = Array.from(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          new Set(Object.values(line["datasets"]).map((dataset: any) => dataset.name))
+        ).join(", ");
+
         parsedContent.push(
           <div className="w-full h-full bg-white">
-            <span className="text-sm pl-2 mb-4">query response (dataset: {line["dataset_name"]})</span>
+            <span className="text-sm pl-2 mb-4">query response (datasets: {datasets})</span>
             <span className="block px-2 py-2">{line["result"]}</span>
           </div>
         );
@@ -303,7 +296,7 @@ function CellResult({ content }: { content: [] }) {
                 data={transformToVisualizationData(line["graphs"]["*"])}
                 ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
                 graphControls={graphControls}
-                className="min-h-48"
+                className="min-h-80"
               />
             </div>
           );

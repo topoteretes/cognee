@@ -48,7 +48,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         query: str,
         context: Optional[List[Edge]] = None,
         context_extension_rounds=4,
-    ) -> str:
+    ) -> List[str]:
         """
         Extends the context for a given query by retrieving related triplets and generating new
         completions based on them.

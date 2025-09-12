@@ -56,8 +56,8 @@ export default function NotebooksAccordion({
     notebookLoading();
     removeNotebook(notebookToRemove!.id)
       .finally(notebookLoaded)
-      .finally(closeRemoveNotebookModal);
-      setNotebookToRemove(null);
+      .finally(closeRemoveNotebookModal)
+      .finally(() => setNotebookToRemove(null));
   };
 
   const handleNotebookAdd = useCallback((_: object, formEvent?: FormEvent<HTMLFormElement>) => {
