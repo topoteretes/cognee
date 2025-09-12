@@ -197,10 +197,10 @@ class CSVChunker(Chunker):
         # Initialize tokenizer once
         tokenizer = None
         try:
-            from cognee.infrastructure.databases.vector import get_vector_engine
+            from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
             embedding_engine = get_vector_engine().embedding_engine
             tokenizer = getattr(embedding_engine, "tokenizer", None)
-        except (ModuleNotFoundError, AttributeError):
+        except (ImportError, ModuleNotFoundError, AttributeError):
             tokenizer = None
 
         # Group rows into chunks

@@ -3,7 +3,7 @@ import io
 from typing import List, Dict, Any
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
-from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
+from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata, FileMetadata
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -112,7 +112,24 @@ class CsvLoader(LoaderInterface):
 
             # Store the processed content
             storage_config = get_storage_config()
-            data_root_directory = storage_config["data_root_directory"]
+            
+            # Handle both object and dict return types for data_root_directory
+            data_root_directory = getattr(storage_config, "data_root_directory", None)
+            if data_root_directory is None:
+                # Fallback to dict access
+                try:
+                    data_root_directory = storage_config.get("data_root_directory")
+                except AttributeError:
+                    # Neither object nor dict-like
+                    raise CsvLoadError(
+                        "storage_config does not contain 'data_root_directory' attribute or key"
+                    )
+            
+            if data_root_directory is None:
+                raise CsvLoadError(
+                    "data_root_directory is not configured in storage settings"
+                )
+                
             storage = get_file_storage(data_root_directory)
 
             full_file_path = await storage.store(storage_file_name, structured_content)
