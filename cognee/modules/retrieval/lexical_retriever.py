@@ -40,17 +40,18 @@ class LexicalRetriever(BaseRetriever):
         self.top_k = top_k
         self.with_scores = with_scores
 
-    def fix_json_strings(self, obj):
+    @staticmethod
+    def fix_json_strings(obj):
         """
         Recursively convert any JSON string values into dict/list.
         """
         if isinstance(obj, dict):
-            return {k: self.fix_json_strings(v) for k, v in obj.items()}
+            return {k: LexicalRetriever.fix_json_strings(v) for k, v in obj.items()}
         elif isinstance(obj, list):
-            return [self.fix_json_strings(item) for item in obj]
+            return [LexicalRetriever.fix_json_strings(item) for item in obj]
         elif isinstance(obj, str):
             try:
-                return self.fix_json_strings(json.loads(obj))
+                return LexicalRetriever.fix_json_strings(json.loads(obj))
             except (json.JSONDecodeError, TypeError):
                 return obj
         return obj
@@ -78,7 +79,7 @@ class LexicalRetriever(BaseRetriever):
             chunk_count = 0
             for node in nodes:
                 chunk_id, document = node
-                fixed_document = cls.fix_json_strings(cls, document)
+                fixed_document = cls.fix_json_strings(document)
                 if fixed_document.get("type") == "DocumentChunk" and fixed_document.get("text"):
                     try:
                         tokens = tokenizer(fixed_document["text"])
