@@ -249,7 +249,7 @@ async def _sync_to_cognee_cloud(
     try:
         # Get cloud configuration
         cloud_base_url = await _get_cloud_base_url()
-        cloud_auth_token = await _get_cloud_auth_token(user)
+        cloud_auth_token = _get_cloud_auth_token()
 
         # Step 1: Sync files for all datasets concurrently
         sync_files_tasks = [
@@ -559,7 +559,7 @@ async def _get_cloud_base_url() -> str:
     return os.getenv("COGNEE_CLOUD_API_URL", "http://localhost:8001")
 
 
-async def _get_cloud_auth_token(user: User) -> str:
+def _get_cloud_auth_token() -> str:
     """Get authentication token for Cognee Cloud API."""
     return os.getenv("COGNEE_CLOUD_AUTH_TOKEN", "your-auth-token")
 

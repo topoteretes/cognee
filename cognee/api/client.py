@@ -215,6 +215,19 @@ async def detailed_health_check():
         )
 
 
+@app.get("/health/cloud")
+async def cloud_health_check():
+    """
+    Health check endpoint for cloud connection.
+    """
+    try:
+        health_status = await health_checker.check_cloud_connection()
+        status_code = 503 if health_status.status == HealthStatus.UNHEALTHY else 200
+
+        return JSONResponse(status_code=status_code, content=health_status.model_dump())
+    except Exception as e:
+        return JSONResponse(status_code=503, content={"status": "unhealthy", "error": f"Cloud health check failed: {str(e)}"})
+
 app.include_router(get_auth_router(), prefix="/api/v1/auth", tags=["auth"])
 
 app.include_router(
