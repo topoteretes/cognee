@@ -68,6 +68,10 @@ fetch.checkHealth = () => {
   return global.fetch(`${backendApiUrl.replace("/api", "")}/health`);
 };
 
+fetch.checkCloudHealth = () => {
+  return global.fetch(`${cloudApiUrl.replace("/api", "")}/health/cloud`);
+};
+
 fetch.setApiKey = (newApiKey: string) => {
   apiKey = newApiKey;
 };

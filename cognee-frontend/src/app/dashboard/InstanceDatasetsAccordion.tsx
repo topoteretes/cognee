@@ -35,7 +35,13 @@ export default function InstanceDatasetsAccordion({ onDatasetsChange }: Instance
         .then(setLocalCogneeConnected)
     };
 
+    const checkConnectionToCloudCognee = () => {
+      fetch.checkCloudHealth()
+        .then(setCloudCogneeConnected)
+    };
+
     checkConnectionToLocalCognee();
+    checkConnectionToCloudCognee();
   }, [checkConnectionToCloudCognee, setCloudCogneeConnected, setLocalCogneeConnected]);
 
   const {
