@@ -167,6 +167,7 @@ class CSVChunker(Chunker):
     def _format_row_for_chunk(self, row_data: Dict[str, str], row_num: int) -> str:
         """
         Format a row's data for inclusion in a chunk.
+        Mirrors CsvLoader._format_row behavior for consistency.
 
         Args:
             row_data: Dictionary of column-value pairs
@@ -178,10 +179,27 @@ class CSVChunker(Chunker):
         parts = [f"Row {row_num}:"]
 
         for field, value in row_data.items():
-            if value:
-                parts.append(f"  {field}: {value}")
+            # Handle None values properly
+            if value is None:
+                parts.append(f"  {field}: [null]")
+            elif isinstance(value, str):
+                # Clean and escape multiline values to preserve row boundaries
+                value_str = value.strip()
+                if value_str:
+                    # Replace newlines and other problematic characters to maintain structure
+                    escaped_value = value_str.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                    parts.append(f"  {field}: {escaped_value}")
+                else:
+                    parts.append(f"  {field}: [empty]")
             else:
-                parts.append(f"  {field}: [empty]")
+                # For non-string values, convert safely (preserves 0/False)
+                value_str = str(value).strip()
+                if value_str:
+                    # Escape any newlines that might be in converted string
+                    escaped_value = value_str.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                    parts.append(f"  {field}: {escaped_value}")
+                else:
+                    parts.append(f"  {field}: [empty]")
 
         return "\n".join(parts)
 

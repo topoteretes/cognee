@@ -98,29 +98,47 @@ Row 3:
 Total rows processed: 3"""
         
         # Test chunker parsing
-        chunker = CSVChunker()
+        # Create minimal stub document and async text source for CSVChunker
+        class StubDocument:
+            def __init__(self):
+                self.id = "test-doc"
+                self.name = "test.csv"
+                
+        async def stub_get_text():
+            return ""
+        
+        stub_document = StubDocument()
+        chunker = CSVChunker(
+            document=stub_document,
+            get_text=stub_get_text,
+            max_chunk_tokens=1000,
+            chunk_size=1024,
+            rows_per_chunk=1
+        )
         # Use the private method for testing
-        parsed_rows = chunker._parse_csv_content(test_formatted_content)
+        parsed_result = chunker._parse_csv_content(test_formatted_content)
+        parsed_rows = parsed_result["rows"]  # Access the rows list from the result dict
         
         print(f"Parsed {len(parsed_rows)} rows:")
         for i, row in enumerate(parsed_rows):
-            print(f"Row {i+1}: {row}")
+            row_data = row["data"]  # Access the actual field data
+            print(f"Row {i+1}: {row_data}")
             
             # Verify null semantics
             if i == 0:  # Row 1
-                assert row["phone"] is None, f"[null] should parse to None, got {repr(row['phone'])}"
-                assert row["notes"] == "", f"[empty] should parse to empty string, got {repr(row['notes'])}"
+                assert row_data["phone"] is None, f"[null] should parse to None, got {repr(row_data['phone'])}"
+                assert row_data["notes"] == "", f"[empty] should parse to empty string, got {repr(row_data['notes'])}"
                 print("✅ Row 1: [null] → None, [empty] → ''")
                 
             elif i == 1:  # Row 2  
-                assert row["email"] == "", f"[empty] should parse to empty string, got {repr(row['email'])}"
-                assert row["notes"] is None, f"[null] should parse to None, got {repr(row['notes'])}"
+                assert row_data["email"] == "", f"[empty] should parse to empty string, got {repr(row_data['email'])}"
+                assert row_data["notes"] is None, f"[null] should parse to None, got {repr(row_data['notes'])}"
                 print("✅ Row 2: [empty] → '', [null] → None")
                 
             elif i == 2:  # Row 3
-                assert row["name"] == "", f"[empty] should parse to empty string, got {repr(row['name'])}"
-                assert row["email"] is None, f"[null] should parse to None, got {repr(row['email'])}"
-                assert row["phone"] == "", f"[empty] should parse to empty string, got {repr(row['phone'])}"
+                assert row_data["name"] == "", f"[empty] should parse to empty string, got {repr(row_data['name'])}"
+                assert row_data["email"] is None, f"[null] should parse to None, got {repr(row_data['email'])}"
+                assert row_data["phone"] == "", f"[empty] should parse to empty string, got {repr(row_data['phone'])}"
                 print("✅ Row 3: [empty] → '', [null] → None, [empty] → ''")
         
         print("\n✅ All round-trip null/empty semantics tests PASSED!")
