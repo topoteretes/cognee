@@ -22,7 +22,7 @@ from cognee.modules.storage.utils import JSONEncoder
 
 
 try:
-    from codingagents.coding_rule_associations import (
+    from cognee.tasks.codingagents.coding_rule_associations import (
         add_rule_associations,
         get_existing_rules,
     )
