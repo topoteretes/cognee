@@ -69,6 +69,7 @@ class CsvLoader(LoaderInterface):
         encoding: str = "utf-8",
         delimiter: str = ",",
         quotechar: str = '"',
+        **kwargs
     ) -> str:
         """
         Load and process the CSV file, preserving row-column relationships.
@@ -78,6 +79,7 @@ class CsvLoader(LoaderInterface):
             encoding: Text encoding to use (default: utf-8)
             delimiter: CSV field delimiter (default: comma)
             quotechar: CSV quote character (default: double quote)
+            **kwargs: Additional keyword arguments (accepted for compatibility)
 
         Returns:
             Path to the processed text file containing structured CSV data
@@ -105,11 +107,11 @@ class CsvLoader(LoaderInterface):
 
                 try:
                     dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
-                    # Only use detected delimiter if not explicitly set
-                    if delimiter == ",":
+                    # Only use detected delimiter if not explicitly set and valid
+                    if delimiter == "," and isinstance(dialect.delimiter, str) and len(dialect.delimiter) == 1:
                         delimiter = dialect.delimiter
-                    # Only use detected quotechar if not explicitly set
-                    if quotechar == '"':
+                    # Only use detected quotechar if not explicitly set and valid
+                    if quotechar == '"' and isinstance(dialect.quotechar, str) and len(dialect.quotechar) == 1:
                         quotechar = dialect.quotechar
                 except csv.Error:
                     # Use defaults if detection fails
