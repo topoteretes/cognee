@@ -1,6 +1,7 @@
 # pylint: disable=R0903, W0221
 """This module provides content translation capabilities for the Cognee framework."""
 import asyncio
+import math
 import os
 from typing import Dict, Type, Protocol, Tuple, Optional
 
@@ -66,6 +67,18 @@ def _get_provider(translation_provider: str) -> TranslationProvider:
         msg = f"Unknown translation provider: {translation_provider}. Available providers: {available}"
         raise ValueError(msg)
     return provider_class()
+# Helpers
+def _normalize_lang_code(code: Optional[str]) -> str:
+    if not isinstance(code, str) or not code.strip():
+        return "unknown"
+    c = code.strip().replace("_", "-")
+    parts = c.split("-")
+    if len(parts) == 1 and len(parts[0]) == 2 and parts[0].isalpha():
+        return parts[0].lower()
+    if len(parts) >= 2 and len(parts[0]) == 2 and parts[1]:
+        return f"{parts[0].lower()}-{parts[1][:2].upper()}"
+    return "unknown"
+
 
 # Test helpers for registry isolation
 def snapshot_registry() -> Dict[str, Type[TranslationProvider]]:
@@ -136,14 +149,13 @@ class OpenAIProvider:
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         try:
-            response = await self.client.chat.completions.create(
+            response = await self.client.with_options(timeout=self.timeout).chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": f"Translate the following text to {target_language}."},
                     {"role": "user", "content": text},
                 ],
                 temperature=0.3,
-                timeout=self.timeout,
             )
         except Exception:
             logger.exception("Error during OpenAI translation (model=%s)", self.model)
@@ -280,20 +292,15 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
             detected_language, conf = "unknown", 0.0
         else:
             lang_code, conf = detection
-            if not isinstance(lang_code, str) or not lang_code.strip():
-                detected_language, conf = "unknown", 0.0
-            else:
-                detected_language = lang_code.strip()
-                # coerce confidence -> [0.0, 1.0]
-                try:
-                    conf = float(conf)
-                except (TypeError, ValueError):
-                    conf = 0.0
-                # NaN check: conf != conf is True only for NaN
-                if conf != conf:
-                    conf = 0.0
-                # clamp to [0.0, 1.0]
-                conf = max(0.0, min(1.0, conf))
+            detected_language = _normalize_lang_code(lang_code)
+            # coerce confidence -> [0.0, 1.0]
+            try:
+                conf = float(conf)
+            except (TypeError, ValueError):
+                conf = 0.0
+            if math.isnan(conf):
+                conf = 0.0
+            conf = max(0.0, min(1.0, conf))
 
         # If detection is unavailable, allow translators to attempt translation.
         can_translate = translation_provider.lower() not in ("noop", "langdetect")

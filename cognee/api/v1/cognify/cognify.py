@@ -308,10 +308,10 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
         available = ", ".join(get_available_providers())
         logger.error("Unknown provider '%s'. Available: %s", translation_provider, available)
         raise UnknownTranslationProviderError(f"Unknown provider '{translation_provider}'")
-    # Instantiate to validate dependencies; let provider-specific ImportErrors bubble up
+    # Instantiate to validate dependencies; include provider-specific config errors
     try:
         validate_provider(translation_provider)
-    except ImportError as e:
+    except Exception as e:  # noqa: BLE001 – we want to convert provider init errors
         available = ", ".join(get_available_providers())
         logger.error(
             "Provider '%s' failed to initialize. Available: %s",
