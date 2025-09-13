@@ -24,7 +24,7 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
-from cognee.tasks.translation import translate_content, get_available_providers
+from cognee.tasks.translation import translate_content, get_available_providers, validate_provider
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
 
@@ -310,8 +310,7 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
         raise UnknownTranslationProviderError(f"Unknown provider '{translation_provider}'")
     # Instantiate to validate dependencies; let provider-specific ImportErrors bubble up
     try:
-        from cognee.tasks.translation.translate_content import _get_provider  # still private; consider public validate()
-        _get_provider(translation_provider)
+        validate_provider(translation_provider)
     except ImportError as e:
         available = ", ".join(get_available_providers())
         logger.error(

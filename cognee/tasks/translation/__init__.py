@@ -3,6 +3,7 @@ from .translate_content import (
     register_translation_provider,
     get_available_providers,
     TranslationProvider,
+    validate_provider,
 )
 from .models import TranslatedContent, LanguageMetadata
 
@@ -12,5 +13,6 @@ __all__ = (
     "TranslationProvider",
     "get_available_providers",
     "register_translation_provider",
+    "validate_provider",
     "translate_content",
 )

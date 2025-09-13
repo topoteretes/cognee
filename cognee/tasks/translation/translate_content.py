@@ -77,11 +77,15 @@ def restore_registry(snapshot: Dict[str, Type[TranslationProvider]]) -> None:
     _provider_registry.clear()
     _provider_registry.update(snapshot)
 
+def validate_provider(name: str) -> None:
+    """Ensure a provider can be resolved and instantiated or raise."""
+    _get_provider(name)
+
 # Built-in Providers
 class NoOpProvider:
     """A provider that does nothing, used for testing or disabling translation."""
     async def detect_language(self, _text: str) -> Optional[Tuple[str, float]]:
-        return None, 0.0
+        return None
 
     async def translate(self, text: str, _target_language: str) -> Optional[Tuple[str, float]]:
         return text, 0.0
@@ -319,13 +323,14 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
             if tr and isinstance(tr[0], str) and tr[0].strip() and tr[0] != text:
                 # Translation succeeded and text was actually changed
                 translated_text, t_conf = tr
+                provider_used = provider.__class__.__name__.replace("Provider", "").lower()
                 trans = TranslatedContent(
                     original_chunk_id=str(content_id),
                     original_text=text,
                     translated_text=translated_text,
                     source_language=detected_language,
                     target_language=target_language,
-                    translation_provider=translation_provider.lower(),
+                    translation_provider=provider_used,
                     confidence_score=t_conf or 0.0,
                 )
                 chunk.metadata["translation"] = trans.model_dump()
@@ -334,7 +339,7 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
                 if hasattr(chunk, "chunk_size"):
                     try:
                         chunk.chunk_size = len(translated_text.split())
-                    except Exception:
+                    except (AttributeError, ValueError, TypeError):
                         logger.debug(
                             "Could not update chunk_size for content_id=%s",
                             content_id,
@@ -342,13 +347,14 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
                         )
             elif tr is None:
                 # Translation call failed (exception or None) — record a no-op entry
+                provider_used = provider.__class__.__name__.replace("Provider", "").lower()
                 trans = TranslatedContent(
                     original_chunk_id=str(content_id),
                     original_text=text,
                     translated_text=text,
                     source_language=detected_language,
                     target_language=target_language,
-                    translation_provider=translation_provider.lower(),
+                    translation_provider=provider_used,
                     confidence_score=0.0,
                 )
                 chunk.metadata["translation"] = trans.model_dump()
