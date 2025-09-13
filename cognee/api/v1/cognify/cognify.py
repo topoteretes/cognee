@@ -42,8 +42,6 @@ class ProviderInitializationError(TranslationProviderError):
 _WARNED_ENV_VARS: set[str] = set()
 
 def _parse_batch_env(var: str, default: int = 10) -> int:
-<<<<<<< HEAD
-=======
     """
     Parse an environment variable as a positive integer (minimum 1), falling back to a default.
     
@@ -59,7 +57,6 @@ def _parse_batch_env(var: str, default: int = 10) -> int:
     Returns:
         An integer >= 1 representing the parsed value or the fallback `default`.
     """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
     raw = os.getenv(var)
     if raw is None:
         return default

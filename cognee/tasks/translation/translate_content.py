@@ -57,8 +57,6 @@ class TranslationContext:
     requires_translation: bool = False
 
     def __post_init__(self):
-<<<<<<< HEAD
-=======
         """
         Initialize derived fields after dataclass construction.
         
@@ -67,19 +65,12 @@ class TranslationContext:
         - self.chunk.chunk_index
         If neither attribute exists, content_id is set to the string "unknown".
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
         self.content_id = getattr(self.chunk, "id", getattr(self.chunk, "chunk_index", "unknown"))
 
 
 class TranslationProvider(Protocol):
     """Protocol for translation providers."""
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
-<<<<<<< HEAD
-        """Detects the language of the given text."""
-
-    async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
-        """Translates the given text to the target language."""
-=======
         """
         Detect the language of the provided text.
         
@@ -98,15 +89,11 @@ class TranslationProvider(Protocol):
         Returns:
             A tuple (translated_text, confidence) on success, where `confidence` is a float in [0.0, 1.0] (may be 0.0 if the provider does not supply a score), or None if translation failed or was unavailable.
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
 
 # Registry for translation providers
 _provider_registry: Dict[str, Type[TranslationProvider]] = {}
 
 def register_translation_provider(name: str, provider: Type[TranslationProvider]):
-<<<<<<< HEAD
-    """Registers a new translation provider."""
-=======
     """
     Register a translation provider under a canonical lowercase key.
     
@@ -116,7 +103,6 @@ def register_translation_provider(name: str, provider: Type[TranslationProvider]
         name (str): Human-readable provider name (case-insensitive); stored as lower-case.
         provider (Type[TranslationProvider]): Provider class implementing the TranslationProvider protocol; instances are constructed when the provider is resolved.
     """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
     _provider_registry[name.lower()] = provider
 
 def get_available_providers():
@@ -124,9 +110,6 @@ def get_available_providers():
     return sorted(_provider_registry.keys())
 
 def _get_provider(translation_provider: str) -> TranslationProvider:
-<<<<<<< HEAD
-    """Returns a translation provider instance."""
-=======
     """
     Resolve and instantiate a registered translation provider by name.
     
@@ -136,7 +119,6 @@ def _get_provider(translation_provider: str) -> TranslationProvider:
     Raises:
         ValueError: if no provider is registered under the given name; the error message lists available providers.
     """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
     provider_class = _provider_registry.get(translation_provider.lower())
     if not provider_class:
         available = ', '.join(get_available_providers())
@@ -145,8 +127,6 @@ def _get_provider(translation_provider: str) -> TranslationProvider:
     return provider_class()
 # Helpers
 def _normalize_lang_code(code: Optional[str]) -> str:
-<<<<<<< HEAD
-=======
     """
     Normalize a language code to a canonical form or return "unknown".
     
@@ -161,7 +141,6 @@ def _normalize_lang_code(code: Optional[str]) -> str:
     Returns:
         str: Normalized language code in either "xx" or "xx-YY" form, or "unknown" if input is invalid.
     """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
     if not isinstance(code, str) or not code.strip():
         return "unknown"
     c = code.strip().replace("_", "-")
@@ -180,8 +159,6 @@ def _provider_name(provider: TranslationProvider) -> str:
     )
 
 async def _detect_language_with_fallback(provider: TranslationProvider, text: str, content_id: str) -> Tuple[str, float]:
-<<<<<<< HEAD
-=======
     """
     Detect the language of `text`, falling back to the registered "langdetect" provider if the primary provider fails.
     
@@ -195,7 +172,6 @@ async def _detect_language_with_fallback(provider: TranslationProvider, text: st
         Tuple[str, float]: A normalized language code (e.g., "en" or "pt-BR") and a confidence score in [0.0, 1.0].
         On detection failure returns ("unknown", 0.0). Confidence values are coerced to float, NaNs converted to 0.0, and clamped to the [0.0, 1.0] range.
     """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
     try:
         detection = await provider.detect_language(text)
     except Exception:
@@ -226,9 +202,6 @@ async def _detect_language_with_fallback(provider: TranslationProvider, text: st
     return detected_language, conf
 
 def _decide_if_translation_is_required(ctx: TranslationContext) -> None:
-<<<<<<< HEAD
-    """Determine if translation is needed and update context."""
-=======
     """
     Decide whether a translation should be performed and update ctx.requires_translation.
     
@@ -239,7 +212,6 @@ def _decide_if_translation_is_required(ctx: TranslationContext) -> None:
     
     The function mutates the provided TranslationContext in-place and does not return a value.
     """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
     # Normalize to align with detected_language normalization and model regex.
     target_language = _normalize_lang_code(ctx.target_language)
     can_translate = ctx.provider_name not in ("noop", "langdetect")
@@ -253,9 +225,6 @@ def _decide_if_translation_is_required(ctx: TranslationContext) -> None:
         )
 
 def _attach_language_metadata(ctx: TranslationContext) -> None:
-<<<<<<< HEAD
-    """Attach language metadata to the chunk."""
-=======
     """
     Attach language detection and translation decision metadata to the context's chunk.
     
@@ -267,7 +236,6 @@ def _attach_language_metadata(ctx: TranslationContext) -> None:
     Parameters:
         ctx (TranslationContext): Context containing the chunk and detection/decision values.
     """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
     ctx.chunk.metadata = getattr(ctx.chunk, "metadata", {}) or {}
     lang_meta = LanguageMetadata(
         content_id=str(ctx.content_id),
@@ -279,9 +247,6 @@ def _attach_language_metadata(ctx: TranslationContext) -> None:
     ctx.chunk.metadata["language"] = lang_meta.model_dump()
 
 async def _translate_and_update(ctx: TranslationContext) -> None:
-<<<<<<< HEAD
-    """Translate the chunk text and update metadata."""
-=======
     """
     Translate the text in the provided TranslationContext and update the chunk and its metadata.
     
@@ -298,7 +263,6 @@ async def _translate_and_update(ctx: TranslationContext) -> None:
     Returns:
         None
     """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
     try:
         tr = await ctx.provider.translate(ctx.text, ctx.target_language)
     except Exception:
@@ -348,9 +312,6 @@ def snapshot_registry() -> Dict[str, Type[TranslationProvider]]:
     return dict(_provider_registry)
 
 def restore_registry(snapshot: Dict[str, Type[TranslationProvider]]) -> None:
-<<<<<<< HEAD
-    """Restore the provider registry from a snapshot (for tests)."""
-=======
     """
     Restore the global translation provider registry from a previously captured snapshot.
     
@@ -360,7 +321,6 @@ def restore_registry(snapshot: Dict[str, Type[TranslationProvider]]) -> None:
     Parameters:
         snapshot (Dict[str, Type[TranslationProvider]]): Mapping of provider name keys to provider classes.
     """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
     _provider_registry.clear()
     _provider_registry.update(snapshot)
 
@@ -372,11 +332,6 @@ def validate_provider(name: str) -> None:
 class NoOpProvider:
     """A provider that does nothing, used for testing or disabling translation."""
     async def detect_language(self, _text: str) -> Optional[Tuple[str, float]]:
-<<<<<<< HEAD
-        return None
-
-    async def translate(self, text: str, _target_language: str) -> Optional[Tuple[str, float]]:
-=======
         """
         No-op language detection: intentionally performs no detection and always returns None.
         
@@ -395,357 +350,340 @@ class NoOpProvider:
         Returns:
             Optional[Tuple[str, float]]: A tuple of (text, 0.0).
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
         return text, 0.0
 
 class LangDetectProvider:
     """
     A provider that uses the 'langdetect' library for offline language detection.
-    This provider only detects the language and does not perform translation.
+    This provider does not support translation.
     """
+    _detector: Any = None
+
     def __init__(self):
-<<<<<<< HEAD
-=======
-        """
-        Initialize the LangDetectProvider by loading the `langdetect.detect_langs` function.
-        
-        Attempts to import `detect_langs` from the `langdetect` package and stores it on the instance as `_detect_langs`. Raises `LangDetectError` if the `langdetect` dependency is not available.
-        """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
-        try:
-            from langdetect import detect_langs  # type: ignore[import-untyped]
-            self._detect_langs = detect_langs
-        except ImportError as e:
-            raise LangDetectError() from e
+        if self._detector is None:
+            try:
+                from langdetect import DetectorFactory, detect_langs
+                from langdetect.lang_detect_exception import LangDetectException
+                DetectorFactory.seed = 0
+                self._detector = (detect_langs, LangDetectException)
+            except ImportError as e:
+                raise LangDetectError("langdetect is not installed. Please install it with `pip install langdetect`") from e
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
-<<<<<<< HEAD
-=======
         """
-        Detect the language of `text` using the provider's langdetect backend.
+        Detect the language of the provided text using the `langdetect` library.
         
-        Returns a tuple of (language_code, confidence) where `language_code` is the top
-        detected language (e.g., "en") and `confidence` is the detection probability
-        in [0.0, 1.0]. Returns None if detection fails or no result is available.
+        Parameters:
+            text (str): The text to analyze.
+        
+        Returns:
+            A tuple containing the detected language code (e.g., "en") and the confidence score (0.0 to 1.0), or None if detection fails.
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
+        detect_langs, LangDetectException = self._detector
         try:
-            detections = await asyncio.to_thread(self._detect_langs, text)
-        except Exception:
-            logger.exception("Error during language detection")
-            return None
-        
-        if not detections:
-            return None
-        best_detection = detections[0]
-        return best_detection.lang, best_detection.prob
+            langs = detect_langs(text)
+            if langs:
+                return langs[0].lang, langs[0].prob
+        except LangDetectException:
+            logger.debug("Langdetect failed for text: %s", text[:100])
+        return None
 
     async def translate(self, text: str, _target_language: str) -> Optional[Tuple[str, float]]:
-        # This provider only detects language, does not translate.
-<<<<<<< HEAD
-=======
         """
-        No-op translation: returns the input text unchanged with a 0.0 confidence.
+        This provider does not support translation. It returns the original text.
         
-        This provider only performs language detection; translate is a passthrough that returns the original `text`
-        and a confidence of 0.0 to indicate no translated content was produced.
+        Parameters:
+            text (str): The text to be "translated".
+            _target_language (str): The target language (ignored).
         
         Returns:
-            A tuple of (text, confidence) where `text` is the original input and `confidence` is 0.0.
+            A tuple containing the original text and a confidence score of 0.0.
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
         return text, 0.0
 
+
 class OpenAIProvider:
-    """A provider that uses OpenAI's API for translation."""
+    """
+    A translation provider that uses OpenAI's API for translation.
+    This provider does not support language detection and will rely on a fallback.
+    """
+    _client: Any = None
+
     def __init__(self):
-<<<<<<< HEAD
-=======
-        """
-        Initialize the OpenAIProvider by creating an AsyncOpenAI client and loading configuration.
-        
-        Reads the following environment variables:
-        - OPENAI_API_KEY: API key passed to AsyncOpenAI for authentication.
-        - OPENAI_TRANSLATE_MODEL: model name to use for translations (default: "gpt-4o-mini").
-        - OPENAI_TIMEOUT: request timeout in seconds (default: "30", parsed as float).
-        
-        Raises:
-            OpenAIError: if the OpenAI SDK (AsyncOpenAI) cannot be imported.
-        """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
-        try:
-            from openai import AsyncOpenAI  # type: ignore[import-untyped]
-            self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            self.model = os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-4o-mini")
-            self.timeout = float(os.getenv("OPENAI_TIMEOUT", "30"))
-        except ImportError as e:
-            raise OpenAIError() from e
+        if self._client is None:
+            try:
+                from openai import AsyncOpenAI
+                self._client = AsyncOpenAI()
+            except ImportError as e:
+                raise OpenAIError("openai is not installed. Please install it with `pip install openai`") from e
 
     async def detect_language(self, _text: str) -> Optional[Tuple[str, float]]:
-        # OpenAI's API does not have a separate language detection endpoint.
-        # This can be implemented as part of the translation prompt if needed.
-<<<<<<< HEAD
-        return None
-
-    async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
-=======
         """
-        Indicates that this provider does not perform standalone language detection.
-        
-        The OpenAI-based provider does not expose a separate detection endpoint and therefore
-        always returns None. Language detection can be achieved by using another provider
-        (e.g., the registered langdetect provider) or by incorporating detection into a
-        translation prompt if needed.
-        """
-        return None
-
-    async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
-        """
-        Translate the given text to the specified target language using the OpenAI chat completions client.
+        This provider does not support language detection.
         
         Parameters:
-            text (str): Source text to translate.
-            target_language (str): Target language name or code (used verbatim in the translation prompt).
+            _text (str): The text to be analyzed (ignored).
         
         Returns:
-            Optional[Tuple[str, float]]: A tuple of (translated_text, confidence). Confidence is 0.0 because no calibrated confidence is available.
-            Returns None if translation failed or an error occurred.
+            None, as language detection is not supported.
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
+        return None
+
+    async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
+        """
+        Translate text using the OpenAI API.
+        
+        Parameters:
+            text (str): The text to translate.
+            target_language (str): The target language code.
+        
+        Returns:
+            A tuple containing the translated text and a confidence score of 1.0, or None if translation fails.
+        """
         try:
-            response = await self.client.with_options(timeout=self.timeout).chat.completions.create(
-                model=self.model,
+            response = await self._client.chat.completions.create(
+                model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": f"Translate the following text to {target_language}."},
+                    {"role": "system", "content": f"You are a translation assistant. Translate the following text to {target_language}."},
                     {"role": "user", "content": text},
                 ],
-                temperature=0.0,
+                temperature=0,
             )
+            if response.choices:
+                return response.choices[0].message.content, 1.0
         except Exception:
-            logger.exception("Error during OpenAI translation (model=%s)", self.model)
-            return None
-        
-        translated_text = response.choices[0].message.content.strip()
-        return translated_text, 0.0  # No calibrated confidence available.
+            logger.exception("OpenAI translation failed.")
+        return None
+
 
 class GoogleTranslateProvider:
-    """A provider that uses the 'googletrans' library for translation."""
+    """
+    A translation provider that uses the 'googletrans' library.
+    This provider supports both language detection and translation.
+    """
+    _translator: Any = None
+
     def __init__(self):
-<<<<<<< HEAD
-=======
-        """
-        Initialize the GoogleTranslateProvider by importing and instantiating googletrans.Translator.
-        
-        Raises:
-            GoogleTranslateError: If the `googletrans` library is not installed or cannot be imported.
-        """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
-        try:
-            from googletrans import Translator  # type: ignore[import-untyped]
-            self.translator = Translator()
-        except ImportError as e:
-            raise GoogleTranslateError() from e
+        if self._translator is None:
+            try:
+                from googletrans import Translator
+                self._translator = Translator()
+            except ImportError as e:
+                raise GoogleTranslateError("googletrans is not installed. Please install it with `pip install googletrans==4.0.0-rc1`") from e
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
-<<<<<<< HEAD
-=======
         """
-        Detect the language of the given text using the configured googletrans Translator.
-        
-        Uses a thread to call the synchronous translator.detect method; on failure returns None.
+        Detect the language of the provided text using the `googletrans` library.
         
         Parameters:
-            text: The text to detect the language for.
+            text (str): The text to analyze.
         
         Returns:
-            A tuple (language_code, confidence) where `language_code` is the detected language string from the translator (e.g. "en") and `confidence` is a float in [0.0, 1.0]. Returns None if detection fails.
+            A tuple containing the detected language code and the confidence score, or None if detection fails.
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
         try:
-            detection = await asyncio.to_thread(self.translator.detect, text)
+            detection = self._translator.detect(text)
+            return detection.lang, detection.confidence
         except Exception:
-            logger.exception("Error during Google Translate language detection")
-            return None
-
-        try:
-            conf = float(detection.confidence) if detection.confidence is not None else 0.0
-        except (TypeError, ValueError):
-            conf = 0.0
-        return detection.lang, conf
+            logger.exception("Google Translate language detection failed.")
+        return None
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
-<<<<<<< HEAD
-=======
         """
-        Translate `text` to `target_language` using the configured googletrans Translator.
+        Translate text using the `googletrans` library.
         
-        Returns a tuple (translated_text, confidence) on success — confidence is always 0.0 because googletrans does not provide a confidence score — or None if translation fails.
+        Parameters:
+            text (str): The text to translate.
+            target_language (str): The target language code.
+        
+        Returns:
+            A tuple containing the translated text and a confidence score of 1.0, or None if translation fails.
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
         try:
-            translation = await asyncio.to_thread(self.translator.translate, text, dest=target_language)
+            translation = self._translator.translate(text, dest=target_language)
+            return translation.text, 1.0
         except Exception:
-            logger.exception("Error during Google Translate translation")
-            return None
-        
-        return translation.text, 0.0  # Confidence not provided.
+            logger.exception("Google Translate translation failed.")
+        return None
 
-class AzureTranslatorProvider:
-    """A provider that uses Azure's Translator service."""
+
+class AzureTranslateProvider:
+    """
+    A translation provider that uses Azure's Text Translation API.
+    This provider supports both language detection and translation.
+    """
+    _client: Any = None
+
     def __init__(self):
-<<<<<<< HEAD
-=======
-        """
-        Initialize the AzureTranslatorProvider.
-        
-        Attempts to import Azure SDK classes, reads AZURE_TRANSLATOR_KEY, AZURE_TRANSLATOR_ENDPOINT,
-        and AZURE_TRANSLATOR_REGION from the environment, verifies the key is present, and constructs
-        a TextTranslationClient using an AzureKeyCredential.
-        
-        Raises:
-            AzureConfigError: if AZURE_TRANSLATOR_KEY is not set.
-            AzureTranslateError: if required Azure SDK imports are unavailable.
-        """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
-        try:
-            from azure.core.credentials import AzureKeyCredential  # type: ignore[import-untyped]
-            from azure.ai.translation.text import TextTranslationClient  # type: ignore[import-untyped]
-            
-            self.key = os.getenv("AZURE_TRANSLATOR_KEY")
-            self.endpoint = os.getenv("AZURE_TRANSLATOR_ENDPOINT", "https://api.cognitive.microsofttranslator.com/")
-            self.region = os.getenv("AZURE_TRANSLATOR_REGION", "global")
+        if self._client is None:
+            try:
+                from azure.ai.translation.text import TextTranslationClient
+                from azure.core.credentials import AzureKeyCredential
 
-            if not self.key:
-                raise AzureConfigError()
+                key = os.getenv("AZURE_TRANSLATE_KEY")
+                region = os.getenv("AZURE_TRANSLATE_REGION")
+                endpoint = os.getenv("AZURE_TRANSLATE_ENDPOINT")
 
-            self.client = TextTranslationClient(
-                endpoint=self.endpoint,
-                credential=AzureKeyCredential(self.key),
-            )
-        except ImportError as e:
-            raise AzureTranslateError() from e
+                if not all([key, region, endpoint]):
+                    raise AzureConfigError("Azure Translate credentials (KEY, REGION, ENDPOINT) are not fully configured.")
+
+                self._client = TextTranslationClient(endpoint, AzureKeyCredential(key))
+            except ImportError as e:
+                raise AzureTranslateError("azure-ai-translation-text is not installed. Please install it with `pip install azure-ai-translation-text`") from e
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
-<<<<<<< HEAD
-=======
         """
-        Detect the language of the given text using the Azure Translator client's detect API.
-        
-        Attempts to call the Azure client's detect method (using a two-letter region as a country hint when available)
-        and returns a tuple of (language_code, confidence_score). Returns None if detection fails or an exception occurs.
+        Detect the language of the provided text using Azure's Text Translation API.
         
         Parameters:
-            text (str): The text to detect language for.
+            text (str): The text to analyze.
         
         Returns:
-            Optional[Tuple[str, float]]: (ISO language code, confidence between 0.0 and 1.0), or None on error.
+            A tuple containing the detected language code and the confidence score, or None if detection fails.
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
         try:
-            # Use a valid country hint only when it looks like ISO 3166-1 alpha-2; otherwise omit.
-            hint = self.region.lower() if isinstance(self.region, str) and len(self.region) == 2 else None
-            response = await asyncio.to_thread(self.client.detect, content=[text], country_hint=hint)
+            response = self._client.find_sentence_boundaries([text])
+            if response and response[0].detected_language:
+                return response[0].detected_language.language, response[0].detected_language.score
         except Exception:
-            logger.exception("Error during Azure language detection")
-            return None
-        
-        detection = response[0].primary_language
-        return detection.language, detection.score
+            logger.exception("Azure Translate language detection failed.")
+        return None
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
-<<<<<<< HEAD
-=======
         """
-        Translate the given text to the target language using the Azure Translator client.
+        Translate text using Azure's Text Translation API.
         
         Parameters:
-            text (str): Plain text to translate.
-            target_language (str): BCP-47 or ISO language code to translate the text into.
+            text (str): The text to translate.
+            target_language (str): The target language code.
         
         Returns:
-            Optional[Tuple[str, float]]: A tuple of (translated_text, confidence). Returns None on error.
-            The provider does not surface a numeric confidence score, so the returned confidence is always 0.0.
+            A tuple containing the translated text and a confidence score of 1.0, or None if translation fails.
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
         try:
-            response = await asyncio.to_thread(self.client.translate, content=[text], to=[target_language])
+            response = self._client.translate(content=[text], to=[target_language])
+            if response and response[0].translations:
+                return response[0].translations[0].text, 1.0
         except Exception:
-            logger.exception("Error during Azure translation")
-            return None
-        
-        translation = response[0].translations[0]
-        return translation.text, 0.0  # Confidence not provided.
+            logger.exception("Azure Translate translation failed.")
+        return None
 
-# Register built-in providers
+
+# Main task function
+async def translate_content(chunk: Any, **kwargs) -> Any:
+    """
+    Translate the content of a chunk if necessary.
+    
+    This function detects the language of the chunk's text, decides if translation is needed,
+    and if so, translates the text to the target language using the specified provider.
+    It updates the chunk with the translated text and adds metadata about the translation process.
+    
+    Parameters:
+        chunk (Any): The chunk of content to be processed. It must have a 'text' attribute.
+        **kwargs: Additional arguments, including 'target_language' and 'translation_provider'.
+    
+    Returns:
+        The processed chunk, which may have its text translated and metadata updated.
+    """
+    target_language = kwargs.get("target_language", TARGET_LANGUAGE)
+    translation_provider_name = kwargs.get("translation_provider", "noop")
+    confidence_threshold = kwargs.get("confidence_threshold", CONFIDENCE_THRESHOLD)
+
+    try:
+        provider = _get_provider(translation_provider_name)
+    except ValueError:
+        logger.exception("Failed to get translation provider.")
+        return chunk
+
+    text_to_translate = getattr(chunk, "text", "")
+    if not isinstance(text_to_translate, str) or not text_to_translate.strip():
+        return chunk
+
+    ctx = TranslationContext(
+        provider=provider,
+        chunk=chunk,
+        text=text_to_translate,
+        target_language=target_language,
+        confidence_threshold=confidence_threshold,
+        provider_name=translation_provider_name,
+    )
+
+    ctx.detected_language, ctx.detection_confidence = await _detect_language_with_fallback(
+        provider, text_to_translate, str(ctx.content_id)
+    )
+
+    _decide_if_translation_is_required(ctx)
+    _attach_language_metadata(ctx)
+
+    if ctx.requires_translation:
+        await _translate_and_update(ctx)
+
+    return ctx.chunk
+
+
+async def main():
+    """Main function for testing the translation module."""
+    # Mock chunk for testing
+    @dataclass
+    class MockChunk:
+        id: str
+        text: str
+        metadata: Dict[str, Any] = field(default_factory=dict)
+
+    chunks_to_process = [
+        MockChunk(id="1", text="This is a test in English."),
+        MockChunk(id="2", text="Ceci est un test en français."),
+        MockChunk(id="3", text="Este es un test en español."),
+        MockChunk(id="4", text=""),  # Empty text
+        MockChunk(id="5", text="Short"),  # Too short for reliable detection
+    ]
+
+    # Register providers for testing
+    register_translation_provider("noop", NoOpProvider)
+    register_translation_provider("langdetect", LangDetectProvider)
+    # Note: The following providers require API keys and are commented out by default.
+    # register_translation_provider("openai", OpenAIProvider)
+    # register_translation_provider("google", GoogleTranslateProvider)
+    # register_translation_provider("azure", AzureTranslateProvider)
+
+    # Create translation tasks
+    tasks = [
+        translate_content(
+            chunk,
+            target_language="en",
+            translation_provider="google",
+            confidence_threshold=0.80,
+        )
+        for chunk in chunks_to_process
+    ]
+
+    # Run tasks concurrently
+    processed_chunks = await asyncio.gather(*tasks)
+
+    # Print results
+    for chunk in processed_chunks:
+        print(f"Chunk ID: {chunk.id}")
+        print(f"Original Text: {chunk.metadata.get('translation', {}).get('original_text', chunk.text)}")
+        print(f"Translated Text: {chunk.text}")
+        print(f"Language Metadata: {chunk.metadata.get('language')}")
+        print(f"Translation Metadata: {chunk.metadata.get('translation')}")
+        print("-" * 20)
+
+# Initialize providers
 register_translation_provider("noop", NoOpProvider)
 register_translation_provider("langdetect", LangDetectProvider)
 register_translation_provider("openai", OpenAIProvider)
 register_translation_provider("google", GoogleTranslateProvider)
-register_translation_provider("azure", AzureTranslatorProvider)
+register_translation_provider("azure", AzureTranslateProvider)
 
-async def translate_content(  # pylint: disable=too-many-locals,too-many-branches
-    *data_chunks,
-    target_language: str = TARGET_LANGUAGE,
-    translation_provider: str = "noop",
-    confidence_threshold: float = CONFIDENCE_THRESHOLD,
-):
-    """
-<<<<<<< HEAD
-    Translate non-English chunks to the target language; attach language/translation metadata.
-    Returns the (possibly modified) list of chunks.
-
-    Batching behavior:
-    - Accepts either varargs of chunk objects (pipeline may pass multiple args),
-      or a single list containing chunk objects. Both forms are supported.
-=======
-    Translate content chunks to a target language and attach language and translation metadata.
-    
-    This function accepts either multiple chunk objects as varargs or a single list of chunks.
-    For each chunk it:
-    - Resolves the named translation provider.
-    - Detects the chunk's language (with a fallback detector when available).
-    - Decides whether translation is required based on detected language, confidence threshold, and provider.
-    - Attaches language metadata (LanguageMetadata) to chunk.metadata.
-    - If required, performs translation and updates the chunk text and metadata (TranslatedContent).
-    
-    Parameters:
-        *data_chunks: One or more chunk objects, or a single list of chunk objects. Each chunk must expose a `text` attribute and a `metadata` mapping (the function will create `metadata` if missing).
-        target_language (str): Language code to translate into (defaults to TARGET_LANGUAGE).
-        translation_provider (str): Registered provider name to use for detection/translation (defaults to "noop").
-        confidence_threshold (float): Minimum detection confidence required to skip translation (defaults to CONFIDENCE_THRESHOLD).
-    
-    Returns:
-        list: The list of processed chunk objects (same objects, possibly modified). Metadata keys added include language detection results and, when a translation occurs, translation details.
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
-    """
-    provider = _get_provider(translation_provider)
-    results = []
-
-    if len(data_chunks) == 1 and isinstance(data_chunks[0], list):
-        _chunks = data_chunks[0]
-    else:
-        _chunks = list(data_chunks)
-
-    for chunk in _chunks:
-        ctx = TranslationContext(
-            provider=provider,
-            chunk=chunk,
-            text=getattr(chunk, "text", "") or "",
-            target_language=target_language,
-            confidence_threshold=confidence_threshold,
-            provider_name=translation_provider.lower(),
-        )
-
-        ctx.detected_language, ctx.detection_confidence = await _detect_language_with_fallback(
-            ctx.provider, ctx.text, str(ctx.content_id)
-        )
-
-        _decide_if_translation_is_required(ctx)
-        _attach_language_metadata(ctx)
-
-        if ctx.requires_translation:
-            await _translate_and_update(ctx)
-
-        results.append(ctx.chunk)
-
-    return results
+if __name__ == "__main__":
+    # To run this, you need to have the required libraries and API keys set up.
+    # Example:
+    # export OPENAI_API_KEY="your_openai_api_key"
+    # export AZURE_TRANSLATE_KEY="your_azure_key"
+    # export AZURE_TRANSLATE_REGION="your_azure_region"
+    # export AZURE_TRANSLATE_ENDPOINT="your_azure_endpoint"
+    #
+    # Then run the script:
+    # python -m cognee.tasks.translation.translate_content
+    asyncio.run(main())
