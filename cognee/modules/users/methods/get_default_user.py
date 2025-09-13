@@ -29,7 +29,9 @@ async def get_default_user() -> SimpleNamespace:
 
             # We return a SimpleNamespace to have the same user type as our SaaS
             # SimpleNamespace is just a dictionary which can be accessed through attributes
-            auth_data = SimpleNamespace(id=user.id, tenant_id=user.tenant_id, roles=[])
+            auth_data = SimpleNamespace(
+                id=user.id, email=user.email, tenant_id=user.tenant_id, roles=[]
+            )
             return auth_data
     except Exception as error:
         if "principals" in str(error.args):

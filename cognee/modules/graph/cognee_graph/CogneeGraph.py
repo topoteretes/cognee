@@ -76,7 +76,7 @@ class CogneeGraph(CogneeAbstractGraph):
             start_time = time.time()
 
             # Determine projection strategy
-            if node_type is not None and node_name is not None:
+            if node_type is not None and node_name not in [None, [], ""]:
                 nodes_data, edges_data = await adapter.get_nodeset_subgraph(
                     node_type=node_type, node_name=node_name
                 )
@@ -180,7 +180,7 @@ class CogneeGraph(CogneeAbstractGraph):
             logger.error(f"Error mapping vector distances to edges: {str(ex)}")
             raise ex
 
-    async def calculate_top_triplet_importances(self, k: int) -> List:
+    async def calculate_top_triplet_importances(self, k: int) -> List[Edge]:
         def score(edge):
             n1 = edge.node1.attributes.get("vector_distance", 1)
             n2 = edge.node2.attributes.get("vector_distance", 1)

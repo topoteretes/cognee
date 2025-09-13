@@ -57,7 +57,12 @@ class SQLAlchemyAdapter:
             )
         else:
             self.engine = create_async_engine(
-                connection_string, pool_size=12, max_overflow=12, poolclass=None
+                connection_string,
+                pool_size=20,
+                max_overflow=20,
+                pool_recycle=280,
+                pool_pre_ping=True,
+                pool_timeout=280,
             )
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)

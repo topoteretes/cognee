@@ -2,7 +2,7 @@ from typing import List, Union
 from uuid import UUID
 
 from cognee.modules.data.models import Dataset
-from cognee.modules.data.methods import create_authorized_dataset
+from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
 from cognee.modules.data.exceptions import DatasetNotFoundError
 
 
