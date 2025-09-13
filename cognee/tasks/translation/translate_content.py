@@ -383,4 +383,3 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
             await _translate_and_update(provider, chunk, str(content_id), text, target_language, detected_language)
         results.append(chunk)
     return results
-    return results
