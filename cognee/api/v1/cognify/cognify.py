@@ -311,17 +311,15 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
     # Instantiate to validate dependencies; include provider-specific config errors
     try:
         validate_provider(translation_provider)
-    except Exception as e:  # noqa: BLE001 – we want to convert provider init errors
+    except Exception as e:  # we want to convert provider init errors
         available = ", ".join(get_available_providers())
         logger.error(
-            "Provider '%s' failed to initialize. Available: %s",
+            "Provider '%s' failed to initialize (available: %s).",
             translation_provider,
             available,
             exc_info=True,
         )
-        raise ProviderInitializationError(
-            f"Failed to initialize provider '{translation_provider}'"
-        ) from e
+        raise ProviderInitializationError() from e
     
     # Precompute max_chunk_size for stability
     max_chunk = chunk_size or get_max_chunk_tokens()

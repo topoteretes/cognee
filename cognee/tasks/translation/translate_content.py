@@ -79,6 +79,13 @@ def _normalize_lang_code(code: Optional[str]) -> str:
         return f"{parts[0].lower()}-{parts[1][:2].upper()}"
     return "unknown"
 
+def _provider_name(provider: TranslationProvider) -> str:
+    """Return the canonical registry key for a provider instance, or a best-effort name."""
+    return next(
+        (name for name, cls in _provider_registry.items() if isinstance(provider, cls)),
+        provider.__class__.__name__.replace("Provider", "").lower(),
+    )
+
 async def _detect_language_with_fallback(provider: TranslationProvider, text: str, content_id: str) -> tuple[str, float]:
     try:
         detection = await provider.detect_language(text)
@@ -135,7 +142,7 @@ async def _translate_and_update(provider: TranslationProvider, chunk, content_id
 
     if tr and isinstance(tr[0], str) and tr[0].strip() and tr[0] != text:
         translated_text, t_conf = tr
-        provider_used = provider.__class__.__name__.replace("Provider", "").lower()
+        provider_used = _provider_name(provider)
         trans = TranslatedContent(
             original_chunk_id=str(content_id),
             original_text=text,
@@ -159,7 +166,7 @@ async def _translate_and_update(provider: TranslationProvider, chunk, content_id
         return
 
     if tr is None:
-        provider_used = provider.__class__.__name__.replace("Provider", "").lower()
+        provider_used = _provider_name(provider)
         trans = TranslatedContent(
             original_chunk_id=str(content_id),
             original_text=text,
