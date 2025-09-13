@@ -50,7 +50,6 @@ class TranslationContext:
     text: str
     target_language: str
     confidence_threshold: float
-    provider_name: str
     content_id: str = field(init=False)
     detected_language: str = "unknown"
     detection_confidence: float = 0.0
@@ -145,10 +144,14 @@ def _normalize_lang_code(code: Optional[str]) -> str:
         return "unknown"
     c = code.strip().replace("_", "-")
     parts = c.split("-")
-    if len(parts) == 1 and len(parts[0]) == 2 and parts[0].isalpha():
-        return parts[0].lower()
-    if len(parts) >= 2 and len(parts[0]) == 2 and parts[1]:
-        return f"{parts[0].lower()}-{parts[1][:2].upper()}"
+    lang = parts[0]
+    if len(lang) == 2 and lang.isalpha():
+        if len(parts) >= 2:
+            region = parts[1]
+            if len(region) == 2 and region.isalpha():
+                return f"{lang.lower()}-{region.upper()}"
+        # Fall back to base language when region is absent or not 2 letters (e.g., zh-Hans, es-419)
+        return lang.lower()
     return "unknown"
 
 def _provider_name(provider: TranslationProvider) -> str:
@@ -288,8 +291,8 @@ async def _translate_and_update(ctx: TranslationContext) -> None:
                     exc_info=True,
                 )
     elif tr is None:
-        # Translation failed, keep original text
-        translated_text = ctx.text
+        logger.info("Translation failed; skipping translation metadata (content_id=%s)", ctx.content_id)
+        return
     else:
         # Provider returned unchanged text
         logger.debug("Provider returned unchanged text; skipping translation metadata (content_id=%s)", ctx.content_id)
@@ -530,6 +533,9 @@ class AzureTranslateProvider:
 
                 if not key:
                     raise AzureConfigError("Azure Translate key (AZURE_TRANSLATE_KEY) is required.")
+                if not endpoint:
+                    # Default to global Translator endpoint when not explicitly provided
+                    endpoint = "https://api.cognitive.microsofttranslator.com"
                 if region:
                     cred = TranslatorCredential(key, region)
                     self._client = TextTranslationClient(endpoint=endpoint, credential=cred)
@@ -551,10 +557,7 @@ class AzureTranslateProvider:
             A tuple containing the detected language code and the confidence score, or None if detection fails.
         """
         try:
-            try:
-                response = await asyncio.to_thread(self._client.detect, content=[text])
-            except TypeError:
-                response = await asyncio.to_thread(self._client.detect, [text])
+            response = await self._client.detect(content=[text])
             if response and getattr(response[0], "detected_language", None):
                 dl = response[0].detected_language
                 return dl.language, dl.score
@@ -574,11 +577,10 @@ class AzureTranslateProvider:
             A tuple containing the translated text and a confidence score of 1.0, or None if translation fails.
         """
         try:
-            try:
-                response = await asyncio.to_thread(self._client.translate, content=[text], to=[target_language])
-            except TypeError:
-                # Fallback for SDKs using `body`/`to_language`
-                response = await asyncio.to_thread(self._client.translate, [text], to_language=[target_language])
+            response = await self._client.translate(
+                content=[text],
+                to=[target_language],
+            )
             if response and response[0].translations:
                 return response[0].translations[0].text, 1.0
         except Exception:
@@ -615,8 +617,9 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
 
         try:
             provider = _get_provider(translation_provider_name)
-        except ValueError:
-            logger.exception("Failed to get translation provider.")
+        except Exception:
+            # Unknown provider or missing/invalid dependency during provider init
+            logger.exception("Failed to initialize translation provider: %s", translation_provider_name)
             results.append(chunk)
             continue
 
@@ -631,7 +634,6 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
             text=text_to_translate,
             target_language=target_language,
             confidence_threshold=confidence_threshold,
-            provider_name=translation_provider_name,
         )
 
         ctx.detected_language, ctx.detection_confidence = await _detect_language_with_fallback(
