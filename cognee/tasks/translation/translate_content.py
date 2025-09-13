@@ -79,6 +79,100 @@ def _normalize_lang_code(code: Optional[str]) -> str:
         return f"{parts[0].lower()}-{parts[1][:2].upper()}"
     return "unknown"
 
+async def _detect_language_with_fallback(provider: TranslationProvider, text: str, content_id: str) -> tuple[str, float]:
+    try:
+        detection = await provider.detect_language(text)
+    except Exception:
+        logger.exception("Language detection failed for content_id=%s", content_id)
+        detection = None
+
+    if detection is None:
+        fallback_cls = _provider_registry.get("langdetect")
+        if fallback_cls is not None and not isinstance(provider, fallback_cls):
+            try:
+                detection = await fallback_cls().detect_language(text)
+            except Exception:
+                logger.exception("Fallback language detection failed for content_id=%s", content_id)
+                detection = None
+
+    if detection is None:
+        return "unknown", 0.0
+
+    lang_code, conf = detection
+    detected_language = _normalize_lang_code(lang_code)
+    try:
+        conf = float(conf)
+    except (TypeError, ValueError):
+        conf = 0.0
+    if math.isnan(conf):
+        conf = 0.0
+    conf = max(0.0, min(1.0, conf))
+    return detected_language, conf
+
+def _requires_translation(detected_language: str, target_language: str, conf: float, threshold: float, provider_name: str, text: str) -> bool:
+    can_translate = provider_name not in ("noop", "langdetect")
+    if detected_language == "unknown":
+        return can_translate and bool(text.strip())
+    return (detected_language != target_language) and (conf >= threshold)
+
+def _attach_language_metadata(chunk, content_id: str, detected_language: str, conf: float, requires: bool, text: str) -> None:
+    chunk.metadata = getattr(chunk, "metadata", {}) or {}
+    lang_meta = LanguageMetadata(
+        content_id=str(content_id),
+        detected_language=detected_language,
+        language_confidence=conf,
+        requires_translation=requires,
+        character_count=len(text),
+    )
+    chunk.metadata["language"] = lang_meta.model_dump()
+
+async def _translate_and_update(provider: TranslationProvider, chunk, content_id: str, text: str, target_language: str, detected_language: str) -> None:
+    try:
+        tr = await provider.translate(text, target_language)
+    except Exception:
+        logger.exception("Translation failed for content_id=%s", content_id)
+        tr = None
+
+    if tr and isinstance(tr[0], str) and tr[0].strip() and tr[0] != text:
+        translated_text, t_conf = tr
+        provider_used = provider.__class__.__name__.replace("Provider", "").lower()
+        trans = TranslatedContent(
+            original_chunk_id=str(content_id),
+            original_text=text,
+            translated_text=translated_text,
+            source_language=detected_language,
+            target_language=target_language,
+            translation_provider=provider_used,
+            confidence_score=t_conf or 0.0,
+        )
+        chunk.metadata["translation"] = trans.model_dump()
+        chunk.text = translated_text
+        if hasattr(chunk, "chunk_size"):
+            try:
+                chunk.chunk_size = len(translated_text.split())
+            except (AttributeError, ValueError, TypeError):
+                logger.debug(
+                    "Could not update chunk_size for content_id=%s",
+                    content_id,
+                    exc_info=True,
+                )
+        return
+
+    if tr is None:
+        provider_used = provider.__class__.__name__.replace("Provider", "").lower()
+        trans = TranslatedContent(
+            original_chunk_id=str(content_id),
+            original_text=text,
+            translated_text=text,
+            source_language=detected_language,
+            target_language=target_language,
+            translation_provider=provider_used,
+            confidence_score=0.0,
+        )
+        chunk.metadata["translation"] = trans.model_dump()
+    else:
+        logger.info("Provider returned unchanged text; skipping translation metadata (content_id=%s)", content_id)
+
 
 # Test helpers for registry isolation
 def snapshot_registry() -> Dict[str, Type[TranslationProvider]]:
@@ -259,115 +353,27 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
     """
     provider = _get_provider(translation_provider)
     results = []
-    
-    # Support both pipeline varargs and a single list argument
+
     if len(data_chunks) == 1 and isinstance(data_chunks[0], list):
         _chunks = data_chunks[0]
     else:
         _chunks = list(data_chunks)
-    
+
     for chunk in _chunks:
         text = getattr(chunk, "text", "") or ""
         content_id = getattr(chunk, "id", getattr(chunk, "chunk_index", "unknown"))
-        
-        # 1) Detect language
-        try:
-            detection = await provider.detect_language(text)
-        except Exception:
-            logger.exception("Language detection failed for content_id=%s", content_id)
-            detection = None
-            
-        # Fallback: try 'langdetect' when the chosen provider can't detect
-        if detection is None:
-            fallback_cls = _provider_registry.get("langdetect")
-            if fallback_cls is not None and not isinstance(provider, fallback_cls):
-                try:
-                    detection = await fallback_cls().detect_language(text)
-                except Exception:
-                    logger.exception("Fallback language detection failed for content_id=%s", content_id)
-                    detection = None
-                    
-        # Normalize detection tuple; guard against (None, ""), bad types
-        if detection is None:
-            detected_language, conf = "unknown", 0.0
-        else:
-            lang_code, conf = detection
-            detected_language = _normalize_lang_code(lang_code)
-            # coerce confidence -> [0.0, 1.0]
-            try:
-                conf = float(conf)
-            except (TypeError, ValueError):
-                conf = 0.0
-            if math.isnan(conf):
-                conf = 0.0
-            conf = max(0.0, min(1.0, conf))
-
-        # If detection is unavailable, allow translators to attempt translation.
-        can_translate = translation_provider.lower() not in ("noop", "langdetect")
-        requires = ((detected_language != target_language) and (conf >= confidence_threshold)) or (
-            detected_language == "unknown" and can_translate and bool(text.strip())
+        detected_language, conf = await _detect_language_with_fallback(provider, text, str(content_id))
+        requires = _requires_translation(
+            detected_language,
+            target_language,
+            conf,
+            confidence_threshold,
+            translation_provider.lower(),
+            text,
         )
-        
-        # 2) Record language metadata
-        chunk.metadata = getattr(chunk, "metadata", {}) or {}
-        lang_meta = LanguageMetadata(
-            content_id=str(content_id),
-            detected_language=detected_language,
-            language_confidence=conf,
-            requires_translation=requires,
-            character_count=len(text),
-        )
-        chunk.metadata["language"] = lang_meta.model_dump()
-        
-        # 3) Translate if required
+        _attach_language_metadata(chunk, str(content_id), detected_language, conf, requires, text)
         if requires:
-            try:
-                tr = await provider.translate(text, target_language)
-            except Exception:
-                logger.exception("Translation failed for content_id=%s", content_id)
-                tr = None
-                
-            if tr and isinstance(tr[0], str) and tr[0].strip() and tr[0] != text:
-                # Translation succeeded and text was actually changed
-                translated_text, t_conf = tr
-                provider_used = provider.__class__.__name__.replace("Provider", "").lower()
-                trans = TranslatedContent(
-                    original_chunk_id=str(content_id),
-                    original_text=text,
-                    translated_text=translated_text,
-                    source_language=detected_language,
-                    target_language=target_language,
-                    translation_provider=provider_used,
-                    confidence_score=t_conf or 0.0,
-                )
-                chunk.metadata["translation"] = trans.model_dump()
-                chunk.text = translated_text
-                # Update chunk size to reflect translated content (word count)
-                if hasattr(chunk, "chunk_size"):
-                    try:
-                        chunk.chunk_size = len(translated_text.split())
-                    except (AttributeError, ValueError, TypeError):
-                        logger.debug(
-                            "Could not update chunk_size for content_id=%s",
-                            content_id,
-                            exc_info=True,
-                        )
-            elif tr is None:
-                # Translation call failed (exception or None) — record a no-op entry
-                provider_used = provider.__class__.__name__.replace("Provider", "").lower()
-                trans = TranslatedContent(
-                    original_chunk_id=str(content_id),
-                    original_text=text,
-                    translated_text=text,
-                    source_language=detected_language,
-                    target_language=target_language,
-                    translation_provider=provider_used,
-                    confidence_score=0.0,
-                )
-                chunk.metadata["translation"] = trans.model_dump()
-            else:
-                # Provider returned unchanged text (not an error) - skip translation metadata
-                logger.info("Provider returned unchanged text; skipping translation metadata (content_id=%s)", content_id)
-                
+            await _translate_and_update(provider, chunk, str(content_id), text, target_language, detected_language)
         results.append(chunk)
+    return results
     return results
