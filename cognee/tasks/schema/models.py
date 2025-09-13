@@ -9,6 +9,7 @@ class DatabaseSchema(DataPoint):
     tables: Dict[str, Dict]  # Reuse existing schema format from SqlAlchemyAdapter
     sample_data: Dict[str, List[Dict]]  # Limited examples per table
     extraction_timestamp: datetime
+    description: str
     metadata: dict = {"index_fields": ["schema_name", "database_type"]}
 
 class SchemaTable(DataPoint):
@@ -20,13 +21,15 @@ class SchemaTable(DataPoint):
     foreign_keys: List[Dict]  # Foreign key relationships
     sample_rows: List[Dict]  # Max 3-5 example rows
     row_count_estimate: Optional[int]  # Actual table size
+    description: str
     metadata: dict = {"index_fields": ["table_name", "schema_name"]}
 
 class SchemaRelationship(DataPoint):
     """Represents relationships between tables"""
     source_table: str
     target_table: str
-    relationship_type: str  # "foreign_key", "one_to_many", etc.
+    relationship_type: str
     source_column: str
     target_column: str
+    description: str
     metadata: dict = {"index_fields": ["source_table", "target_table"]}
