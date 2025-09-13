@@ -42,6 +42,24 @@ class ProviderInitializationError(TranslationProviderError):
 _WARNED_ENV_VARS: set[str] = set()
 
 def _parse_batch_env(var: str, default: int = 10) -> int:
+<<<<<<< HEAD
+=======
+    """
+    Parse an environment variable as a positive integer (minimum 1), falling back to a default.
+    
+    If the environment variable named `var` is unset, the provided `default` is returned.
+    If the variable is set but cannot be parsed as an integer, `default` is returned and a
+    one-time warning is logged for that variable (the variable name is recorded in
+    `_WARNED_ENV_VARS` to avoid repeated warnings).
+    
+    Parameters:
+        var: Name of the environment variable to read.
+        default: Fallback integer value returned when the variable is missing or invalid.
+    
+    Returns:
+        An integer >= 1 representing the parsed value or the fallback `default`.
+    """
+>>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
     raw = os.getenv(var)
     if raw is None:
         return default
@@ -246,7 +264,31 @@ def get_default_tasks(  # pylint: disable=too-many-arguments,too-many-positional
     custom_prompt: Optional[str] = None,
 ) -> list[Task]:
     """
-    Build the default pipeline (no translation). See get_default_tasks_with_translation for the translation-enabled variant.
+    Return the standard, non-translation Task list used by the cognify pipeline.
+    
+    This builds the default processing pipeline (no automatic translation) and returns
+    a list of Task objects in execution order:
+    1. classify_documents
+    2. check_permissions_on_dataset (enforces write permission for `user`)
+    3. extract_chunks_from_documents (uses `chunker` and `chunk_size`)
+    4. extract_graph_from_data (uses `graph_model`, optional `ontology_file_path`, and `custom_prompt`)
+    5. summarize_text
+    6. add_data_points
+    
+    Notes:
+    - Batch sizes for downstream tasks use the module-level DEFAULT_BATCH_SIZE.
+    - If `chunk_size` is not provided, the token limit from get_max_chunk_tokens() is used.
+    
+    Parameters:
+        user: Optional user context used for the permission check.
+        graph_model: Model class used to construct knowledge graph instances.
+        chunker: Chunking strategy or class used to split documents into chunks.
+        chunk_size: Optional max tokens per chunk; if omitted, defaults to get_max_chunk_tokens().
+        ontology_file_path: Optional path to an ontology file passed to the extractor.
+        custom_prompt: Optional custom prompt applied during graph extraction.
+    
+    Returns:
+        List[Task]: Ordered list of Task objects for the cognify pipeline (no translation).
     """
     # Precompute max_chunk_size for stability
     max_chunk = chunk_size or get_max_chunk_tokens()
@@ -285,24 +327,20 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
     translation_provider: str = "noop",
 ) -> list[Task]:
     """
-    Get default pipeline tasks with translation capability.
+    Return the default Cognify pipeline task list with an added translation step.
     
-    This function returns the standard Cognee processing pipeline with an added
-    translation step that automatically detects and translates non-English content
-    to English before graph extraction.
+    Constructs the standard processing pipeline (classify -> permission check -> chunk extraction -> translate -> graph extraction -> summarize -> add data points),
+    validates and initializes the named translation provider, and applies module DEFAULT_BATCH_SIZE to downstream batchable tasks.
     
-    Args:
-        user: User context for permissions
-        graph_model: Model for knowledge graph structure
-        chunker: Text chunking strategy
-        chunk_size: Maximum chunk size in tokens
-        ontology_file_path: Path to ontology file for structured extraction
-        custom_prompt: Custom prompt for graph extraction
-        translation_provider: Name of a registered provider (see get_available_providers()).
-                             Common options: "noop", "langdetect", "openai"; plugins/examples allowed (e.g., "google", "azure").
-        
+    Parameters:
+        translation_provider (str): Name of a registered translation provider (case-insensitive). Defaults to `"noop"` which is a no-op provider.
+    
     Returns:
-        List of Tasks including translation step
+        list[Task]: Ordered Task objects ready to be executed by the pipeline executor.
+    
+    Raises:
+        UnknownTranslationProviderError: If the given provider name is not in get_available_providers().
+        ProviderInitializationError: If the provider fails to initialize or validate via validate_provider().
     """
     # Fail fast on unknown providers (keeps errors close to the API surface)
     translation_provider = (translation_provider or "noop").strip().lower()

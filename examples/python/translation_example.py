@@ -15,7 +15,30 @@ from cognee.modules.pipelines.operations.pipeline import run_pipeline
 #    - pip install langdetect googletrans==4.0.0rc1 azure-ai-translation-text
 
 async def main():
+<<<<<<< HEAD
     """Demonstrates the translation pipeline in cognee."""
+=======
+    """
+    Demonstrates an end-to-end translation-enabled Cognify workflow using the Cognee SDK.
+    
+    Performs three main steps:
+    1. Resets the demo workspace by pruning stored data and system metadata.
+    2. Seeds three multilingual documents, builds translation-enabled Cognify tasks using the
+       provider specified by the COGNEE_TRANSLATION_PROVIDER environment variable (defaults to "noop"),
+       and executes the pipeline to translate and process the documents.
+       - If the selected provider is missing or invalid, the function prints the error and returns early.
+    3. Issues an English search query (using SearchType.INSIGHTS) against the processed index and
+       prints any returned result texts.
+    
+    Side effects:
+    - Mutates persistent Cognee state (prune, add, cognify pipeline execution).
+    - Prints status and result messages to stdout.
+    
+    Notes:
+    - No return value.
+    - Exceptions ValueError and ImportError are caught and handled by printing an error and exiting the function.
+    """
+>>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
     # 1. Set up cognee and add multilingual content
     print("Setting up demo environment...")
     await cognee.prune.prune_data()

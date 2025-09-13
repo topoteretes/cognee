@@ -24,10 +24,8 @@ export default function TextArea({
     const fakeTextAreaElement = event.target as HTMLDivElement;
     const newValue = fakeTextAreaElement.innerText;
 
-    if (newValue !== value) {
-      onChange?.(newValue);
-    }
-  }, [onChange, value]);
+    onChange?.(newValue);
+  }, [onChange]);
 
   const handleKeyUp = useCallback((event: Event) => {
     if (onKeyUp) {
@@ -55,8 +53,15 @@ export default function TextArea({
   useLayoutEffect(() => {
     const fakeTextAreaElement = fakeTextAreaRef.current;
 
-    if (fakeTextAreaElement) {
+    if (fakeTextAreaElement && fakeTextAreaElement.innerText.trim() !== "") {
       fakeTextAreaElement.innerText = placeholder;
+    }
+  }, [placeholder]);
+
+  useLayoutEffect(() => {
+    const fakeTextAreaElement = fakeTextAreaRef.current;
+
+    if (fakeTextAreaElement) {
       fakeTextAreaElement.addEventListener("input", handleTextChange);
       fakeTextAreaElement.addEventListener("keyup", handleKeyUp);
     }
@@ -67,15 +72,21 @@ export default function TextArea({
         fakeTextAreaElement.removeEventListener("keyup", handleKeyUp);
       }
     };
-  }, []);
+  }, [handleKeyUp, handleTextChange]);
 
   useEffect(() => {
     const fakeTextAreaElement = fakeTextAreaRef.current;
     const textAreaText = fakeTextAreaElement?.innerText;
-    if (fakeTextAreaElement && textAreaText !== value && textAreaText !== placeholder) {
+
+    if (fakeTextAreaElement && (value === "" || value === "\n")) {
+      fakeTextAreaElement.innerText = placeholder;
+      return;
+    }
+
+    if (fakeTextAreaElement && textAreaText !== value) {
       fakeTextAreaElement.innerText = value;
     }
-  }, [value]);
+  }, [placeholder, value]);
 
   return isAutoExpanding ? (
     <>

@@ -35,7 +35,7 @@ class LLMConfig(BaseSettings):
 
     structured_output_framework: str = "instructor"
     llm_provider: str = "openai"
-    llm_model: str = "gpt-5-mini"
+    llm_model: str = "openai/gpt-4o-mini"
     llm_endpoint: str = ""
     llm_api_key: Optional[str] = None
     llm_api_version: Optional[str] = None
@@ -44,7 +44,7 @@ class LLMConfig(BaseSettings):
     llm_max_completion_tokens: int = 16384
 
     baml_llm_provider: str = "openai"
-    baml_llm_model: str = "gpt-5-mini"
+    baml_llm_model: str = "gpt-4o-mini"
     baml_llm_endpoint: str = ""
     baml_llm_api_key: Optional[str] = None
     baml_llm_temperature: float = 0.0
@@ -52,6 +52,8 @@ class LLMConfig(BaseSettings):
 
     transcription_model: str = "whisper-1"
     graph_prompt_path: str = "generate_graph_prompt.txt"
+    temporal_graph_prompt_path: str = "generate_event_graph_prompt.txt"
+    event_entity_prompt_path: str = "generate_event_entity_prompt.txt"
     llm_rate_limit_enabled: bool = False
     llm_rate_limit_requests: int = 60
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
