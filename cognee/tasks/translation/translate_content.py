@@ -30,7 +30,14 @@ class AzureConfigError(ValueError):
 
 # Environment variables for configuration
 TARGET_LANGUAGE = os.getenv("COGNEE_TRANSLATION_TARGET_LANGUAGE", "en")
-CONFIDENCE_THRESHOLD = float(os.getenv("COGNEE_TRANSLATION_CONFIDENCE_THRESHOLD", 0.80))
+try:
+    CONFIDENCE_THRESHOLD = float(os.getenv("COGNEE_TRANSLATION_CONFIDENCE_THRESHOLD", "0.80"))
+except (TypeError, ValueError):
+    logger.warning(
+        "Invalid float for COGNEE_TRANSLATION_CONFIDENCE_THRESHOLD=%r; defaulting to 0.80",
+        os.getenv("COGNEE_TRANSLATION_CONFIDENCE_THRESHOLD"),
+    )
+    CONFIDENCE_THRESHOLD = 0.80
 
 class TranslationProvider(Protocol):
     """Protocol for translation providers."""
@@ -139,7 +146,7 @@ class OpenAIProvider:
             return None
         
         translated_text = response.choices[0].message.content.strip()
-        return translated_text, 1.0  # OpenAI does not provide a confidence score.
+        return translated_text, 0.0  # No calibrated confidence available.
 
 class GoogleTranslateProvider:
     """A provider that uses the 'googletrans' library for translation."""
@@ -156,8 +163,12 @@ class GoogleTranslateProvider:
         except Exception:
             logger.exception("Error during Google Translate language detection")
             return None
-        
-        return detection.lang, detection.confidence
+
+        try:
+            conf = float(detection.confidence) if detection.confidence is not None else 0.0
+        except (TypeError, ValueError):
+            conf = 0.0
+        return detection.lang, conf
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         try:
@@ -166,7 +177,7 @@ class GoogleTranslateProvider:
             logger.exception("Error during Google Translate translation")
             return None
         
-        return translation.text, 1.0  # Confidence score not provided for translation.
+        return translation.text, 0.0  # Confidence not provided.
 
 class AzureTranslatorProvider:
     """A provider that uses Azure's Translator service."""
@@ -207,7 +218,7 @@ class AzureTranslatorProvider:
             return None
         
         translation = response[0].translations[0]
-        return translation.text, 1.0  # Confidence score not provided for translation.
+        return translation.text, 0.0  # Confidence not provided.
 
 # Register built-in providers
 register_translation_provider("noop", NoOpProvider)
@@ -225,6 +236,10 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
     """
     Translate non-English chunks to the target language; attach language/translation metadata.
     Returns the (possibly modified) list of chunks.
+
+    Batching behavior:
+    - Accepts either varargs of chunk objects (pipeline may pass multiple args),
+      or a single list containing chunk objects. Both forms are supported.
     """
     provider = _get_provider(translation_provider)
     results = []
@@ -265,6 +280,16 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
                 detected_language, conf = "unknown", 0.0
             else:
                 detected_language = lang_code.strip()
+                # coerce confidence -> [0.0, 1.0]
+                try:
+                    conf = float(conf)
+                except (TypeError, ValueError):
+                    conf = 0.0
+                # NaN check: conf != conf is True only for NaN
+                if conf != conf:
+                    conf = 0.0
+                # clamp to [0.0, 1.0]
+                conf = max(0.0, min(1.0, conf))
 
         # If detection is unavailable, allow translators to attempt translation.
         can_translate = translation_provider.lower() not in ("noop", "langdetect")
@@ -291,7 +316,7 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
                 logger.exception("Translation failed for content_id=%s", content_id)
                 tr = None
                 
-            if tr and tr[0] != text:
+            if tr and isinstance(tr[0], str) and tr[0].strip() and tr[0] != text:
                 # Translation succeeded and text was actually changed
                 translated_text, t_conf = tr
                 trans = TranslatedContent(
@@ -305,13 +330,16 @@ async def translate_content(  # pylint: disable=too-many-locals,too-many-branche
                 )
                 chunk.metadata["translation"] = trans.model_dump()
                 chunk.text = translated_text
-                # Update chunk size to reflect translated content
+                # Update chunk size to reflect translated content (word count)
                 if hasattr(chunk, "chunk_size"):
                     try:
-                        chunk.chunk_size = len(translated_text)
+                        chunk.chunk_size = len(translated_text.split())
                     except Exception:
-                        # Best-effort; leave unchanged if not applicable
-                        pass
+                        logger.debug(
+                            "Could not update chunk_size for content_id=%s",
+                            content_id,
+                            exc_info=True,
+                        )
             elif tr is None:
                 # Translation call failed (exception or None) — record a no-op entry
                 trans = TranslatedContent(

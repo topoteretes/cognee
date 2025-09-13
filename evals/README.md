@@ -68,6 +68,3 @@ Performance analysis of different Cognee retriever configurations (GRAPH_COMPLET
 - **Traditional QA metrics (EM/F1)** miss core value of AI memory systems - measure letter/word differences rather than information content
 - **HotPotQA benchmark mismatch** - designed for multi-hop reasoning but operates in constrained contexts vs. real-world cross-context linking
 - **DeepEval variance** - LLM-as-judge evaluation carries inconsistencies of underlying language model
-- **Traditional QA metrics (EM/F1)** miss core value of AI memory systems - measure letter/word differences rather than information content
-- **HotPotQA benchmark mismatch** - designed for multi-hop reasoning but operates in constrained contexts vs. real-world cross-context linking
-- **DeepEval variance** - LLM-as-judge evaluation carries inconsistencies of underlying language model

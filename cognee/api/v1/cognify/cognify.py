@@ -30,23 +30,27 @@ from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline
 
 class TranslationProviderError(ValueError):
     """Error related to translation provider initialization."""
+    pass
 
+class UnknownTranslationProviderError(TranslationProviderError):
+    """Unknown translation provider name."""
+
+class ProviderInitializationError(TranslationProviderError):
+    """Provider failed to initialize (likely missing dependency or bad config)."""
+
+
+_WARNED_ENV_VARS: set[str] = set()
 
 def _parse_batch_env(var: str, default: int = 10) -> int:
+    raw = os.getenv(var)
+    if raw is None:
+        return default
     try:
-        return max(1, int(os.getenv(var, str(default))))
-    except ValueError:
-        # Optional: log once to aid debugging of misconfigurations
-        try:
-            # Use a module-level set to avoid repeated warnings
-            if not hasattr(_parse_batch_env, "_warned"):
-                _parse_batch_env._warned = set()  # type: ignore[attr-defined]
-            warned = _parse_batch_env._warned  # type: ignore[attr-defined]
-            if var not in warned:
-                logger.warning("Invalid int for %s=%r; using default=%d", var, os.getenv(var), default)
-                warned.add(var)
-        except Exception:
-            pass
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        if var not in _WARNED_ENV_VARS:
+            logger.warning("Invalid int for %s=%r; using default=%d", var, raw, default)
+            _WARNED_ENV_VARS.add(var)
         return default
 
 # Constants for batch processing
@@ -300,15 +304,25 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
     # Fail fast on unknown providers (keeps errors close to the API surface)
     translation_provider = (translation_provider or "noop").strip().lower()
     # Validate provider using public API
+    if translation_provider not in get_available_providers():
+        available = ", ".join(get_available_providers())
+        logger.error("Unknown provider '%s'. Available: %s", translation_provider, available)
+        raise UnknownTranslationProviderError(f"Unknown provider '{translation_provider}'")
+    # Instantiate to validate dependencies; let provider-specific ImportErrors bubble up
     try:
-        from cognee.tasks.translation import get_available_providers
-        if translation_provider not in get_available_providers():
-            raise ValueError(f"Unknown provider: {translation_provider}")
-        # Instantiate to validate dependencies
-        from cognee.tasks.translation.translate_content import _get_provider
+        from cognee.tasks.translation.translate_content import _get_provider  # still private; consider public validate()
         _get_provider(translation_provider)
-    except Exception as e:
-        raise TranslationProviderError(f"Provider '{translation_provider}' failed to initialize") from e
+    except ImportError as e:
+        available = ", ".join(get_available_providers())
+        logger.error(
+            "Provider '%s' failed to initialize. Available: %s",
+            translation_provider,
+            available,
+            exc_info=True,
+        )
+        raise ProviderInitializationError(
+            f"Failed to initialize provider '{translation_provider}'"
+        ) from e
     
     # Precompute max_chunk_size for stability
     max_chunk = chunk_size or get_max_chunk_tokens()
