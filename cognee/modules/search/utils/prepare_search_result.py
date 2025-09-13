@@ -6,7 +6,7 @@ from cognee.modules.search.utils.transform_context_to_graph import transform_con
 
 
 async def prepare_search_result(search_result):
-    result, context, datasets = search_result
+    results, context, datasets = search_result
 
     graphs = None
     result_graph = None
@@ -30,11 +30,11 @@ async def prepare_search_result(search_result):
             "*": "\n".join(cast(List[str], context)),
         }
 
-    if isinstance(result, List) and len(result) > 0 and isinstance(result[0], Edge):
-        result_graph = transform_context_to_graph(result)
+    if isinstance(results, List) and len(results) > 0 and isinstance(results[0], Edge):
+        result_graph = transform_context_to_graph(results)
 
     return {
-        "result": result_graph or result,
+        "result": result_graph or results[0] if len(results) == 1 else results,
         "graphs": graphs,
         "context": context_texts,
         "datasets": datasets,

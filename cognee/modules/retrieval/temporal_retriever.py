@@ -136,7 +136,7 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         return self.descriptions_to_string(top_k_events)
 
-    async def get_completion(self, query: str, context: Optional[str] = None) -> str:
+    async def get_completion(self, query: str, context: Optional[str] = None) -> List[str]:
         """Generates a response using the query and optional context."""
         if not context:
             context = await self.get_context(query=query)

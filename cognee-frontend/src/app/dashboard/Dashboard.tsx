@@ -54,10 +54,12 @@ export default function Dashboard({ accessToken }: DashboardProps) {
   const [selectedNotebookId, setSelectedNotebookId] = useState<string | null>(null);
 
   const handleNotebookRemove = useCallback((notebookId: string) => {
-    setSelectedNotebookId((currentSelectedNotebookId) => (
-      currentSelectedNotebookId === notebookId ? null : currentSelectedNotebookId
-    ));
-    return removeNotebook(notebookId);
+    return removeNotebook(notebookId)
+      .then(() => {
+        setSelectedNotebookId((currentSelectedNotebookId) => (
+          currentSelectedNotebookId === notebookId ? null : currentSelectedNotebookId
+        ));
+      });
   }, [removeNotebook]);
 
   const saveNotebookTimeoutRef = useRef<number | null>(null);
@@ -158,7 +160,6 @@ export default function Dashboard({ accessToken }: DashboardProps) {
                 key={selectedNotebook.id}
                 notebook={selectedNotebook}
                 updateNotebook={handleNotebookUpdate}
-                saveNotebook={saveNotebook}
                 runCell={runCell}
               />
             )}
