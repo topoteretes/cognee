@@ -61,6 +61,7 @@ async def search(
         user:
         system_prompt_path:
         top_k:
+        with_scores:
 
     Returns:
 
