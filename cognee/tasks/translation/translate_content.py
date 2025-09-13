@@ -74,7 +74,7 @@ class TranslationProvider(Protocol):
         """
         Detect the language of the provided text.
         
-        Uses the langdetect library to determine the most likely language and its probability.
+        Provider-agnostic hook to determine the most likely language and its probability.
         Returns a tuple (language_code, confidence) where `language_code` is a normalized short code (e.g., "en", "fr" or "unknown") and `confidence` is a float in [0.0, 1.0]. Returns None when detection fails (empty input, an error, or no reliable result).
         """
 
@@ -214,7 +214,8 @@ def _decide_if_translation_is_required(ctx: TranslationContext) -> None:
     """
     # Normalize to align with detected_language normalization and model regex.
     target_language = _normalize_lang_code(ctx.target_language)
-    can_translate = ctx.provider_name not in ("noop", "langdetect")
+    provider_key = _provider_name(ctx.provider)
+    can_translate = provider_key not in ("noop", "langdetect")
 
     if ctx.detected_language == "unknown":
         ctx.requires_translation = can_translate and bool(ctx.text.strip())
@@ -291,7 +292,7 @@ async def _translate_and_update(ctx: TranslationContext) -> None:
         translated_text = ctx.text
     else:
         # Provider returned unchanged text
-        logger.info("Provider returned unchanged text; skipping translation metadata (content_id=%s)", ctx.content_id)
+        logger.debug("Provider returned unchanged text; skipping translation metadata (content_id=%s)", ctx.content_id)
         return
 
     trans = TranslatedContent(
@@ -485,7 +486,8 @@ class GoogleTranslateProvider:
         """
         try:
             detection = await asyncio.to_thread(self._translator.detect, text)
-            return detection.lang, detection.confidence
+            conf = float(detection.confidence) if detection.confidence is not None else 0.0
+            return detection.lang, conf
         except Exception:
             logger.exception("Google Translate language detection failed.")
         return None
@@ -519,16 +521,22 @@ class AzureTranslateProvider:
     def __init__(self):
         if self._client is None:
             try:
-                from azure.ai.translation.text import TextTranslationClient
+                from azure.ai.translation.text import TextTranslationClient, TranslatorCredential
                 from azure.core.credentials import AzureKeyCredential
 
                 key = os.getenv("AZURE_TRANSLATE_KEY")
-                endpoint = os.getenv("AZURE_TRANSLATE_ENDPOINT")
+                endpoint = os.getenv("AZURE_TRANSLATE_ENDPOINT")  # optional for global
+                region = os.getenv("AZURE_TRANSLATE_REGION")      # optional; required for some resources
 
-                if not all([key, endpoint]):
-                    raise AzureConfigError("Azure Translate credentials (KEY and ENDPOINT) are required.")
-                # Global endpoint works without region; regional endpoints embed region in the URL.
-                self._client = TextTranslationClient(endpoint, AzureKeyCredential(key))
+                if not key:
+                    raise AzureConfigError("Azure Translate key (AZURE_TRANSLATE_KEY) is required.")
+                if region:
+                    cred = TranslatorCredential(key, region)
+                    self._client = TextTranslationClient(endpoint=endpoint, credential=cred)
+                else:
+                    cred = AzureKeyCredential(key)
+                    # If endpoint is None, SDK uses the global translator endpoint.
+                    self._client = TextTranslationClient(endpoint=endpoint, credential=cred)
             except ImportError as e:
                 raise AzureTranslateError("azure-ai-translation-text is not installed. Please install it with `pip install azure-ai-translation-text`") from e
 
@@ -543,7 +551,10 @@ class AzureTranslateProvider:
             A tuple containing the detected language code and the confidence score, or None if detection fails.
         """
         try:
-            response = await asyncio.to_thread(self._client.detect, content=[text])
+            try:
+                response = await asyncio.to_thread(self._client.detect, content=[text])
+            except TypeError:
+                response = await asyncio.to_thread(self._client.detect, [text])
             if response and getattr(response[0], "detected_language", None):
                 dl = response[0].detected_language
                 return dl.language, dl.score
@@ -563,7 +574,11 @@ class AzureTranslateProvider:
             A tuple containing the translated text and a confidence score of 1.0, or None if translation fails.
         """
         try:
-            response = await asyncio.to_thread(self._client.translate, content=[text], to=[target_language])
+            try:
+                response = await asyncio.to_thread(self._client.translate, content=[text], to=[target_language])
+            except TypeError:
+                # Fallback for SDKs using `body`/`to_language`
+                response = await asyncio.to_thread(self._client.translate, [text], to_language=[target_language])
             if response and response[0].translations:
                 return response[0].translations[0].text, 1.0
         except Exception:
@@ -587,11 +602,9 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
     Returns:
         The processed chunk(s), which may have its text translated and metadata updated.
     """
-    # Normalize inputs to a list
-    if len(chunks) == 1 and isinstance(chunks[0], list):
-        batch = chunks[0]
-    else:
-        batch = list(chunks)
+    # Normalize inputs and remember original shape
+    input_was_list = len(chunks) == 1 and isinstance(chunks[0], list)
+    batch = chunks[0] if input_was_list else list(chunks)
     
     results = []
 
@@ -633,7 +646,7 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
 
         results.append(ctx.chunk)
 
-    return results if len(results) != 1 else results[0]
+    return results if (input_was_list or len(chunks) != 1) else results[0]
 
 
 # Initialize providers
