@@ -322,6 +322,7 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
     ontology_file_path: Optional[str] = None,
     custom_prompt: Optional[str] = None,
     translation_provider: str = "noop",
+    target_language: str = "en",
 ) -> list[Task]:
     """
     Return the default Cognify pipeline task list with an added translation step.
@@ -345,7 +346,9 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
     if translation_provider not in get_available_providers():
         available = ", ".join(get_available_providers())
         logger.error("Unknown provider '%s'. Available: %s", translation_provider, available)
-        raise UnknownTranslationProviderError(f"Unknown provider '{translation_provider}'")
+        raise UnknownTranslationProviderError(
+            f"Unknown provider '{translation_provider}'. Available: {available}"
+        )
     # Instantiate to validate dependencies; include provider-specific config errors
     try:
         validate_provider(translation_provider)
@@ -372,7 +375,7 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
         ),  # Extract text chunks based on the document type.
         Task(
             translate_content,
-            target_language="en",
+            target_language=target_language,
             translation_provider=translation_provider,
             task_config={"batch_size": DEFAULT_BATCH_SIZE},
         ),  # Auto-translate non-English content and attach metadata

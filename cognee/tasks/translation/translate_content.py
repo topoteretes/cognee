@@ -441,7 +441,8 @@ class OpenAIProvider:
             A tuple containing the translated text and a confidence score of 1.0, or None if translation fails.
         """
         try:
-            response = await self._client.chat.completions.create(
+            client = self._client.with_options(timeout=float(os.getenv("OPENAI_TIMEOUT", "30")))
+            response = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": f"You are a translation assistant. Translate the following text to {target_language}."},
@@ -482,7 +483,7 @@ class GoogleTranslateProvider:
             A tuple containing the detected language code and the confidence score, or None if detection fails.
         """
         try:
-            detection = self._translator.detect(text)
+            detection = await asyncio.to_thread(self._translator.detect, text)
             return detection.lang, detection.confidence
         except Exception:
             logger.exception("Google Translate language detection failed.")
@@ -500,7 +501,7 @@ class GoogleTranslateProvider:
             A tuple containing the translated text and a confidence score of 1.0, or None if translation fails.
         """
         try:
-            translation = self._translator.translate(text, dest=target_language)
+            translation = await asyncio.to_thread(self._translator.translate, text, dest=target_language)
             return translation.text, 1.0
         except Exception:
             logger.exception("Google Translate translation failed.")
@@ -524,9 +525,9 @@ class AzureTranslateProvider:
                 region = os.getenv("AZURE_TRANSLATE_REGION")
                 endpoint = os.getenv("AZURE_TRANSLATE_ENDPOINT")
 
-                if not all([key, region, endpoint]):
-                    raise AzureConfigError("Azure Translate credentials (KEY, REGION, ENDPOINT) are not fully configured.")
-
+                if not all([key, endpoint]):
+                    raise AzureConfigError("Azure Translate credentials (KEY and ENDPOINT) are required.")
+                # Global endpoint works without region; regional endpoints embed region in the URL.
                 self._client = TextTranslationClient(endpoint, AzureKeyCredential(key))
             except ImportError as e:
                 raise AzureTranslateError("azure-ai-translation-text is not installed. Please install it with `pip install azure-ai-translation-text`") from e
@@ -542,11 +543,10 @@ class AzureTranslateProvider:
             A tuple containing the detected language code and the confidence score, or None if detection fails.
         """
         try:
-            # Note: The Azure SDK's find_sentence_boundaries is used for detection here.
-            # For regional resources, ensure the endpoint is configured correctly.
-            response = self._client.find_sentence_boundaries([text])
-            if response and response[0].detected_language:
-                return response[0].detected_language.language, response[0].detected_language.score
+            response = await asyncio.to_thread(self._client.detect, content=[text])
+            if response and getattr(response[0], "detected_language", None):
+                dl = response[0].detected_language
+                return dl.language, dl.score
         except Exception:
             logger.exception("Azure Translate language detection failed.")
         return None
@@ -563,7 +563,7 @@ class AzureTranslateProvider:
             A tuple containing the translated text and a confidence score of 1.0, or None if translation fails.
         """
         try:
-            response = self._client.translate(content=[text], to=[target_language])
+            response = await asyncio.to_thread(self._client.translate, content=[text], to=[target_language])
             if response and response[0].translations:
                 return response[0].translations[0].text, 1.0
         except Exception:
@@ -572,7 +572,7 @@ class AzureTranslateProvider:
 
 
 # Main task function
-async def translate_content(chunk: Any, **kwargs) -> Any:
+async def translate_content(*chunks: Any, **kwargs) -> Any:
     """
     Translate the content of a chunk if necessary.
     
@@ -581,95 +581,60 @@ async def translate_content(chunk: Any, **kwargs) -> Any:
     It updates the chunk with the translated text and adds metadata about the translation process.
     
     Parameters:
-        chunk (Any): The chunk of content to be processed. It must have a 'text' attribute.
+        chunks (Any): The chunk(s) of content to be processed. It must have a 'text' attribute.
         **kwargs: Additional arguments, including 'target_language' and 'translation_provider'.
     
     Returns:
-        The processed chunk, which may have its text translated and metadata updated.
+        The processed chunk(s), which may have its text translated and metadata updated.
     """
-    target_language = kwargs.get("target_language", TARGET_LANGUAGE)
-    translation_provider_name = kwargs.get("translation_provider", "noop")
-    confidence_threshold = kwargs.get("confidence_threshold", CONFIDENCE_THRESHOLD)
+    # Normalize inputs to a list
+    if len(chunks) == 1 and isinstance(chunks[0], list):
+        batch = chunks[0]
+    else:
+        batch = list(chunks)
+    
+    results = []
 
-    try:
-        provider = _get_provider(translation_provider_name)
-    except ValueError:
-        logger.exception("Failed to get translation provider.")
-        return chunk
+    for chunk in batch:
+        target_language = kwargs.get("target_language", TARGET_LANGUAGE)
+        translation_provider_name = kwargs.get("translation_provider", "noop")
+        confidence_threshold = kwargs.get("confidence_threshold", CONFIDENCE_THRESHOLD)
 
-    text_to_translate = getattr(chunk, "text", "")
-    if not isinstance(text_to_translate, str) or not text_to_translate.strip():
-        return chunk
+        try:
+            provider = _get_provider(translation_provider_name)
+        except ValueError:
+            logger.exception("Failed to get translation provider.")
+            results.append(chunk)
+            continue
 
-    ctx = TranslationContext(
-        provider=provider,
-        chunk=chunk,
-        text=text_to_translate,
-        target_language=target_language,
-        confidence_threshold=confidence_threshold,
-        provider_name=translation_provider_name,
-    )
+        text_to_translate = getattr(chunk, "text", "")
+        if not isinstance(text_to_translate, str) or not text_to_translate.strip():
+            results.append(chunk)
+            continue
 
-    ctx.detected_language, ctx.detection_confidence = await _detect_language_with_fallback(
-        provider, text_to_translate, str(ctx.content_id)
-    )
-
-    _decide_if_translation_is_required(ctx)
-    _attach_language_metadata(ctx)
-
-    if ctx.requires_translation:
-        await _translate_and_update(ctx)
-
-    return ctx.chunk
-
-
-async def main():
-    """Main function for testing the translation module."""
-    # Mock chunk for testing
-    @dataclass
-    class MockChunk:
-        id: str
-        text: str
-        metadata: Dict[str, Any] = field(default_factory=dict)
-
-    chunks_to_process = [
-        MockChunk(id="1", text="This is a test in English."),
-        MockChunk(id="2", text="Ceci est un test en français."),
-        MockChunk(id="3", text="Este es un test en español."),
-        MockChunk(id="4", text=""),  # Empty text
-        MockChunk(id="5", text="Short"),  # Too short for reliable detection
-    ]
-
-    # Register providers for testing
-    register_translation_provider("noop", NoOpProvider)
-    register_translation_provider("langdetect", LangDetectProvider)
-    # Note: The following providers require API keys and are commented out by default.
-    # register_translation_provider("openai", OpenAIProvider)
-    # register_translation_provider("google", GoogleTranslateProvider)
-    # register_translation_provider("azure", AzureTranslateProvider)
-
-    # Create translation tasks
-    tasks = [
-        translate_content(
-            chunk,
-            target_language="en",
-            translation_provider="google",
-            confidence_threshold=0.80,
+        ctx = TranslationContext(
+            provider=provider,
+            chunk=chunk,
+            text=text_to_translate,
+            target_language=target_language,
+            confidence_threshold=confidence_threshold,
+            provider_name=translation_provider_name,
         )
-        for chunk in chunks_to_process
-    ]
 
-    # Run tasks concurrently
-    processed_chunks = await asyncio.gather(*tasks)
+        ctx.detected_language, ctx.detection_confidence = await _detect_language_with_fallback(
+            provider, text_to_translate, str(ctx.content_id)
+        )
 
-    # Print results
-    for chunk in processed_chunks:
-        print(f"Chunk ID: {chunk.id}")
-        print(f"Original Text: {chunk.metadata.get('translation', {}).get('original_text', chunk.text)}")
-        print(f"Translated Text: {chunk.text}")
-        print(f"Language Metadata: {chunk.metadata.get('language')}")
-        print(f"Translation Metadata: {chunk.metadata.get('translation')}")
-        print("-" * 20)
+        _decide_if_translation_is_required(ctx)
+        _attach_language_metadata(ctx)
+
+        if ctx.requires_translation:
+            await _translate_and_update(ctx)
+
+        results.append(ctx.chunk)
+
+    return results if len(results) != 1 else results[0]
+
 
 # Initialize providers
 register_translation_provider("noop", NoOpProvider)
@@ -677,15 +642,3 @@ register_translation_provider("langdetect", LangDetectProvider)
 register_translation_provider("openai", OpenAIProvider)
 register_translation_provider("google", GoogleTranslateProvider)
 register_translation_provider("azure", AzureTranslateProvider)
-
-if __name__ == "__main__":
-    # To run this, you need to have the required libraries and API keys set up.
-    # Example:
-    # export OPENAI_API_KEY="your_openai_api_key"
-    # export AZURE_TRANSLATE_KEY="your_azure_key"
-    # export AZURE_TRANSLATE_REGION="your_azure_region"
-    # export AZURE_TRANSLATE_ENDPOINT="your_azure_endpoint"
-    #
-    # Then run the script:
-    # python -m cognee.tasks.translation.translate_content
-    asyncio.run(main())
