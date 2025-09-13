@@ -146,19 +146,12 @@ class TestProviderRegistry:
 class TestNoOpProvider:
     """Test NoOp provider functionality."""
     
+    @pytest.mark.parametrize("text", ["Hello world", "Hëllo wörld"])
     @pytest.mark.asyncio
-    async def test_detect_language_ascii(self):
-        """Test language detection for ASCII text."""
+    async def test_detect_language_noop(self, text):
+        """NoOp returns (None, 0.0) for any text."""
         provider = NoOpProvider()
-        lang, conf = await provider.detect_language("Hello world")
-        assert lang is None
-        assert conf == 0.0
-        
-    @pytest.mark.asyncio
-    async def test_detect_language_unicode(self):
-        """Test language detection for Unicode text."""
-        provider = NoOpProvider()
-        lang, conf = await provider.detect_language("Hëllo wörld")
+        lang, conf = await provider.detect_language(text)
         assert lang is None
         assert conf == 0.0
         

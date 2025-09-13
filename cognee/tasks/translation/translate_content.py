@@ -414,6 +414,7 @@ class OpenAIProvider:
             try:
                 from openai import AsyncOpenAI
                 self._client = AsyncOpenAI()
+                self._model = os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-4o-mini")
             except ImportError as e:
                 raise OpenAIError("openai is not installed. Please install it with `pip install openai`") from e
 
@@ -443,7 +444,7 @@ class OpenAIProvider:
         try:
             client = self._client.with_options(timeout=float(os.getenv("OPENAI_TIMEOUT", "30")))
             response = await client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=getattr(self, "_model", "gpt-4o-mini"),
                 messages=[
                     {"role": "system", "content": f"You are a translation assistant. Translate the following text to {target_language}."},
                     {"role": "user", "content": text},
@@ -522,7 +523,6 @@ class AzureTranslateProvider:
                 from azure.core.credentials import AzureKeyCredential
 
                 key = os.getenv("AZURE_TRANSLATE_KEY")
-                region = os.getenv("AZURE_TRANSLATE_REGION")
                 endpoint = os.getenv("AZURE_TRANSLATE_ENDPOINT")
 
                 if not all([key, endpoint]):

@@ -4,15 +4,16 @@ import cognee
 from cognee.api.v1.search import SearchType
 from cognee.api.v1.cognify.cognify import get_default_tasks_with_translation
 from cognee.modules.pipelines.operations.pipeline import run_pipeline
+from cognee.tasks.translation import get_available_providers
 
 # Prerequisites:
 # 1. Set up your environment with API keys for your chosen translation provider.
 #    - For OpenAI: OPENAI_API_KEY
-#    - For Azure: AZURE_TRANSLATOR_KEY, AZURE_TRANSLATOR_ENDPOINT, AZURE_TRANSLATOR_REGION
+#    - For Azure: AZURE_TRANSLATE_KEY, AZURE_TRANSLATE_ENDPOINT
 # 2. Specify the translation provider via an environment variable (optional, defaults to "noop"):
 #    COGNEE_TRANSLATION_PROVIDER="openai"  # Or "google", "azure", "langdetect"
 # 3. Install any required libraries for your provider:
-#    - pip install openai langdetect googletrans==4.0.0rc1 azure-ai-translation-text
+#    - pip install openai langdetect googletrans==4.0.0-rc1 azure-ai-translation-text
 
 async def main():
     """
@@ -54,7 +55,11 @@ async def main():
     # 2. Run the cognify pipeline with translation enabled
     provider = os.getenv('COGNEE_TRANSLATION_PROVIDER', 'noop').lower()
     print(f"Running cognify with translation provider: {provider}")
-    
+
+    if provider not in get_available_providers():
+        print(f"Unknown provider: {provider}. Available: {', '.join(get_available_providers())}")
+        return
+
     try:
         # Build translation-enabled tasks and execute the pipeline
         translation_enabled_tasks = get_default_tasks_with_translation(
@@ -63,7 +68,7 @@ async def main():
         async for _ in run_pipeline(tasks=translation_enabled_tasks):
             pass
         print("Cognify pipeline with translation completed successfully.")
-    except Exception as e:
+    except (ValueError, ImportError, RuntimeError) as e:
         print(f"Error during cognify: {e}")
         print("Please ensure the selected provider is installed and configured correctly.")
         return
