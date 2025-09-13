@@ -213,6 +213,9 @@ async def cognify(  # pylint: disable=too-many-arguments,too-many-positional-arg
         - LLM_PROVIDER, LLM_MODEL, VECTOR_DB_PROVIDER, GRAPH_DATABASE_PROVIDER
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
+
+        New in this version:
+        - COGNEE_DEFAULT_BATCH_SIZE: Default batch size for processing (default: 10)
     """
     tasks = get_default_tasks(
         user, graph_model, chunker, chunk_size, ontology_file_path, custom_prompt
