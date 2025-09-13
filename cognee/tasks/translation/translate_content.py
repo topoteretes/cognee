@@ -542,6 +542,8 @@ class AzureTranslateProvider:
             A tuple containing the detected language code and the confidence score, or None if detection fails.
         """
         try:
+            # Note: The Azure SDK's find_sentence_boundaries is used for detection here.
+            # For regional resources, ensure the endpoint is configured correctly.
             response = self._client.find_sentence_boundaries([text])
             if response and response[0].detected_language:
                 return response[0].detected_language.language, response[0].detected_language.score

@@ -12,12 +12,9 @@ from cognee.modules.pipelines.operations.pipeline import run_pipeline
 # 2. Specify the translation provider via an environment variable (optional, defaults to "noop"):
 #    COGNEE_TRANSLATION_PROVIDER="openai"  # Or "google", "azure", "langdetect"
 # 3. Install any required libraries for your provider:
-#    - pip install langdetect googletrans==4.0.0rc1 azure-ai-translation-text
+#    - pip install openai langdetect googletrans==4.0.0rc1 azure-ai-translation-text
 
 async def main():
-<<<<<<< HEAD
-    """Demonstrates the translation pipeline in cognee."""
-=======
     """
     Demonstrates an end-to-end translation-enabled Cognify workflow using the Cognee SDK.
     
@@ -38,7 +35,6 @@ async def main():
     - No return value.
     - Exceptions ValueError and ImportError are caught and handled by printing an error and exiting the function.
     """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
     # 1. Set up cognee and add multilingual content
     print("Setting up demo environment...")
     await cognee.prune.prune_data()
@@ -67,7 +63,7 @@ async def main():
         async for _ in run_pipeline(tasks=translation_enabled_tasks):
             pass
         print("Cognify pipeline with translation completed successfully.")
-    except (ValueError, ImportError) as e:
+    except Exception as e:
         print(f"Error during cognify: {e}")
         print("Please ensure the selected provider is installed and configured correctly.")
         return

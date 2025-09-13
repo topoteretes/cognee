@@ -36,14 +36,11 @@ class TestTranslationError(Exception):  # pylint: disable=too-few-public-methods
 # Ensure registry isolation across tests using public helpers
 @pytest.fixture(autouse=True)
 def _restore_registry():
-<<<<<<< HEAD
-=======
     """
     Pytest fixture that snapshots the translation provider registry and restores it after the test.
     
     Use to isolate tests that register or modify providers: the current registry state is captured before the test runs, and always restored when the fixture completes (including on exceptions).
     """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
     snapshot = tr.snapshot_registry()
     try:
         yield
@@ -55,8 +52,6 @@ class MockDocumentChunk:  # pylint: disable=too-few-public-methods
     """Mock document chunk for testing."""
     
     def __init__(self, text: str, chunk_id: str = "test_chunk", metadata: Optional[Dict] = None):
-<<<<<<< HEAD
-=======
         """
         Initialize a mock document chunk used in tests.
         
@@ -65,7 +60,6 @@ class MockDocumentChunk:  # pylint: disable=too-few-public-methods
             chunk_id (str): Identifier for the chunk; also used as chunk_index for tests. Defaults to "test_chunk".
             metadata (Optional[Dict]): Optional mapping of metadata values; defaults to an empty dict.
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
         self.text = text
         self.id = chunk_id
         self.chunk_index = chunk_id
@@ -76,8 +70,6 @@ class MockTranslationProvider:
     """Mock provider for testing custom provider registration."""
     
     async def detect_language(self, text: str) -> Tuple[str, float]:
-<<<<<<< HEAD
-=======
         """
         Detect the language of the given text and return an ISO 639-1 language code with a confidence score.
         
@@ -91,7 +83,6 @@ class MockTranslationProvider:
             Tuple[str, float]: A tuple of (language_code, confidence) where language_code is an ISO 639-1 code and
             confidence is a float between 0.0 and 1.0 indicating detection confidence.
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
         if "hola" in text.lower():
             return "es", 0.95
         if "bonjour" in text.lower():
@@ -99,8 +90,6 @@ class MockTranslationProvider:
         return "en", 0.85
     
     async def translate(self, text: str, target_language: str) -> Tuple[str, float]:
-<<<<<<< HEAD
-=======
         """
         Simulate translating `text` into `target_language` and return a mock translated string with a confidence score.
         
@@ -113,7 +102,6 @@ class MockTranslationProvider:
         Returns:
             Tuple[str, float]: A pair of (translated_text, confidence) where confidence is in [0.0, 1.0].
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
         if target_language == "en":
             return f"[MOCK TRANSLATED] {text}", 0.88
         return text, 0.0
@@ -345,11 +333,6 @@ class TestTranslateContentFunction:
         """Test graceful error handling in language detection."""
         class FailingProvider:
             async def detect_language(self, _text: str) -> Tuple[str, float]:
-<<<<<<< HEAD
-                raise TestDetectionError()
-                
-            async def translate(self, text: str, _target_language: str) -> Tuple[str, float]:
-=======
                 """
                 Simulate a language detection failure by always raising TestDetectionError.
                 
@@ -370,7 +353,6 @@ class TestTranslateContentFunction:
                 Returns:
                     Tuple[str, float]: A tuple containing the original text and a confidence score (always 0.0).
                 """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
                 return text, 0.0
         
         register_translation_provider("failing", FailingProvider)
@@ -397,11 +379,6 @@ class TestTranslateContentFunction:
         """Test graceful error handling in translation."""
         class PartialProvider:
             async def detect_language(self, _text: str) -> Tuple[str, float]:
-<<<<<<< HEAD
-                return "es", 0.9
-                
-            async def translate(self, _text: str, _target_language: str) -> Tuple[str, float]:
-=======
                 """
                 Mock language detection used in tests.
                 
@@ -426,7 +403,6 @@ class TestTranslateContentFunction:
                 Raises:
                     TestTranslationError: Always raised to simulate a translation failure.
                 """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
                 raise TestTranslationError()
         
         register_translation_provider("partial", PartialProvider)
@@ -487,9 +463,6 @@ class TestTranslateContentFunction:
             assert isinstance(chunk.metadata["translation"], dict)
             
     def test_model_serialization_compatibility(self):
-<<<<<<< HEAD
-        """Test that models serialize to JSON-compatible dicts."""
-=======
         """
         Verify that a TranslatedContent instance can be dumped to a JSON-serializable dict.
         
@@ -498,7 +471,6 @@ class TestTranslateContentFunction:
         - required fields like `original_chunk_id`, `translation_timestamp`, and `metadata` are present and preserved,
         - the dict can be round-tripped through json.dumps/json.loads without losing `original_chunk_id`.
         """
->>>>>>> 9f6b2dca51a936a9de482fc9f3c64934502240b6
         content = TranslatedContent(
             original_chunk_id="test",
             original_text="Hello",
