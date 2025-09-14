@@ -133,7 +133,10 @@ def register_translation_provider(name: str, provider: Type[TranslationProvider]
         name (str): Human-readable provider name (case-insensitive); stored as lower-case.
         provider (Type[TranslationProvider]): Provider class implementing the TranslationProvider protocol; instances are constructed when the provider is resolved.
     """
-    _provider_registry[name.lower()] = provider
+    key = name.lower()
+    if key in _provider_registry and _provider_registry[key] is not provider:
+        logger.warning("Overriding translation provider for key=%s (%s -> %s)", key, _provider_registry[key].__name__, provider.__name__)
+    _provider_registry[key] = provider
 
 def get_available_providers():
     """Returns a list of available translation providers."""
@@ -206,7 +209,9 @@ async def _detect_language_with_fallback(provider: TranslationProvider, text: st
     """
     try:
         detection = await provider.detect_language(text)
-    except Exception:
+    except Exception as e:
+        if isinstance(e, asyncio.CancelledError):
+            raise
         logger.exception("Language detection failed for content_id=%s", content_id)
         detection = None
 
@@ -215,7 +220,9 @@ async def _detect_language_with_fallback(provider: TranslationProvider, text: st
         if fallback_cls is not None and not isinstance(provider, fallback_cls):
             try:
                 detection = await fallback_cls().detect_language(text)
-            except Exception:
+            except Exception as e:
+                if isinstance(e, asyncio.CancelledError):
+                    raise
                 logger.exception("Fallback language detection failed for content_id=%s", content_id)
                 detection = None
 
@@ -291,7 +298,9 @@ async def _translate_and_update(ctx: TranslationContext) -> None:
     """
     try:
         tr = await ctx.provider.translate(ctx.text, ctx.target_language)
-    except Exception:
+    except Exception as e:
+        if isinstance(e, asyncio.CancelledError):
+            raise
         logger.exception("Translation failed for content_id=%s", ctx.content_id)
         tr = None
 
@@ -314,6 +323,11 @@ async def _translate_and_update(ctx: TranslationContext) -> None:
                 )
     elif tr is None:
         logger.info("Translation failed; skipping translation metadata (content_id=%s)", ctx.content_id)
+        ctx.chunk.metadata.setdefault("translation_error", {
+            "provider": provider_used,
+            "reason": "failed",
+            "target_language": target_for_meta,
+        })
         return
     else:
         # Provider returned unchanged text
@@ -522,8 +536,12 @@ class GoogleTranslateProvider:
             A tuple containing the detected language code and the confidence score, or None if detection fails.
         """
         try:
-            detection = await asyncio.to_thread(type(self)._translator.detect, text)
-        except (AttributeError, TypeError, ValueError):
+            timeout = float(os.getenv("GOOGLE_TRANSLATE_TIMEOUT", "30"))
+            detection = await asyncio.wait_for(
+                asyncio.to_thread(type(self)._translator.detect, text), 
+                timeout=timeout
+            )
+        except (AttributeError, TypeError, ValueError, asyncio.TimeoutError):
             logger.exception("Google Translate language detection failed")
             return None
         try:
@@ -544,8 +562,12 @@ class GoogleTranslateProvider:
             A tuple containing the translated text and a confidence score of 1.0, or None if translation fails.
         """
         try:
-            translation = await asyncio.to_thread(type(self)._translator.translate, text, dest=target_language)
-        except (AttributeError, TypeError, ValueError):
+            timeout = float(os.getenv("GOOGLE_TRANSLATE_TIMEOUT", "30"))
+            translation = await asyncio.wait_for(
+                asyncio.to_thread(type(self)._translator.translate, text, dest=target_language),
+                timeout=timeout
+            )
+        except (AttributeError, TypeError, ValueError, asyncio.TimeoutError):
             logger.exception("Google Translate translation failed")
             return None
         return translation.text, 0.8  # Moderate confidence for Google Translate
@@ -570,7 +592,7 @@ class AzureTranslateProvider:
                 region = os.getenv("AZURE_TRANSLATE_REGION")      # optional; required for some resources
 
                 if not key:
-                    raise AzureConfigError()
+                    raise AzureConfigError("AZURE_TRANSLATE_KEY is required (and AZURE_TRANSLATE_ENDPOINT/REGION as applicable).")
                 if not endpoint:
                     # Default to global Translator endpoint when not explicitly provided
                     endpoint = "https://api.cognitive.microsofttranslator.com"
@@ -595,12 +617,19 @@ class AzureTranslateProvider:
             A tuple containing the detected language code and the confidence score, or None if detection fails.
         """
         try:
+            timeout = float(os.getenv("AZURE_TRANSLATE_TIMEOUT", "30"))
             try:
-                response = await asyncio.to_thread(type(self)._client.detect, content=[text])
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(type(self)._client.detect, content=[text]),
+                    timeout=timeout
+                )
             except TypeError:
                 # Older SDKs may use positional body instead of 'content'
-                response = await asyncio.to_thread(type(self)._client.detect, [text])
-        except (ValueError, AttributeError, TypeError):
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(type(self)._client.detect, [text]),
+                    timeout=timeout
+                )
+        except (ValueError, AttributeError, TypeError, asyncio.TimeoutError):
             logger.exception("Azure Translate language detection failed")
             return None
         except (ImportError, RuntimeError):
@@ -624,25 +653,29 @@ class AzureTranslateProvider:
             A tuple containing the translated text and a confidence score of 1.0, or None if translation fails.
         """
         try:
+            timeout = float(os.getenv("AZURE_TRANSLATE_TIMEOUT", "30"))
             try:
                 # Try modern SDK signature first
-                response = await asyncio.to_thread(
-                    type(self)._client.translate,
-                    content=[text],
-                    to=[target_language],
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(type(self)._client.translate, content=[text], to=[target_language]),
+                    timeout=timeout
                 )
             except TypeError:
                 # Try positional arguments
                 try:
-                    response = await asyncio.to_thread(type(self)._client.translate, [text], to_language=[target_language])
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(type(self)._client.translate, [text], to_language=[target_language]),
+                        timeout=timeout
+                    )
                 except TypeError:
                     # Final fallback for different parameter names
-                    response = await asyncio.to_thread(
-                        type(self)._client.translate,
-                        body=[text],
-                        to_language=[target_language]
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            type(self)._client.translate, body=[text], to_language=[target_language]
+                        ),
+                        timeout=timeout
                     )
-        except (ValueError, AttributeError, TypeError):
+        except (ValueError, AttributeError, TypeError, asyncio.TimeoutError):
             logger.exception("Azure Translate translation failed")
             return None
         except (ImportError, RuntimeError):
@@ -681,7 +714,9 @@ async def _process_chunk(chunk, plan, provider_cache):
         if provider is None:
             provider = _get_provider(primary_key)
             provider_cache[primary_key] = provider
-    except Exception:
+    except Exception as e:
+        if isinstance(e, asyncio.CancelledError):
+            raise
         logger.exception("Failed to initialize translation provider: %s", primary_key)
         return chunk
 
@@ -714,7 +749,9 @@ async def _process_chunk(chunk, plan, provider_cache):
                     if alt_provider is None:
                         alt_provider = _get_provider(alt_name)
                         provider_cache[alt_name] = alt_provider
-                except Exception:
+                except Exception as e:
+                    if isinstance(e, asyncio.CancelledError):
+                        raise
                     logger.exception("Failed to initialize fallback translation provider: %s", alt_name)
                     continue
                 ctx.provider = alt_provider
@@ -793,6 +830,9 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
     except (TypeError, ValueError):
         logger.warning("Invalid COGNEE_TRANSLATION_MAX_CONCURRENCY; defaulting to 8")
         max_concurrency = 8
+    if max_concurrency < 1:
+        logger.warning("COGNEE_TRANSLATION_MAX_CONCURRENCY < 1; clamping to 1")
+        max_concurrency = 1
     
     sem = asyncio.Semaphore(max_concurrency)
     async def _wrapped(c):
