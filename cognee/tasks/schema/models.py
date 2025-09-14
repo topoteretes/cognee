@@ -28,7 +28,7 @@ class SchemaRelationship(DataPoint):
     """Represents relationships between tables"""
     source_table: str
     target_table: str
-    relationship_type: str
+    relationship_type: str  # "foreign_key", "one_to_many", etc.
     source_column: str
     target_column: str
     description: str

@@ -42,7 +42,6 @@ async def ingest_database_schema(
 
     async with engine.engine.begin() as cursor:
         for table_name, details in schema.items():
-            print(table_name)
             rows_result = await cursor.execute(text(f"SELECT * FROM {table_name} LIMIT {max_sample_rows}"))
             rows = [dict(zip([col["name"] for col in details["columns"]], row)) for row in rows_result.fetchall()]
             count_result = await cursor.execute(text(f"SELECT COUNT(*) FROM {table_name};"))
@@ -57,15 +56,13 @@ async def ingest_database_schema(
                 foreign_keys=details.get("foreign_keys", []),
                 sample_rows=rows,
                 row_count_estimate=row_count_estimate,
-                description=f"Schema table for '{table_name}' with {len(details['columns'])} columns and approx. {row_count_estimate} rows."
+                description=f""
             )
             schema_tables.append(schema_table)
             tables[table_name] = details
             sample_data[table_name] = rows
 
             for fk in details.get("foreign_keys", []):
-                print(f"ref_table:{fk['ref_table']}")
-                print(f"table_name:{table_name}")
                 relationship = SchemaRelationship(
                     id=uuid5(NAMESPACE_OID, name=f"{fk['column']}:{table_name}:{fk['ref_column']}:{fk['ref_table']}"),
                     source_table=table_name,
@@ -73,7 +70,7 @@ async def ingest_database_schema(
                     relationship_type="foreign_key",
                     source_column=fk["column"],
                     target_column=fk["ref_column"],
-                    description=f"Foreign key relationship: {table_name}.{fk['column']} → {fk['ref_table']}.{fk['ref_column']}"
+                    description=f""
                 )
                 schema_relationships.append(relationship)
 
@@ -84,7 +81,7 @@ async def ingest_database_schema(
         tables=tables,
         sample_data=sample_data,
         extraction_timestamp=datetime.utcnow(),
-        description=f"Database schema '{schema_name}' containing {len(schema_tables)} tables and {len(schema_relationships)} relationships."
+        description=f""
     )
 
     return {
