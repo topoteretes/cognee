@@ -232,19 +232,18 @@ def _decide_if_translation_is_required(ctx: TranslationContext) -> None:
     Decide whether a translation should be performed and update ctx.requires_translation.
     
     Normalizes the configured target language and marks translation as required only when:
-    - The provider can perform translations (not "noop" or "langdetect"), and
     - Either the detected language is "unknown" and the text is non-empty, or
     - The detected language (normalized) differs from the target language and the detection confidence meets or exceeds ctx.confidence_threshold.
     
+    Provider capability is handled via fallbacks - this function decides purely based on input/detection.
     The function mutates the provided TranslationContext in-place and does not return a value.
     """
     # Normalize to align with detected_language normalization and model regex.
     target_language = _normalize_lang_code(ctx.target_language)
-    provider_key = _provider_name(ctx.provider)
-    can_translate = provider_key not in ("noop", "langdetect")
 
     if ctx.detected_language == "unknown":
-        ctx.requires_translation = can_translate and bool(ctx.text.strip())
+        # Decide purely from input; provider capability is handled via fallbacks.
+        ctx.requires_translation = bool(ctx.text.strip())
     else:
         same_base = ctx.detected_language.split("-")[0] == target_language.split("-")[0]
         ctx.requires_translation = (
@@ -301,7 +300,7 @@ async def _translate_and_update(ctx: TranslationContext) -> None:
     provider_used = _provider_name(ctx.provider)
     target_for_meta = _normalize_lang_code(ctx.target_language)
 
-    if tr and isinstance(tr[0], str) and tr[0].strip() and tr[0] != ctx.text:
+    if tr and isinstance(tr[0], str) and tr[0].strip() and tr[0].strip() != ctx.text.strip():
         translated_text, translation_confidence = tr
         ctx.chunk.text = translated_text
         if hasattr(ctx.chunk, "chunk_size"):
@@ -487,8 +486,11 @@ class OpenAIProvider:
                 content = getattr(response.choices[0].message, "content", None)
                 if isinstance(content, str) and content.strip():
                     return content, 1.0
-        except Exception:
-            logger.exception("OpenAI translation failed.")
+        except (ValueError, AttributeError, TypeError) as e:
+            logger.exception("OpenAI translation failed: %s", e)
+        except (ImportError, RuntimeError, ConnectionError) as e:
+            # Catch OpenAI SDK specific exceptions
+            logger.exception("OpenAI translation failed (SDK error): %s", e)
         return None
 
 
@@ -519,6 +521,9 @@ class GoogleTranslateProvider:
         """
         try:
             detection = await asyncio.to_thread(self._translator.detect, text)
+        except (ValueError, AttributeError) as e:
+            logger.exception("Google Translate language detection failed: %s", e)
+            return None
         except Exception:
             logger.exception("Google Translate language detection failed.")
             return None
@@ -541,6 +546,9 @@ class GoogleTranslateProvider:
         """
         try:
             translation = await asyncio.to_thread(self._translator.translate, text, dest=target_language)
+        except (ValueError, AttributeError) as e:
+            logger.exception("Google Translate translation failed: %s", e)
+            return None
         except Exception:
             logger.exception("Google Translate translation failed.")
             return None
@@ -595,12 +603,17 @@ class AzureTranslateProvider:
             except TypeError:
                 # Older SDKs may use positional body instead of 'content'
                 response = await asyncio.to_thread(self._client.detect, [text])
+        except (ValueError, AttributeError, TypeError) as e:
+            logger.exception("Azure Translate language detection failed: %s", e)
+            return None
+        except (ImportError, RuntimeError) as e:
+            # Catch Azure SDK specific exceptions
+            logger.exception("Azure Translate language detection failed (SDK error): %s", e)
+            return None
+        else:
             if response and getattr(response[0], "detected_language", None):
                 dl = response[0].detected_language
                 return dl.language, dl.score
-            return None
-        except Exception:
-            logger.exception("Azure Translate language detection failed.")
             return None
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
@@ -633,12 +646,78 @@ class AzureTranslateProvider:
                         body=[text],
                         to_language=[target_language]
                     )
+        except (ValueError, AttributeError, TypeError) as e:
+            logger.exception("Azure Translate translation failed: %s", e)
+            return None
+        except (ImportError, RuntimeError) as e:
+            # Catch Azure SDK specific exceptions
+            logger.exception("Azure Translate translation failed (SDK error): %s", e)
+            return None
+        else:
             if response and response[0].translations:
                 return response[0].translations[0].text, 1.0
             return None
-        except Exception:
-            logger.exception("Azure Translate translation failed.")
-            return None
+
+
+def _build_provider_plan(translation_provider_name, fallback_input):
+    primary_key = (translation_provider_name or "noop").lower()
+    raw = fallback_input or []
+    fallback_providers = []
+    invalid_providers = []
+    for p in raw:
+        if isinstance(p, str) and p.strip():
+            key = p.strip().lower()
+            if key in _provider_registry and key != primary_key:
+                fallback_providers.append(key)
+            else:
+                invalid_providers.append(p)
+    if invalid_providers:
+        logger.warning("Ignoring unknown fallback providers: %s", invalid_providers)
+    return primary_key, fallback_providers
+
+
+async def _process_chunk(chunk, target_language, primary_key, fallback_providers, confidence_threshold):
+    try:
+        provider = _get_provider(primary_key)
+    except Exception:
+        logger.exception("Failed to initialize translation provider: %s", primary_key)
+        return chunk
+
+    text_to_translate = getattr(chunk, "text", "")
+    if not isinstance(text_to_translate, str) or not text_to_translate.strip():
+        return chunk
+
+    ctx = TranslationContext(
+        provider=provider,
+        chunk=chunk,
+        text=text_to_translate,
+        target_language=target_language,
+        confidence_threshold=confidence_threshold,
+    )
+
+    ctx.detected_language, ctx.detection_confidence = await _detect_language_with_fallback(
+        provider, text_to_translate, str(ctx.content_id)
+    )
+
+    _decide_if_translation_is_required(ctx)
+    _attach_language_metadata(ctx)
+
+    if ctx.requires_translation:
+        await _translate_and_update(ctx)
+        # If no translation metadata was produced, try fallbacks in order
+        if "translation" not in getattr(ctx.chunk, "metadata", {}):
+            for alt_name in fallback_providers:
+                try:
+                    alt_provider = _get_provider(alt_name)
+                except Exception:
+                    logger.exception("Failed to initialize fallback translation provider: %s", alt_name)
+                    continue
+                ctx.provider = alt_provider
+                await _translate_and_update(ctx)
+                if "translation" in getattr(ctx.chunk, "metadata", {}):
+                    break
+
+    return ctx.chunk
 
 
 # Main task function
@@ -649,20 +728,10 @@ async def translate_content(*chunks: Any, **kwargs) -> List[Any]: ...
 async def translate_content(*chunks: Any, **kwargs) -> Any:
     """
     Translate the content of a chunk if necessary.
-    
+
     This function detects the language of the chunk's text, decides if translation is needed,
     and if so, translates the text to the target language using the specified provider.
     It updates the chunk with the translated text and adds metadata about the translation process.
-    
-    Parameters:
-        chunks (Any): The chunk(s) of content to be processed. It must have a 'text' attribute.
-        **kwargs: Additional arguments:
-            - target_language (str): target language (default from COGNEE_TRANSLATION_TARGET_LANGUAGE).
-            - translation_provider (str): primary provider key (e.g., "openai", "google", "azure", "noop").
-            - fallback_providers (List[str]): ordered list of provider keys to try if the primary fails/returns unchanged text
-    
-    Returns:
-        The processed chunk(s), which may have its text translated and metadata updated.
     """
     # Always work with a list internally for consistency
     if len(chunks) == 1 and isinstance(chunks[0], list):
@@ -677,75 +746,18 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
         # Multiple chunk arguments: translate_content(chunk1, chunk2, ...)
         batch = list(chunks)
         return_single = False
-    
+
+    target_language = kwargs.get("target_language", TARGET_LANGUAGE)
+    translation_provider_name = kwargs.get("translation_provider", "noop")
+    primary_key, fallback_providers = _build_provider_plan(
+        translation_provider_name, kwargs.get("fallback_providers", [])
+    )
+    confidence_threshold = kwargs.get("confidence_threshold", CONFIDENCE_THRESHOLD)
+
     results = []
-
-    for chunk in batch:
-        target_language = kwargs.get("target_language", TARGET_LANGUAGE)
-        translation_provider_name = kwargs.get("translation_provider", "noop")
-        primary_key = translation_provider_name.lower()
-        fallback_providers = [
-            p.strip().lower()
-            for p in kwargs.get("fallback_providers", [])
-            if isinstance(p, str)
-            and p.strip()
-            and (p.strip().lower() in _provider_registry)
-            and (p.strip().lower() != primary_key)
-        ]
-        
-        invalid_providers = [
-            p for p in kwargs.get("fallback_providers", []) 
-            if isinstance(p, str) and p.strip() and p.strip().lower() not in _provider_registry
-        ]
-        if invalid_providers:
-            logger.warning("Ignoring unknown fallback providers: %s", invalid_providers)
-            
-        confidence_threshold = kwargs.get("confidence_threshold", CONFIDENCE_THRESHOLD)
-
-        try:
-            provider = _get_provider(translation_provider_name)
-        except Exception:
-            # Unknown provider or missing/invalid dependency during provider init
-            logger.exception("Failed to initialize translation provider: %s", translation_provider_name)
-            results.append(chunk)
-            continue
-
-        text_to_translate = getattr(chunk, "text", "")
-        if not isinstance(text_to_translate, str) or not text_to_translate.strip():
-            results.append(chunk)
-            continue
-
-        ctx = TranslationContext(
-            provider=provider,
-            chunk=chunk,
-            text=text_to_translate,
-            target_language=target_language,
-            confidence_threshold=confidence_threshold,
-        )
-
-        ctx.detected_language, ctx.detection_confidence = await _detect_language_with_fallback(
-            provider, text_to_translate, str(ctx.content_id)
-        )
-
-        _decide_if_translation_is_required(ctx)
-        _attach_language_metadata(ctx)
-
-        if ctx.requires_translation:
-            await _translate_and_update(ctx)
-            # If no translation metadata was produced, try fallbacks in order
-            if "translation" not in getattr(ctx.chunk, "metadata", {}):
-                for alt_name in fallback_providers:
-                    try:
-                        alt_provider = _get_provider(alt_name)
-                    except Exception:
-                        logger.exception("Failed to initialize fallback translation provider: %s", alt_name)
-                        continue
-                    ctx.provider = alt_provider
-                    await _translate_and_update(ctx)
-                    if "translation" in getattr(ctx.chunk, "metadata", {}):
-                        break
-
-        results.append(ctx.chunk)
+    for c in batch:
+        processed = await _process_chunk(c, target_language, primary_key, fallback_providers, confidence_threshold)
+        results.append(processed)
 
     return results[0] if return_single else results
 
