@@ -478,7 +478,7 @@ class OpenAIProvider:
             response = await client.chat.completions.create(
                 model=getattr(type(self), "_model", "gpt-4o-mini"),
                 messages=[
-                    {"role": "system", "content": f"You are a translation assistant. Translate the following text to {target_language}."},
+                    {"role": "system", "content": f"You are a translation assistant. Translate the user's text to {target_language}. Reply with only the translated text, no quotes or commentary."},
                     {"role": "user", "content": text},
                 ],
                 temperature=0,
@@ -673,7 +673,9 @@ def _build_provider_plan(translation_provider_name, fallback_input):
     return primary_key, fallback_providers
 
 
-async def _process_chunk(chunk, target_language, primary_key, fallback_providers, confidence_threshold, provider_cache):
+async def _process_chunk(chunk, plan, provider_cache):
+    # Unpack plan: (target_language, primary_key, fallback_providers, confidence_threshold)
+    target_language, primary_key, fallback_providers, confidence_threshold = plan
     try:
         provider = provider_cache.get(primary_key)
         if provider is None:
@@ -782,6 +784,9 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
     # Provider cache for this batch to reduce instantiation overhead
     provider_cache: Dict[str, Any] = {}
     
+    # Bundle plan parameters to reduce argument count
+    plan = (target_language, primary_key, fallback_providers, confidence_threshold)
+    
     # Parse concurrency with error handling
     try:
         max_concurrency = int(os.getenv("COGNEE_TRANSLATION_MAX_CONCURRENCY", "8"))
@@ -792,7 +797,7 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
     sem = asyncio.Semaphore(max_concurrency)
     async def _wrapped(c):
         async with sem:
-            return await _process_chunk(c, target_language, primary_key, fallback_providers, confidence_threshold, provider_cache)
+            return await _process_chunk(c, plan, provider_cache)
     results = await asyncio.gather(*(_wrapped(c) for c in batch))
 
     return results[0] if return_single else results
