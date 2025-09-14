@@ -35,11 +35,20 @@ class AzureTranslateError(TranslationDependencyError):
     def __init__(self, message="azure-ai-translation-text is not installed. Please install it with `pip install azure-ai-translation-text`"):
         super().__init__(message)
 
-class AzureTranslateError(TranslationDependencyError):
-    """Azure AI Translation library required."""
-
 class AzureConfigError(ValueError):
     """Azure configuration error."""
+    def __init__(self, message="Azure Translate key (AZURE_TRANSLATE_KEY) is required."):
+        super().__init__(message)
+
+class UnknownProviderError(ValueError):
+    """Unknown translation provider error."""
+    def __init__(self, provider_name=None):
+        if provider_name:
+            available = ', '.join(get_available_providers())
+            message = f"Unknown translation provider: {provider_name}. Available providers: {available}"
+        else:
+            message = "Unknown translation provider."
+        super().__init__(message)
 
 # Environment variables for configuration
 TARGET_LANGUAGE = os.getenv("COGNEE_TRANSLATION_TARGET_LANGUAGE", "en")
@@ -342,8 +351,7 @@ def restore_registry(snapshot: Dict[str, Type[TranslationProvider]]) -> None:
 def validate_provider(name: str) -> None:
     """Ensure a provider is registered or raise ValueError."""
     if name.lower() not in _provider_registry:
-        available = ', '.join(get_available_providers())
-        raise ValueError(f"Unknown translation provider: {name}. Available providers: {available}")
+        raise UnknownProviderError(name)
 
 # Built-in Providers
 class NoOpProvider:
@@ -551,7 +559,7 @@ class AzureTranslateProvider:
                 region = os.getenv("AZURE_TRANSLATE_REGION")      # optional; required for some resources
 
                 if not key:
-                    raise AzureConfigError("Azure Translate key (AZURE_TRANSLATE_KEY) is required.")
+                    raise AzureConfigError()
                 if not endpoint:
                     # Default to global Translator endpoint when not explicitly provided
                     endpoint = "https://api.cognitive.microsofttranslator.com"
@@ -577,10 +585,10 @@ class AzureTranslateProvider:
         """
         try:
             try:
-                response = await self._client.detect(content=[text])
+                response = await asyncio.to_thread(self._client.detect, content=[text])
             except TypeError:
                 # Older SDKs may use positional body instead of 'content'
-                response = await self._client.detect([text])
+                response = await asyncio.to_thread(self._client.detect, [text])
             if response and getattr(response[0], "detected_language", None):
                 dl = response[0].detected_language
                 return dl.language, dl.score
@@ -601,13 +609,14 @@ class AzureTranslateProvider:
         """
         try:
             try:
-                response = await self._client.translate(
+                response = await asyncio.to_thread(
+                    self._client.translate,
                     content=[text],
                     to=[target_language],
                 )
             except TypeError:
                 # Fallback for SDKs using positional body / 'to_language'
-                response = await self._client.translate([text], to_language=[target_language])
+                response = await asyncio.to_thread(self._client.translate, [text], to_language=[target_language])
             if response and response[0].translations:
                 return response[0].translations[0].text, 1.0
         except Exception:
