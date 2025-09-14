@@ -16,7 +16,9 @@ from cognee.modules.engine.models import TableRow, TableType, ColumnValue
 logger = logging.getLogger(__name__)
 
 
-async def migrate_relational_database(graph_db, schema, migrate_column_data=True,schema_only=False):
+async def migrate_relational_database(
+    graph_db, schema, migrate_column_data=True, schema_only=False
+):
     """
     Migrates data from a relational database into a graph database.
 
@@ -33,15 +35,15 @@ async def migrate_relational_database(graph_db, schema, migrate_column_data=True
     # Create a mapping of node_id to node objects for referencing in edge creation
     node_mapping = {}
     edge_mapping = []
-    
+
     if schema_only:
-        database_config = get_migration_config().to_dict() 
+        database_config = get_migration_config().to_dict()
         # Calling the ingest_database_schema function to return DataPoint subclasses
         result = await ingest_database_schema(
             database_config=database_config,
             schema_name="migrated_schema",
             max_sample_rows=5,
-            node_set=["database_schema", "schema_tables", "relationships"]
+            node_set=["database_schema", "schema_tables", "relationships"],
         )
         database_schema = result["database_schema"]
         schema_tables = result["schema_tables"]
@@ -51,57 +53,64 @@ async def migrate_relational_database(graph_db, schema, migrate_column_data=True
         for table in schema_tables:
             table_node_id = table.id
             # Add TableSchema Datapoint as a node.
-            node_mapping[table_node_id]=table
-            edge_mapping.append((
-                table_node_id,
-                database_node_id,
-                "is_part_of",
-                dict(
-                    source_node_id=table_node_id,
-                    target_node_id=database_node_id,
-                    relationship_name="is_part_of",
-                ),
-            ))
-        for rel in schema_relationships:
-            source_table_id = uuid5(NAMESPACE_OID,name=rel.source_table)
-            target_table_id = uuid5(NAMESPACE_OID,name=rel.target_table)
-            relationship_id = rel.id
-            
-            # Add RelationshipTable DataPoint as a node.
-            node_mapping[relationship_id]=rel
-            edge_mapping.append((
-                source_table_id,
-                relationship_id,
-                "has_relationship",
-                dict(
-                    source_node_id=source_table_id,
-                    target_node_id=relationship_id,
-                    relationship_name=rel.relationship_type,
-                ),
-            ))
-            edge_mapping.append((
-                relationship_id,
-                target_table_id,
-                "has_relationship",
-                dict(
-                    source_node_id=relationship_id,
-                    target_node_id=target_table_id,
-                    relationship_name=rel.relationship_type,
+            node_mapping[table_node_id] = table
+            edge_mapping.append(
+                (
+                    table_node_id,
+                    database_node_id,
+                    "is_part_of",
+                    dict(
+                        source_node_id=table_node_id,
+                        target_node_id=database_node_id,
+                        relationship_name="is_part_of",
+                    ),
                 )
-            ))
-            edge_mapping.append((
-                source_table_id,
-                target_table_id,
-                rel.relationship_type,
-                dict(
-                    source_node_id=source_table_id,
-                    target_node_id=target_table_id,
-                    relationship_name=rel.relationship_type,
-                ),
-            ))
-            
-            
-            
+            )
+        for rel in schema_relationships:
+            source_table_id = uuid5(NAMESPACE_OID, name=rel.source_table)
+            target_table_id = uuid5(NAMESPACE_OID, name=rel.target_table)
+
+            relationship_id = rel.id
+
+            # Add RelationshipTable DataPoint as a node.
+            node_mapping[relationship_id] = rel
+            edge_mapping.append(
+                (
+                    source_table_id,
+                    relationship_id,
+                    "has_relationship",
+                    dict(
+                        source_node_id=source_table_id,
+                        target_node_id=relationship_id,
+                        relationship_name=rel.relationship_type,
+                    ),
+                )
+            )
+            edge_mapping.append(
+                (
+                    relationship_id,
+                    target_table_id,
+                    "has_relationship",
+                    dict(
+                        source_node_id=relationship_id,
+                        target_node_id=target_table_id,
+                        relationship_name=rel.relationship_type,
+                    ),
+                )
+            )
+            edge_mapping.append(
+                (
+                    source_table_id,
+                    target_table_id,
+                    rel.relationship_type,
+                    dict(
+                        source_node_id=source_table_id,
+                        target_node_id=target_table_id,
+                        relationship_name=rel.relationship_type,
+                    ),
+                )
+            )
+
     else:
         async with engine.engine.begin() as cursor:
             # First, create table type nodes for all tables
