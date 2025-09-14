@@ -9,7 +9,7 @@ from typing import Any, Dict, Type, Protocol, Tuple, Optional, List, overload
 from cognee.shared.logging_utils import get_logger
 from .models import TranslatedContent, LanguageMetadata
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 # Custom exceptions for better error handling
 class TranslationDependencyError(ImportError):
@@ -147,13 +147,11 @@ def _get_provider(translation_provider: str) -> TranslationProvider:
     Returns an instance of the provider implementing the TranslationProvider protocol.
     
     Raises:
-        ValueError: if no provider is registered under the given name; the error message lists available providers.
+        UnknownProviderError: if no provider is registered under the given name.
     """
     provider_class = _provider_registry.get(translation_provider.lower())
     if not provider_class:
-        available = ', '.join(get_available_providers())
-        msg = f"Unknown translation provider: {translation_provider}. Available providers: {available}"
-        raise ValueError(msg)
+        raise UnknownProviderError(translation_provider)
     return provider_class()
 # Helpers
 def _normalize_lang_code(code: Optional[str]) -> str:
@@ -524,12 +522,11 @@ class GoogleTranslateProvider:
         except Exception:
             logger.exception("Google Translate language detection failed.")
             return None
-        else:
-            try:
-                conf = _normalize_confidence(detection.confidence or 0.0)
-            except AttributeError:
-                conf = 0.0
-            return detection.lang, conf
+        try:
+            conf = _normalize_confidence(getattr(detection, "confidence", 0.0) or 0.0)
+        except Exception:
+            conf = 0.0
+        return detection.lang, conf
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         """
@@ -547,8 +544,7 @@ class GoogleTranslateProvider:
         except Exception:
             logger.exception("Google Translate translation failed.")
             return None
-        else:
-            return translation.text, 1.0
+        return translation.text, 1.0
 
 
 class AzureTranslateProvider:
@@ -602,9 +598,10 @@ class AzureTranslateProvider:
             if response and getattr(response[0], "detected_language", None):
                 dl = response[0].detected_language
                 return dl.language, dl.score
+            return None
         except Exception:
             logger.exception("Azure Translate language detection failed.")
-        return None
+            return None
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         """
@@ -638,9 +635,10 @@ class AzureTranslateProvider:
                     )
             if response and response[0].translations:
                 return response[0].translations[0].text, 1.0
+            return None
         except Exception:
             logger.exception("Azure Translate translation failed.")
-        return None
+            return None
 
 
 # Main task function
@@ -658,7 +656,10 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
     
     Parameters:
         chunks (Any): The chunk(s) of content to be processed. It must have a 'text' attribute.
-        **kwargs: Additional arguments, including 'target_language' and 'translation_provider'.
+        **kwargs: Additional arguments:
+            - target_language (str): target language (default from COGNEE_TRANSLATION_TARGET_LANGUAGE).
+            - translation_provider (str): primary provider key (e.g., "openai", "google", "azure", "noop").
+            - fallback_providers (List[str]): ordered list of provider keys to try if the primary fails/returns unchanged text
     
     Returns:
         The processed chunk(s), which may have its text translated and metadata updated.
@@ -682,9 +683,14 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
     for chunk in batch:
         target_language = kwargs.get("target_language", TARGET_LANGUAGE)
         translation_provider_name = kwargs.get("translation_provider", "noop")
+        primary_key = translation_provider_name.lower()
         fallback_providers = [
-            p.strip().lower() for p in kwargs.get("fallback_providers", []) 
-            if isinstance(p, str) and p.strip() and p.strip().lower() in _provider_registry
+            p.strip().lower()
+            for p in kwargs.get("fallback_providers", [])
+            if isinstance(p, str)
+            and p.strip()
+            and (p.strip().lower() in _provider_registry)
+            and (p.strip().lower() != primary_key)
         ]
         
         invalid_providers = [
