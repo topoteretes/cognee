@@ -437,11 +437,12 @@ class OpenAIProvider:
     _client: Any = None
 
     def __init__(self):
-        if self._client is None:
+        cls = type(self)
+        if cls._client is None:
             try:
                 from openai import AsyncOpenAI
-                self._client = AsyncOpenAI()
-                self._model = os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-4o-mini")
+                cls._client = AsyncOpenAI()
+                cls._model = os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-4o-mini")
             except ImportError as e:
                 raise OpenAIError() from e
 
@@ -473,9 +474,9 @@ class OpenAIProvider:
                 _timeout = float(os.getenv("OPENAI_TIMEOUT", "30"))
             except (TypeError, ValueError):
                 _timeout = 30.0
-            client = self._client.with_options(timeout=_timeout)
+            client = type(self)._client.with_options(timeout=_timeout)
             response = await client.chat.completions.create(
-                model=getattr(self, "_model", "gpt-4o-mini"),
+                model=getattr(type(self), "_model", "gpt-4o-mini"),
                 messages=[
                     {"role": "system", "content": f"You are a translation assistant. Translate the following text to {target_language}."},
                     {"role": "user", "content": text},
@@ -485,10 +486,10 @@ class OpenAIProvider:
             if response.choices:
                 content = getattr(response.choices[0].message, "content", None)
                 if isinstance(content, str) and content.strip():
-                    return content, 1.0
-        except (ValueError, AttributeError, TypeError) as e:
+                    return content, 0.9  # High confidence for GPT models, but not perfect
+        except (ValueError, AttributeError, TypeError):
             logger.exception("OpenAI translation failed")
-        except (ImportError, RuntimeError, ConnectionError) as e:
+        except (ImportError, RuntimeError, ConnectionError):
             # Catch OpenAI SDK specific exceptions
             logger.exception("OpenAI translation failed (SDK error)")
         return None
@@ -502,10 +503,11 @@ class GoogleTranslateProvider:
     _translator: Any = None
 
     def __init__(self):
-        if self._translator is None:
+        cls = type(self)
+        if cls._translator is None:
             try:
                 from googletrans import Translator
-                self._translator = Translator()
+                cls._translator = Translator()
             except ImportError as e:
                 raise GoogleTranslateError() from e
 
@@ -520,16 +522,13 @@ class GoogleTranslateProvider:
             A tuple containing the detected language code and the confidence score, or None if detection fails.
         """
         try:
-            detection = await asyncio.to_thread(self._translator.detect, text)
-        except (ValueError, AttributeError) as e:
-            logger.exception("Google Translate language detection failed")
-            return None
+            detection = await asyncio.to_thread(type(self)._translator.detect, text)
         except (AttributeError, TypeError, ValueError):
-            logger.exception("Google Translate language detection failed.")
+            logger.exception("Google Translate language detection failed")
             return None
         try:
             conf = _normalize_confidence(getattr(detection, "confidence", 0.0) or 0.0)
-        except Exception:
+        except (TypeError, ValueError, AttributeError):
             conf = 0.0
         return detection.lang, conf
 
@@ -545,14 +544,11 @@ class GoogleTranslateProvider:
             A tuple containing the translated text and a confidence score of 1.0, or None if translation fails.
         """
         try:
-            translation = await asyncio.to_thread(self._translator.translate, text, dest=target_language)
-        except (ValueError, AttributeError) as e:
+            translation = await asyncio.to_thread(type(self)._translator.translate, text, dest=target_language)
+        except (AttributeError, TypeError, ValueError):
             logger.exception("Google Translate translation failed")
             return None
-        except Exception:
-            logger.exception("Google Translate translation failed.")
-            return None
-        return translation.text, 1.0
+        return translation.text, 0.8  # Moderate confidence for Google Translate
 
 
 class AzureTranslateProvider:
@@ -563,7 +559,8 @@ class AzureTranslateProvider:
     _client: Any = None
 
     def __init__(self):
-        if self._client is None:
+        cls = type(self)
+        if cls._client is None:
             try:
                 from azure.ai.translation.text import TextTranslationClient, TranslatorCredential
                 from azure.core.credentials import AzureKeyCredential
@@ -579,11 +576,11 @@ class AzureTranslateProvider:
                     endpoint = "https://api.cognitive.microsofttranslator.com"
                 if region:
                     cred = TranslatorCredential(key, region)
-                    self._client = TextTranslationClient(endpoint=endpoint, credential=cred)
+                    cls._client = TextTranslationClient(endpoint=endpoint, credential=cred)
                 else:
                     cred = AzureKeyCredential(key)
                     # If endpoint is None, SDK uses the global translator endpoint.
-                    self._client = TextTranslationClient(endpoint=endpoint, credential=cred)
+                    cls._client = TextTranslationClient(endpoint=endpoint, credential=cred)
             except ImportError as e:
                 raise AzureTranslateError() from e
 
@@ -599,14 +596,14 @@ class AzureTranslateProvider:
         """
         try:
             try:
-                response = await asyncio.to_thread(self._client.detect, content=[text])
+                response = await asyncio.to_thread(type(self)._client.detect, content=[text])
             except TypeError:
                 # Older SDKs may use positional body instead of 'content'
-                response = await asyncio.to_thread(self._client.detect, [text])
-        except (ValueError, AttributeError, TypeError) as e:
+                response = await asyncio.to_thread(type(self)._client.detect, [text])
+        except (ValueError, AttributeError, TypeError):
             logger.exception("Azure Translate language detection failed")
             return None
-        except (ImportError, RuntimeError) as e:
+        except (ImportError, RuntimeError):
             # Catch Azure SDK specific exceptions
             logger.exception("Azure Translate language detection failed (SDK error)")
             return None
@@ -630,30 +627,30 @@ class AzureTranslateProvider:
             try:
                 # Try modern SDK signature first
                 response = await asyncio.to_thread(
-                    self._client.translate,
+                    type(self)._client.translate,
                     content=[text],
                     to=[target_language],
                 )
             except TypeError:
                 # Try positional arguments
                 try:
-                    response = await asyncio.to_thread(self._client.translate, [text], to_language=[target_language])
+                    response = await asyncio.to_thread(type(self)._client.translate, [text], to_language=[target_language])
                 except TypeError:
                     # Final fallback for different parameter names
                     response = await asyncio.to_thread(
-                        self._client.translate,
+                        type(self)._client.translate,
                         body=[text],
                         to_language=[target_language]
                     )
-        except (ValueError, AttributeError, TypeError) as e:
+        except (ValueError, AttributeError, TypeError):
             logger.exception("Azure Translate translation failed")
             return None
-        except (ImportError, RuntimeError) as e:
+        except (ImportError, RuntimeError):
             # Catch Azure SDK specific exceptions
             logger.exception("Azure Translate translation failed (SDK error)")
             return None
         if response and response[0].translations:
-            return response[0].translations[0].text, 1.0
+            return response[0].translations[0].text, 0.85  # High confidence for Azure Translate
         return None
 
 
@@ -676,9 +673,12 @@ def _build_provider_plan(translation_provider_name, fallback_input):
     return primary_key, fallback_providers
 
 
-async def _process_chunk(chunk, target_language, primary_key, fallback_providers, confidence_threshold):
+async def _process_chunk(chunk, target_language, primary_key, fallback_providers, confidence_threshold, provider_cache):
     try:
-        provider = _get_provider(primary_key)
+        provider = provider_cache.get(primary_key)
+        if provider is None:
+            provider = _get_provider(primary_key)
+            provider_cache[primary_key] = provider
     except Exception:
         logger.exception("Failed to initialize translation provider: %s", primary_key)
         return chunk
@@ -708,7 +708,10 @@ async def _process_chunk(chunk, target_language, primary_key, fallback_providers
         if "translation" not in getattr(ctx.chunk, "metadata", {}):
             for alt_name in fallback_providers:
                 try:
-                    alt_provider = _get_provider(alt_name)
+                    alt_provider = provider_cache.get(alt_name)
+                    if alt_provider is None:
+                        alt_provider = _get_provider(alt_name)
+                        provider_cache[alt_name] = alt_provider
                 except Exception:
                     logger.exception("Failed to initialize fallback translation provider: %s", alt_name)
                     continue
@@ -776,10 +779,20 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
     )
     confidence_threshold = kwargs.get("confidence_threshold", CONFIDENCE_THRESHOLD)
 
-    sem = asyncio.Semaphore(int(os.getenv("COGNEE_TRANSLATION_MAX_CONCURRENCY", "8")))
+    # Provider cache for this batch to reduce instantiation overhead
+    provider_cache: Dict[str, Any] = {}
+    
+    # Parse concurrency with error handling
+    try:
+        max_concurrency = int(os.getenv("COGNEE_TRANSLATION_MAX_CONCURRENCY", "8"))
+    except (TypeError, ValueError):
+        logger.warning("Invalid COGNEE_TRANSLATION_MAX_CONCURRENCY; defaulting to 8")
+        max_concurrency = 8
+    
+    sem = asyncio.Semaphore(max_concurrency)
     async def _wrapped(c):
         async with sem:
-            return await _process_chunk(c, target_language, primary_key, fallback_providers, confidence_threshold)
+            return await _process_chunk(c, target_language, primary_key, fallback_providers, confidence_threshold, provider_cache)
     results = await asyncio.gather(*(_wrapped(c) for c in batch))
 
     return results[0] if return_single else results
