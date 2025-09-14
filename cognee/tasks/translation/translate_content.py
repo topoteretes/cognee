@@ -62,6 +62,17 @@ except (TypeError, ValueError):
     CONFIDENCE_THRESHOLD = 0.80
 
 
+def _normalize_confidence(conf: Any) -> float:
+    """Normalize confidence value to float in [0.0, 1.0] range."""
+    try:
+        conf = float(conf)
+    except (TypeError, ValueError):
+        return 0.0
+    if math.isnan(conf):
+        return 0.0
+    return max(0.0, min(1.0, conf))
+
+
 @dataclass
 class TranslationContext:  # pylint: disable=too-many-instance-attributes
     """A context object to hold data for a single translation operation."""
@@ -215,13 +226,7 @@ async def _detect_language_with_fallback(provider: TranslationProvider, text: st
 
     lang_code, conf = detection
     detected_language = _normalize_lang_code(lang_code)
-    try:
-        conf = float(conf)
-    except (TypeError, ValueError):
-        conf = 0.0
-    if math.isnan(conf):
-        conf = 0.0
-    conf = max(0.0, min(1.0, conf))
+    conf = _normalize_confidence(conf)
     return detected_language, conf
 
 def _decide_if_translation_is_required(ctx: TranslationContext) -> None:
@@ -516,11 +521,15 @@ class GoogleTranslateProvider:
         """
         try:
             detection = await asyncio.to_thread(self._translator.detect, text)
-            conf = float(detection.confidence) if detection.confidence is not None else 0.0
-            return detection.lang, conf
         except Exception:
             logger.exception("Google Translate language detection failed.")
             return None
+        else:
+            try:
+                conf = _normalize_confidence(detection.confidence or 0.0)
+            except AttributeError:
+                conf = 0.0
+            return detection.lang, conf
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         """
@@ -535,10 +544,11 @@ class GoogleTranslateProvider:
         """
         try:
             translation = await asyncio.to_thread(self._translator.translate, text, dest=target_language)
-            return translation.text, 1.0
         except Exception:
             logger.exception("Google Translate translation failed.")
             return None
+        else:
+            return translation.text, 1.0
 
 
 class AzureTranslateProvider:
@@ -609,14 +619,23 @@ class AzureTranslateProvider:
         """
         try:
             try:
+                # Try modern SDK signature first
                 response = await asyncio.to_thread(
                     self._client.translate,
                     content=[text],
                     to=[target_language],
                 )
             except TypeError:
-                # Fallback for SDKs using positional body / 'to_language'
-                response = await asyncio.to_thread(self._client.translate, [text], to_language=[target_language])
+                # Try positional arguments
+                try:
+                    response = await asyncio.to_thread(self._client.translate, [text], to_language=[target_language])
+                except TypeError:
+                    # Final fallback for different parameter names
+                    response = await asyncio.to_thread(
+                        self._client.translate,
+                        body=[text],
+                        to_language=[target_language]
+                    )
             if response and response[0].translations:
                 return response[0].translations[0].text, 1.0
         except Exception:
@@ -644,9 +663,19 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
     Returns:
         The processed chunk(s), which may have its text translated and metadata updated.
     """
-    # Normalize inputs and remember original shape
-    input_was_list = len(chunks) == 1 and isinstance(chunks[0], list)
-    batch = chunks[0] if input_was_list else list(chunks)
+    # Always work with a list internally for consistency
+    if len(chunks) == 1 and isinstance(chunks[0], list):
+        # Single list argument: translate_content([chunk1, chunk2, ...])
+        batch = chunks[0]
+        return_single = False
+    elif len(chunks) == 1:
+        # Single chunk argument: translate_content(chunk)
+        batch = list(chunks)
+        return_single = True
+    else:
+        # Multiple chunk arguments: translate_content(chunk1, chunk2, ...)
+        batch = list(chunks)
+        return_single = False
     
     results = []
 
@@ -654,8 +683,17 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
         target_language = kwargs.get("target_language", TARGET_LANGUAGE)
         translation_provider_name = kwargs.get("translation_provider", "noop")
         fallback_providers = [
-            p.strip().lower() for p in kwargs.get("fallback_providers", []) if isinstance(p, str) and p.strip()
+            p.strip().lower() for p in kwargs.get("fallback_providers", []) 
+            if isinstance(p, str) and p.strip() and p.strip().lower() in _provider_registry
         ]
+        
+        invalid_providers = [
+            p for p in kwargs.get("fallback_providers", []) 
+            if isinstance(p, str) and p.strip() and p.strip().lower() not in _provider_registry
+        ]
+        if invalid_providers:
+            logger.warning("Ignoring unknown fallback providers: %s", invalid_providers)
+            
         confidence_threshold = kwargs.get("confidence_threshold", CONFIDENCE_THRESHOLD)
 
         try:
@@ -703,7 +741,7 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
 
         results.append(ctx.chunk)
 
-    return results if (input_was_list or len(chunks) != 1) else results[0]
+    return results[0] if return_single else results
 
 
 # Initialize providers
