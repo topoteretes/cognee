@@ -412,7 +412,7 @@ class LangDetectProvider:
             if langs:
                 return langs[0].lang, langs[0].prob
         except LangDetectException:
-            logger.debug("Langdetect failed for text: %s", text[:100])
+            logger.debug("Langdetect failed (text_len=%d)", len(text) if isinstance(text, str) else -1)
         return None
 
     async def translate(self, text: str, _target_language: str) -> Optional[Tuple[str, float]]:
@@ -487,10 +487,10 @@ class OpenAIProvider:
                 if isinstance(content, str) and content.strip():
                     return content, 1.0
         except (ValueError, AttributeError, TypeError) as e:
-            logger.exception("OpenAI translation failed: %s", e)
+            logger.exception("OpenAI translation failed")
         except (ImportError, RuntimeError, ConnectionError) as e:
             # Catch OpenAI SDK specific exceptions
-            logger.exception("OpenAI translation failed (SDK error): %s", e)
+            logger.exception("OpenAI translation failed (SDK error)")
         return None
 
 
@@ -522,9 +522,9 @@ class GoogleTranslateProvider:
         try:
             detection = await asyncio.to_thread(self._translator.detect, text)
         except (ValueError, AttributeError) as e:
-            logger.exception("Google Translate language detection failed: %s", e)
+            logger.exception("Google Translate language detection failed")
             return None
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             logger.exception("Google Translate language detection failed.")
             return None
         try:
@@ -547,7 +547,7 @@ class GoogleTranslateProvider:
         try:
             translation = await asyncio.to_thread(self._translator.translate, text, dest=target_language)
         except (ValueError, AttributeError) as e:
-            logger.exception("Google Translate translation failed: %s", e)
+            logger.exception("Google Translate translation failed")
             return None
         except Exception:
             logger.exception("Google Translate translation failed.")
@@ -604,17 +604,16 @@ class AzureTranslateProvider:
                 # Older SDKs may use positional body instead of 'content'
                 response = await asyncio.to_thread(self._client.detect, [text])
         except (ValueError, AttributeError, TypeError) as e:
-            logger.exception("Azure Translate language detection failed: %s", e)
+            logger.exception("Azure Translate language detection failed")
             return None
         except (ImportError, RuntimeError) as e:
             # Catch Azure SDK specific exceptions
-            logger.exception("Azure Translate language detection failed (SDK error): %s", e)
+            logger.exception("Azure Translate language detection failed (SDK error)")
             return None
-        else:
-            if response and getattr(response[0], "detected_language", None):
-                dl = response[0].detected_language
-                return dl.language, dl.score
-            return None
+        if response and getattr(response[0], "detected_language", None):
+            dl = response[0].detected_language
+            return dl.language, dl.score
+        return None
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         """
@@ -647,28 +646,29 @@ class AzureTranslateProvider:
                         to_language=[target_language]
                     )
         except (ValueError, AttributeError, TypeError) as e:
-            logger.exception("Azure Translate translation failed: %s", e)
+            logger.exception("Azure Translate translation failed")
             return None
         except (ImportError, RuntimeError) as e:
             # Catch Azure SDK specific exceptions
-            logger.exception("Azure Translate translation failed (SDK error): %s", e)
+            logger.exception("Azure Translate translation failed (SDK error)")
             return None
-        else:
-            if response and response[0].translations:
-                return response[0].translations[0].text, 1.0
-            return None
+        if response and response[0].translations:
+            return response[0].translations[0].text, 1.0
+        return None
 
 
 def _build_provider_plan(translation_provider_name, fallback_input):
     primary_key = (translation_provider_name or "noop").lower()
     raw = fallback_input or []
     fallback_providers = []
+    seen = {primary_key}
     invalid_providers = []
     for p in raw:
         if isinstance(p, str) and p.strip():
             key = p.strip().lower()
-            if key in _provider_registry and key != primary_key:
+            if key in _provider_registry and key not in seen:
                 fallback_providers.append(key)
+                seen.add(key)
             else:
                 invalid_providers.append(p)
     if invalid_providers:
@@ -732,6 +732,28 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
     This function detects the language of the chunk's text, decides if translation is needed,
     and if so, translates the text to the target language using the specified provider.
     It updates the chunk with the translated text and adds metadata about the translation process.
+    
+    Args:
+        *chunks: The chunk(s) of content to be processed. Each chunk must have a 'text' attribute.
+                Can be called as:
+                - translate_content(chunk) - single chunk
+                - translate_content(chunk1, chunk2, ...) - multiple chunks
+                - translate_content([chunk1, chunk2, ...]) - list of chunks
+        **kwargs: Additional arguments:
+            target_language (str): Target language code (default from COGNEE_TRANSLATION_TARGET_LANGUAGE).
+            translation_provider (str): Primary provider key (e.g., "openai", "google", "azure", "noop").
+                                      Defaults to "noop".
+            fallback_providers (List[str]): Ordered list of provider keys to try if the primary 
+                                          fails or returns unchanged text. Defaults to empty list.
+            confidence_threshold (float): Minimum confidence threshold for language detection 
+                                        (default from COGNEE_TRANSLATION_CONFIDENCE_THRESHOLD).
+    
+    Returns:
+        Any: For single chunk input - returns the processed chunk directly.
+             For multiple chunks input - returns List[Any] of processed chunks.
+             Each returned chunk may have its text translated and metadata updated with:
+             - language_metadata: detected language and confidence
+             - translation: translated text and provider information (if translation occurred)
     """
     # Always work with a list internally for consistency
     if len(chunks) == 1 and isinstance(chunks[0], list):
@@ -754,10 +776,11 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
     )
     confidence_threshold = kwargs.get("confidence_threshold", CONFIDENCE_THRESHOLD)
 
-    results = []
-    for c in batch:
-        processed = await _process_chunk(c, target_language, primary_key, fallback_providers, confidence_threshold)
-        results.append(processed)
+    sem = asyncio.Semaphore(int(os.getenv("COGNEE_TRANSLATION_MAX_CONCURRENCY", "8")))
+    async def _wrapped(c):
+        async with sem:
+            return await _process_chunk(c, target_language, primary_key, fallback_providers, confidence_threshold)
+    results = await asyncio.gather(*(_wrapped(c) for c in batch))
 
     return results[0] if return_single else results
 
