@@ -4,7 +4,7 @@ import asyncio
 import math
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, Type, Protocol, Tuple, Optional
+from typing import Any, Dict, Type, Protocol, Tuple, Optional, List, overload
 
 from cognee.shared.logging_utils import get_logger
 from .models import TranslatedContent, LanguageMetadata
@@ -17,12 +17,23 @@ class TranslationDependencyError(ImportError):
 
 class LangDetectError(TranslationDependencyError):
     """LangDetect library required."""
+    def __init__(self, message="langdetect is not installed. Please install it with `pip install langdetect`"):
+        super().__init__(message)
 
 class OpenAIError(TranslationDependencyError):
     """OpenAI library required."""
+    def __init__(self, message="openai is not installed. Please install it with `pip install openai`"):
+        super().__init__(message)
 
 class GoogleTranslateError(TranslationDependencyError):
     """GoogleTrans library required."""
+    def __init__(self, message="googletrans is not installed. Please install it with `pip install googletrans==4.0.0-rc1`"):
+        super().__init__(message)
+
+class AzureTranslateError(TranslationDependencyError):
+    """Azure Translate library required."""
+    def __init__(self, message="azure-ai-translation-text is not installed. Please install it with `pip install azure-ai-translation-text`"):
+        super().__init__(message)
 
 class AzureTranslateError(TranslationDependencyError):
     """Azure AI Translation library required."""
@@ -43,7 +54,7 @@ except (TypeError, ValueError):
 
 
 @dataclass
-class TranslationContext:
+class TranslationContext:  # pylint: disable=too-many-instance-attributes
     """A context object to hold data for a single translation operation."""
     provider: "TranslationProvider"
     chunk: Any
@@ -223,9 +234,9 @@ def _decide_if_translation_is_required(ctx: TranslationContext) -> None:
     if ctx.detected_language == "unknown":
         ctx.requires_translation = can_translate and bool(ctx.text.strip())
     else:
+        same_base = ctx.detected_language.split("-")[0] == target_language.split("-")[0]
         ctx.requires_translation = (
-            ctx.detected_language != target_language
-            and ctx.detection_confidence >= ctx.confidence_threshold
+            (not same_base) and ctx.detection_confidence >= ctx.confidence_threshold
         )
 
 def _attach_language_metadata(ctx: TranslationContext) -> None:
@@ -259,7 +270,7 @@ async def _translate_and_update(ctx: TranslationContext) -> None:
     - attempts to update ctx.chunk.chunk_size (if present),
     - attaches a `translation` entry in ctx.chunk.metadata containing a TranslatedContent dict (original/translated text, source/target languages, provider, and confidence).
     
-    If translation fails (exception or None) the original text is preserved and a TranslatedContent record is still attached with confidence 0.0. If the provider returns the same text unchanged, no metadata is attached and the function returns without modifying the chunk.
+    If translation fails (exception or None), the original text is preserved and no translation metadata is attached. If the provider returns the same text unchanged, no metadata is attached and the function returns without modifying the chunk.
     
     Parameters:
         ctx (TranslationContext): context carrying provider, chunk, original text, target language, detected language, and content_id.
@@ -329,8 +340,10 @@ def restore_registry(snapshot: Dict[str, Type[TranslationProvider]]) -> None:
     _provider_registry.update(snapshot)
 
 def validate_provider(name: str) -> None:
-    """Ensure a provider can be resolved and instantiated or raise."""
-    _get_provider(name)
+    """Ensure a provider is registered or raise ValueError."""
+    if name.lower() not in _provider_registry:
+        available = ', '.join(get_available_providers())
+        raise ValueError(f"Unknown translation provider: {name}. Available providers: {available}")
 
 # Built-in Providers
 class NoOpProvider:
@@ -371,7 +384,7 @@ class LangDetectProvider:
                 DetectorFactory.seed = 0
                 self._detector = (detect_langs, LangDetectException)
             except ImportError as e:
-                raise LangDetectError("langdetect is not installed. Please install it with `pip install langdetect`") from e
+                raise LangDetectError() from e
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
         """
@@ -420,7 +433,7 @@ class OpenAIProvider:
                 self._client = AsyncOpenAI()
                 self._model = os.getenv("OPENAI_TRANSLATE_MODEL", "gpt-4o-mini")
             except ImportError as e:
-                raise OpenAIError("openai is not installed. Please install it with `pip install openai`") from e
+                raise OpenAIError() from e
 
     async def detect_language(self, _text: str) -> Optional[Tuple[str, float]]:
         """
@@ -446,7 +459,11 @@ class OpenAIProvider:
             A tuple containing the translated text and a confidence score of 1.0, or None if translation fails.
         """
         try:
-            client = self._client.with_options(timeout=float(os.getenv("OPENAI_TIMEOUT", "30")))
+            try:
+                _timeout = float(os.getenv("OPENAI_TIMEOUT", "30"))
+            except (TypeError, ValueError):
+                _timeout = 30.0
+            client = self._client.with_options(timeout=_timeout)
             response = await client.chat.completions.create(
                 model=getattr(self, "_model", "gpt-4o-mini"),
                 messages=[
@@ -456,7 +473,9 @@ class OpenAIProvider:
                 temperature=0,
             )
             if response.choices:
-                return response.choices[0].message.content, 1.0
+                content = getattr(response.choices[0].message, "content", None)
+                if isinstance(content, str) and content.strip():
+                    return content, 1.0
         except Exception:
             logger.exception("OpenAI translation failed.")
         return None
@@ -475,7 +494,7 @@ class GoogleTranslateProvider:
                 from googletrans import Translator
                 self._translator = Translator()
             except ImportError as e:
-                raise GoogleTranslateError("googletrans is not installed. Please install it with `pip install googletrans==4.0.0-rc1`") from e
+                raise GoogleTranslateError() from e
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
         """
@@ -493,7 +512,7 @@ class GoogleTranslateProvider:
             return detection.lang, conf
         except Exception:
             logger.exception("Google Translate language detection failed.")
-        return None
+            return None
 
     async def translate(self, text: str, target_language: str) -> Optional[Tuple[str, float]]:
         """
@@ -511,7 +530,7 @@ class GoogleTranslateProvider:
             return translation.text, 1.0
         except Exception:
             logger.exception("Google Translate translation failed.")
-        return None
+            return None
 
 
 class AzureTranslateProvider:
@@ -544,7 +563,7 @@ class AzureTranslateProvider:
                     # If endpoint is None, SDK uses the global translator endpoint.
                     self._client = TextTranslationClient(endpoint=endpoint, credential=cred)
             except ImportError as e:
-                raise AzureTranslateError("azure-ai-translation-text is not installed. Please install it with `pip install azure-ai-translation-text`") from e
+                raise AzureTranslateError() from e
 
     async def detect_language(self, text: str) -> Optional[Tuple[str, float]]:
         """
@@ -557,7 +576,11 @@ class AzureTranslateProvider:
             A tuple containing the detected language code and the confidence score, or None if detection fails.
         """
         try:
-            response = await self._client.detect(content=[text])
+            try:
+                response = await self._client.detect(content=[text])
+            except TypeError:
+                # Older SDKs may use positional body instead of 'content'
+                response = await self._client.detect([text])
             if response and getattr(response[0], "detected_language", None):
                 dl = response[0].detected_language
                 return dl.language, dl.score
@@ -577,10 +600,14 @@ class AzureTranslateProvider:
             A tuple containing the translated text and a confidence score of 1.0, or None if translation fails.
         """
         try:
-            response = await self._client.translate(
-                content=[text],
-                to=[target_language],
-            )
+            try:
+                response = await self._client.translate(
+                    content=[text],
+                    to=[target_language],
+                )
+            except TypeError:
+                # Fallback for SDKs using positional body / 'to_language'
+                response = await self._client.translate([text], to_language=[target_language])
             if response and response[0].translations:
                 return response[0].translations[0].text, 1.0
         except Exception:
@@ -589,6 +616,10 @@ class AzureTranslateProvider:
 
 
 # Main task function
+@overload
+async def translate_content(chunk: Any, **kwargs) -> Any: ...
+@overload
+async def translate_content(*chunks: Any, **kwargs) -> List[Any]: ...
 async def translate_content(*chunks: Any, **kwargs) -> Any:
     """
     Translate the content of a chunk if necessary.
@@ -613,6 +644,9 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
     for chunk in batch:
         target_language = kwargs.get("target_language", TARGET_LANGUAGE)
         translation_provider_name = kwargs.get("translation_provider", "noop")
+        fallback_providers = [
+            p.strip().lower() for p in kwargs.get("fallback_providers", []) if isinstance(p, str) and p.strip()
+        ]
         confidence_threshold = kwargs.get("confidence_threshold", CONFIDENCE_THRESHOLD)
 
         try:
@@ -645,6 +679,18 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
 
         if ctx.requires_translation:
             await _translate_and_update(ctx)
+            # If no translation metadata was produced, try fallbacks in order
+            if "translation" not in getattr(ctx.chunk, "metadata", {}):
+                for alt_name in fallback_providers:
+                    try:
+                        alt_provider = _get_provider(alt_name)
+                    except Exception:
+                        logger.exception("Failed to initialize fallback translation provider: %s", alt_name)
+                        continue
+                    ctx.provider = alt_provider
+                    await _translate_and_update(ctx)
+                    if "translation" in getattr(ctx.chunk, "metadata", {}):
+                        break
 
         results.append(ctx.chunk)
 
