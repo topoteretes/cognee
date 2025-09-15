@@ -66,9 +66,10 @@ async def migrate_relational_database(
                     ),
                 )
             )
+        table_name_to_id = {t.table_name: t.id for t in schema_tables}
         for rel in schema_relationships:
-            source_table_id = uuid5(NAMESPACE_OID, name=rel.source_table)
-            target_table_id = uuid5(NAMESPACE_OID, name=rel.target_table)
+            source_table_id = table_name_to_id.get(rel.source_table)
+            target_table_id = table_name_to_id.get(rel.target_table)
 
             relationship_id = rel.id
 
