@@ -49,7 +49,7 @@ class TestCliMain:
     def test_main_no_command(self, mock_create_parser):
         """Test main function when no command is provided"""
         mock_parser = MagicMock()
-        mock_parser.parse_args.return_value = MagicMock(command=None)
+        mock_parser.parse_args.return_value = MagicMock(command=None, spec={})
         mock_create_parser.return_value = (mock_parser, {})
 
         result = main()
