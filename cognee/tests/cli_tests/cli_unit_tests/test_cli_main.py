@@ -64,7 +64,7 @@ class TestCliMain:
         mock_command.execute.return_value = None
 
         mock_parser = MagicMock()
-        mock_args = MagicMock(command="test")
+        mock_args = MagicMock(command="test", spec={})
         mock_parser.parse_args.return_value = mock_args
 
         mock_create_parser.return_value = (mock_parser, {"test": mock_command})
@@ -84,7 +84,7 @@ class TestCliMain:
         mock_command.execute.side_effect = CliCommandException("Test error", error_code=2)
 
         mock_parser = MagicMock()
-        mock_args = MagicMock(command="test")
+        mock_args = MagicMock(command="test",  spec={})
         mock_parser.parse_args.return_value = mock_args
 
         mock_create_parser.return_value = (mock_parser, {"test": mock_command})
@@ -103,7 +103,7 @@ class TestCliMain:
         mock_command.execute.side_effect = Exception("Generic error")
 
         mock_parser = MagicMock()
-        mock_args = MagicMock(command="test")
+        mock_args = MagicMock(command="test",  spec={})
         mock_parser.parse_args.return_value = mock_args
 
         mock_create_parser.return_value = (mock_parser, {"test": mock_command})
@@ -126,7 +126,7 @@ class TestCliMain:
         mock_command.execute.side_effect = test_exception
 
         mock_parser = MagicMock()
-        mock_args = MagicMock(command="test")
+        mock_args = MagicMock(command="test",  spec={})
         mock_parser.parse_args.return_value = mock_args
 
         mock_create_parser.return_value = (mock_parser, {"test": mock_command})
