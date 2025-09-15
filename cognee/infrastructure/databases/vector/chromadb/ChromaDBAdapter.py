@@ -538,7 +538,7 @@ class ChromaDBAdapter(VectorDBInterface):
             Returns True upon successful deletion of all collections.
         """
         client = await self.get_connection()
-        collections = await self.list_collections()
+        collections = await client.list_collections()
         for collection_name in collections:
             await client.delete_collection(collection_name)
         return True

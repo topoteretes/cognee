@@ -73,7 +73,7 @@ def ingest_files(data: List[Any]):
 
                 new_company.departments.append(departments_data_points[department_name])
 
-    return companies_data_points.values()
+    return list(companies_data_points.values())
 
 
 async def main():
