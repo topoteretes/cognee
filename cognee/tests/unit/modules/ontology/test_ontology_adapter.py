@@ -1,5 +1,49 @@
 import pytest
 import asyncio
+from cognee.modules.pipelines.operations.ontology_pipeline import OntologyPipeline
+
+def test_ontology_pipeline_ingest(tmp_path):
+    owl_content = """<?xml version=\"1.0\"?>
+        <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"
+                 xmlns:owl=\"http://www.w3.org/2002/07/owl#\"
+                 xmlns:rdfs=\"http://www.w3.org/2000/01/rdf-schema#\">
+            <owl:Class rdf:about=\"http://example.org/test#Car\"/>
+            <owl:NamedIndividual rdf:about=\"http://example.org/test#Audi\">
+                <rdf:type rdf:resource=\"http://example.org/test#Car\"/>
+            </owl:NamedIndividual>
+        </rdf:RDF>"""
+    owl_file = tmp_path / "test.owl"
+    owl_file.write_text(owl_content)
+
+    pipeline = OntologyPipeline(str(owl_file))
+    result = asyncio.run(pipeline.ingest())
+    assert "nodes" in result
+    assert any(n["name"].lower() == "car" for n in result["nodes"])
+    assert any(n["name"].lower() == "audi" for n in result["nodes"])
+    # Embeddings are handled by add_data_points, so check metadata
+    for node in result["nodes"]:
+        assert "category" in node["metadata"]
+        assert "uri" in node["metadata"]
+
+def test_ontology_pipeline_batch_embedding(tmp_path):
+    owl_content = """<?xml version=\"1.0\"?>
+        <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"
+                 xmlns:owl=\"http://www.w3.org/2002/07/owl#\"
+                 xmlns:rdfs=\"http://www.w3.org/2000/01/rdf-schema#\">
+            <owl:Class rdf:about=\"http://example.org/test#Car\"/>
+            <owl:NamedIndividual rdf:about=\"http://example.org/test#Audi\">
+                <rdf:type rdf:resource=\"http://example.org/test#Car\"/>
+            </owl:NamedIndividual>
+        </rdf:RDF>"""
+    owl_file = tmp_path / "test.owl"
+    owl_file.write_text(owl_content)
+
+    pipeline = OntologyPipeline(str(owl_file))
+    result = asyncio.run(pipeline.ingest())
+    # Test that all nodes are ingested in a single batch
+    assert len(result["nodes"]) >= 2
+import pytest
+import asyncio
 from cognee.tasks.graph.infer_data_ontology import OntologyEngine
 from rdflib import Graph, Namespace, RDF, OWL, RDFS
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver, AttachedOntologyNode
