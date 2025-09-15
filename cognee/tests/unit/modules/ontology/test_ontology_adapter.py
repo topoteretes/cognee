@@ -1,5 +1,8 @@
+import pytest
 import asyncio
 from cognee.tasks.graph.infer_data_ontology import OntologyEngine
+from rdflib import Graph, Namespace, RDF, OWL, RDFS
+from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver, AttachedOntologyNode
 
 
 def test_load_owl_rdf_file(tmp_path):
@@ -59,15 +62,10 @@ def test_search_integration(tmp_path):
     owl_file.write_text(owl_content)
 
     engine = OntologyEngine()
-    data = asyncio.run(engine.load_data(str(owl_file)))
+    asyncio.run(engine.load_data(str(owl_file)))
     assert hasattr(engine, "ontology_nodes")
     assert hasattr(engine, "ontology_edges")
     assert hasattr(engine, "ontology_embeddings")
-
-
-import pytest
-from rdflib import Graph, Namespace, RDF, OWL, RDFS
-from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver, AttachedOntologyNode
 
 
 def test_ontology_adapter_initialization_success():
