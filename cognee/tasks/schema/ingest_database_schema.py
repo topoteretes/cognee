@@ -26,7 +26,10 @@ async def ingest_database_schema(
         max_sample_rows: Maximum sample rows per table
 
     Returns:
-        List of created DataPoint objects
+        Dict with keys:
+            "database_schema": DatabaseSchema
+            "schema_tables": List[SchemaTable]
+            "relationships": List[SchemaRelationship]
     """
     engine = create_relational_engine(
         db_path=database_config.get("migration_db_path", ""),
@@ -48,7 +51,6 @@ async def ingest_database_schema(
             qi = engine.engine.dialect.identifier_preparer.quote
             qname = lambda name : ".".join(qi(p) for p in name.split("."))
             tn = qname(table_name)
-            tn = qi(table_name)
             rows_result = await cursor.execute(
                 text(f"SELECT * FROM {tn} LIMIT :limit;"),
                 {"limit": max_sample_rows}
@@ -61,7 +63,7 @@ async def ingest_database_schema(
             row_count_estimate = count_result.scalar()
 
             schema_table = SchemaTable(
-                id=uuid5(NAMESPACE_OID, name=f"{schema_name}:{tn}"),
+                id=uuid5(NAMESPACE_OID, name=f"{schema_name}:{table_name}"),
                 table_name=table_name,
                 schema_name=schema_name,
                 columns=details["columns"],
