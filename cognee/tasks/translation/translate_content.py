@@ -344,6 +344,8 @@ async def _translate_and_update(ctx: TranslationContext) -> None:
         confidence_score=translation_confidence or 0.0,
     )
     ctx.chunk.metadata["translation"] = trans.model_dump()
+    # Clear any prior failure marker once we have a success
+    ctx.chunk.metadata.pop("translation_error", None)
 
 
 # Test helpers for registry isolation
@@ -592,7 +594,7 @@ class AzureTranslateProvider:
                 region = os.getenv("AZURE_TRANSLATE_REGION")      # optional; required for some resources
 
                 if not key:
-                    raise AzureConfigError("AZURE_TRANSLATE_KEY is required (and AZURE_TRANSLATE_ENDPOINT/REGION as applicable).")
+                    raise AzureConfigError()
                 if not endpoint:
                     # Default to global Translator endpoint when not explicitly provided
                     endpoint = "https://api.cognitive.microsofttranslator.com"
@@ -713,7 +715,7 @@ async def _process_chunk(chunk, plan, provider_cache):
         provider = provider_cache.get(primary_key)
         if provider is None:
             provider = _get_provider(primary_key)
-            provider_cache[primary_key] = provider
+            provider = provider_cache.setdefault(primary_key, provider)
     except Exception as e:
         if isinstance(e, asyncio.CancelledError):
             raise
@@ -740,6 +742,9 @@ async def _process_chunk(chunk, plan, provider_cache):
     _attach_language_metadata(ctx)
 
     if ctx.requires_translation:
+        # Short-circuit: primary provider cannot translate and no fallbacks provided
+        if primary_key == "noop" and not fallback_providers:
+            return ctx.chunk
         await _translate_and_update(ctx)
         # If no translation metadata was produced, try fallbacks in order
         if "translation" not in getattr(ctx.chunk, "metadata", {}):
@@ -748,7 +753,7 @@ async def _process_chunk(chunk, plan, provider_cache):
                     alt_provider = provider_cache.get(alt_name)
                     if alt_provider is None:
                         alt_provider = _get_provider(alt_name)
-                        provider_cache[alt_name] = alt_provider
+                        alt_provider = provider_cache.setdefault(alt_name, alt_provider)
                 except Exception as e:
                     if isinstance(e, asyncio.CancelledError):
                         raise
@@ -794,7 +799,7 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
         Any: For single chunk input - returns the processed chunk directly.
              For multiple chunks input - returns List[Any] of processed chunks.
              Each returned chunk may have its text translated and metadata updated with:
-             - language_metadata: detected language and confidence
+             - language: detected language and confidence
              - translation: translated text and provider information (if translation occurred)
     """
     # Always work with a list internally for consistency
