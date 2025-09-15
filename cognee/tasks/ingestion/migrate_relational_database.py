@@ -43,7 +43,6 @@ async def migrate_relational_database(
             database_config=database_config,
             schema_name="migrated_schema",
             max_sample_rows=5,
-            node_set=["database_schema", "schema_tables", "relationships"],
         )
         database_schema = result["database_schema"]
         schema_tables = result["schema_tables"]
