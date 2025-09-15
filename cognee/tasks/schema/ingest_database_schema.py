@@ -93,7 +93,7 @@ async def ingest_database_schema(
     database_schema = DatabaseSchema(
         id=uuid5(NAMESPACE_OID, name=schema_name),
         schema_name=schema_name,
-        database_type=database_config.get("db_provider", "sqlite"),
+        database_type=database_config.get("migration_db_provider", "sqlite"),
         tables=tables,
         sample_data=sample_data,
         extraction_timestamp=datetime.utcnow(),
