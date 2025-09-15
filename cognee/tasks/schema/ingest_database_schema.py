@@ -47,8 +47,11 @@ async def ingest_database_schema(
 
     async with engine.engine.begin() as cursor:
         for table_name, details in schema.items():
+            qi = engine.engine.dialect.identifier_preparer.quote
+            tn = qi(table_name)
             rows_result = await cursor.execute(
-                text(f"SELECT * FROM {table_name} LIMIT {max_sample_rows}")
+                text(f"SELECT * FROM {tn} LIMIT :limit;"),
+                {"limit": max_sample_rows}
             )
             rows = [
                 dict(zip([col["name"] for col in details["columns"]], row))
@@ -58,7 +61,7 @@ async def ingest_database_schema(
             row_count_estimate = count_result.scalar()
 
             schema_table = SchemaTable(
-                id=uuid5(NAMESPACE_OID, name=table_name),
+                id=uuid5(NAMESPACE_OID, name=f"{schema_name}:{table_name}"),
                 table_name=table_name,
                 schema_name=schema_name,
                 columns=details["columns"],
