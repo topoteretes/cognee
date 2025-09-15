@@ -1,9 +1,10 @@
 import asyncio
 from cognee.tasks.graph.infer_data_ontology import OntologyEngine
 
+
 def test_load_owl_rdf_file(tmp_path):
-        # Create a minimal OWL file
-        owl_content = '''<?xml version="1.0"?>
+    # Create a minimal OWL file
+    owl_content = """<?xml version="1.0"?>
         <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
                          xmlns:owl="http://www.w3.org/2002/07/owl#"
                          xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
@@ -11,20 +12,21 @@ def test_load_owl_rdf_file(tmp_path):
             <owl:NamedIndividual rdf:about="http://example.org/test#Audi">
                 <rdf:type rdf:resource="http://example.org/test#Car"/>
             </owl:NamedIndividual>
-        </rdf:RDF>'''
-        owl_file = tmp_path / "test.owl"
-        owl_file.write_text(owl_content)
+        </rdf:RDF>"""
+    owl_file = tmp_path / "test.owl"
+    owl_file.write_text(owl_content)
 
-        engine = OntologyEngine()
-        data = asyncio.run(engine.load_data(str(owl_file)))
-        assert "nodes" in data
-        assert "edges" in data
-        assert "embeddings" in data
-        assert any(n["id"] == "car" for n in data["nodes"])
-        assert any(n["id"] == "audi" for n in data["nodes"])
+    engine = OntologyEngine()
+    data = asyncio.run(engine.load_data(str(owl_file)))
+    assert "nodes" in data
+    assert "edges" in data
+    assert "embeddings" in data
+    assert any(n["id"] == "car" for n in data["nodes"])
+    assert any(n["id"] == "audi" for n in data["nodes"])
+
 
 def test_embeddings_are_generated(tmp_path):
-        owl_content = '''<?xml version="1.0"?>
+    owl_content = """<?xml version="1.0"?>
         <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
                          xmlns:owl="http://www.w3.org/2002/07/owl#"
                          xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
@@ -32,18 +34,19 @@ def test_embeddings_are_generated(tmp_path):
             <owl:NamedIndividual rdf:about="http://example.org/test#Audi">
                 <rdf:type rdf:resource="http://example.org/test#Car"/>
             </owl:NamedIndividual>
-        </rdf:RDF>'''
-        owl_file = tmp_path / "test.owl"
-        owl_file.write_text(owl_content)
+        </rdf:RDF>"""
+    owl_file = tmp_path / "test.owl"
+    owl_file.write_text(owl_content)
 
-        engine = OntologyEngine()
-        data = asyncio.run(engine.load_data(str(owl_file)))
-        for node in data["nodes"]:
-                assert "embedding" in node
+    engine = OntologyEngine()
+    data = asyncio.run(engine.load_data(str(owl_file)))
+    for node in data["nodes"]:
+        assert "embedding" in node
+
 
 def test_search_integration(tmp_path):
-        # This test assumes search integration uses ontology_nodes
-        owl_content = '''<?xml version="1.0"?>
+    # This test assumes search integration uses ontology_nodes
+    owl_content = """<?xml version="1.0"?>
         <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
                          xmlns:owl="http://www.w3.org/2002/07/owl#"
                          xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
@@ -51,15 +54,17 @@ def test_search_integration(tmp_path):
             <owl:NamedIndividual rdf:about="http://example.org/test#Audi">
                 <rdf:type rdf:resource="http://example.org/test#Car"/>
             </owl:NamedIndividual>
-        </rdf:RDF>'''
-        owl_file = tmp_path / "test.owl"
-        owl_file.write_text(owl_content)
+        </rdf:RDF>"""
+    owl_file = tmp_path / "test.owl"
+    owl_file.write_text(owl_content)
 
-        engine = OntologyEngine()
-        data = asyncio.run(engine.load_data(str(owl_file)))
-        assert hasattr(engine, "ontology_nodes")
-        assert hasattr(engine, "ontology_edges")
-        assert hasattr(engine, "ontology_embeddings")
+    engine = OntologyEngine()
+    data = asyncio.run(engine.load_data(str(owl_file)))
+    assert hasattr(engine, "ontology_nodes")
+    assert hasattr(engine, "ontology_edges")
+    assert hasattr(engine, "ontology_embeddings")
+
+
 import pytest
 from rdflib import Graph, Namespace, RDF, OWL, RDFS
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver, AttachedOntologyNode

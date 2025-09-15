@@ -163,6 +163,7 @@ class OntologyEngine:
             elif file_path.endswith(".owl") or file_path.endswith(".rdf"):
                 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
                 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+
                 resolver = OntologyResolver(ontology_file=file_path)
                 nodes = []
                 edges = []
@@ -176,14 +177,18 @@ class OntologyEngine:
                         node_info["description"] = str(uri)
                         # Generate embedding for node
                         try:
-                            embedding = llm.generate_embedding(text=node_info["label"] + " " + node_info["description"])
+                            embedding = llm.generate_embedding(
+                                text=node_info["label"] + " " + node_info["description"]
+                            )
                         except Exception:
                             embedding = None
                         node_info["embedding"] = embedding
                         embeddings[key] = embedding
                         nodes.append(node_info)
                 for node in nodes:
-                    _, node_edges, _ = resolver.get_subgraph(node_name=node["id"], node_type=node["category"])
+                    _, node_edges, _ = resolver.get_subgraph(
+                        node_name=node["id"], node_type=node["category"]
+                    )
                     for edge in node_edges:
                         edge_info = {"source": edge[0], "relation": edge[1], "target": edge[2]}
                         # Generate embedding for edge relation
