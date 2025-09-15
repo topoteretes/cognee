@@ -43,6 +43,10 @@ async def ingest_database_schema(
     schema_tables = []
     schema_relationships = []
     qi = engine.engine.dialect.identifier_preparer.quote
+    try:
+        max_sample_rows = max(0, int(max_sample_rows))
+    except (TypeError, ValueError):
+        max_sample_rows = 0
 
     def qname(name: str):
         split_name = name.split(".")
@@ -53,8 +57,8 @@ async def ingest_database_schema(
             tn = qname(table_name)
             if max_sample_rows > 0:
                 rows_result = await cursor.execute(
-                    text(f"SELECT * FROM {tn} LIMIT :limit;"),
-                    {"limit": max_sample_rows},  # noqa: S608 - tn is fully quoted
+                    text(f"SELECT * FROM {tn} LIMIT :limit;"),  # noqa: S608 - tn is fully quoted
+                    {"limit": max_sample_rows},
                 )
                 rows = [dict(r) for r in rows_result.mappings().all()]
             else:
@@ -67,7 +71,7 @@ async def ingest_database_schema(
                     schema_part, table_part = "public", table_name
                 estimate = await cursor.execute(
                     text(
-                        "SELECT reltuples:bigint AS estimate "
+                        "SELECT reltuples::bigint AS estimate "
                         "FROM pg_class c "
                         "JOIN pg_namespace n ON n.oid = c.relnamespace "
                         "WHERE n.nspname = :schema AND c.relname = :table"
