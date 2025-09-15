@@ -146,7 +146,7 @@ async def request_validation_exception_handler(request: Request, exc: RequestVal
 @app.exception_handler(CogneeApiError)
 async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
     detail = {}
-
+    
     if exc.name and exc.message and exc.status_code:
         status_code = exc.status_code
         detail["message"] = f"{exc.message} [{exc.name}]"

@@ -3,7 +3,8 @@ import pathlib
 import asyncio
 import cognee
 from cognee.modules.search.types import SearchType
-from cognee.infrastructure.databases.graph.config import get_graph_config
+
+
 async def main():
     """
     Example script demonstrating how to use Cognee with Neo4j
@@ -30,7 +31,7 @@ async def main():
             "graph_database_password": neo4j_pass,  # Neo4j password
         }
     )
-    print("Current Graph DB Config:", get_graph_config())
+
     # Set up data directories for storing documents and system files
     # You should adjust these paths to your needs
     current_dir = pathlib.Path(__file__).parent
@@ -57,9 +58,10 @@ async def main():
 
     # Add the sample text to the dataset
     await cognee.add([sample_text], dataset_name)
-    await cognee.add(["print(hello world)"], "hello_world")  # Adding twice to have more data
+
     # Process the added document to extract knowledge
-    await cognee.cognify([dataset_name, "hello_world"])
+    await cognee.cognify([dataset_name])
+
     # Now let's perform some searches
     # 1. Search for insights related to "Neo4j"
     insights_results = await cognee.search(query_type=SearchType.INSIGHTS, query_text="Neo4j")
@@ -69,26 +71,12 @@ async def main():
 
     # 2. Search for text chunks related to "graph database"
     chunks_results = await cognee.search(
-        query_type=SearchType.CHUNKS_LEXICAL, query_text="graph database", datasets=[dataset_name],with_scores=True
+        query_type=SearchType.CHUNKS, query_text="graph database", datasets=[dataset_name]
     )
     print("\nChunks about graph database:")
     for result in chunks_results:
         print(f"- {result}")
 
-
-    chunks_results = await cognee.search(
-        query_type=SearchType.CHUNKS_LEXICAL, query_text="graph database", datasets=["hello_world"],with_scores=True
-    )
-    print("\nChunks about graph database:")
-    for result in chunks_results:
-        print(f"- {result}")
-
-    chunks_results = await cognee.search(
-        query_type=SearchType.CHUNKS, query_text="graph database", datasets=[dataset_name],with_scores=True
-    )
-    print("\nChunks about graph non lexical database:")
-    for result in chunks_results:
-        print(f"- {result}")
     # 3. Get graph completion related to databases
     graph_completion_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION, query_text="database"
