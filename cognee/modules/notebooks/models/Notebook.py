@@ -106,7 +106,49 @@ class Notebook(Base):
         notebook_content = notebook_path.read_text(encoding="utf-8")
         notebook = cls.from_ipynb_string(notebook_content, owner_id, name, deletable)
 
+        # Update file paths in code cells to use actual cached data files
+        cls._update_file_paths_in_cells(notebook, tutorial_cache_dir)
+
         return notebook, tutorial_cache_dir
+
+    @staticmethod
+    def _update_file_paths_in_cells(notebook: "Notebook", cache_dir: Path) -> None:
+        """
+        Update file paths in code cells to use actual cached data files.
+
+        Args:
+            notebook: Parsed Notebook instance with cells to update
+            cache_dir: Path to the cached tutorial directory containing data files
+        """
+        import re
+
+        # Parse the notebook to find actual data files
+        data_dir = cache_dir / "data"
+        if not data_dir.exists():
+            return
+
+        # Get all data files in the cache directory
+        data_files = {}
+        for file_path in data_dir.rglob("*"):
+            if file_path.is_file():
+                # Map filename to actual absolute path
+                data_files[file_path.name] = str(file_path)
+
+        # Pattern to match file://data/filename patterns in code cells
+        file_pattern = r'"file://data/([^"]+)"'
+
+        def replace_path(match):
+            filename = match.group(1)
+            if filename in data_files:
+                # Return the actual absolute path to the cached file
+                return f'"file://{data_files[filename]}"'
+            return match.group(0)  # Keep original if file not found
+
+        # Update only code cells
+        for cell in notebook.cells:
+            if cell.type == "code":
+                # Update file paths in the cell content
+                cell.content = re.sub(file_pattern, replace_path, cell.content)
 
     @classmethod
     def from_ipynb_string(
