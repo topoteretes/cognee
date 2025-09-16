@@ -36,7 +36,6 @@ async def search(
     save_interaction: bool = False,
     last_k: Optional[int] = None,
     only_context: bool = False,
-    with_scores: bool = False,
     use_combined_context: bool = False,
 ) -> Union[CombinedSearchResult, List[SearchResult]]:
     """
@@ -48,7 +47,6 @@ async def search(
         user:
         system_prompt_path:
         top_k:
-        with_scores:
 
     Returns:
 
@@ -74,7 +72,6 @@ async def search(
             last_k=last_k,
             only_context=only_context,
             use_combined_context=use_combined_context,
-            with_scores=with_scores,
         )
     else:
         search_results = [
@@ -89,7 +86,6 @@ async def search(
                 save_interaction=save_interaction,
                 last_k=last_k,
                 only_context=only_context,
-                with_scores=with_scores,
             )
         ]
 
@@ -178,7 +174,6 @@ async def authorized_search(
     node_name: Optional[List[str]] = None,
     save_interaction: bool = False,
     last_k: Optional[int] = None,
-    with_scores: bool = False,
     only_context: bool = False,
     use_combined_context: bool = False,
 ) -> Union[
@@ -205,7 +200,6 @@ async def authorized_search(
             save_interaction=save_interaction,
             last_k=last_k,
             only_context=True,
-            with_scores = with_scores,
         )
 
         context = {}
@@ -227,7 +221,6 @@ async def authorized_search(
             node_name=node_name,
             save_interaction=save_interaction,
             last_k=last_k,
-            with_scores=with_scores,
         )
         search_tools = specific_search_tools
         if len(search_tools) == 2:
@@ -266,7 +259,6 @@ async def authorized_search(
         save_interaction=save_interaction,
         last_k=last_k,
         only_context=only_context,
-        with_scores=with_scores,
     )
 
     return search_results
@@ -285,7 +277,6 @@ async def search_in_datasets_context(
     last_k: Optional[int] = None,
     only_context: bool = False,
     context: Optional[Any] = None,
-    with_scores: bool = False,
 ) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
@@ -305,7 +296,6 @@ async def search_in_datasets_context(
         last_k: Optional[int] = None,
         only_context: bool = False,
         context: Optional[Any] = None,
-        with_scores: bool = False,
     ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)
@@ -320,7 +310,6 @@ async def search_in_datasets_context(
             node_name=node_name,
             save_interaction=save_interaction,
             last_k=last_k,
-            with_scores=with_scores,
         )
         search_tools = specific_search_tools
         if len(search_tools) == 2:
@@ -355,7 +344,6 @@ async def search_in_datasets_context(
                 last_k=last_k,
                 only_context=only_context,
                 context=context,
-                with_scores=with_scores,
             )
         )
 

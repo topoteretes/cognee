@@ -19,7 +19,6 @@ async def no_access_control_search(
     save_interaction: bool = False,
     last_k: Optional[int] = None,
     only_context: bool = False,
-    with_scores: bool = False,
 ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
     search_tools = await get_search_type_tools(
         query_type=query_type,
@@ -31,7 +30,6 @@ async def no_access_control_search(
         node_name=node_name,
         save_interaction=save_interaction,
         last_k=last_k,
-        with_scores=with_scores,
     )
     if len(search_tools) == 2:
         [get_completion, get_context] = search_tools

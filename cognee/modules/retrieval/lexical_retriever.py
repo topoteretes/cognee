@@ -15,10 +15,6 @@ logger = get_logger("LexicalRetriever")
 
 
 class LexicalRetriever(BaseRetriever):
-    # Cache keyed by dataset context
-    _dataset_caches: dict[str, dict] = {}
-    _cache_locks: dict[str, asyncio.Lock] = {}
-    _global_lock = asyncio.Lock()
 
     def __init__(self, tokenizer: Callable, scorer: Callable, top_k: int = 10, with_scores: bool = False):
         if not callable(tokenizer) or not callable(scorer):
@@ -31,6 +27,11 @@ class LexicalRetriever(BaseRetriever):
         self.top_k = top_k
         self.with_scores = bool(with_scores)
 
+        # Cache keyed by dataset context
+        self.chunks: dict[str, Any] = {}   # {chunk_id: tokens}
+        self.payloads: dict[str, Any] = {} # {chunk_id: original_document}
+        self._initialized = False
+        self._init_lock = asyncio.Lock()
     def fix_json_strings(self, obj):
         """Recursively convert any JSON string values into dict/list."""
         if isinstance(obj, dict):
@@ -47,100 +48,92 @@ class LexicalRetriever(BaseRetriever):
             return obj
         return obj
 
-    async def _get_dataset_key(self) -> str:
-        """Generate a unique key for current dataset context."""
-        from cognee.context_global_variables import dataset_id
-        current_dataset = dataset_id.get()
-        if current_dataset is None:
-            current_dataset = "ALL"
-        return f"dataset_{str(current_dataset)}"
-
     async def initialize(self):
-        dataset_key = await self._get_dataset_key()
+      """Initialize retriever by reading all DocumentChunks from graph_engine."""
+      async with self._init_lock:
+          if self._initialized:
+              return
 
-        # Ensure each dataset has its own lock
-        async with self._global_lock:
-            if dataset_key not in self._cache_locks:
-                self._cache_locks[dataset_key] = asyncio.Lock()
+          logger.info("Initializing LexicalRetriever by loading DocumentChunks from graph engine")
 
-        async with self._cache_locks[dataset_key]:
-            if dataset_key in self._dataset_caches:
-                return  # already cached for this dataset
+          try:
+              graph_engine = await get_graph_engine()
+              nodes, _ = await graph_engine.get_graph_data()
+          except Exception as e:
+              logger.error("Graph engine initialization failed")
+              raise NoDataError("Graph engine initialization failed") from e
 
-            logger.info(f"Initializing LexicalRetriever for {dataset_key} from graph engine")
+          chunk_count = 0
+          for node in nodes:
+              try:
+                  chunk_id, document = node
+              except Exception:
+                  logger.warning("Skipping node with unexpected shape: %r", node)
+                  continue
 
-            graph_engine = await get_graph_engine()
-            nodes, _ = await graph_engine.get_graph_data()
+              fixed_document = self.fix_json_strings(document)
+              if fixed_document.get("type") == "DocumentChunk" and fixed_document.get("text"):
+                  try:
+                      tokens = self.tokenizer(fixed_document["text"])
+                      if not tokens:
+                          continue
+                      document_chunk = DocumentChunk.from_dict(fixed_document)
+                      new_document = get_own_properties(document_chunk)
+                      new_document["id"] = str(new_document.get("id", chunk_id))
+                      self.chunks[str(chunk_id)] = tokens
+                      self.payloads[str(chunk_id)] = new_document
+                      chunk_count += 1
+                  except Exception as e:
+                      logger.error("Tokenizer failed for chunk %s: %s", chunk_id, str(e))
 
-            chunks = {}
-            payloads = {}
-            chunk_count = 0
+          if chunk_count == 0:
+              logger.error("Initialization completed but no valid chunks were loaded.")
+              raise NoDataError("No valid chunks loaded during initialization.")
 
-            for node in nodes:
-                try:
-                    chunk_id, document = node
-                except Exception:
-                    continue
-
-                fixed_document = self.fix_json_strings(document)
-                if fixed_document.get("type") == "DocumentChunk" and fixed_document.get("text"):
-                    try:
-                        tokens = self.tokenizer(fixed_document["text"])
-                        if not tokens:
-                            continue
-                        document_chunk = DocumentChunk.from_dict(fixed_document)
-                        new_document = get_own_properties(document_chunk)
-                        new_document["id"] = str(new_document.get("id", chunk_id))
-                        chunks[str(chunk_id)] = tokens
-                        payloads[str(chunk_id)] = new_document
-                        chunk_count += 1
-                    except Exception as e:
-                        logger.error("Tokenizer failed for chunk %s: %s", chunk_id, str(e))
-
-            if chunk_count == 0:
-                raise NoDataError(f"No valid chunks loaded during initialization for {dataset_key}.")
-
-            self._dataset_caches[dataset_key] = {
-                "chunks": chunks,
-                "payloads": payloads,
-                "initialized": True,
-            }
-
-            logger.info("Retriever initialized for %s with %d chunks", dataset_key, chunk_count)
+          self._initialized = True
+          logger.info("Initialized with %d document chunks", len(self.chunks))
 
     async def get_context(self, query: str) -> Any:
-        dataset_key = await self._get_dataset_key()
-        await self.initialize()
+        """Retrieves relevant chunks for the given query."""
+        if not self._initialized:
+            await self.initialize()
 
-        cache = self._dataset_caches[dataset_key]
-        chunks = cache["chunks"]
-        payloads = cache["payloads"]
-
-        if not chunks:
+        if not self.chunks:
+            logger.warning("No chunks available in retriever")
             return []
 
-        query_tokens = self.tokenizer(query)
+        try:
+            query_tokens = self.tokenizer(query)
+        except Exception as e:
+            logger.error("Failed to tokenize query: %s", str(e))
+            return []
+
         if not query_tokens:
+            logger.warning("Query produced no tokens")
             return []
 
         results = []
-        for chunk_id, chunk_tokens in chunks.items():
+        for chunk_id, chunk_tokens in self.chunks.items():
             try:
                 score = self.scorer(query_tokens, chunk_tokens)
                 if not isinstance(score, (int, float)):
+                    logger.warning("Non-numeric score for chunk %s → treated as 0.0", chunk_id)
                     score = 0.0
-            except Exception:
+            except Exception as e:
+                logger.error("Scorer failed for chunk %s: %s", chunk_id, str(e))
                 score = 0.0
             results.append((chunk_id, score))
 
         top_results = nlargest(self.top_k, results, key=lambda x: x[1])
+        logger.info("Retrieved %d/%d chunks for query (len=%d)", len(top_results), len(results), len(query_tokens))
 
         if self.with_scores:
-            return [(payloads[chunk_id], score) for chunk_id, score in top_results]
+            return [(self.payloads[chunk_id], score) for chunk_id, score in top_results]
         else:
-            return [payloads[chunk_id] for chunk_id, _ in top_results]
+            return [self.payloads[chunk_id] for chunk_id, _ in top_results]
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
+        """Returns context for the given query (retrieves if not provided)."""
         if context is None:
             context = await self.get_context(query)
         return context

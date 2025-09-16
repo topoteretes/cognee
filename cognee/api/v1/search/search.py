@@ -25,7 +25,6 @@ async def search(
     last_k: Optional[int] = None,
     only_context: bool = False,
     use_combined_context: bool = False,
-    with_scores: bool = False,
 ) -> Union[List[SearchResult], CombinedSearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -119,7 +118,6 @@ async def search(
 
         save_interaction: Save interaction (query, context, answer connected to triplet endpoints) results into the graph or not
 
-        with_scores: Whether to return similarity scores with results (for CHUNKS_LEXICAL types).
 
     Returns:
         list: Search results in format determined by query_type:
@@ -201,7 +199,6 @@ async def search(
         last_k=last_k,
         only_context=only_context,
         use_combined_context=use_combined_context,
-        with_scores=with_scores,
   )
 
     return filtered_search_results
