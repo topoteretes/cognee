@@ -136,7 +136,7 @@ class Notebook(Base):
 
         # Convert Jupyter cells to NotebookCell objects
         cells = []
-        for i, jupyter_cell in enumerate(jupyter_nb.cells):
+        for jupyter_cell in jupyter_nb.cells:
             # Each cell is also a NotebookNode with dynamic attributes
             cell = cast(NotebookNode, jupyter_cell)
             # Skip raw cells as they're not supported in our model
@@ -147,7 +147,7 @@ class Notebook(Base):
             content = cell.source
 
             # Generate a name based on content or cell index
-            cell_name = cls._generate_cell_name(cell, i)
+            cell_name = cls._generate_cell_name(cell)
 
             # Map cell types (jupyter uses "code"/"markdown", we use same)
             cell_type = "code" if cell.cell_type == "code" else "markdown"
@@ -162,7 +162,7 @@ class Notebook(Base):
         return cls(id=uuid4(), owner_id=owner_id, name=name, cells=cells, deletable=deletable)
 
     @staticmethod
-    def _generate_cell_name(jupyter_cell: NotebookNode, index: int) -> str:
+    def _generate_cell_name(jupyter_cell: NotebookNode) -> str:
         """Generate a meaningful name for a notebook cell using nbformat cell."""
         if jupyter_cell.cell_type == "markdown":
             # Try to extract a title from markdown headers
@@ -174,6 +174,6 @@ class Notebook(Base):
                 header = lines[0].lstrip("#").strip()
                 return header[:50] if len(header) > 50 else header
             else:
-                return f"Markdown Cell {index + 1}"
+                return "Markdown Cell"
         else:
-            return f"Code Cell {index + 1}"
+            return "Code Cell"

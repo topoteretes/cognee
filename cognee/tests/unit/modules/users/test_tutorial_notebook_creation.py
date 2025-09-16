@@ -97,8 +97,8 @@ class TestTutorialNotebookCreation:
         assert notebook.cells[2].name == "Step 1: Data Ingestion"
 
         # Check code cell naming
-        assert notebook.cells[1].name == "Code Cell 2"  # Index 1 in original, but 2 in display
-        assert notebook.cells[3].name == "Code Cell 4"
+        assert notebook.cells[1].name == "Code Cell"
+        assert notebook.cells[3].name == "Code Cell"
 
     @pytest.mark.asyncio
     async def test_notebook_from_ipynb_string_with_default_name(self, sample_jupyter_notebook):
@@ -190,7 +190,7 @@ class TestTutorialNotebookCreation:
             {"cell_type": "markdown", "source": "# This is a Header\n\nSome content here."}
         )
 
-        result = Notebook._generate_cell_name(mock_cell, 0)
+        result = Notebook._generate_cell_name(mock_cell)
         assert result == "This is a Header"
 
     def test_generate_cell_name_with_long_header(self):
@@ -202,7 +202,7 @@ class TestTutorialNotebookCreation:
             {"cell_type": "markdown", "source": f"# {long_header}\n\nContent."}
         )
 
-        result = Notebook._generate_cell_name(mock_cell, 0)
+        result = Notebook._generate_cell_name(mock_cell)
         assert len(result) == 50
         assert result == long_header[:50]
 
@@ -214,8 +214,8 @@ class TestTutorialNotebookCreation:
             {"cell_type": "markdown", "source": "Just some regular markdown text without a header."}
         )
 
-        result = Notebook._generate_cell_name(mock_cell, 2)
-        assert result == "Markdown Cell 3"  # Index + 1
+        result = Notebook._generate_cell_name(mock_cell)
+        assert result == "Markdown Cell"
 
     def test_generate_cell_name_code_cell(self):
         """Test cell name generation for code cells."""
@@ -225,8 +225,8 @@ class TestTutorialNotebookCreation:
             {"cell_type": "code", "source": 'import pandas as pd\nprint("Hello world")'}
         )
 
-        result = Notebook._generate_cell_name(mock_cell, 4)
-        assert result == "Code Cell 5"  # Index + 1
+        result = Notebook._generate_cell_name(mock_cell)
+        assert result == "Code Cell"
 
 
 @pytest.fixture
