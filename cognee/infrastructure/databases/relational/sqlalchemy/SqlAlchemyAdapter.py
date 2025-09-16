@@ -58,8 +58,8 @@ class SQLAlchemyAdapter:
         else:
             self.engine = create_async_engine(
                 connection_string,
-                pool_size=5,
-                max_overflow=10,
+                pool_size=20,
+                max_overflow=20,
                 pool_recycle=280,
                 pool_pre_ping=True,
                 pool_timeout=280,

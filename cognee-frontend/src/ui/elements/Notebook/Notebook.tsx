@@ -16,22 +16,9 @@ interface NotebookProps {
   notebook: NotebookType;
   runCell: (notebook: NotebookType, cell: Cell, cogneeInstance: string) => Promise<void>;
   updateNotebook: (updatedNotebook: NotebookType) => void;
-  saveNotebook: (notebook: NotebookType) => void;
 }
 
-export default function Notebook({ notebook, updateNotebook, saveNotebook, runCell }: NotebookProps) {
-  const saveCells = useCallback(() => {
-    saveNotebook(notebook);
-  }, [notebook, saveNotebook]);
-
-  useEffect(() => {
-    window.addEventListener("beforeunload", saveCells);
-
-    return () => {
-      window.removeEventListener("beforeunload", saveCells);
-    };
-  }, [saveCells]);
-
+export default function Notebook({ notebook, updateNotebook, runCell }: NotebookProps) {
   useEffect(() => {
     if (notebook.cells.length === 0) {
       const newCell: Cell = {
@@ -44,8 +31,9 @@ export default function Notebook({ notebook, updateNotebook, saveNotebook, runCe
        ...notebook,
         cells: [newCell],
       });
+      toggleCellOpen(newCell.id)
     }
-  }, [notebook, saveNotebook, updateNotebook]);
+  }, [notebook, updateNotebook]);
 
   const handleCellRun = useCallback((cell: Cell, cogneeInstance: string) => {
     return runCell(notebook, cell, cogneeInstance);
@@ -256,62 +244,122 @@ function CellResult({ content }: { content: [] }) {
   for (const line of content) {
     try {
       if (Array.isArray(line)) {
-        // @ts-expect-error line can be Array or string
-        for (const item of line) {
-          if (typeof item === "string") {
-            parsedContent.push(
-              <pre key={item.slice(0, -10)}>
-                {item}
-              </pre>
-            );
-          }
-          if (typeof item === "object" && item["search_result"]) {
-            parsedContent.push(
-              <div className="w-full h-full bg-white">
-                <span className="text-sm pl-2 mb-4">query response (dataset: {item["dataset_name"]})</span>
-                <span className="block px-2 py-2">{item["search_result"]}</span>
-              </div>
-            );
-          }
-          if (typeof item === "object" && item["graph"] && typeof item["graph"] === "object") {
-            parsedContent.push(
-              <div className="w-full h-full bg-white">
-                <span className="text-sm pl-2 mb-4">reasoning graph</span>
-                <GraphVisualization
-                  data={transformToVisualizationData(item["graph"])}
-                  ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
-                  graphControls={graphControls}
-                  className="min-h-48"
-                />
-              </div>
-            );
-          }
-        }
-      }
-      if (typeof(line) === "object" && line["result"]) {
-        parsedContent.push(
-          <div className="w-full h-full bg-white">
-            <span className="text-sm pl-2 mb-4">query response (dataset: {line["dataset_name"]})</span>
-            <span className="block px-2 py-2">{line["result"]}</span>
-          </div>
-        );
-        if (line["graphs"]) {
+        // Insights search returns uncommon graph data structure
+        if (Array.from(line).length > 0 && Array.isArray(line[0]) && line[0][1]["relationship_name"]) {
           parsedContent.push(
-            <div className="w-full h-full bg-white">
+            <div key={line[0][1]["relationship_name"]} className="w-full h-full bg-white">
               <span className="text-sm pl-2 mb-4">reasoning graph</span>
               <GraphVisualization
-                data={transformToVisualizationData(line["graphs"]["*"])}
+                data={transformInsightsGraphData(line)}
                 ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
                 graphControls={graphControls}
                 className="min-h-48"
               />
             </div>
           );
+          continue;
         }
+
+        // @ts-expect-error line can be Array or string
+        for (const item of line) {
+          if (
+            typeof item === "object" && item["search_result"] && (typeof(item["search_result"]) === "string"
+            || (Array.isArray(item["search_result"]) && typeof(item["search_result"][0]) === "string"))
+          ) {
+            parsedContent.push(
+              <div key={String(item["search_result"])} className="w-full h-full bg-white">
+                <span className="text-sm pl-2 mb-4">query response (dataset: {item["dataset_name"]})</span>
+                <span className="block px-2 py-2 whitespace-normal">{item["search_result"]}</span>
+              </div>
+            );
+          } else if (typeof(item) === "object" && item["search_result"] && typeof(item["search_result"]) === "object") {
+            parsedContent.push(
+              <pre className="px-2 w-full h-full bg-white text-sm" key={String(item).slice(0, -10)}>
+                {JSON.stringify(item, null, 2)}
+              </pre>
+            )
+          } else if (typeof(item) === "string") {
+            parsedContent.push(
+              <pre className="px-2 w-full h-full bg-white text-sm whitespace-normal" key={item.slice(0, -10)}>
+                {item}
+              </pre>
+            );
+          } else if (typeof(item) === "object" && !(item["search_result"] || item["graphs"])) {
+            parsedContent.push(
+              <pre className="px-2 w-full h-full bg-white text-sm" key={String(item).slice(0, -10)}>
+                {JSON.stringify(item, null, 2)}
+              </pre>
+            )
+          }
+
+          if (typeof item === "object" && item["graphs"] && typeof item["graphs"] === "object") {
+            Object.entries<{ nodes: []; edges: []; }>(item["graphs"]).forEach(([datasetName, graph]) => {
+              parsedContent.push(
+                <div key={datasetName} className="w-full h-full bg-white">
+                  <span className="text-sm pl-2 mb-4">reasoning graph (datasets: {datasetName})</span>
+                  <GraphVisualization
+                    data={transformToVisualizationData(graph)}
+                    ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
+                    graphControls={graphControls}
+                    className="min-h-80"
+                  />
+                </div>
+              );
+            });
+          }
+        }
+      }
+
+      if (typeof(line) === "object" && line["result"] && typeof(line["result"]) === "string") {
+        const datasets = Array.from(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          new Set(Object.values(line["datasets"]).map((dataset: any) => dataset.name))
+        ).join(", ");
+
+        parsedContent.push(
+          <div key={line["result"]} className="w-full h-full bg-white">
+            <span className="text-sm pl-2 mb-4">query response (datasets: {datasets})</span>
+            <span className="block px-2 py-2 whitespace-normal">{line["result"]}</span>
+          </div>
+        );
+      }
+      if (typeof(line) === "object" && line["graphs"]) {
+        Object.entries<{ nodes: []; edges: []; }>(line["graphs"]).forEach(([datasetName, graph]) => {
+          parsedContent.push(
+            <div key={datasetName} className="w-full h-full bg-white">
+              <span className="text-sm pl-2 mb-4">reasoning graph (datasets: {datasetName})</span>
+              <GraphVisualization
+                data={transformToVisualizationData(graph)}
+                ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
+                graphControls={graphControls}
+                className="min-h-80"
+              />
+            </div>
+          );
+        });
+      }
+
+      if (typeof(line) === "object" && line["result"] && typeof(line["result"]) === "object") {
+        parsedContent.push(
+          <pre className="px-2 w-full h-full bg-white text-sm" key={String(line).slice(0, -10)}>
+            {JSON.stringify(line["result"], null, 2)}
+          </pre>
+        )
+      }
+      if (typeof(line) === "string") {
+        parsedContent.push(
+          <pre className="px-2 w-full h-full bg-white text-sm whitespace-normal" key={String(line).slice(0, -10)}>
+            {line}
+          </pre>
+        )
       }
     } catch (error) {
       console.error(error);
-      parsedContent.push(line);
+      parsedContent.push(
+        <pre className="px-2 w-full h-full bg-white text-sm whitespace-normal" key={String(line).slice(0, -10)}>
+          {line}
+        </pre>
+      );
     }
   }
 
@@ -324,38 +372,61 @@ function CellResult({ content }: { content: [] }) {
 };
 
 function transformToVisualizationData(graph: { nodes: [], edges: [] }) {
-  // Implementation to transform triplet to visualization data
-
   return {
     nodes: graph.nodes,
     links: graph.edges,
   };
+}
 
-  // const nodes = {};
-  // const links = {};
+type Triplet = [{
+  id: string,
+  name: string,
+  type: string,
+}, {
+  relationship_name: string,
+}, {
+  id: string,
+  name: string,
+  type: string,
+}]
 
-  // for (const triplet of triplets) {
-  //   nodes[triplet.source.id] = {
-  //     id: triplet.source.id,
-  //     label: triplet.source.attributes.name,
-  //     type: triplet.source.attributes.type,
-  //     attributes: triplet.source.attributes,
-  //   };
-  //   nodes[triplet.destination.id] = {
-  //     id: triplet.destination.id,
-  //     label: triplet.destination.attributes.name,
-  //     type: triplet.destination.attributes.type,
-  //     attributes: triplet.destination.attributes,
-  //   };
-  //   links[`${triplet.source.id}_${triplet.attributes.relationship_name}_${triplet.destination.id}`] = {
-  //     source: triplet.source.id,
-  //     target: triplet.destination.id,
-  //     label: triplet.attributes.relationship_name,
-  //   }
-  // }
+function transformInsightsGraphData(triplets: Triplet[]) {
+  const nodes: {
+    [key: string]: {
+      id: string,
+      label: string,
+      type: string,
+    }
+  } = {};
+  const links: {
+    [key: string]: {
+      source: string,
+      target: string,
+      label: string,
+    }
+  } = {};          
 
-  // return {
-  //   nodes: Object.values(nodes),
-  //   links: Object.values(links),
-  // };
+  for (const triplet of triplets) {
+    nodes[triplet[0].id] = {
+      id: triplet[0].id,
+      label: triplet[0].name || triplet[0].id,
+      type: triplet[0].type,
+    };
+    nodes[triplet[2].id] = {
+      id: triplet[2].id,
+      label: triplet[2].name || triplet[2].id,
+      type: triplet[2].type,
+    };
+    const linkKey = `${triplet[0]["id"]}_${triplet[1]["relationship_name"]}_${triplet[2]["id"]}`;
+    links[linkKey] = {
+      source: triplet[0].id,
+      target: triplet[2].id,
+      label: triplet[1]["relationship_name"],
+    };
+  }
+  
+  return {
+    nodes: Object.values(nodes),
+    links: Object.values(links),
+  };
 }
