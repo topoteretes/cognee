@@ -13,6 +13,7 @@ from cognee.modules.users.methods import get_user
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
 
+
 async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):
     """
     If backend access control is enabled this function will ensure all datasets have their own databases,
