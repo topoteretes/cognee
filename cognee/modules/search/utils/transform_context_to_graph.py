@@ -14,7 +14,7 @@ def transform_context_to_graph(context: List[Edge]):
             if "name" in triplet.node1.attributes
             else triplet.node1.id,
             "type": triplet.node1.attributes["type"],
-            "attributes": triplet.node2.attributes,
+            "attributes": triplet.node1.attributes,
         }
         nodes[triplet.node2.id] = {
             "id": triplet.node2.id,
