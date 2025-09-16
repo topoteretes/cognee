@@ -12,7 +12,6 @@ from cognee.modules.users.methods import get_user
 #       for different async tasks, threads and processes
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
-dataset_id = ContextVar("dataset_id", default=None)
 
 async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):
     """
@@ -75,4 +74,3 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     graph_db_config.set(graph_config)
     vector_db_config.set(vector_config)
     file_storage_config.set(storage_config)
-    dataset_id.set(dataset)
