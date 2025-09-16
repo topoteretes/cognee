@@ -136,12 +136,19 @@ async def search(
         if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
             return_value = []
             for search_result in search_results:
-                result, context, datasets = search_result
+                prepared_search_results = await prepare_search_result(search_result)
+
+                result = prepared_search_results["result"]
+                graphs = prepared_search_results["graphs"]
+                context = prepared_search_results["context"]
+                datasets = prepared_search_results["datasets"]
+
                 return_value.append(
                     {
-                        "search_result": result,
+                        "search_result": [result] if result else None,
                         "dataset_id": datasets[0].id,
                         "dataset_name": datasets[0].name,
+                        "graphs": graphs,
                     }
                 )
             return return_value
@@ -155,14 +162,6 @@ async def search(
                 return return_value[0]
             else:
                 return return_value
-        # return [
-        #     SearchResult(
-        #         search_result=result,
-        #         dataset_id=datasets[min(index, len(datasets) - 1)].id if datasets else None,
-        #         dataset_name=datasets[min(index, len(datasets) - 1)].name if datasets else None,
-        #     )
-        #     for index, (result, _, datasets) in enumerate(search_results)
-        # ]
 
 
 async def authorized_search(
@@ -208,11 +207,11 @@ async def authorized_search(
         context = {}
         datasets: List[Dataset] = []
 
-        for _, search_context, datasets in search_responses:
-            for dataset in datasets:
+        for _, search_context, search_datasets in search_responses:
+            for dataset in search_datasets:
                 context[str(dataset.id)] = search_context
 
-            datasets.extend(datasets)
+            datasets.extend(search_datasets)
 
         specific_search_tools = await get_search_type_tools(
             query_type=query_type,
