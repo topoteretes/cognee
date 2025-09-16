@@ -12,7 +12,6 @@ from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.modules.data.models.Data import Data
-from cognee.modules.sync.models.SyncOperation import SyncOperation
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
@@ -65,7 +64,12 @@ class SQLAlchemyAdapter(SQLiteCloudDatabaseMixin):
             )
         else:
             self.engine = create_async_engine(
-                connection_string, pool_size=12, max_overflow=12, poolclass=None
+                connection_string,
+                pool_size=20,
+                max_overflow=20,
+                pool_recycle=280,
+                pool_pre_ping=True,
+                pool_timeout=280,
             )
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)

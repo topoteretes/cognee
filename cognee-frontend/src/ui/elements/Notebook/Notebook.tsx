@@ -14,24 +14,11 @@ import { Cell, Notebook as NotebookType } from "./types";
 
 interface NotebookProps {
   notebook: NotebookType;
-  runCell: (notebook: NotebookType, cell: Cell) => Promise<void>;
+  runCell: (notebook: NotebookType, cell: Cell, cogneeInstance: string) => Promise<void>;
   updateNotebook: (updatedNotebook: NotebookType) => void;
-  saveNotebook: (notebook: NotebookType) => void;
 }
 
-export default function Notebook({ notebook, updateNotebook, saveNotebook, runCell }: NotebookProps) {
-  const saveCells = useCallback(() => {
-    saveNotebook(notebook);
-  }, [notebook, saveNotebook]);
-
-  useEffect(() => {
-    window.addEventListener("beforeunload", saveCells);
-
-    return () => {
-      window.removeEventListener("beforeunload", saveCells);
-    };
-  }, [saveCells]);
-
+export default function Notebook({ notebook, updateNotebook, runCell }: NotebookProps) {
   useEffect(() => {
     if (notebook.cells.length === 0) {
       const newCell: Cell = {
@@ -44,11 +31,12 @@ export default function Notebook({ notebook, updateNotebook, saveNotebook, runCe
        ...notebook,
         cells: [newCell],
       });
+      toggleCellOpen(newCell.id)
     }
-  }, [notebook, saveNotebook, updateNotebook]);
+  }, [notebook, updateNotebook]);
 
-  const handleCellRun = useCallback((cell: Cell) => {
-    return runCell(notebook, cell);
+  const handleCellRun = useCallback((cell: Cell, cogneeInstance: string) => {
+    return runCell(notebook, cell, cogneeInstance);
   }, [notebook, runCell]);
 
   const handleCellAdd = useCallback((afterCellIndex: number, cellType: "markdown" | "code") => {
@@ -244,7 +232,7 @@ export default function Notebook({ notebook, updateNotebook, saveNotebook, runCe
 }
 
 
-function CellResult({ content = [] }) {
+function CellResult({ content }: { content: [] }) {
   const parsedContent = [];
 
   const graphRef = useRef<GraphVisualizationAPI>();
@@ -256,6 +244,7 @@ function CellResult({ content = [] }) {
   for (const line of content) {
     try {
       if (Array.isArray(line)) {
+        // @ts-expect-error line can be Array or string
         for (const item of line) {
           if (typeof item === "string") {
             parsedContent.push(
@@ -264,15 +253,13 @@ function CellResult({ content = [] }) {
               </pre>
             );
           }
-          if (typeof item === "object" && item["search_result"] && Array.isArray(item["search_result"])) {
-            for (const result of item["search_result"]) {
-              parsedContent.push(
-                <div className="w-full h-full bg-white">
-                  <span className="text-sm pl-2 mb-4">query response (dataset: {item["dataset_name"]})</span>
-                  <span className="block px-2 py-2">{result}</span>
-                </div>
-              );
-            }
+          if (typeof item === "object" && item["search_result"]) {
+            parsedContent.push(
+              <div className="w-full h-full bg-white">
+                <span className="text-sm pl-2 mb-4">query response (dataset: {item["dataset_name"]})</span>
+                <span className="block px-2 py-2">{item["search_result"]}</span>
+              </div>
+            );
           }
           if (typeof item === "object" && item["graph"] && typeof item["graph"] === "object") {
             parsedContent.push(
@@ -289,6 +276,32 @@ function CellResult({ content = [] }) {
           }
         }
       }
+      if (typeof(line) === "object" && line["result"]) {
+        const datasets = Array.from(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          new Set(Object.values(line["datasets"]).map((dataset: any) => dataset.name))
+        ).join(", ");
+
+        parsedContent.push(
+          <div className="w-full h-full bg-white">
+            <span className="text-sm pl-2 mb-4">query response (datasets: {datasets})</span>
+            <span className="block px-2 py-2">{line["result"]}</span>
+          </div>
+        );
+        if (line["graphs"]) {
+          parsedContent.push(
+            <div className="w-full h-full bg-white">
+              <span className="text-sm pl-2 mb-4">reasoning graph</span>
+              <GraphVisualization
+                data={transformToVisualizationData(line["graphs"]["*"])}
+                ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
+                graphControls={graphControls}
+                className="min-h-80"
+              />
+            </div>
+          );
+        }
+      }
     } catch (error) {
       console.error(error);
       parsedContent.push(line);
@@ -298,45 +311,44 @@ function CellResult({ content = [] }) {
   return parsedContent.map((item, index) => (
     <div key={index} className="px-2 py-1">
       {item}
-      {/* {typeof item === "object" && item["search_result"] && Array.isArray(item["search_result"]) && (
-        (item["search_result"] as []).map((result: string) => (<pre key={result.slice(0, -10)}>{result}</pre>))
-      )}
-      {typeof item === "object" && item["graph"] && typeof item["graph"] === "object" && (
-        (item["graph"])
-      )} */}
     </div>
   ));
 
 };
 
-function transformToVisualizationData(triplets) {
+function transformToVisualizationData(graph: { nodes: [], edges: [] }) {
   // Implementation to transform triplet to visualization data
 
-  const nodes = {};
-  const links = {};
-
-  for (const triplet of triplets) {
-    nodes[triplet.source.id] = {
-      id: triplet.source.id,
-      label: triplet.source.attributes.name,
-      type: triplet.source.attributes.type,
-      attributes: triplet.source.attributes,
-    };
-    nodes[triplet.destination.id] = {
-      id: triplet.destination.id,
-      label: triplet.destination.attributes.name,
-      type: triplet.destination.attributes.type,
-      attributes: triplet.destination.attributes,
-    };
-    links[`${triplet.source.id}_${triplet.attributes.relationship_name}_${triplet.destination.id}`] = {
-      source: triplet.source.id,
-      target: triplet.destination.id,
-      label: triplet.attributes.relationship_name,
-    }
-  }
-
   return {
-    nodes: Object.values(nodes),
-    links: Object.values(links),
+    nodes: graph.nodes,
+    links: graph.edges,
   };
+
+  // const nodes = {};
+  // const links = {};
+
+  // for (const triplet of triplets) {
+  //   nodes[triplet.source.id] = {
+  //     id: triplet.source.id,
+  //     label: triplet.source.attributes.name,
+  //     type: triplet.source.attributes.type,
+  //     attributes: triplet.source.attributes,
+  //   };
+  //   nodes[triplet.destination.id] = {
+  //     id: triplet.destination.id,
+  //     label: triplet.destination.attributes.name,
+  //     type: triplet.destination.attributes.type,
+  //     attributes: triplet.destination.attributes,
+  //   };
+  //   links[`${triplet.source.id}_${triplet.attributes.relationship_name}_${triplet.destination.id}`] = {
+  //     source: triplet.source.id,
+  //     target: triplet.destination.id,
+  //     label: triplet.attributes.relationship_name,
+  //   }
+  // }
+
+  // return {
+  //   nodes: Object.values(nodes),
+  //   links: Object.values(links),
+  // };
 }

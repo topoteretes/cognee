@@ -47,6 +47,7 @@ async def main():
     query = "When was Kamala Harris in office?"
     triplets = await brute_force_triplet_search(
         query=query,
+        user=user,
         top_k=3,
         collections=["graphitinode_content", "graphitinode_name", "graphitinode_summary"],
     )

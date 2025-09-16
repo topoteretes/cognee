@@ -1,10 +1,7 @@
 import { fetch } from "@/utils";
 
-export default function checkCloudConnection(apiKey: string) {
+export default function checkCloudConnection() {
   return fetch("/v1/checks/connection", {
     method: "POST",
-    headers: {
-      "X-Api-Key": apiKey,
-    },
   });
 }

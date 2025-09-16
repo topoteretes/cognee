@@ -5,16 +5,31 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Header } from "@/ui/Layout";
 import { SearchIcon } from "@/ui/Icons";
 import { Notebook } from "@/ui/elements";
+import { fetch, isCloudEnvironment } from "@/utils";
 import { Notebook as NotebookType } from "@/ui/elements/Notebook/types";
+import { useAuthenticatedUser } from "@/modules/auth";
 import { Dataset } from "@/modules/ingestion/useDatasets";
 import useNotebooks from "@/modules/notebooks/useNotebooks";
 
+import AddDataToCognee from "./AddDataToCognee";
 import NotebooksAccordion from "./NotebooksAccordion";
 import CogneeInstancesAccordion from "./CogneeInstancesAccordion";
-import AddDataToCognee from "./AddDataToCognee";
 import InstanceDatasetsAccordion from "./InstanceDatasetsAccordion";
 
-export default function Dashboard() {
+interface DashboardProps {
+  user?: {
+    id: string;
+    name: string;
+    email: string;
+    picture: string;
+  };
+  accessToken: string;
+}
+
+export default function Dashboard({ accessToken }: DashboardProps) {
+  fetch.setAccessToken(accessToken);
+  const { user } = useAuthenticatedUser();
+
   const {
     notebooks,
     refreshNotebooks,
@@ -39,10 +54,12 @@ export default function Dashboard() {
   const [selectedNotebookId, setSelectedNotebookId] = useState<string | null>(null);
 
   const handleNotebookRemove = useCallback((notebookId: string) => {
-    setSelectedNotebookId((currentSelectedNotebookId) => (
-      currentSelectedNotebookId === notebookId ? null : currentSelectedNotebookId
-    ));
-    return removeNotebook(notebookId);
+    return removeNotebook(notebookId)
+      .then(() => {
+        setSelectedNotebookId((currentSelectedNotebookId) => (
+          currentSelectedNotebookId === notebookId ? null : currentSelectedNotebookId
+        ));
+      });
   }, [removeNotebook]);
 
   const saveNotebookTimeoutRef = useRef<number | null>(null);
@@ -91,9 +108,22 @@ export default function Dashboard() {
     setDatasets(datasets);
   }, []);
 
+  const isCloudEnv = isCloudEnvironment();
+
   return (
     <div className="h-full flex flex-col bg-gray-200">
-      <Header />
+      <video
+        autoPlay
+        loop
+        muted
+        playsInline
+        className="fixed inset-0 z-0 object-cover w-full h-full"
+      >
+        <source src="/videos/background-video-blur.mp4" type="video/mp4" />
+        Your browser does not support the video tag.
+      </video>
+
+      <Header user={user} />
 
       <div className="relative flex-1 flex flex-row gap-2.5 items-start w-full max-w-[1920px] max-h-[calc(100% - 3.5rem)] overflow-hidden mx-auto px-2.5 py-2.5">
         <div className="px-5 py-4 lg:w-96 bg-white rounded-xl min-h-full">
@@ -105,6 +135,7 @@ export default function Dashboard() {
           <AddDataToCognee
             datasets={datasets}
             refreshDatasets={refreshDatasetsRef.current}
+            useCloud={isCloudEnv}
           />
 
           <NotebooksAccordion
@@ -129,7 +160,6 @@ export default function Dashboard() {
                 key={selectedNotebook.id}
                 notebook={selectedNotebook}
                 updateNotebook={handleNotebookUpdate}
-                saveNotebook={saveNotebook}
                 runCell={runCell}
               />
             )}

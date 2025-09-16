@@ -1,22 +1,29 @@
+"use client";
+
 import Link from "next/link";
 import { BackIcon } from "@/ui/Icons";
 import { CTAButton } from "@/ui/elements";
 import Header from "@/ui/Layout/Header";
+import { useAuthenticatedUser } from "@/modules/auth";
 
 export default function Account() {
+  const { user } = useAuthenticatedUser();
   const account = {
-    name: "John Doe",
+    name: user ? user.name || user.email : "NN",
   };
 
   return (
-    <>
-      <div className="absolute top-0 right-0 bottom-0 left-0 flex flex-row gap-2.5">
-        <div className="flex-1/5 bg-gray-100 h-full"></div>
-        <div className="flex-1/5 bg-gray-100 h-full"></div>
-        <div className="flex-1/5 bg-gray-100 h-full"></div>
-        <div className="flex-1/5 bg-gray-100 h-full"></div>
-        <div className="flex-1/5 bg-gray-100 h-full"></div>
-      </div>
+    <div className="bg-gray-200 h-full max-w-[1920px] mx-auto">
+      <video
+        autoPlay
+        loop
+        muted
+        playsInline
+        className="fixed inset-0 z-0 object-cover w-full h-full"
+      >
+        <source src="/videos/background-video-blur.mp4" type="video/mp4" />
+        Your browser does not support the video tag.
+      </video>
 
       <Header />
 
@@ -46,6 +53,6 @@ export default function Account() {
         <div className="flex-1/5 py-4 px-5 rounded-xl">
         </div>
       </div>
-    </>
+    </div>
   );
 }

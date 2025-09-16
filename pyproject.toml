@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.2.4"
+version = "0.3.3"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -41,7 +41,7 @@ dependencies = [
     "aiohttp>=3.11.14,<4.0.0",
     "aiofiles>=23.2.1,<24.0.0",
     "rdflib>=7.1.4,<7.2.0",
-    "pypdf>=4.1.0,<6.0.0",
+    "pypdf>=4.1.0,<7.0.0",
     "jinja2>=3.1.3,<4",
     "matplotlib>=3.8.3,<4",
     "networkx>=3.4.2,<4",
@@ -147,7 +147,7 @@ Homepage = "https://www.cognee.ai"
 Repository = "https://github.com/topoteretes/cognee"
 
 [project.scripts]
-cognee = "cognee.cli._cognee:main"
+cognee-cli = "cognee.cli._cognee:main"
 
 [build-system]
 requires = ["hatchling"]

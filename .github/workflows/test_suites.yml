@@ -34,49 +34,49 @@ jobs:
 
   docker-compose-test:
     name: Docker Compose Test
-    needs: [basic-tests, e2e-tests, cli-tests]
+    needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/docker_compose.yml
     secrets: inherit
 
   docker-ci-test:
     name: Docker CI test
-    needs: [basic-tests, e2e-tests, cli-tests]
+    needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/backend_docker_build_test.yml
     secrets: inherit
 
   graph-db-tests:
     name: Graph Database Tests
-    needs: [basic-tests, e2e-tests, cli-tests]
+    needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/graph_db_tests.yml
     secrets: inherit
 
   temporal-graph-tests:
     name: Temporal Graph Test
-    needs: [ basic-tests, e2e-tests, cli-tests, graph-db-tests ]
+    needs: [ basic-tests, e2e-tests, graph-db-tests ]
     uses: ./.github/workflows/temporal_graph_tests.yml
     secrets: inherit
 
   search-db-tests:
     name: Search Test on Different DBs
-    needs: [basic-tests, e2e-tests, cli-tests, graph-db-tests]
+    needs: [basic-tests, e2e-tests, graph-db-tests]
     uses: ./.github/workflows/search_db_tests.yml
     secrets: inherit
 
   relational-db-migration-tests:
     name: Relational DB Migration Tests
-    needs: [basic-tests, e2e-tests, cli-tests, graph-db-tests]
+    needs: [basic-tests, e2e-tests, graph-db-tests]
     uses: ./.github/workflows/relational_db_migration_tests.yml
     secrets: inherit
 
   notebook-tests:
     name: Notebook Tests
-    needs: [basic-tests, e2e-tests, cli-tests]
+    needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/notebooks_tests.yml
     secrets: inherit
 
   different-operating-systems-tests:
     name: Operating System and Python Tests
-    needs: [basic-tests, e2e-tests, cli-tests]
+    needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
       python-versions: '["3.10.x", "3.11.x", "3.12.x"]'
@@ -85,20 +85,20 @@ jobs:
   # Matrix-based vector database tests
   vector-db-tests:
     name: Vector DB Tests
-    needs: [basic-tests, e2e-tests, cli-tests]
+    needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/vector_db_tests.yml
     secrets: inherit
 
   # Matrix-based example tests
   example-tests:
     name: Example Tests
-    needs: [basic-tests, e2e-tests, cli-tests]
+    needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/examples_tests.yml
     secrets: inherit
 
   mcp-test:
     name: MCP Tests
-    needs: [basic-tests, e2e-tests, cli-tests]
+    needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/test_mcp.yml
     secrets: inherit
 
@@ -110,20 +110,20 @@ jobs:
 
   s3-file-storage-test:
     name: S3 File Storage Test
-    needs: [basic-tests, e2e-tests, cli-tests]
+    needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/test_s3_file_storage.yml
     secrets: inherit
 
   # Additional LLM tests
   gemini-tests:
     name: Gemini Tests
-    needs: [basic-tests, e2e-tests, cli-tests]
+    needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/test_gemini.yml
     secrets: inherit
 
   openrouter-tests:
     name: OpenRouter Tests
-    needs: [basic-tests, e2e-tests, cli-tests]
+    needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/test_openrouter.yml
     secrets: inherit
 
@@ -133,7 +133,6 @@ jobs:
     needs: [
       basic-tests,
       e2e-tests,
-      cli-tests,
       graph-db-tests,
       notebook-tests,
       different-operating-systems-tests,

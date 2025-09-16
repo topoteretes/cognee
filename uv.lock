@@ -807,7 +807,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "0.2.4"
+version = "0.3.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -1029,7 +1029,7 @@ requires-dist = [
     { name = "pylance", specifier = ">=0.22.0,<1.0.0" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.0.3,<4" },
     { name = "pympler", specifier = ">=1.1,<2.0.0" },
-    { name = "pypdf", specifier = ">=4.1.0,<6.0.0" },
+    { name = "pypdf", specifier = ">=4.1.0,<7.0.0" },
     { name = "pypika", marker = "extra == 'chromadb'", specifier = "==0.48.8" },
     { name = "pyside6", marker = "extra == 'gui'", specifier = ">=6.8.3,<7" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0,<8" },

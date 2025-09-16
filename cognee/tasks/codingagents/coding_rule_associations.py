@@ -31,7 +31,7 @@ class RuleSet(DataPoint):
     )
 
 
-async def get_existing_rules(rules_nodeset_name: str, return_list: bool = False) -> str:
+async def get_existing_rules(rules_nodeset_name: str) -> List[str]:
     graph_engine = await get_graph_engine()
     nodes_data, _ = await graph_engine.get_nodeset_subgraph(
         node_type=NodeSet, node_name=[rules_nodeset_name]
@@ -45,9 +45,6 @@ async def get_existing_rules(rules_nodeset_name: str, return_list: bool = False)
         and isinstance(item[1], dict)
         and "text" in item[1]
     ]
-
-    if not return_list:
-        existing_rules = "\n".join(f"- {rule}" for rule in existing_rules)
 
     return existing_rules
 
@@ -103,6 +100,7 @@ async def add_rule_associations(
 
     graph_engine = await get_graph_engine()
     existing_rules = await get_existing_rules(rules_nodeset_name=rules_nodeset_name)
+    existing_rules = "\n".join(f"- {rule}" for rule in existing_rules)
 
     user_context = {"chat": data, "rules": existing_rules}
 
