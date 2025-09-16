@@ -39,6 +39,7 @@ dependencies = [
     "langfuse>=2.32.0,<3",
     "filetype>=1.2.0,<2.0.0",
     "aiohttp>=3.11.14,<4.0.0",
+    "requests>=2.25.0,<3.0.0",
     "aiofiles>=23.2.1,<24.0.0",
     "rdflib>=7.1.4,<7.2.0",
     "pypdf>=4.1.0,<7.0.0",

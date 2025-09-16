@@ -14,28 +14,39 @@ from sqlalchemy import select
 from typing import Optional
 
 
-async def _create_tutorial_notebook(user_id: UUID, session: AsyncSession) -> None:
+async def _create_tutorial_notebook(
+    user_id: UUID, session: AsyncSession, force_refresh: bool = False
+) -> None:
     """
     Create the default tutorial notebook for new users.
-    Dynamically fetches from: https://github.com/topoteretes/cognee/blob/notebook_tutorial/notebooks/tutorial.ipynb
+    Dynamically fetches from: https://github.com/topoteretes/cognee/blob/notebook_tutorial/notebooks/starter_tutorial.zip
     """
-    TUTORIAL_NOTEBOOK_URL = "https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/notebook_tutorial/notebooks/tutorial.ipynb"
+    TUTORIAL_ZIP_URL = (
+        "https://github.com/topoteretes/cognee/raw/notebook_tutorial/notebooks/starter_tutorial.zip"
+    )
 
     try:
-        # Create notebook from remote Jupyter notebook
-        notebook = await Notebook.from_ipynb_url(
-            url=TUTORIAL_NOTEBOOK_URL,
+        # Create notebook from remote zip file (includes notebook + data files)
+        notebook, data_dir = await Notebook.from_ipynb_zip_url(
+            zip_url=TUTORIAL_ZIP_URL,
             owner_id=user_id,
+            notebook_filename="tutorial.ipynb",
             name="Python Development with Cognee Tutorial 🧠",
             deletable=False,
+            force=force_refresh,
         )
 
         # Add to session and commit
         session.add(notebook)
         await session.commit()
 
+        # Log data directory location for user reference
+        if data_dir:
+            print(f"Tutorial data files available at: {data_dir}")
+            # You could also store this path in user metadata or notebook metadata
+
     except Exception as e:
-        print(f"Failed to fetch tutorial notebook from {TUTORIAL_NOTEBOOK_URL}: {e}")
+        print(f"Failed to fetch tutorial notebook from {TUTORIAL_ZIP_URL}: {e}")
 
         raise e
 
