@@ -1,5 +1,5 @@
 from urllib.parse import urlparse
-from cognee.infrastructure.files.storage import StorageProviderRegistry
+from ..storage_provider_registry import StorageProviderRegistry
 
 
 def get_storage_type(storage_path: str) -> str:

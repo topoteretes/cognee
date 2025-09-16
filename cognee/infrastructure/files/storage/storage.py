@@ -24,6 +24,22 @@ class Storage(Protocol):
         """
         pass
 
+    def is_dir(self, dir_path: Optional[str] = None) -> bool:
+        """
+        Check if a specified directory exists in the storage.
+
+        Parameters:
+        -----------
+
+            - dir_path (str): The path of the directory to check.
+
+        Returns:
+        --------
+
+            - bool: True if the directory exists, otherwise False.
+        """
+        pass
+
     def is_file(self, file_path: str) -> bool:
         """
         Check if a specified file is a regular file.
@@ -133,5 +149,17 @@ class Storage(Protocol):
         -----------
 
             - tree_path (str): The root path of the directory tree to be removed.
+        """
+        pass
+
+    def rename(self, source_file_name: str, destination_file_path: str):
+        """
+        Rename a file or directory at the specified source path to a new destination path.
+
+        Parameters:
+        -----------
+
+            - source_file_path (str): The path of the file or directory to be renamed.
+            - destination_file_path (str): The new path for the file or directory.
         """
         pass

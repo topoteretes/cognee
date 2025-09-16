@@ -12,6 +12,12 @@ class KuzuCloudDatabaseMixin(CloudDatabaseMixin):
     """
     Provides functionality for synchronizing a local Kuzu database file
     with a cloud storage backend (e.g., S3).
+
+    This mixin expects the consuming class to provide the following attributes:
+    - self.db_path (str): The cloud storage URI for the database.
+    - self.temp_graph_file (str): The local temporary path for the database directory.
+    - self.connection (kuzu.Connection): The active Kuzu connection or None.
+    - self.KUZU_ASYNC_LOCK (asyncio.Lock): An asyncio lock for concurrency control.
     """
 
     async def push_to_cloud(self) -> None:

@@ -36,5 +36,5 @@ def classify(data: Union[str, BinaryIO], filename: str = None):
             return CloudBinaryData(cloud_file_path=full_name, name=file_name)
 
     raise IngestionError(
-        message=f"Type of data sent to classify(data: Union[str, BinaryIO) not supported or s3fs is not installed: {type(data)}"
+        message=f"Type of data sent to classify(data: Union[str, BinaryIO) not supported or fsspec is not installed: {type(data)}"
     )

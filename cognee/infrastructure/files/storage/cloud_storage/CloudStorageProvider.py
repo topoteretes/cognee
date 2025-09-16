@@ -89,7 +89,7 @@ class CloudStorageProvider(Storage, ABC):
         return f"{self.scheme}{full_file_path}"
 
     @asynccontextmanager
-    async def open(self, file_path: str, mode: str = "r"):
+    async def open(self, file_path: str, mode: str = "r", *args, **kwargs):
         """
         Retrieve data from a specified file path, returning the content as bytes.
 
@@ -111,7 +111,7 @@ class CloudStorageProvider(Storage, ABC):
         full_file_path = self._get_full_path(file_path)
 
         def get_file():
-            return self.fs.open(full_file_path, mode=mode)
+            return self.fs.open(full_file_path, mode=mode, *args, **kwargs)
 
         file = await run_async(get_file)
         file = FileBufferedReader(file, name=f"{self.scheme}{full_file_path}")
@@ -137,6 +137,26 @@ class CloudStorageProvider(Storage, ABC):
         """
         return await run_async(self.fs.exists, self._get_full_path(file_path))
 
+    async def is_dir(self, dir_path: Optional[str] = None) -> bool:
+        """
+        Check if a specified directory exists in the filesystem.
+
+        Parameters:
+        -----------
+
+            - dir_path (str): The path of the directory to check.
+
+        Returns:
+        --------
+
+            - bool: True if the directory exists, otherwise False.
+        """
+        if dir_path is None:
+            dir_path = self.storage_path.replace(self.scheme, "")
+        else:
+            dir_path = self._get_full_path(dir_path)
+        return await run_async(self.fs.isdir, dir_path)
+
     async def is_file(self, file_path: str) -> bool:
         """
         Check if a specified file is a regular file.
@@ -154,9 +174,7 @@ class CloudStorageProvider(Storage, ABC):
         return await run_async(self.fs.isfile, self._get_full_path(file_path))
 
     async def get_size(self, file_path: str) -> int:
-        return await run_async(
-            self.s3.size, os.path.join(self.storage_path.replace("s3://", ""), file_path)
-        )
+        return await run_async(self.fs.size, self._get_full_path(file_path))
 
     async def ensure_directory_exists(self, directory_path: str = ""):
         """
@@ -244,3 +262,53 @@ class CloudStorageProvider(Storage, ABC):
             await run_async(self.fs.rm, tree_path, recursive=True)
         except FileNotFoundError:
             pass
+
+    async def rename(self, source_file_name: str, destination_file_path: str):
+        """
+        Rename a file or directory at the specified source path to a new destination path.
+
+        Parameters:
+        -----------
+
+            - source_file_name (str): The name of the file to be renamed.
+            - destination_file_path (str): The new path for the file.
+        """
+        full_source_file_path = self._get_full_path(source_file_name)
+        destination_file_path = destination_file_path.replace(self.scheme, "")
+
+        if self.fs.isdir(full_source_file_path):
+            for file_path in self.fs.glob(f"{full_source_file_path}/**"):
+                # Check if the file is not a directory
+                if not self.fs.isdir(file_path):
+                    file_name = os.path.basename(file_path)
+                    await run_async(
+                        self.fs.rename, file_path, os.path.join(destination_file_path, file_name)
+                    )
+        else:
+            await run_async(self.fs.rename, full_source_file_path, destination_file_path)
+
+    async def push_to_cloud(self, file_name: str, local_file_path: str):
+        """
+        Push a file from a local path to a cloud path.
+
+        Parameters:
+        -----------
+
+            - file_name (str): The name of the file to be pushed to the cloud.
+            - local_file_path (str): The path of the local file to be pushed to the cloud.
+        """
+        full_file_path = self._get_full_path(file_name)
+        await run_async(self.fs.put, local_file_path, full_file_path, recursive=True)
+
+    async def pull_from_cloud(self, file_name: str, local_file_path: str):
+        """
+        Pull a file from a cloud path to a local path.
+
+        Parameters:
+        -----------
+
+            - file_name (str): The name of the file to be pulled from the cloud.
+            - local_file_path (str): The path of the local file to be pulled from the cloud.
+        """
+        full_file_path = self._get_full_path(file_name)
+        await run_async(self.fs.get, full_file_path, local_file_path, recursive=True)

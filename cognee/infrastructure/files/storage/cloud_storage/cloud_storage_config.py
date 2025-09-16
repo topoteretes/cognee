@@ -14,6 +14,7 @@ class CloudStorageConfig(BaseSettings):
     aws_region: Optional[str] = None
     aws_endpoint_url: Optional[str] = None
     aws_access_key_id: Optional[str] = None
+    storage_bucket_name: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
 
     # Azure Blob Storage Specific Config
@@ -45,6 +46,7 @@ class CloudStorageConfig(BaseSettings):
             "aws_endpoint_url": self.aws_endpoint_url,
             "aws_access_key_id": self.aws_access_key_id,
             "aws_secret_access_key": self.aws_secret_access_key,
+            "storage_bucket_name": self.storage_bucket_name,
             "azure_storage_account_name": self.azure_storage_account_name,
             "azure_storage_account_key": self.azure_storage_account_key,
             "azure_storage_container_name": self.azure_storage_container_name,
@@ -73,6 +75,7 @@ class CloudStorageConfig(BaseSettings):
             "aws_endpoint_url": self.aws_endpoint_url,
             "aws_access_key_id": self.aws_access_key_id,
             "aws_secret_access_key": self.aws_secret_access_key,
+            "storage_bucket_name": self.storage_bucket_name,
             "azure_storage_account_name": self.azure_storage_account_name,
             "azure_storage_account_key": self.azure_storage_account_key,
             "azure_storage_container_name": self.azure_storage_container_name,
