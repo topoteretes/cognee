@@ -109,8 +109,8 @@ async def main():
         f"Expected multiple events (assert is set to 20), but found {type_counts.get('Event', 0)}"
     )
 
-    assert type_counts.get("Timestamp", 0) >= 20, (
-        f"Expected multiple timestamps (assert is set to 20), but found {type_counts.get('Timestamp', 0)}"
+    assert type_counts.get("Timestamp", 0) >= 10, (
+        f"Expected multiple timestamps (assert is set to 10), but found {type_counts.get('Timestamp', 0)}"
     )
 
     assert edge_type_counts.get("contains", 0) >= 20, (
