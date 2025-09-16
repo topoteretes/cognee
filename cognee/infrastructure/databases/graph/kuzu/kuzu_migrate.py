@@ -35,6 +35,12 @@ import subprocess
 import argparse
 import os
 
+from cognee.infrastructure.files.storage import (
+    LocalFileStorage,
+    get_file_storage,
+    StorageManager,
+)
+from cognee.infrastructure.utils.run_sync import run_sync
 
 kuzu_version_mapping = {
     34: "0.7.0",
@@ -53,24 +59,34 @@ def read_kuzu_storage_version(kuzu_db_path: str) -> int:
     :param kuzu_db_path: Path to the Kuzu database file/directory.
     :return: Storage version code as an integer.
     """
-    if os.path.isdir(kuzu_db_path):
-        kuzu_version_file_path = os.path.join(kuzu_db_path, "catalog.kz")
-        if not os.path.isfile(kuzu_version_file_path):
+    storage_manager = get_file_storage(kuzu_db_path)
+    if run_sync(storage_manager.is_dir()):
+        kuzu_verison_file_name = "catalog.kz"
+        kuzu_version_file_path = os.path.join(kuzu_db_path, kuzu_verison_file_name)
+        if not run_sync(storage_manager.is_file(kuzu_verison_file_name)):
             raise FileExistsError("Kuzu catalog.kz file does not exist")
     else:
         kuzu_version_file_path = kuzu_db_path
 
-    with open(kuzu_version_file_path, "rb") as f:
-        # Skip the 3-byte magic "KUZ" and one byte of padding
-        f.seek(4)
-        # Read the next 8 bytes as a little-endian unsigned 64-bit integer
-        data = f.read(8)
-        if len(data) < 8:
-            raise ValueError(
-                f"File '{kuzu_version_file_path}' does not contain a storage version code."
-            )
-        version_code = struct.unpack("<Q", data)[0]
+    async def read_kuzu_storage_version_async(
+        storage_manager: StorageManager, kuzu_version_file_path: str
+    ) -> int:
+        kuzu_verison_file_name = os.path.basename(kuzu_version_file_path)
+        async with storage_manager.open(kuzu_verison_file_name, "rb") as f:
+            # Skip the 3-byte magic "KUZ" and one byte of padding
+            f.seek(4)
+            # Read the next 8 bytes as a little-endian unsigned 64-bit integer
+            data = f.read(8)
+            if len(data) < 8:
+                raise ValueError(
+                    f"File '{kuzu_version_file_path}' does not contain a storage version code."
+                )
+            version_code = struct.unpack("<Q", data)[0]
+            return version_code
 
+    version_code = run_sync(
+        read_kuzu_storage_version_async(storage_manager, kuzu_version_file_path)
+    )
     if kuzu_version_mapping.get(version_code):
         return kuzu_version_mapping[version_code]
     else:
@@ -127,27 +143,45 @@ def kuzu_migration(new_db, old_db, new_version, old_version=None, overwrite=None
     print(f"📂 Source: {old_db}", file=sys.stderr)
     print("", file=sys.stderr)
 
+    old_db_dir = os.path.dirname(old_db)
+    old_db_name = os.path.basename(old_db)
+    old_storage_manager = get_file_storage(old_db_dir)
+
+    new_db_dir = os.path.dirname(new_db)
+    new_db_name = os.path.basename(new_db)
+    new_storage_manager = get_file_storage(new_db_dir)
+
+    is_cloud_source = not isinstance(old_storage_manager.storage, LocalFileStorage)
+    is_cloud_target = not isinstance(new_storage_manager.storage, LocalFileStorage)
+
     # If version of old kuzu db is not provided try to determine it based on file info
     if not old_version:
         old_version = read_kuzu_storage_version(old_db)
 
     # Check if old database exists
-    if not os.path.exists(old_db):
+    if not run_sync(old_storage_manager.file_exists(old_db_name)):
         print(f"Source database '{old_db}' does not exist.", file=sys.stderr)
         sys.exit(1)
 
     # Prepare target - ensure parent directory exists but remove target if it exists
-    parent_dir = os.path.dirname(new_db)
-    if parent_dir:
-        os.makedirs(parent_dir, exist_ok=True)
+    if new_db_dir:
+        run_sync(new_storage_manager.ensure_directory_exists(new_db_dir))
 
-    if os.path.exists(new_db):
+    if run_sync(new_storage_manager.file_exists(new_db_name)):
         raise FileExistsError(
             "File already exists at new database location, remove file or change new database file path to continue"
         )
 
     # Use temp directory for all processing, it will be cleaned up after with statement
     with tempfile.TemporaryDirectory() as export_dir:
+        # Create local db paths
+        local_old_db_path = old_db if not is_cloud_source else os.path.join(export_dir, "old_db")
+        local_new_db_path = new_db if not is_cloud_target else os.path.join(export_dir, "new_db")
+
+        # Download old db from cloud if it's a cloud source
+        if is_cloud_source:
+            run_sync(old_storage_manager.storage.pull_from_cloud(old_db_name, local_old_db_path))
+
         # Set up environments
         print(f"Setting up Kuzu {old_version} environment...", file=sys.stderr)
         old_py = ensure_env(old_version, export_dir)
@@ -156,7 +190,7 @@ def kuzu_migration(new_db, old_db, new_version, old_version=None, overwrite=None
 
         export_file = os.path.join(export_dir, "kuzu_export")
         print(f"Exporting old DB → {export_dir}", file=sys.stderr)
-        run_migration_step(old_py, old_db, f"EXPORT DATABASE '{export_file}'")
+        run_migration_step(old_py, local_old_db_path, f"EXPORT DATABASE '{export_file}'")
         print("Export complete.", file=sys.stderr)
 
         # Check if export files were created and have content
@@ -165,15 +199,26 @@ def kuzu_migration(new_db, old_db, new_version, old_version=None, overwrite=None
             raise ValueError(f"Schema file not found: {schema_file}")
 
         print(f"Importing into new DB at {new_db}", file=sys.stderr)
-        run_migration_step(new_py, new_db, f"IMPORT DATABASE '{export_file}'")
+        run_migration_step(new_py, local_new_db_path, f"IMPORT DATABASE '{export_file}'")
         print("Import complete.", file=sys.stderr)
+
+        # Upload the result if the target is on cloud storage
+        if is_cloud_target:
+            for ext in ["", ".wal", ".lock"]:
+                local_file_path = local_new_db_path + ext
+                cloud_file_name = new_db_name + ext
+                if os.path.exists(local_file_path):
+                    run_sync(
+                        new_storage_manager.storage.push_to_cloud(cloud_file_name, local_file_path)
+                    )
 
     # Rename new kuzu database to old kuzu database name if enabled
     if overwrite or delete_old:
         # Remove kuzu lock from migrated DB
         lock_file = new_db + ".lock"
-        if os.path.exists(lock_file):
-            os.remove(lock_file)
+        lock_file_name = os.path.basename(lock_file)
+        run_sync(new_storage_manager.remove(lock_file_name))
+
         rename_databases(old_db, old_version, new_db, delete_old)
 
     print("✅ Kuzu graph database migration finished successfully!")
@@ -192,35 +237,42 @@ def rename_databases(old_db: str, old_version: str, new_db: str, delete_old: boo
     backup_database_name = f"{name}_old_" + old_version.replace(".", "_")
     backup_base = os.path.join(base_dir, backup_database_name)
 
-    if os.path.isfile(old_db):
+    old_storage_manager = get_file_storage(base_dir)
+
+    if run_sync(old_storage_manager.is_file(name)):
         # File-based database: handle main file and accompanying lock/WAL
         for ext in ["", ".wal"]:
             src = old_db + ext
             dst = backup_base + ext
-            if os.path.exists(src):
+            src_file_name = os.path.basename(src.rstrip(os.sep))
+            if run_sync(old_storage_manager.file_exists(src_file_name)):
                 if delete_old:
-                    os.remove(src)
+                    run_sync(old_storage_manager.remove(src_file_name))
                 else:
-                    os.rename(src, dst)
+                    run_sync(old_storage_manager.rename(src_file_name, dst))
                     print(f"Renamed '{src}' to '{dst}'", file=sys.stderr)
-    elif os.path.isdir(old_db):
+    elif run_sync(old_storage_manager.is_dir(name)):
         # Directory-based Kuzu database
         backup_dir = backup_base
         if delete_old:
-            shutil.rmtree(old_db)
+            run_sync(old_storage_manager.remove_all(name))
         else:
-            os.rename(old_db, backup_dir)
+            run_sync(old_storage_manager.rename(name, backup_dir))
             print(f"Renamed directory '{old_db}' to '{backup_dir}'", file=sys.stderr)
     else:
         print(f"Original database path '{old_db}' not found for renaming.", file=sys.stderr)
         sys.exit(1)
 
     # Now move new files into place
+    new_db_base_dir = os.path.dirname(new_db)
+    new_storage_manager = get_file_storage(new_db_base_dir)
     for ext in ["", ".wal"]:
         src_new = new_db + ext
         dst_new = os.path.join(base_dir, name + ext)
-        if os.path.exists(src_new):
-            os.rename(src_new, dst_new)
+        src_new_name = os.path.basename(src_new)
+        if run_sync(new_storage_manager.file_exists(src_new_name)):
+            run_sync(new_storage_manager.rename(src_new_name, dst_new))
+
             print(f"Renamed '{src_new}' to '{dst_new}'", file=sys.stderr)
 
 

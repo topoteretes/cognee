@@ -30,7 +30,7 @@ dependencies = [
     "pandas>=2.2.2,<3.0.0",
     # Note: New s3fs and boto3 versions don't work well together
     # Always use comaptible fixed versions of these two dependencies
-    "s3fs[boto3]==2025.3.2",
+    "s3fs[boto3]==2025.9.0",
     "sqlalchemy>=2.0.39,<3.0.0",
     "aiosqlite>=0.20.0,<1.0.0",
     "tiktoken>=0.8.0,<1.0.0",
@@ -62,6 +62,8 @@ dependencies = [
     "pylance>=0.22.0,<1.0.0",
     "kuzu (==0.11.0)",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
+    "adlfs==2025.8.0",
+    "gcsfs==2025.9.0",
 ]
 
 [project.optional-dependencies]
@@ -123,7 +125,7 @@ gui = [
 graphiti = ["graphiti-core>=0.7.0,<0.8"]
 # Note: New s3fs and boto3 versions don't work well together
 # Always use comaptible fixed versions of these two dependencies
-aws = ["s3fs[boto3]==2025.3.2"]
+aws = ["s3fs[boto3]==2025.9.0"]
 dev = [
     "pytest>=7.4.0,<8",
     "pytest-cov>=6.1.1,<7.0.0",

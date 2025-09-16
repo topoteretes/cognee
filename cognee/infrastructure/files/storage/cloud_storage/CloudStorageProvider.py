@@ -1,36 +1,47 @@
 import os
-import s3fs
-from typing import BinaryIO, Union
+from abc import abstractmethod, ABC
+from typing import BinaryIO, Union, Optional
 from contextlib import asynccontextmanager
+from fsspec.asyn import AsyncFileSystem
 
-from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.utils.run_async import run_async
 from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
-from .storage import Storage
+from ..storage import Storage
 
 
-class S3FileStorage(Storage):
+class CloudStorageProvider(Storage, ABC):
     """
-    Manage local file storage operations such as storing, retrieving, and managing files on
-    the filesystem.
+    Abstract interface for cloud storage operations.
     """
 
     storage_path: str
-    s3: s3fs.S3FileSystem
+    fs: AsyncFileSystem
 
     def __init__(self, storage_path: str):
+        """Initializes the cloud storage provider and the underlying filesystem."""
         self.storage_path = storage_path
-        s3_config = get_s3_config()
-        if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
-            self.s3 = s3fs.S3FileSystem(
-                key=s3_config.aws_access_key_id,
-                secret=s3_config.aws_secret_access_key,
-                anon=False,
-                endpoint_url=s3_config.aws_endpoint_url,
-                client_kwargs={"region_name": s3_config.aws_region},
-            )
-        else:
-            raise ValueError("S3 credentials are not set in the configuration.")
+        self.fs = self._initialize_filesystem()
+
+    @abstractmethod
+    def _initialize_filesystem(self) -> AsyncFileSystem:
+        """
+        Initializes and returns the specific filesystem object for the cloud provider (e.g., S3FileSystem).
+        This method must be implemented by subclasses.
+        """
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def scheme(self) -> str:
+        """
+        Returns the URL scheme for the cloud provider (e.g., "s3://", "gs://").
+        This property must be implemented by subclasses.
+        """
+        raise NotImplementedError
+
+    def _get_full_path(self, relative_path: str) -> str:
+        """Constructs the full, scheme-less path for the filesystem."""
+        return os.path.join(self.storage_path.replace(self.scheme, ""), relative_path)
 
     async def store(
         self, file_path: str, data: Union[BinaryIO, str], overwrite: bool = False
@@ -51,7 +62,7 @@ class S3FileStorage(Storage):
               binary stream.
             - overwrite (bool): If True, overwrite the existing file.
         """
-        full_file_path = os.path.join(self.storage_path.replace("s3://", ""), file_path)
+        full_file_path = self._get_full_path(file_path)
 
         file_dir_path = os.path.dirname(full_file_path)
 
@@ -60,7 +71,7 @@ class S3FileStorage(Storage):
         if overwrite or not await self.file_exists(file_path):
 
             def save_data_to_file():
-                with self.s3.open(
+                with self.fs.open(
                     full_file_path,
                     mode="w" if isinstance(data, str) else "wb",
                     encoding="utf-8" if isinstance(data, str) else None,
@@ -75,10 +86,10 @@ class S3FileStorage(Storage):
 
             await run_async(save_data_to_file)
 
-        return "s3://" + full_file_path
+        return f"{self.scheme}{full_file_path}"
 
     @asynccontextmanager
-    async def open(self, file_path: str, mode: str = "r"):
+    async def open(self, file_path: str, mode: str = "r", *args, **kwargs):
         """
         Retrieve data from a specified file path, returning the content as bytes.
 
@@ -97,13 +108,13 @@ class S3FileStorage(Storage):
 
             The content of the retrieved file as bytes.
         """
-        full_file_path = os.path.join(self.storage_path.replace("s3://", ""), file_path)
+        full_file_path = self._get_full_path(file_path)
 
         def get_file():
-            return self.s3.open(full_file_path, mode=mode)
+            return self.fs.open(full_file_path, mode=mode, *args, **kwargs)
 
         file = await run_async(get_file)
-        file = FileBufferedReader(file, name="s3://" + full_file_path)
+        file = FileBufferedReader(file, name=f"{self.scheme}{full_file_path}")
 
         try:
             yield file
@@ -124,9 +135,27 @@ class S3FileStorage(Storage):
 
             - bool: True if the file exists, otherwise False.
         """
-        return await run_async(
-            self.s3.exists, os.path.join(self.storage_path.replace("s3://", ""), file_path)
-        )
+        return await run_async(self.fs.exists, self._get_full_path(file_path))
+
+    async def is_dir(self, dir_path: Optional[str] = None) -> bool:
+        """
+        Check if a specified directory exists in the filesystem.
+
+        Parameters:
+        -----------
+
+            - dir_path (str): The path of the directory to check.
+
+        Returns:
+        --------
+
+            - bool: True if the directory exists, otherwise False.
+        """
+        if dir_path is None:
+            dir_path = self.storage_path.replace(self.scheme, "")
+        else:
+            dir_path = self._get_full_path(dir_path)
+        return await run_async(self.fs.isdir, dir_path)
 
     async def is_file(self, file_path: str) -> bool:
         """
@@ -142,14 +171,10 @@ class S3FileStorage(Storage):
 
             - bool: True if the file is a regular file, otherwise False.
         """
-        return await run_async(
-            self.s3.isfile, os.path.join(self.storage_path.replace("s3://", ""), file_path)
-        )
+        return await run_async(self.fs.isfile, self._get_full_path(file_path))
 
     async def get_size(self, file_path: str) -> int:
-        return await run_async(
-            self.s3.size, os.path.join(self.storage_path.replace("s3://", ""), file_path)
-        )
+        return await run_async(self.fs.size, self._get_full_path(file_path))
 
     async def ensure_directory_exists(self, directory_path: str = ""):
         """
@@ -163,11 +188,11 @@ class S3FileStorage(Storage):
             - directory_path (str): The path of the directory to check or create.
         """
         if not directory_path.strip():
-            directory_path = self.storage_path.replace("s3://", "")
+            directory_path = self.storage_path.replace(self.scheme, "")
 
         def ensure_directory():
-            if not self.s3.exists(directory_path):
-                self.s3.makedirs(directory_path, exist_ok=True)
+            if not self.fs.exists(directory_path):
+                self.fs.makedirs(directory_path, exist_ok=True)
 
         await run_async(ensure_directory)
 
@@ -188,9 +213,9 @@ class S3FileStorage(Storage):
         """
 
         def copy():
-            return self.s3.copy(
-                os.path.join(self.storage_path.replace("s3://", ""), source_file_path),
-                os.path.join(self.storage_path.replace("s3://", ""), destination_file_path),
+            return self.fs.copy(
+                self._get_full_path(source_file_path),
+                self._get_full_path(destination_file_path),
                 recursive=True,
             )
 
@@ -205,15 +230,15 @@ class S3FileStorage(Storage):
 
             - file_path (str): The path of the file to be removed.
         """
-        full_file_path = os.path.join(self.storage_path.replace("s3://", ""), file_path)
+        full_file_path = self._get_full_path(file_path)
 
         def remove_file():
-            if self.s3.exists(full_file_path):
-                self.s3.rm_file(full_file_path)
+            if self.fs.exists(full_file_path):
+                self.fs.rm_file(full_file_path)
 
         await run_async(remove_file)
 
-    async def remove_all(self, tree_path: str):
+    async def remove_all(self, tree_path: Optional[str] = None):
         """
         Remove an entire directory tree at the specified path, including all files and
         subdirectories.
@@ -226,14 +251,64 @@ class S3FileStorage(Storage):
             - tree_path (str): The root path of the directory tree to be removed.
         """
         if tree_path is None:
-            tree_path = self.storage_path.replace("s3://", "")
+            tree_path = self.storage_path.replace(self.scheme, "")
         else:
-            tree_path = os.path.join(self.storage_path.replace("s3://", ""), tree_path)
+            tree_path = self._get_full_path(tree_path)
 
         # async_remove_all = run_async(lambda: self.s3.rm(tree_path, recursive=True))
 
         try:
             # await async_remove_all()
-            await run_async(self.s3.rm, tree_path, recursive=True)
+            await run_async(self.fs.rm, tree_path, recursive=True)
         except FileNotFoundError:
             pass
+
+    async def rename(self, source_file_name: str, destination_file_path: str):
+        """
+        Rename a file or directory at the specified source path to a new destination path.
+
+        Parameters:
+        -----------
+
+            - source_file_name (str): The name of the file to be renamed.
+            - destination_file_path (str): The new path for the file.
+        """
+        full_source_file_path = self._get_full_path(source_file_name)
+        destination_file_path = destination_file_path.replace(self.scheme, "")
+
+        if self.fs.isdir(full_source_file_path):
+            for file_path in self.fs.glob(f"{full_source_file_path}/**"):
+                # Check if the file is not a directory
+                if not self.fs.isdir(file_path):
+                    file_name = os.path.basename(file_path)
+                    await run_async(
+                        self.fs.rename, file_path, os.path.join(destination_file_path, file_name)
+                    )
+        else:
+            await run_async(self.fs.rename, full_source_file_path, destination_file_path)
+
+    async def push_to_cloud(self, file_name: str, local_file_path: str):
+        """
+        Push a file from a local path to a cloud path.
+
+        Parameters:
+        -----------
+
+            - file_name (str): The name of the file to be pushed to the cloud.
+            - local_file_path (str): The path of the local file to be pushed to the cloud.
+        """
+        full_file_path = self._get_full_path(file_name)
+        await run_async(self.fs.put, local_file_path, full_file_path, recursive=True)
+
+    async def pull_from_cloud(self, file_name: str, local_file_path: str):
+        """
+        Pull a file from a cloud path to a local path.
+
+        Parameters:
+        -----------
+
+            - file_name (str): The name of the file to be pulled from the cloud.
+            - local_file_path (str): The path of the local file to be pulled from the cloud.
+        """
+        full_file_path = self._get_full_path(file_name)
+        await run_async(self.fs.get, full_file_path, local_file_path, recursive=True)

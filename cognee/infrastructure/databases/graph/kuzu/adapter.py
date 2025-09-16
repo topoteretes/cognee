@@ -3,6 +3,7 @@
 import os
 import json
 import asyncio
+import shutil
 import tempfile
 from uuid import UUID
 from kuzu import Connection
@@ -14,10 +15,13 @@ from typing import Dict, Any, List, Union, Optional, Tuple, Type
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
-from cognee.infrastructure.files.storage import get_file_storage
+from cognee.infrastructure.files.storage import get_file_storage, StorageProviderRegistry
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
     record_graph_changes,
+)
+from cognee.infrastructure.databases.graph.kuzu.kuzu_cloud_database_mixin import (
+    KuzuCloudDatabaseMixin,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
@@ -27,7 +31,7 @@ from cognee.tasks.temporal_graph.models import Timestamp
 logger = get_logger()
 
 
-class KuzuAdapter(GraphDBInterface):
+class KuzuAdapter(GraphDBInterface, KuzuCloudDatabaseMixin):
     """
     Adapter for Kuzu graph database operations with improved consistency and async support.
 
@@ -49,17 +53,17 @@ class KuzuAdapter(GraphDBInterface):
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
         try:
-            if "s3://" in self.db_path:
-                with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
-                    self.temp_graph_file = temp_file.name
+            # Prepare the local database path
+            is_cloud_path = self.db_path.startswith(StorageProviderRegistry.get_all_cloud_schemes())
+            local_db_path = None  # Will point to the database on the local filesystem
+            if is_cloud_path:
+                db_dir = os.path.dirname(self.db_path)
+                file_storage = get_file_storage(db_dir)
+                self.temp_dir_root = tempfile.mkdtemp()
+                self.temp_graph_file = os.path.join(self.temp_dir_root, "original_graph_db")
 
-                run_sync(self.pull_from_s3())
-
-                self.db = Database(
-                    self.temp_graph_file,
-                    buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                    max_db_size=4096 * 1024 * 1024,
-                )
+                run_sync(self.pull_from_cloud())
+                local_db_path = self.temp_graph_file
             else:
                 # Ensure the parent directory exists before creating the database
                 db_dir = os.path.dirname(self.db_path)
@@ -75,36 +79,50 @@ class KuzuAdapter(GraphDBInterface):
 
                 run_sync(file_storage.ensure_directory_exists())
 
-                try:
-                    self.db = Database(
-                        self.db_path,
-                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                        max_db_size=4096 * 1024 * 1024,
+                local_db_path = self.db_path
+
+            # Unify the kuzu Database Class init and kuzu migration logic
+            try:
+                self.db = Database(
+                    local_db_path,
+                    buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
+                    max_db_size=4096 * 1024 * 1024,
+                )
+            except RuntimeError:
+                from .kuzu_migrate import read_kuzu_storage_version
+                import kuzu
+
+                kuzu_db_version = read_kuzu_storage_version(self.db_path)
+                if (
+                    kuzu_db_version == "0.9.0" or kuzu_db_version == "0.8.2"
+                ) and kuzu_db_version != kuzu.__version__:
+                    # Try to migrate kuzu database to latest version
+                    from .kuzu_migrate import kuzu_migration
+
+                    logger.info(f"Migrating kuzu database to version {kuzu.__version__}...")
+                    kuzu_migration(
+                        new_db=self.db_path + "_new",
+                        old_db=self.db_path,
+                        new_version=kuzu.__version__,
+                        old_version=kuzu_db_version,
+                        overwrite=True,
                     )
-                except RuntimeError:
-                    from .kuzu_migrate import read_kuzu_storage_version
-                    import kuzu
 
-                    kuzu_db_version = read_kuzu_storage_version(self.db_path)
-                    if (
-                        kuzu_db_version == "0.9.0" or kuzu_db_version == "0.8.2"
-                    ) and kuzu_db_version != kuzu.__version__:
-                        # Try to migrate kuzu database to latest version
-                        from .kuzu_migrate import kuzu_migration
-
-                        kuzu_migration(
-                            new_db=self.db_path + "_new",
-                            old_db=self.db_path,
-                            new_version=kuzu.__version__,
-                            old_version=kuzu_db_version,
-                            overwrite=True,
+                    if is_cloud_path:
+                        logger.info("Pulling migrated kuzu cloud database back to the local...")
+                        self.temp_graph_file = os.path.join(self.temp_dir_root, "migrated_graph_db")
+                        run_sync(self.pull_from_cloud())
+                        local_db_path = self.temp_graph_file
+                        logger.info(
+                            "Pulled migrated kuzu cloud database back to the local successfully..."
                         )
 
-                    self.db = Database(
-                        self.db_path,
-                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
-                        max_db_size=4096 * 1024 * 1024,
-                    )
+                # Try to init the kuzu Database Class again. Now, it should be the new version.
+                self.db = Database(
+                    local_db_path,
+                    buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
+                    max_db_size=4096 * 1024 * 1024,
+                )
 
             self.db.init_database()
             self.connection = Connection(self.db)
@@ -146,26 +164,20 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to initialize Kuzu database: {e}")
             raise e
 
-    async def push_to_s3(self) -> None:
-        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file"):
-            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-
-            s3_file_storage = S3FileStorage("")
-
-            if self.connection:
-                async with self.KUZU_ASYNC_LOCK:
-                    self.connection.execute("CHECKPOINT;")
-
-            s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
-
-    async def pull_from_s3(self) -> None:
-        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
-
-        s3_file_storage = S3FileStorage("")
+    async def close(self):
+        """Close connection and db and remove temporary directory if it exists."""
         try:
-            s3_file_storage.s3.get(self.db_path, self.temp_graph_file, recursive=True)
-        except FileNotFoundError:
-            logger.warning(f"Kuzu S3 storage file not found: {self.db_path}")
+            if self.connection:
+                self.connection.close()
+                self.connection = None
+            if self.db:
+                self.db.close()
+                self.db = None
+            if hasattr(self, "temp_graph_file"):
+                shutil.rmtree(self.temp_dir_root)
+        except Exception as e:
+            logger.error(f"Failed to close kuzu graph: {e}")
+            raise
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
@@ -1483,12 +1495,7 @@ class KuzuAdapter(GraphDBInterface):
         It raises exceptions for failures occurring during deletion processes.
         """
         try:
-            if self.connection:
-                self.connection.close()
-                self.connection = None
-            if self.db:
-                self.db.close()
-                self.db = None
+            await self.close()
 
             db_dir = os.path.dirname(self.db_path)
             db_name = os.path.basename(self.db_path)
@@ -1515,11 +1522,7 @@ class KuzuAdapter(GraphDBInterface):
         occur during file deletions or initializations carefully.
         """
         try:
-            if self.connection:
-                self.connection = None
-            if self.db:
-                self.db.close()
-                self.db = None
+            self.close()
 
             db_dir = os.path.dirname(self.db_path)
             db_name = os.path.basename(self.db_path)

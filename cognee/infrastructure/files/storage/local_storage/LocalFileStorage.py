@@ -4,8 +4,9 @@ from urllib.parse import urlparse
 from contextlib import contextmanager
 from typing import BinaryIO, Optional, Union
 
-from .FileBufferedReader import FileBufferedReader
-from .storage import Storage
+from ..FileBufferedReader import FileBufferedReader
+from ..storage import Storage
+from ..storage_provider_registry import StorageProviderRegistry
 
 
 def get_parsed_path(file_path: str) -> str:
@@ -47,6 +48,7 @@ def get_parsed_path(file_path: str) -> str:
         return os.path.normpath(file_path)
 
 
+@StorageProviderRegistry.register("local")
 class LocalFileStorage(Storage):
     """
     Manage local file storage operations such as storing, retrieving, and managing files on
@@ -171,6 +173,29 @@ class LocalFileStorage(Storage):
 
         return os.path.exists(os.path.join(parsed_storage_path, file_path))
 
+    def is_dir(self, dir_path: Optional[str] = None) -> bool:
+        """
+        Check if a specified directory exists in the storage.
+
+        Parameters:
+        -----------
+
+            - dir_path (str): The path of the directory to check.
+
+        Returns:
+        --------
+
+            - bool: True if the directory exists, otherwise False.
+        """
+        parsed_storage_path = get_parsed_path(self.storage_path)
+
+        if dir_path is None:
+            dir_path = parsed_storage_path
+        else:
+            dir_path = os.path.join(parsed_storage_path, dir_path)
+
+        return os.path.isdir(dir_path)
+
     def is_file(self, file_path: str):
         """
         Check if a specified file is a regular file.
@@ -253,7 +278,7 @@ class LocalFileStorage(Storage):
         if os.path.exists(full_file_path):
             os.remove(full_file_path)
 
-    def remove_all(self, tree_path: str = None):
+    def remove_all(self, tree_path: Optional[str] = None):
         """
         Remove an entire directory tree at the specified path, including all files and
         subdirectories.
@@ -278,3 +303,18 @@ class LocalFileStorage(Storage):
             return shutil.rmtree(tree_path)
         except FileNotFoundError:
             pass
+
+    def rename(self, source_file_name: str, destination_file_path: str):
+        """
+        Rename a file or directory at the specified source path to a new destination path.
+
+        Parameters:
+        -----------
+
+            - source_file_name (str): The name of the file to be renamed.
+            - destination_file_path (str): The new path for the file.
+        """
+        parsed_storage_path = get_parsed_path(self.storage_path)
+        full_source_file_path = os.path.join(parsed_storage_path, source_file_name)
+
+        os.rename(full_source_file_path, destination_file_path)

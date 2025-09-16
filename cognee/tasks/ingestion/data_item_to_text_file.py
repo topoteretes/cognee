@@ -3,14 +3,14 @@ from urllib.parse import urlparse
 from typing import List, Tuple
 from pathlib import Path
 import tempfile
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.infrastructure.loaders import get_loader_engine
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
-
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from cognee.infrastructure.files.storage import StorageProviderRegistry
 
 logger = get_logger(__name__)
 
@@ -24,7 +24,8 @@ class SaveDataSettings(BaseSettings):
 settings = SaveDataSettings()
 
 
-async def pull_from_s3(file_path, destination_file) -> None:
+# pull data from cloud storage to local file
+async def pull_from_cloud_storage(file_path, destination_file) -> None:
     async with open_data_file(file_path) as file:
         while True:
             chunk = file.read(8192)
@@ -38,14 +39,16 @@ async def data_item_to_text_file(
 ) -> Tuple[str, LoaderInterface]:
     if isinstance(data_item_path, str):
         parsed_url = urlparse(data_item_path)
+        scheme = parsed_url.scheme
+        scheme_with_separator = f"{scheme}://"
 
-        # data is s3 file path
-        if parsed_url.scheme == "s3":
+        # data is cloud storage(s3, gcs, azure, etc.) file path
+        if scheme_with_separator in StorageProviderRegistry.get_all_cloud_schemes():
             # TODO: Rework this to work with file streams and not saving data to temp storage
             # Note: proper suffix information is needed for OpenAI to handle mp3 files
             path_info = Path(parsed_url.path)
             with tempfile.NamedTemporaryFile(mode="wb", suffix=path_info.suffix) as temp_file:
-                await pull_from_s3(data_item_path, temp_file)
+                await pull_from_cloud_storage(data_item_path, temp_file)
                 temp_file.flush()  # Data needs to be saved to local storage
                 loader = get_loader_engine()
                 return await loader.load_file(temp_file.name, preferred_loaders), loader.get_loader(
