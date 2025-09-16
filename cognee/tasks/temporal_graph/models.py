@@ -3,7 +3,12 @@ from pydantic import BaseModel, Field
 
 
 class Timestamp(BaseModel):
-    year: int = Field(..., ge=1, le=9999, description="Always required. If only a year is known, use it if unknown just dont generate timestamp.")
+    year: int = Field(
+        ...,
+        ge=1,
+        le=9999,
+        description="Always required. If only a year is known, use it if unknown just dont generate timestamp.",
+    )
     month: int = Field(1, ge=1, le=12, description="If unknown, default to 1")
     day: int = Field(1, ge=1, le=31, description="If unknown, default to 1")
     hour: int = Field(0, ge=0, le=23, description="If unknown, default to 0")
