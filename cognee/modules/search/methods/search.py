@@ -9,13 +9,16 @@ from cognee.shared.utils import send_telemetry
 from cognee.context_global_variables import set_database_global_context_variables
 
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.search.types import SearchResult, SearchType, CombinedSearchResult, SearchResultDataset
-
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.search.types import (
+    SearchResult,
+    CombinedSearchResult,
+    SearchResultDataset,
+    SearchType,
+)
 from cognee.modules.search.operations import log_query, log_result
 from cognee.modules.users.models import User
 from cognee.modules.data.models import Dataset
-from cognee.infrastructure.engine.models import Edge
-
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
 
 from .get_search_type_tools import get_search_type_tools

@@ -118,7 +118,6 @@ async def search(
 
         save_interaction: Save interaction (query, context, answer connected to triplet endpoints) results into the graph or not
 
-
     Returns:
         list: Search results in format determined by query_type:
 
@@ -199,6 +198,6 @@ async def search(
         last_k=last_k,
         only_context=only_context,
         use_combined_context=use_combined_context,
-  )
+    )
 
     return filtered_search_results

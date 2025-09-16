@@ -3,6 +3,8 @@ import pathlib
 import asyncio
 import cognee
 from cognee.modules.search.types import SearchType
+
+
 async def main():
     """
     Example script demonstrating how to use Cognee with FalkorDB
