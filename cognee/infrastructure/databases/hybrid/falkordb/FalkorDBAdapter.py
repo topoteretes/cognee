@@ -4,7 +4,6 @@ import asyncio
 import json
 from textwrap import dedent
 from uuid import UUID
-from webbrowser import Error
 from typing import List, Dict, Any, Optional, Tuple, Type, Union
 
 from falkordb import FalkorDB
@@ -427,7 +426,7 @@ class FalkorDBAdapter(VectorDBInterface, GraphDBInterface):
                     for index in indices.result_set
                 ]
             )
-        except Error as e:
+        except Exception as e:
             print(e)
             return False
 
