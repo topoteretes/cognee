@@ -296,7 +296,7 @@ class TestTutorialNotebookZipFunctionality:
                 mock_cache_dir.mkdir()
                 mock_get_data_dir.return_value = mock_cache_dir
 
-                notebook, data_dir = await Notebook.from_ipynb_zip_url(
+                notebook, _ = await Notebook.from_ipynb_zip_url(
                     zip_url="https://example.com/tutorial.zip",
                     owner_id=user_id,
                     notebook_filename="tutorial.ipynb",
@@ -307,10 +307,6 @@ class TestTutorialNotebookZipFunctionality:
                 assert notebook.owner_id == user_id
                 assert notebook.name == "Test Zip Notebook"
                 assert len(notebook.cells) == 4  # Should skip raw cells
-
-                # Verify data directory was created
-                assert data_dir is not None
-                assert data_dir.exists()
 
     @pytest.mark.asyncio
     @patch("cognee.shared.cache._is_cache_valid", return_value=False)  # Force cache miss

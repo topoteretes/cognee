@@ -108,9 +108,52 @@ def _check_remote_content_freshness(url: str, cache_dir: Path) -> Tuple[bool, Op
         return True, None  # Assume fresh if we can't check
 
 
+def _flatten_single_directory_extraction(cache_dir: Path) -> None:
+    """
+    If the extracted content consists of a single directory, flatten it by moving
+    its contents to the parent level and removing the empty directory.
+    Ignores common metadata directories like __MACOSX.
+
+    Args:
+        cache_dir: Directory containing extracted content
+    """
+    try:
+        # Get all items in cache_dir (excluding metadata directories and any files we might have created)
+        metadata_dirs = {"__MACOSX", ".DS_Store", "Thumbs.db"}
+        relevant_items = [
+            item
+            for item in cache_dir.iterdir()
+            if item.name not in metadata_dirs and not item.name.endswith((".txt", ".md"))
+        ]
+
+        # Check if there's exactly one relevant item and it's a directory
+        if len(relevant_items) == 1 and relevant_items[0].is_dir():
+            single_dir = relevant_items[0]
+
+            # Move all contents of the single directory up one level
+            temp_items = []
+            for item in single_dir.iterdir():
+                temp_name = f"_temp_{item.name}"
+                temp_path = cache_dir / temp_name
+                shutil.move(str(item), str(temp_path))
+                temp_items.append((temp_path, cache_dir / item.name))
+
+            # Remove the now-empty directory
+            single_dir.rmdir()
+
+            # Move items from temp names to final names
+            for temp_path, final_path in temp_items:
+                shutil.move(str(temp_path), str(final_path))
+
+            logger.debug(f"Flattened single directory extraction in {cache_dir}")
+    except Exception as e:
+        logger.debug(f"Could not flatten directory structure: {e}")
+        # Non-critical error, continue with nested structure
+
+
 def download_and_extract_zip(
     url: str, cache_dir: Path, version_or_hash: str, force: bool = False
-) -> Tuple[bool, Optional[Path]]:
+) -> None:
     """
     Download a zip file and extract it to cache directory with content freshness checking.
 
@@ -121,7 +164,7 @@ def download_and_extract_zip(
         force: If True, re-download even if already cached
 
     Returns:
-        Tuple of (success: bool, extracted_path: Optional[Path])
+        None
     """
     # Check if already cached and valid
     if not force and _is_cache_valid(cache_dir, version_or_hash):
@@ -129,7 +172,6 @@ def download_and_extract_zip(
         is_fresh, new_identifier = _check_remote_content_freshness(url, cache_dir)
         if is_fresh:
             logger.debug(f"Content already cached and fresh for version {version_or_hash}")
-            return True, cache_dir
         else:
             logger.info("Cached content is stale, updating...")
             # Don't clear cache yet, we'll overwrite it
@@ -140,84 +182,44 @@ def download_and_extract_zip(
 
     logger.info(f"Downloading content from {url}...")
 
-    try:
-        # Create a temporary directory for download
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            archive_path = temp_path / "download.zip"
+    # Create a temporary directory for download
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        archive_path = temp_path / "download.zip"
 
-            # Download the zip file
-            response = requests.get(url, stream=True, timeout=60)
-            response.raise_for_status()
+        # Download the zip file
+        response = requests.get(url, stream=True, timeout=60)
+        response.raise_for_status()
 
-            with open(archive_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+        with open(archive_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
 
-            # Extract the archive
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(archive_path, "r") as zip_file:
-                zip_file.extractall(cache_dir)
+        # Extract the archive
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive_path, "r") as zip_file:
+            zip_file.extractall(cache_dir)
 
-            # Write version info for future cache validation
-            version_file = cache_dir / "version.txt"
-            version_file.write_text(version_or_hash)
+        # Check if extraction created a single top-level directory and flatten if so
+        _flatten_single_directory_extraction(cache_dir)
 
-            # Store content identifier from response headers for freshness checking
-            etag = response.headers.get("ETag", "").strip('"')
-            last_modified = response.headers.get("Last-Modified", "")
-            content_identifier = etag if etag else last_modified
+        # Write version info for future cache validation
+        version_file = cache_dir / "version.txt"
+        version_file.write_text(version_or_hash)
 
-            if content_identifier:
-                identifier_file = cache_dir / "content_id.txt"
-                identifier_file.write_text(content_identifier)
-                logger.debug(f"Stored content identifier: {content_identifier[:20]}...")
+        # Store content identifier from response headers for freshness checking
+        etag = response.headers.get("ETag", "").strip('"')
+        last_modified = response.headers.get("Last-Modified", "")
+        content_identifier = etag if etag else last_modified
 
-            logger.info("✓ Content downloaded and cached successfully!")
-            return True, cache_dir
+        if content_identifier:
+            identifier_file = cache_dir / "content_id.txt"
+            identifier_file.write_text(content_identifier)
+            logger.debug(f"Stored content identifier: {content_identifier[:20]}...")
 
-    except requests.exceptions.RequestException as e:
-        if "404" in str(e):
-            logger.error(f"Content not found at {url}")
-        else:
-            logger.error(f"Failed to download from {url}: {str(e)}")
-        return False, None
-    except Exception as e:
-        logger.error(f"Failed to download and extract content: {str(e)}")
-        return False, None
+        logger.info("✓ Content downloaded and cached successfully!")
 
 
 def get_tutorial_data_dir() -> Path:
     """Get the tutorial data cache directory."""
     return get_cache_subdir("tutorial_data")
-
-
-def store_tutorial_files(source_dir: Path, data_files_dir: Path) -> bool:
-    """
-    Store tutorial data files in the cache directory.
-
-    Args:
-        source_dir: Directory containing tutorial files to store
-        data_files_dir: Target directory to store files
-
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    try:
-        if data_files_dir.exists():
-            shutil.rmtree(data_files_dir)
-
-        # Look for a 'data' directory in the source
-        source_data_dir = source_dir / "data"
-        if source_data_dir.exists():
-            shutil.copytree(source_data_dir, data_files_dir)
-            logger.info(f"Tutorial data files stored in {data_files_dir}")
-            return True
-        else:
-            logger.debug("No data directory found in tutorial zip")
-            data_files_dir.mkdir(parents=True, exist_ok=True)
-            return True
-
-    except Exception as e:
-        logger.error(f"Failed to store tutorial files: {e}")
-        return False
