@@ -69,55 +69,6 @@ class TestTutorialNotebookCreation:
     """Test cases for tutorial notebook creation functionality."""
 
     @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_notebook_from_ipynb_url_success(
-        self, mock_httpx_client, sample_jupyter_notebook
-    ):
-        """Test successful creation of notebook from remote URL."""
-        # Setup mock HTTP response
-        mock_response = AsyncMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.text = json.dumps(sample_jupyter_notebook)
-
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_httpx_client.return_value = mock_client
-
-        # Test the method
-        user_id = uuid4()
-        notebook = await Notebook.from_ipynb_url(
-            url="https://example.com/test.ipynb",
-            owner_id=user_id,
-            name="Test Notebook",
-            deletable=True,
-        )
-
-        # Verify the notebook was created correctly
-        assert notebook.owner_id == user_id
-        assert notebook.name == "Test Notebook"
-        assert notebook.deletable is True
-        assert len(notebook.cells) == 4  # Should skip the raw cell
-
-        # Check cell content
-        assert notebook.cells[0].type == "markdown"
-        assert notebook.cells[0].name == "Tutorial Introduction"
-        assert "This is a tutorial notebook." in notebook.cells[0].content
-
-        assert notebook.cells[1].type == "code"
-        assert "import cognee" in notebook.cells[1].content
-
-        assert notebook.cells[2].type == "markdown"
-        assert notebook.cells[2].name == "Step 1: Data Ingestion"
-
-        assert notebook.cells[3].type == "code"
-        assert "Add your data here" in notebook.cells[3].content
-
-        # Verify HTTP call was made
-        mock_client.get.assert_called_once_with("https://example.com/test.ipynb")
-
-    @pytest.mark.asyncio
     async def test_notebook_from_ipynb_string_success(self, sample_jupyter_notebook):
         """Test successful creation of notebook from JSON string."""
         notebook_json = json.dumps(sample_jupyter_notebook)
@@ -175,29 +126,6 @@ class TestTutorialNotebookCreation:
         notebook = Notebook.from_ipynb_string(notebook_content=notebook_json, owner_id=user_id)
 
         assert notebook.name == "Imported Notebook"  # Fallback name
-
-    @pytest.mark.asyncio
-    @patch("httpx.AsyncClient")
-    async def test_notebook_from_ipynb_url_http_error(self, mock_httpx_client):
-        """Test error handling when HTTP request fails."""
-        # Create a mock that raises HTTPStatusError when raise_for_status is called
-        mock_response = MagicMock()
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "404 Not Found", request=MagicMock(), response=MagicMock()
-        )
-
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_httpx_client.return_value = mock_client
-
-        user_id = uuid4()
-
-        with pytest.raises(httpx.HTTPStatusError):
-            await Notebook.from_ipynb_url(
-                url="https://example.com/nonexistent.ipynb", owner_id=user_id
-            )
 
     @pytest.mark.asyncio
     async def test_notebook_from_ipynb_string_invalid_json(self):
@@ -301,56 +229,6 @@ class TestTutorialNotebookCreation:
         assert result == "Code Cell 5"  # Index + 1
 
 
-class TestTutorialNotebookIntegration:
-    """Integration tests for tutorial notebook functionality."""
-
-    @pytest.mark.asyncio
-    async def test_tutorial_notebook_url_accessibility(self):
-        """Test that the actual tutorial notebook URL is accessible (integration test)."""
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    "https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/notebook_tutorial/notebooks/tutorial.ipynb"
-                )
-                response.raise_for_status()
-
-                # Verify it's valid JSON
-                notebook_data = response.json()
-                assert "cells" in notebook_data
-                assert "nbformat" in notebook_data
-                assert isinstance(notebook_data["cells"], list)
-
-        except httpx.RequestError:
-            pytest.skip("Network request failed - skipping integration test")
-        except httpx.HTTPStatusError as e:
-            pytest.fail(f"HTTP error accessing tutorial notebook: {e}")
-
-    @pytest.mark.asyncio
-    async def test_real_tutorial_notebook_parsing(self):
-        """Test parsing the actual tutorial notebook (integration test)."""
-        try:
-            user_id = uuid4()
-            notebook = await Notebook.from_ipynb_url(
-                url="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/notebook_tutorial/notebooks/tutorial.ipynb",
-                owner_id=user_id,
-                name="Integration Test",
-            )
-
-            # Basic validation
-            assert notebook.owner_id == user_id
-            assert notebook.name == "Integration Test"
-            assert len(notebook.cells) > 0
-
-            # Should have at least some markdown and code cells
-            has_markdown = any(cell.type == "markdown" for cell in notebook.cells)
-            has_code = any(cell.type == "code" for cell in notebook.cells)
-            assert has_markdown, "Tutorial should have markdown cells"
-            assert has_code, "Tutorial should have code cells"
-
-        except (httpx.RequestError, httpx.HTTPStatusError):
-            pytest.skip("Network request failed - skipping integration test")
-
-
 @pytest.fixture
 def sample_tutorial_zip_content(sample_jupyter_notebook):
     """Create a sample zip file content with notebook and data files."""
@@ -387,7 +265,7 @@ class TestTutorialNotebookZipFunctionality:
     @patch("cognee.shared.cache.requests.head")  # Mock HEAD request for freshness check
     @patch("cognee.shared.cache.requests.get")
     async def test_notebook_from_ipynb_zip_url_success(
-        self, mock_requests_get, mock_requests_head, mock_cache_valid, sample_tutorial_zip_content
+        self, mock_requests_get, mock_requests_head, _mock_cache_valid, sample_tutorial_zip_content
     ):
         """Test successful creation of notebook from zip URL."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -410,7 +288,10 @@ class TestTutorialNotebookZipFunctionality:
             user_id = uuid4()
 
             # Test the zip functionality
-            with patch("cognee.shared.cache.get_tutorial_data_dir") as mock_get_data_dir:
+            import sys
+
+            notebook_module = sys.modules["cognee.modules.notebooks.models.Notebook"]
+            with patch.object(notebook_module, "get_tutorial_data_dir") as mock_get_data_dir:
                 mock_cache_dir = temp_path / "cache"
                 mock_cache_dir.mkdir()
                 mock_get_data_dir.return_value = mock_cache_dir
@@ -418,7 +299,7 @@ class TestTutorialNotebookZipFunctionality:
                 notebook, data_dir = await Notebook.from_ipynb_zip_url(
                     zip_url="https://example.com/tutorial.zip",
                     owner_id=user_id,
-                    notebook_filename="tutorial.ipynb",  # Changed to match user's filename change
+                    notebook_filename="tutorial.ipynb",
                     name="Test Zip Notebook",
                 )
 
@@ -436,7 +317,7 @@ class TestTutorialNotebookZipFunctionality:
     @patch("cognee.shared.cache.requests.head")  # Mock HEAD request for freshness check
     @patch("cognee.shared.cache.requests.get")
     async def test_notebook_from_ipynb_zip_url_missing_notebook(
-        self, mock_requests_get, mock_requests_head, mock_cache_valid, sample_tutorial_zip_content
+        self, mock_requests_get, mock_requests_head, _mock_cache_valid, sample_tutorial_zip_content
     ):
         """Test error handling when notebook file is missing from zip."""
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -462,7 +343,10 @@ class TestTutorialNotebookZipFunctionality:
 
             user_id = uuid4()
 
-            with patch("cognee.shared.cache.get_tutorial_data_dir") as mock_get_data_dir:
+            import sys
+
+            notebook_module = sys.modules["cognee.modules.notebooks.models.Notebook"]
+            with patch.object(notebook_module, "get_tutorial_data_dir") as mock_get_data_dir:
                 mock_cache_dir = temp_path / "cache"
                 mock_cache_dir.mkdir()
                 mock_get_data_dir.return_value = mock_cache_dir
@@ -473,7 +357,7 @@ class TestTutorialNotebookZipFunctionality:
                     await Notebook.from_ipynb_zip_url(
                         zip_url="https://example.com/tutorial.zip",
                         owner_id=user_id,
-                        notebook_filename="tutorial.ipynb",  # Changed to match user's filename change
+                        notebook_filename="tutorial.ipynb",
                     )
 
     @pytest.mark.asyncio
@@ -509,10 +393,10 @@ class TestTutorialNotebookZipFunctionality:
         mock_from_zip.assert_called_once_with(
             zip_url="https://github.com/topoteretes/cognee/raw/notebook_tutorial/notebooks/starter_tutorial.zip",
             owner_id=user_id,
-            notebook_filename="tutorial.ipynb",  # Changed to match user's filename change
+            notebook_filename="tutorial.ipynb",
             name="Python Development with Cognee Tutorial 🧠",
             deletable=False,
-            force=False,  # Added this parameter
+            force=False,
         )
 
         # Verify session operations

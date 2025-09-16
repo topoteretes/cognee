@@ -1,8 +1,7 @@
 import json
-import httpx
 import nbformat
 from nbformat.notebooknode import NotebookNode
-from typing import List, Literal, Dict, Any, Optional, cast, Tuple
+from typing import List, Literal, Optional, cast, Tuple
 from uuid import uuid4, UUID as UUID_t
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime, timezone
@@ -61,29 +60,6 @@ class Notebook(Base):
     deletable: Mapped[bool] = mapped_column(Boolean, default=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-
-    @classmethod
-    async def from_ipynb_url(
-        cls, url: str, owner_id: UUID_t, name: Optional[str] = None, deletable: bool = True
-    ) -> "Notebook":
-        """
-        Create a Notebook instance from a remote Jupyter notebook (.ipynb) URL.
-
-        Args:
-            url: Remote URL to fetch the .ipynb file from
-            owner_id: UUID of the notebook owner
-            name: Optional custom name for the notebook (defaults to extracting from metadata)
-            deletable: Whether the notebook can be deleted (defaults to True)
-
-        Returns:
-            Notebook instance ready to be saved to database
-        """
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            notebook_content = response.text
-
-        return cls.from_ipynb_string(notebook_content, owner_id, name, deletable)
 
     @classmethod
     async def from_ipynb_zip_url(
