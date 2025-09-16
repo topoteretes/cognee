@@ -7,7 +7,7 @@ class Timestamp(BaseModel):
         ...,
         ge=1,
         le=9999,
-        description="Always required. If only a year is known, use it if unknown just dont generate timestamp.",
+        description="Always required. If only a year is known, use it.",
     )
     month: int = Field(1, ge=1, le=12, description="If unknown, default to 1")
     day: int = Field(1, ge=1, le=31, description="If unknown, default to 1")
