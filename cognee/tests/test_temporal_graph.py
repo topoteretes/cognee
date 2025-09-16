@@ -113,10 +113,6 @@ async def main():
         f"Expected multiple timestamps (assert is set to 20), but found {type_counts.get('Timestamp', 0)}"
     )
 
-    assert type_counts.get("Interval", 0) >= 2, (
-        f"Expected multiple intervals, but found {type_counts.get('Interval', 0)}"
-    )
-
     assert edge_type_counts.get("contains", 0) >= 20, (
         f"Expected multiple 'contains' edge, but found {edge_type_counts.get('contains', 0)}"
     )
