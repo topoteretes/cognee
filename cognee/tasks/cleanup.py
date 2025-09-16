@@ -1,49 +1,36 @@
-from datetime import datetime, timedelta
-from typing import Optional
-import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
-async def cleanup_unused_data(
-    days_threshold: int = 30,
-    dry_run: bool = True,
-    user_id: Optional[uuid.UUID] = None
-):
-    cutoff = datetime.utcnow() - timedelta(days=days_threshold)
+async def cleanup_unused_data(days_threshold: int, dry_run: bool = True) -> dict[str, Any]:
+    """
+    Cleanup unused data older than the given days_threshold.
 
-    # TODO: Replace these with actual ORM/DB queries
-    unused_chunks = []
-    unused_entities = []
-    unused_summaries = []
-    unused_associations = []
+    Args:
+        days_threshold (int): The age threshold in days for unused data.
+        dry_run (bool): If True, simulate the cleanup without deleting data.
 
-    total_unused = (
-        len(unused_chunks)
-        + len(unused_entities)
-        + len(unused_summaries)
-        + len(unused_associations)
-    )
+    Returns:
+        dict[str, Any]: Summary of the cleanup process.
+    """
+    if days_threshold < 0:
+        raise ValueError("days_threshold cannot be negative")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days_threshold)
+
+    # Here, replace with actual data fetching/deletion logic
+    unused_data_count = 42  # dummy number
 
     if dry_run:
         return {
-            "status": "dry_run",
-            "unused_count": total_unused,
-            "deleted_count": {},
-            "cleanup_date": datetime.utcnow().isoformat()
+            "status": "dry-run",
+            "unused_data_count": unused_data_count,
+            "cutoff_date": cutoff.isoformat(),
         }
-
-    # TODO: Replace with actual deletion logic
-    deleted_chunks = len(unused_chunks)
-    deleted_entities = len(unused_entities)
-    deleted_summaries = len(unused_summaries)
-    deleted_associations = len(unused_associations)
-
-    return {
-        "status": "completed",
-        "unused_count": total_unused,
-        "deleted_count": {
-            "chunks": deleted_chunks,
-            "entities": deleted_entities,
-            "summaries": deleted_summaries,
-            "associations": deleted_associations,
-        },
-        "cleanup_date": datetime.utcnow().isoformat()
-    }
+    else:
+        # delete data (dummy simulation)
+        deleted_count = unused_data_count
+        return {
+            "status": "executed",
+            "deleted_count": deleted_count,
+            "cutoff_date": cutoff.isoformat(),
+        }
