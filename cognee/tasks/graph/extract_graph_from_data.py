@@ -101,6 +101,4 @@ async def extract_graph_from_data(
                 if edge.source_node_id in valid_node_ids and edge.target_node_id in valid_node_ids
             ]
 
-    return await integrate_chunk_graphs(
-        data_chunks, chunk_graphs, graph_model, ontology_adapter
-    )
+    return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_adapter)
