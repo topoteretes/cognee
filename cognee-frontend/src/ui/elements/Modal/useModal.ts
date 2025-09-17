@@ -1,7 +1,7 @@
-import { useCallback, useState } from "react";
+import { FormEvent, useCallback, useState } from "react";
 import { useBoolean } from "@/utils";
 
-export default function useModal<ModalState extends object, ConfirmActionEvent>(initiallyOpen?: boolean, confirmCallback?: (state: ModalState, event?: ConfirmActionEvent) => Promise<void> | void) {
+export default function useModal<ModalState extends object, ConfirmActionEvent = FormEvent<HTMLFormElement>>(initiallyOpen?: boolean, confirmCallback?: (state: ModalState, event?: ConfirmActionEvent) => Promise<void> | void) {
   const [modalState, setModalState] = useState<ModalState>();
   const [isActionLoading, setLoading] = useState(false);
 

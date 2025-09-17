@@ -2,10 +2,11 @@
 
 import { v4 as uuid4 } from "uuid";
 import classNames from "classnames";
-import { Fragment, MouseEvent, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, MouseEvent, MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
 
+import { useModal } from "@/ui/elements/Modal";
 import { CaretIcon, CloseIcon, PlusIcon } from "@/ui/Icons";
-import { IconButton, PopupMenu, TextArea, Modal, useModal, GhostButton, CTAButton } from "@/ui/elements";
+import { IconButton, PopupMenu, TextArea, Modal, GhostButton, CTAButton } from "@/ui/elements";
 import { GraphControlsAPI } from "@/app/(graph)/GraphControls";
 import GraphVisualization, { GraphVisualizationAPI } from "@/app/(graph)/GraphVisualization";
 
@@ -295,12 +296,12 @@ function CellResult({ content }: { content: [] }) {
           parsedContent.push(
             <div key={line[0][1]["relationship_name"]} className="w-full h-full bg-white">
               <span className="text-sm pl-2 mb-4">reasoning graph</span>
-              {/* <GraphVisualization
+              <GraphVisualization
                 data={transformInsightsGraphData(line)}
                 ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
                 graphControls={graphControls}
                 className="min-h-80"
-              /> */}
+              />
             </div>
           );
           continue;
@@ -343,12 +344,12 @@ function CellResult({ content }: { content: [] }) {
               parsedContent.push(
                 <div key={datasetName} className="w-full h-full bg-white">
                   <span className="text-sm pl-2 mb-4">reasoning graph (datasets: {datasetName})</span>
-                  {/* <GraphVisualization
+                  <GraphVisualization
                     data={transformToVisualizationData(graph)}
                     ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
                     graphControls={graphControls}
                     className="min-h-80"
-                  /> */}
+                  />
                 </div>
               );
             });
@@ -374,12 +375,12 @@ function CellResult({ content }: { content: [] }) {
           parsedContent.push(
             <div key={datasetName} className="w-full h-full bg-white">
               <span className="text-sm pl-2 mb-4">reasoning graph (datasets: {datasetName})</span>
-              {/* <GraphVisualization
+              <GraphVisualization
                 data={transformToVisualizationData(graph)}
                 ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
                 graphControls={graphControls}
                 className="min-h-80"
-              /> */}
+              />
             </div>
           );
         });
