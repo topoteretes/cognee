@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.notebooks.models.Notebook import Notebook
+from cognee.modules.notebooks.methods.create_notebook import _create_tutorial_notebook
 from cognee.modules.users.exceptions import TenantNotFoundError
 from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.modules.users.get_user_db import get_user_db_context
@@ -12,43 +13,6 @@ from cognee.modules.users.models.Tenant import Tenant
 
 from sqlalchemy import select
 from typing import Optional
-
-
-async def _create_tutorial_notebook(
-    user_id: UUID, session: AsyncSession, force_refresh: bool = False
-) -> None:
-    """
-    Create the default tutorial notebook for new users.
-    Dynamically fetches from: https://github.com/topoteretes/cognee/blob/notebook_tutorial/notebooks/starter_tutorial.zip
-    """
-    TUTORIAL_ZIP_URL = (
-        "https://github.com/topoteretes/cognee/raw/notebook_tutorial/notebooks/starter_tutorial.zip"
-    )
-
-    try:
-        # Create notebook from remote zip file (includes notebook + data files)
-        notebook, data_dir = await Notebook.from_ipynb_zip_url(
-            zip_url=TUTORIAL_ZIP_URL,
-            owner_id=user_id,
-            notebook_filename="tutorial.ipynb",
-            name="Python Development with Cognee Tutorial 🧠",
-            deletable=False,
-            force=force_refresh,
-        )
-
-        # Add to session and commit
-        session.add(notebook)
-        await session.commit()
-
-        # Log data directory location for user reference
-        if data_dir:
-            print(f"Tutorial data files available at: {data_dir}")
-            # You could also store this path in user metadata or notebook metadata
-
-    except Exception as e:
-        print(f"Failed to fetch tutorial notebook from {TUTORIAL_ZIP_URL}: {e}")
-
-        raise e
 
 
 async def create_user(

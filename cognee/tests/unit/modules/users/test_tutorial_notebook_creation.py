@@ -8,7 +8,7 @@ import tempfile
 import zipfile
 import httpx
 
-from cognee.modules.users.methods.create_user import _create_tutorial_notebook
+from cognee.modules.notebooks.methods.create_notebook import _create_tutorial_notebook
 from cognee.modules.notebooks.models.Notebook import Notebook
 
 
