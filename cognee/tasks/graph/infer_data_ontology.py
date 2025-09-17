@@ -163,34 +163,38 @@ class OntologyEngine:
             elif file_path.endswith(".owl") or file_path.endswith(".rdf"):
                 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
                 from cognee.modules.engine.models.Entity import Entity
+                from cognee.modules.engine.models.EntityType import EntityType
                 from cognee.tasks.storage.add_data_points import add_data_points
-                from cognee.infrastructure.llm.LLMGateway import LLMGateway
-
+                # If embedding API is available, batch embeddings
+                # Placeholder: batch_size can be tuned
+                batch_size = 50
                 resolver = OntologyResolver(ontology_file=file_path)
                 datapoints = []
-                embeddings = {}
-                embedding_fn = getattr(LLMGateway, "generate_embedding", None)
-                for category in ["classes", "individuals"]:
-                    for key, uri in resolver.lookup.get(category, {}).items():
-                        if embedding_fn:
-                            try:
-                                embedding = embedding_fn(text=f"{key} {str(uri)}")
-                            except Exception:
-                                embedding = None
-                        else:
-                            embedding = None
-                        datapoint = Entity(
-                            name=key,
-                            description=str(uri),
-                            metadata={"category": category, "uri": str(uri)}
-                        )
-                        datapoints.append(datapoint)
-                        embeddings[str(uri)] = embedding
+                texts_to_embed = []
+                # Parse classes as EntityType
+                for key, uri in resolver.lookup.get("classes", {}).items():
+                    entity_type = EntityType(
+                        name=key,
+                        description=str(uri),
+                        metadata={"index_fields": ["name"], "category": "class", "uri": str(uri)}
+                    )
+                    datapoints.append(entity_type)
+                    texts_to_embed.append(f"{key} {str(uri)}")
+                # Parse individuals as Entity
+                for key, uri in resolver.lookup.get("individuals", {}).items():
+                    entity = Entity(
+                        name=key,
+                        description=str(uri),
+                        metadata={"index_fields": ["name"], "category": "individual", "uri": str(uri)}
+                    )
+                    datapoints.append(entity)
+                    texts_to_embed.append(f"{key} {str(uri)}")
+                # Batch embedding API placeholder
+                # Example: embeddings = await embedding_api.embed_batch(texts_to_embed)
+                # for dp, emb in zip(datapoints, embeddings):
+                #     dp.embedding = emb
                 await add_data_points(datapoints, update_edge_collection=True)
-                self.ontology_nodes = [dp.dict() for dp in datapoints]
-                self.ontology_edges = []  # Edges handled by add_data_points
-                self.ontology_embeddings = embeddings
-                return {"nodes": self.ontology_nodes, "edges": self.ontology_edges, "embeddings": embeddings}
+                # Ingestion is handled by add_data_points; no need to return structure
             else:
                 raise IngestionError(message="Unsupported file format")
         except Exception as e:

@@ -1,5 +1,6 @@
 from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
 from cognee.modules.engine.models.Entity import Entity
+from cognee.modules.engine.models.EntityType import EntityType
 from cognee.tasks.storage.add_data_points import add_data_points
 
 class OntologyPipeline:
@@ -14,15 +15,24 @@ class OntologyPipeline:
 
     async def ingest(self):
         datapoints = []
-        for category in ["classes", "individuals"]:
-            for key, uri in self.resolver.lookup.get(category, {}).items():
-                datapoints.append(
-                    Entity(
-                        name=key,
-                        description=str(uri),
-                        metadata={"category": category, "uri": str(uri)}
-                    )
+        # Ingest classes as EntityType
+        for key, uri in self.resolver.lookup.get("classes", {}).items():
+            datapoints.append(
+                EntityType(
+                    name=key,
+                    description=str(uri),
+                    metadata={"category": "class", "uri": str(uri)}
                 )
+            )
+        # Ingest individuals as Entity
+        for key, uri in self.resolver.lookup.get("individuals", {}).items():
+            datapoints.append(
+                Entity(
+                    name=key,
+                    description=str(uri),
+                    metadata={"category": "individual", "uri": str(uri)}
+                )
+            )
         await add_data_points(datapoints, update_edge_collection=True)
         self.nodes = [dp.dict() for dp in datapoints]
         self.edges = []  # Edges handled by add_data_points
