@@ -1277,7 +1277,6 @@ class KuzuAdapter(GraphDBInterface):
             A tuple containing a list of filtered node properties and a list of filtered edge
             properties.
         """
-
         where_clauses = []
         params = {}
 
@@ -1288,16 +1287,48 @@ class KuzuAdapter(GraphDBInterface):
                 params[param_name] = values
 
         where_clause = " AND ".join(where_clauses)
-        nodes_query = f"MATCH (n:Node) WHERE {where_clause} RETURN properties(n)"
+        nodes_query = f"MATCH (n:Node) WHERE {where_clause} RETURN n.id, {{properties: n.properties}}"
         edges_query = f"""
         MATCH (n1:Node)-[r:EDGE]->(n2:Node)
         WHERE {where_clause.replace("n.", "n1.")} AND {where_clause.replace("n.", "n2.")}
-        RETURN properties(r)
+        RETURN n1.id, n2.id, r.relationship_name, r.properties
         """
         nodes, edges = await asyncio.gather(
             self.query(nodes_query, params), self.query(edges_query, params)
         )
-        return ([n[0] for n in nodes], [e[0] for e in edges])
+        formatted_nodes = []
+        for n in nodes:
+            if n[0]:
+                node_id = str(n[0])
+                props = n[1]
+                if props.get("properties"):
+                    try:
+                        additional_props = json.loads(props["properties"])
+                        props.update(additional_props)
+                        del props["properties"]
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse properties JSON for node {node_id}")
+                formatted_nodes.append((node_id, props))
+        if not formatted_nodes:
+            logger.warning("No nodes found in the database")
+            return [], []
+
+        formatted_edges = []
+        for e in edges:
+            if e and len(e) >= 3:
+                source_id = str(e[0])
+                target_id = str(e[1])
+                rel_type = str(e[2])
+                props = {}
+                if len(e) > 3 and e[3]:
+                    try:
+                        props = json.loads(e[3])
+                    except (json.JSONDecodeError, TypeError):
+                        logger.warning(
+                            f"Failed to parse edge properties for {source_id}->{target_id}"
+                        )
+                formatted_edges.append((source_id, target_id, rel_type, props))
+        return formatted_nodes, formatted_edges
 
     async def get_graph_metrics(self, include_optional=False) -> Dict[str, Any]:
         """
