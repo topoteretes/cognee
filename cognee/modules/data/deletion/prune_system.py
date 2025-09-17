@@ -18,4 +18,4 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
         await db_engine.delete_database()
 
     if cache:
-        delete_cache()
+        await delete_cache()

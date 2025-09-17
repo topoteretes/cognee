@@ -209,8 +209,11 @@ class TestTutorialNotebookZipFunctionality:
 
         user_id = uuid4()
 
-        tutorial_data_dir = get_tutorial_data_dir()
-        assert not any(tutorial_data_dir.iterdir()), "Tutorial data directory should be empty"
+        # Check that tutorial data directory is empty using storage-aware method
+        tutorial_data_dir_path = await get_tutorial_data_dir()
+        tutorial_data_dir = Path(tutorial_data_dir_path)
+        if tutorial_data_dir.exists():
+            assert not any(tutorial_data_dir.iterdir()), "Tutorial data directory should be empty"
 
         await _create_tutorial_notebook(user_id, mock_session)
 
@@ -244,8 +247,11 @@ class TestTutorialNotebookZipFunctionality:
 
         user_id = uuid4()
 
-        tutorial_data_dir = get_tutorial_data_dir()
-        assert not any(tutorial_data_dir.iterdir()), "Tutorial data directory should be empty"
+        # Check that tutorial data directory is empty using storage-aware method
+        tutorial_data_dir_path = await get_tutorial_data_dir()
+        tutorial_data_dir = Path(tutorial_data_dir_path)
+        if tutorial_data_dir.exists():
+            assert not any(tutorial_data_dir.iterdir()), "Tutorial data directory should be empty"
 
         # First creation (without force refresh)
         await _create_tutorial_notebook(user_id, mock_session, force_refresh=False)

@@ -1,5 +1,6 @@
 import json
 import nbformat
+import asyncio
 from nbformat.notebooknode import NotebookNode
 from typing import List, Literal, Optional, cast, Tuple
 from uuid import uuid4, UUID as UUID_t
@@ -16,6 +17,8 @@ from cognee.shared.cache import (
     get_tutorial_data_dir,
     generate_content_hash,
 )
+from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
+from cognee.base_config import get_base_config
 
 
 class NotebookCell(BaseModel):
@@ -69,7 +72,7 @@ class Notebook(Base):
         name: Optional[str] = None,
         deletable: bool = True,
         force: bool = False,
-    ) -> Tuple["Notebook", Path]:
+    ) -> "Notebook":
         """
         Create a Notebook instance from a remote zip file containing notebook + data files.
 
@@ -82,34 +85,37 @@ class Notebook(Base):
             force: If True, re-download even if already cached
 
         Returns:
-            Tuple of (Notebook instance, Path to data directory)
+            Notebook instance
         """
         # Generate a cache key based on the zip URL
         content_hash = generate_content_hash(zip_url, notebook_filename)
-        tutorial_cache_dir = get_tutorial_data_dir() / content_hash
 
-        # Download and extract the zip file
+        # Download and extract the zip file to tutorial_data/{content_hash}
         try:
-            download_and_extract_zip(
-                url=zip_url, cache_dir=tutorial_cache_dir, version_or_hash=content_hash, force=force
+            extracted_cache_dir = await download_and_extract_zip(
+                url=zip_url,
+                cache_dir_name=f"tutorial_data/{content_hash}",
+                version_or_hash=content_hash,
+                force=force,
             )
         except Exception as e:
             raise RuntimeError(f"Failed to download tutorial zip from {zip_url}") from e
 
-        # Find the notebook file in the extracted content (immediate directory only)
-        notebook_path = tutorial_cache_dir / notebook_filename
+        # Use StorageManager to access the notebook file (works with both local and S3)
+        base_config = get_base_config()
+        storage_manager = get_file_storage(base_config.system_root_directory)
+        notebook_file_path = f"{extracted_cache_dir}/{notebook_filename}"
 
-        if not notebook_path or not notebook_path.exists():
+        # Check if the notebook file exists in storage
+        if not await storage_manager.file_exists(notebook_file_path):
             raise FileNotFoundError(f"Notebook file '{notebook_filename}' not found in zip")
 
-        # Read and parse the notebook
-        notebook_content = notebook_path.read_text(encoding="utf-8")
+        # Read and parse the notebook using StorageManager
+        async with storage_manager.open(notebook_file_path, encoding="utf-8") as f:
+            notebook_content = await asyncio.to_thread(f.read)
         notebook = cls.from_ipynb_string(notebook_content, owner_id, name, deletable)
 
-        # Update file paths in code cells to use actual cached data files
-        cls._update_file_paths_in_cells(notebook, tutorial_cache_dir)
-
-        return notebook, tutorial_cache_dir
+        return notebook
 
     @staticmethod
     def _update_file_paths_in_cells(notebook: "Notebook", cache_dir: Path) -> None:

@@ -20,7 +20,7 @@ async def _create_tutorial_notebook(
 
     try:
         # Create notebook from remote zip file (includes notebook + data files)
-        notebook, data_dir = await Notebook.from_ipynb_zip_url(
+        notebook = await Notebook.from_ipynb_zip_url(
             zip_url=TUTORIAL_ZIP_URL,
             owner_id=user_id,
             notebook_filename="tutorial.ipynb",
@@ -32,11 +32,6 @@ async def _create_tutorial_notebook(
         # Add to session and commit
         session.add(notebook)
         await session.commit()
-
-        # Log data directory location for user reference
-        if data_dir:
-            print(f"Tutorial data files available at: {data_dir}")
-            # You could also store this path in user metadata or notebook metadata
 
     except Exception as e:
         print(f"Failed to fetch tutorial notebook from {TUTORIAL_ZIP_URL}: {e}")
