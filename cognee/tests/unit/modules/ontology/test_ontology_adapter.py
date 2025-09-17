@@ -2,13 +2,14 @@ import pytest
 from rdflib import Graph, Namespace, RDF, OWL, RDFS
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.ontology.models import AttachedOntologyNode
-from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
+from cognee.modules.ontology.get_ontology_resolver import get_ontology_resolver
 
 
 def test_ontology_adapter_initialization_success():
     """Test successful initialization of OntologyAdapter."""
 
-    adapter = get_default_ontology_resolver()
+    config = get_ontology_resolver()
+    adapter = config["resolver"]
     adapter.build_lookup()
 
     assert isinstance(adapter.lookup, dict)
@@ -107,7 +108,8 @@ def test_get_subgraph_no_match_rdflib():
     """Test get_subgraph returns empty results for a non-existent node."""
     g = Graph()
 
-    resolver = get_default_ontology_resolver()
+    config = get_ontology_resolver()
+    resolver = config["resolver"]
     resolver.graph = g
     resolver.build_lookup()
 
@@ -165,7 +167,8 @@ def test_refresh_lookup_rdflib():
     """Test that refresh_lookup rebuilds the lookup dict into a new object."""
     g = Graph()
 
-    resolver = get_default_ontology_resolver()
+    config = get_ontology_resolver()
+    resolver = config["resolver"]
     resolver.graph = g
     resolver.build_lookup()
 
