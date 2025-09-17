@@ -9,6 +9,7 @@ from cognee.modules.engine.utils import (
 )
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
 
 
 def _create_node_key(node_id: str, category: str) -> str:
@@ -320,7 +321,7 @@ def expand_with_nodes_and_edges(
         existing_edges_map = {}
 
     if ontology_resolver is None:
-        ontology_resolver = RDFLibOntologyResolver()
+        ontology_resolver = get_default_ontology_resolver()
 
     added_nodes_map = {}
     added_ontology_nodes_map = {}
