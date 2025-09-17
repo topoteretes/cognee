@@ -5,6 +5,8 @@ import cognee
 from cognee.api.v1.search import SearchType
 from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.shared.logging_utils import setup_logging
+from cognee.modules.ontology.get_ontology_resolver import get_ontology_resolver
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
 text_1 = """
 1. Audi
@@ -60,7 +62,12 @@ async def main():
         os.path.dirname(os.path.abspath(__file__)), "ontology_input_example/basic_ontology.owl"
     )
 
-    await cognee.cognify(ontology_file_path=ontology_path)
+    # Create ontology config with custom ontology file
+    ontology_config = get_ontology_resolver(
+        resolver=RDFLibOntologyResolver(ontology_file=ontology_path)
+    )
+
+    await cognee.cognify(ontology_config=ontology_config)
     print("Knowledge with ontology created.")
 
     # Step 4: Query insights

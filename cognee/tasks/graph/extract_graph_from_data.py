@@ -4,6 +4,8 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.tasks.storage.add_data_points import add_data_points
+from cognee.modules.ontology.ontology_config import OntologyConfig
+from cognee.modules.ontology.get_ontology_resolver import get_ontology_resolver
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.graph.utils import (
@@ -70,7 +72,7 @@ async def integrate_chunk_graphs(
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     graph_model: Type[BaseModel],
-    ontology_adapter: RDFLibOntologyResolver = None,
+    ontology_config: OntologyConfig = None,
     custom_prompt: Optional[str] = None,
 ) -> List[DocumentChunk]:
     """
@@ -100,5 +102,11 @@ async def extract_graph_from_data(
                 for edge in graph.edges
                 if edge.source_node_id in valid_node_ids and edge.target_node_id in valid_node_ids
             ]
+
+    # Extract resolver from config if provided, otherwise get default
+    if ontology_config is None:
+        ontology_config = get_ontology_resolver()
+
+    ontology_adapter = ontology_config["resolver"]
 
     return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_adapter)
