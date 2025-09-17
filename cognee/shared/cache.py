@@ -20,9 +20,14 @@ logger = logging.getLogger(__name__)
 
 def delete_cache():
     """Delete the Cognee cache directory."""
+    logger.info("Deleting cache...")
     cache_dir = get_cognee_cache_dir()
     if cache_dir.exists():
-        shutil.rmtree(cache_dir)
+        for item in cache_dir.iterdir():
+            if item.is_file():
+                item.unlink()
+            elif item.is_dir():
+                shutil.rmtree(item)
 
     logger.info("✓ Cache deleted successfully!")
 

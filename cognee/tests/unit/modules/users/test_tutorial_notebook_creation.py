@@ -1,16 +1,20 @@
 import json
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
+import hashlib
+import time
 from uuid import uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 from pathlib import Path
-import tempfile
 import zipfile
-import httpx
+from cognee.shared.cache import get_tutorial_data_dir
 
 from cognee.modules.notebooks.methods.create_notebook import _create_tutorial_notebook
 from cognee.modules.notebooks.models.Notebook import Notebook
 import cognee
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 # Module-level fixtures available to all test classes
@@ -21,13 +25,6 @@ def mock_session():
     session.add = MagicMock()
     session.commit = AsyncMock()
     return session
-
-
-@pytest.mark.asyncio
-@pytest.fixture(autouse=True)
-async def test_cleanup():
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
 
 
 @pytest.fixture
@@ -148,33 +145,6 @@ class TestTutorialNotebookCreation:
 
     @pytest.mark.asyncio
     @patch.object(Notebook, "from_ipynb_zip_url")
-    async def test_create_tutorial_notebook_success(self, mock_from_zip_url, mock_session):
-        """Test successful tutorial notebook creation via zip."""
-        user_id = uuid4()
-        mock_notebook = Notebook(
-            id=uuid4(), owner_id=user_id, name="Tutorial Notebook", cells=[], deletable=False
-        )
-        mock_data_dir = Path("/mock/data/dir")
-        mock_from_zip_url.return_value = (mock_notebook, mock_data_dir)
-
-        await _create_tutorial_notebook(user_id, mock_session)
-
-        # Verify the notebook was created from the correct zip URL
-        mock_from_zip_url.assert_called_once_with(
-            zip_url="https://github.com/topoteretes/cognee/raw/notebook_tutorial/notebooks/starter_tutorial.zip",
-            owner_id=user_id,
-            notebook_filename="tutorial.ipynb",
-            name="Python Development with Cognee Tutorial 🧠",
-            deletable=False,
-            force=False,
-        )
-
-        # Verify session operations
-        mock_session.add.assert_called_once_with(mock_notebook)
-        mock_session.commit.assert_called_once()
-
-    @pytest.mark.asyncio
-    @patch.object(Notebook, "from_ipynb_zip_url")
     async def test_create_tutorial_notebook_error_propagated(self, mock_from_zip_url, mock_session):
         """Test that errors are propagated when zip fetch fails."""
         user_id = uuid4()
@@ -237,203 +207,204 @@ class TestTutorialNotebookCreation:
         assert result == "Code Cell"
 
 
-@pytest.fixture
-def sample_tutorial_zip_content(sample_jupyter_notebook):
-    """Create a sample zip file content with notebook and data files."""
-    return {
-        "notebook": sample_jupyter_notebook,
-        "data_files": {
-            "data/sample.txt": "This is sample tutorial data",
-            "data/config.json": '{"tutorial": "configuration"}',
-            "data/example.csv": "name,value\ntest,123\nexample,456",
-        },
-    }
-
-
-def create_test_zip(zip_content, temp_dir: Path) -> Path:
-    """Helper to create a test zip file."""
-    zip_path = temp_dir / "test_tutorial.zip"
-
-    with zipfile.ZipFile(zip_path, "w") as zf:
-        # Add the notebook
-        zf.writestr("tutorial.ipynb", json.dumps(zip_content["notebook"]))
-
-        # Add data files
-        for file_path, content in zip_content["data_files"].items():
-            zf.writestr(file_path, content)
-
-    return zip_path
-
-
 class TestTutorialNotebookZipFunctionality:
     """Test cases for zip-based tutorial functionality."""
 
     @pytest.mark.asyncio
-    @patch("cognee.shared.cache._is_cache_valid", return_value=False)  # Force cache miss
-    @patch("cognee.shared.cache.requests.head")  # Mock HEAD request for freshness check
-    @patch("cognee.shared.cache.requests.get")
-    async def test_notebook_from_ipynb_zip_url_success(
-        self, mock_requests_get, mock_requests_head, _mock_cache_valid, sample_tutorial_zip_content
-    ):
-        """Test successful creation of notebook from zip URL."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            zip_path = create_test_zip(sample_tutorial_zip_content, temp_path)
-
-            # Mock the requests.head call for freshness check
-            mock_head_response = MagicMock()
-            mock_head_response.raise_for_status = MagicMock()
-            mock_head_response.headers = {}  # No freshness headers, will skip freshness check
-            mock_requests_head.return_value = mock_head_response
-
-            # Mock the requests.get call
-            mock_response = MagicMock()
-            mock_response.raise_for_status = MagicMock()
-            mock_response.iter_content = MagicMock(return_value=[zip_path.read_bytes()])
-            mock_response.headers = {}  # No content headers for storage
-            mock_requests_get.return_value = mock_response
-
-            user_id = uuid4()
-
-            # Test the zip functionality
-            import sys
-
-            notebook_module = sys.modules["cognee.modules.notebooks.models.Notebook"]
-            with patch.object(notebook_module, "get_tutorial_data_dir") as mock_get_data_dir:
-                mock_cache_dir = temp_path / "cache"
-                mock_cache_dir.mkdir()
-                mock_get_data_dir.return_value = mock_cache_dir
-
-                notebook, _ = await Notebook.from_ipynb_zip_url(
-                    zip_url="https://example.com/tutorial.zip",
-                    owner_id=user_id,
-                    notebook_filename="tutorial.ipynb",
-                    name="Test Zip Notebook",
-                )
-
-                # Verify notebook was created correctly
-                assert notebook.owner_id == user_id
-                assert notebook.name == "Test Zip Notebook"
-                assert len(notebook.cells) == 4  # Should skip raw cells
-
-    @pytest.mark.asyncio
-    @patch("cognee.shared.cache._is_cache_valid", return_value=False)  # Force cache miss
-    @patch("cognee.shared.cache.requests.head")  # Mock HEAD request for freshness check
-    @patch("cognee.shared.cache.requests.get")
     async def test_notebook_from_ipynb_zip_url_missing_notebook(
-        self, mock_requests_get, mock_requests_head, _mock_cache_valid, sample_tutorial_zip_content
+        self,
     ):
         """Test error handling when notebook file is missing from zip."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-
-            # Create zip without the expected notebook file
-            zip_path = temp_path / "test.zip"
-            with zipfile.ZipFile(zip_path, "w") as zf:
-                zf.writestr("wrong_name.ipynb", json.dumps(sample_tutorial_zip_content["notebook"]))
-
-            # Mock the requests.head call for freshness check
-            mock_head_response = MagicMock()
-            mock_head_response.raise_for_status = MagicMock()
-            mock_head_response.headers = {}  # No freshness headers, will skip freshness check
-            mock_requests_head.return_value = mock_head_response
-
-            # Mock the requests.get call
-            mock_response = MagicMock()
-            mock_response.raise_for_status = MagicMock()
-            mock_response.iter_content = MagicMock(return_value=[zip_path.read_bytes()])
-            mock_response.headers = {}  # No content headers for storage
-            mock_requests_get.return_value = mock_response
-
-            user_id = uuid4()
-
-            import sys
-
-            notebook_module = sys.modules["cognee.modules.notebooks.models.Notebook"]
-            with patch.object(notebook_module, "get_tutorial_data_dir") as mock_get_data_dir:
-                mock_cache_dir = temp_path / "cache"
-                mock_cache_dir.mkdir()
-                mock_get_data_dir.return_value = mock_cache_dir
-
-                with pytest.raises(
-                    FileNotFoundError, match="Notebook file 'tutorial.ipynb' not found in zip"
-                ):
-                    await Notebook.from_ipynb_zip_url(
-                        zip_url="https://example.com/tutorial.zip",
-                        owner_id=user_id,
-                        notebook_filename="tutorial.ipynb",
-                    )
-
-    @pytest.mark.asyncio
-    @patch("cognee.shared.cache.requests.get")
-    async def test_notebook_from_ipynb_zip_url_download_failure(self, mock_requests_get):
-        """Test error handling when zip download fails."""
-        mock_requests_get.side_effect = httpx.HTTPStatusError(
-            "404 Not Found", request=MagicMock(), response=MagicMock()
-        )
-
         user_id = uuid4()
 
-        with pytest.raises(RuntimeError, match="Failed to download tutorial zip"):
+        with pytest.raises(
+            FileNotFoundError,
+            match="Notebook file 'super_random_tutorial_name.ipynb' not found in zip",
+        ):
             await Notebook.from_ipynb_zip_url(
-                zip_url="https://example.com/nonexistent.zip", owner_id=user_id
+                zip_url="https://github.com/topoteretes/cognee/raw/notebook_tutorial/notebooks/starter_tutorial.zip",
+                owner_id=user_id,
+                notebook_filename="super_random_tutorial_name.ipynb",
             )
 
     @pytest.mark.asyncio
-    @patch.object(Notebook, "from_ipynb_zip_url")
-    async def test_create_tutorial_notebook_zip_success(self, mock_from_zip, mock_session):
-        """Test successful tutorial notebook creation with zip."""
+    async def test_notebook_from_ipynb_zip_url_download_failure(self):
+        """Test error handling when zip download fails."""
         user_id = uuid4()
-        mock_data_dir = Path("/mock/data/dir")
-        mock_notebook = Notebook(
-            id=uuid4(), owner_id=user_id, name="Tutorial", cells=[], deletable=False
-        )
+        with pytest.raises(RuntimeError, match="Failed to download tutorial zip"):
+            await Notebook.from_ipynb_zip_url(
+                zip_url="https://github.com/topoteretes/cognee/raw/notebook_tutorial/notebooks/nonexistent_tutorial_name.zip",
+                owner_id=user_id,
+            )
 
-        mock_from_zip.return_value = (mock_notebook, mock_data_dir)
+    @pytest.mark.asyncio
+    async def test_create_tutorial_notebook_zip_success(self, mock_session):
+        """Test successful tutorial notebook creation with zip."""
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
+
+        user_id = uuid4()
+
+        tutorial_data_dir = get_tutorial_data_dir()
+        assert not any(tutorial_data_dir.iterdir()), "Tutorial data directory should be empty"
 
         await _create_tutorial_notebook(user_id, mock_session)
 
-        # Verify zip method was called
-        mock_from_zip.assert_called_once_with(
-            zip_url="https://github.com/topoteretes/cognee/raw/notebook_tutorial/notebooks/starter_tutorial.zip",
-            owner_id=user_id,
-            notebook_filename="tutorial.ipynb",
-            name="Python Development with Cognee Tutorial 🧠",
-            deletable=False,
-            force=False,
-        )
+        items = list(tutorial_data_dir.iterdir())
+        assert len(items) == 1, "Tutorial data directory should contain exactly one item"
+        assert items[0].is_dir(), "Tutorial data directory item should be a directory"
 
-        # Verify session operations
-        mock_session.add.assert_called_once_with(mock_notebook)
-        mock_session.commit.assert_called_once()
+        # Verify the structure inside the tutorial directory
+        tutorial_dir = items[0]
+
+        # Check for tutorial.ipynb file
+        notebook_file = tutorial_dir / "tutorial.ipynb"
+        assert notebook_file.exists(), f"tutorial.ipynb should exist in {tutorial_dir}"
+        assert notebook_file.is_file(), "tutorial.ipynb should be a file"
+
+        # Check for data subfolder with contents
+        data_folder = tutorial_dir / "data"
+        assert data_folder.exists(), f"data subfolder should exist in {tutorial_dir}"
+        assert data_folder.is_dir(), "data should be a directory"
+
+        data_items = list(data_folder.iterdir())
+        assert len(data_items) > 0, (
+            f"data folder should contain files, but found {len(data_items)} items"
+        )
 
     @pytest.mark.asyncio
-    @patch.object(Notebook, "from_ipynb_zip_url")
-    async def test_create_tutorial_notebook_with_force_refresh(self, mock_from_zip, mock_session):
+    async def test_create_tutorial_notebook_with_force_refresh(self, mock_session):
         """Test tutorial notebook creation with force refresh."""
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
+
         user_id = uuid4()
 
-        mock_notebook = Notebook(
-            id=uuid4(), owner_id=user_id, name="Tutorial", cells=[], deletable=False
-        )
-        mock_data_dir = Path("/mock/data/dir")
-        mock_from_zip.return_value = (mock_notebook, mock_data_dir)
+        tutorial_data_dir = get_tutorial_data_dir()
+        assert not any(tutorial_data_dir.iterdir()), "Tutorial data directory should be empty"
 
-        # Test with force refresh enabled
+        # First creation (without force refresh)
+        await _create_tutorial_notebook(user_id, mock_session, force_refresh=False)
+
+        items_first = list(tutorial_data_dir.iterdir())
+        assert len(items_first) == 1, (
+            "Tutorial data directory should contain exactly one item after first creation"
+        )
+        first_dir = items_first[0]
+        assert first_dir.is_dir(), "Tutorial data directory item should be a directory"
+
+        # Verify the structure inside the tutorial directory (first creation)
+        notebook_file = first_dir / "tutorial.ipynb"
+        assert notebook_file.exists(), f"tutorial.ipynb should exist in {first_dir}"
+        assert notebook_file.is_file(), "tutorial.ipynb should be a file"
+
+        data_folder = first_dir / "data"
+        assert data_folder.exists(), f"data subfolder should exist in {first_dir}"
+        assert data_folder.is_dir(), "data should be a directory"
+
+        data_items = list(data_folder.iterdir())
+        assert len(data_items) > 0, (
+            f"data folder should contain files, but found {len(data_items)} items"
+        )
+
+        # Capture metadata from first creation
+
+        first_creation_metadata = {}
+
+        for file_path in first_dir.rglob("*"):
+            if file_path.is_file():
+                relative_path = file_path.relative_to(first_dir)
+                stat = file_path.stat()
+
+                # Store multiple metadata points
+                with open(file_path, "rb") as f:
+                    content = f.read()
+
+                first_creation_metadata[str(relative_path)] = {
+                    "mtime": stat.st_mtime,
+                    "size": stat.st_size,
+                    "hash": hashlib.md5(content).hexdigest(),
+                    "first_bytes": content[:100]
+                    if content
+                    else b"",  # First 100 bytes as fingerprint
+                }
+
+        # Wait a moment to ensure different timestamps
+        time.sleep(0.1)
+
+        # Force refresh - should create new files with different metadata
         await _create_tutorial_notebook(user_id, mock_session, force_refresh=True)
 
-        # Verify zip method was called with force=True
-        mock_from_zip.assert_called_once_with(
-            zip_url="https://github.com/topoteretes/cognee/raw/notebook_tutorial/notebooks/starter_tutorial.zip",
-            owner_id=user_id,
-            notebook_filename="tutorial.ipynb",
-            name="Python Development with Cognee Tutorial 🧠",
-            deletable=False,
-            force=True,
+        items_second = list(tutorial_data_dir.iterdir())
+        assert len(items_second) == 1, (
+            "Tutorial data directory should contain exactly one item after force refresh"
+        )
+        second_dir = items_second[0]
+
+        # Verify the structure is maintained after force refresh
+        notebook_file_second = second_dir / "tutorial.ipynb"
+        assert notebook_file_second.exists(), (
+            f"tutorial.ipynb should exist in {second_dir} after force refresh"
+        )
+        assert notebook_file_second.is_file(), "tutorial.ipynb should be a file after force refresh"
+
+        data_folder_second = second_dir / "data"
+        assert data_folder_second.exists(), (
+            f"data subfolder should exist in {second_dir} after force refresh"
+        )
+        assert data_folder_second.is_dir(), "data should be a directory after force refresh"
+
+        data_items_second = list(data_folder_second.iterdir())
+        assert len(data_items_second) > 0, (
+            f"data folder should still contain files after force refresh, but found {len(data_items_second)} items"
         )
 
-        mock_session.add.assert_called_once_with(mock_notebook)
-        mock_session.commit.assert_called_once()
+        # Compare metadata to ensure files are actually different
+        files_with_changed_metadata = 0
+
+        for file_path in second_dir.rglob("*"):
+            if file_path.is_file():
+                relative_path = file_path.relative_to(second_dir)
+                relative_path_str = str(relative_path)
+
+                # File should exist from first creation
+                assert relative_path_str in first_creation_metadata, (
+                    f"File {relative_path_str} missing from first creation"
+                )
+
+                old_metadata = first_creation_metadata[relative_path_str]
+
+                # Get new metadata
+                stat = file_path.stat()
+                with open(file_path, "rb") as f:
+                    new_content = f.read()
+
+                new_metadata = {
+                    "mtime": stat.st_mtime,
+                    "size": stat.st_size,
+                    "hash": hashlib.md5(new_content).hexdigest(),
+                    "first_bytes": new_content[:100] if new_content else b"",
+                }
+
+                # Check if any metadata changed (indicating file was refreshed)
+                metadata_changed = (
+                    new_metadata["mtime"] > old_metadata["mtime"]  # Newer modification time
+                    or new_metadata["hash"] != old_metadata["hash"]  # Different content hash
+                    or new_metadata["size"] != old_metadata["size"]  # Different file size
+                    or new_metadata["first_bytes"]
+                    != old_metadata["first_bytes"]  # Different content
+                )
+
+                if metadata_changed:
+                    files_with_changed_metadata += 1
+
+        # Assert that force refresh actually updated files
+        assert files_with_changed_metadata > 0, (
+            f"Force refresh should have updated at least some files, but all {len(first_creation_metadata)} "
+            f"files appear to have identical metadata. This suggests force refresh didn't work."
+        )
+
+        mock_session.commit.assert_called()
 
     @pytest.mark.asyncio
     async def test_tutorial_zip_url_accessibility(self):
