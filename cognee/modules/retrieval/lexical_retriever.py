@@ -71,17 +71,13 @@ class LexicalRetriever(BaseRetriever):
                   logger.warning("Skipping node with unexpected shape: %r", node)
                   continue
 
-              fixed_document = self.fix_json_strings(document)
-              if fixed_document.get("type") == "DocumentChunk" and fixed_document.get("text"):
+              if document.get("type") == "DocumentChunk" and document.get("text"):
                   try:
-                      tokens = self.tokenizer(fixed_document["text"])
+                      tokens = self.tokenizer(document["text"])
                       if not tokens:
                           continue
-                      document_chunk = DocumentChunk.from_dict(fixed_document)
-                      new_document = get_own_properties(document_chunk)
-                      new_document["id"] = str(new_document.get("id", chunk_id))
-                      self.chunks[str(chunk_id)] = tokens
-                      self.payloads[str(chunk_id)] = new_document
+                      self.chunks[str(document.get("id",chunk_id))] = tokens
+                      self.payloads[str(document.get("id",chunk_id))] = document
                       chunk_count += 1
                   except Exception as e:
                       logger.error("Tokenizer failed for chunk %s: %s", chunk_id, str(e))
