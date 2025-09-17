@@ -112,7 +112,7 @@ export default function Dashboard({ accessToken }: DashboardProps) {
 
   return (
     <div className="h-full flex flex-col bg-gray-200">
-      <video
+      {/* <video
         autoPlay
         loop
         muted
@@ -121,7 +121,7 @@ export default function Dashboard({ accessToken }: DashboardProps) {
       >
         <source src="/videos/background-video-blur.mp4" type="video/mp4" />
         Your browser does not support the video tag.
-      </video>
+      </video> */}
 
       <Header user={user} />
 
