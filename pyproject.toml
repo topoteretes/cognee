@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.3.3"
+version = "0.3.4.dev0"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -96,14 +96,14 @@ gemini = ["google-generativeai>=0.8.4,<0.9"]
 huggingface = ["transformers>=4.46.3,<5"]
 ollama = ["transformers>=4.46.3,<5"]
 mistral = ["mistral-common>=1.5.2,<2"]
-anthropic = ["anthropic>=0.26.1,<0.27"]
+anthropic = ["anthropic>=0.27"]
 deepeval = ["deepeval>=3.0.1,<4"]
 posthog = ["posthog>=3.5.0,<4"]
 falkordb = ["falkordb>=1.0.9,<2.0.0"]
 groq = ["groq>=0.8.0,<1.0.0"]
 chromadb = [
-    "chromadb>=0.3.0,<0.7",
-    "pypika==0.48.8",
+    "chromadb>=0.6,<0.7",
+    "pypika==0.48.9",
 ]
 docs = ["unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx]>=0.18.1,<19"]
 codegraph = [
