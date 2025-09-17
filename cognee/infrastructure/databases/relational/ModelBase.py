@@ -1,7 +1,8 @@
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.ext.asyncio import AsyncAttrs
 
 
-class Base(DeclarativeBase):
+class Base(AsyncAttrs, DeclarativeBase):
     """
     Represents a base class for declarative models using SQLAlchemy.
 

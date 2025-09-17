@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from cognee.shared.logging_utils import get_logger
 
 from ...models.User import User
@@ -17,9 +19,14 @@ async def get_all_user_permission_datasets(user: User, permission_type: str) -> 
         # Get all datasets all tenants have access to
         tenant = await get_tenant(user.tenant_id)
         datasets.extend(await get_principal_datasets(tenant, permission_type))
+
         # Get all datasets Users roles have access to
-        for role_name in user.roles:
-            role = await get_role(user.tenant_id, role_name)
+        if isinstance(user, SimpleNamespace):
+            # If simple namespace use roles defined in user
+            roles = user.roles
+        else:
+            roles = await user.awaitable_attrs.roles
+        for role in roles:
             datasets.extend(await get_principal_datasets(role, permission_type))
 
     # Deduplicate datasets with same ID
