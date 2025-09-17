@@ -18,6 +18,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def delete_cache():
+    """Delete the Cognee cache directory."""
+    cache_dir = get_cognee_cache_dir()
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir)
+
+    logger.info("✓ Cache deleted successfully!")
+
+
 def get_cognee_cache_dir() -> Path:
     """Get the base Cognee cache directory (~/.cognee)."""
     cache_dir = Path.home() / ".cognee"
