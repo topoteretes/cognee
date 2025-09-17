@@ -10,6 +10,7 @@ import httpx
 
 from cognee.modules.notebooks.methods.create_notebook import _create_tutorial_notebook
 from cognee.modules.notebooks.models.Notebook import Notebook
+import cognee
 
 
 # Module-level fixtures available to all test classes
@@ -20,6 +21,13 @@ def mock_session():
     session.add = MagicMock()
     session.commit = AsyncMock()
     return session
+
+
+@pytest.mark.asyncio
+@pytest.fixture(autouse=True)
+async def test_cleanup():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
 
 
 @pytest.fixture
