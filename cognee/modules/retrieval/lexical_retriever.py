@@ -1,12 +1,9 @@
 import asyncio
-import json
 from typing import Any, Callable, Optional
 from heapq import nlargest
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.storage.utils import get_own_properties
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.shared.logging_utils import get_logger
 
@@ -32,21 +29,6 @@ class LexicalRetriever(BaseRetriever):
         self.payloads: dict[str, Any] = {} # {chunk_id: original_document}
         self._initialized = False
         self._init_lock = asyncio.Lock()
-    def fix_json_strings(self, obj):
-        """Recursively convert any JSON string values into dict/list."""
-        if isinstance(obj, dict):
-            return {k: self.fix_json_strings(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [self.fix_json_strings(item) for item in obj]
-        elif isinstance(obj, str):
-            s = obj.strip()
-            if s.startswith("{") or s.startswith("["):
-                try:
-                    return self.fix_json_strings(json.loads(s))
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            return obj
-        return obj
 
     async def initialize(self):
       """Initialize retriever by reading all DocumentChunks from graph_engine."""
