@@ -16,6 +16,15 @@ from cognee.modules.users.models import (
 
 
 async def give_default_permission_to_role(role_id: UUID, permission_name: str):
+    """
+        Give the permission with given name to the role with the given id as a default permission.
+    Args:
+        role_id: Id of the role
+        permission_name: Name of the permission
+
+    Returns:
+        None
+    """
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:

@@ -11,6 +11,19 @@ from cognee.modules.data.methods import (
 
 
 async def resolve_authorized_user_dataset(dataset_id: UUID, dataset_name: str, user: User):
+    """
+        Function handles creation and dataset authorization if dataset already exist for Cognee.
+        Verifies that provided user has necessary permission for provided Dataset.
+        If Dataset does not exist creates the Dataset and gives permission for the user creating the dataset.
+
+        Args:
+            dataset_id: Id of the dataset.
+            dataset_name: Name of the dataset.
+            user: Cognee User request is being processed for, if None default user will be used.
+
+        Returns:
+            Tuple[User, Dataset]: A tuple containing the user and the authorized dataset.
+        """
     if not user:
         user = await get_default_user()
 

@@ -8,6 +8,16 @@ from ...models import ACL, Permission
 
 
 async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -> list[str]:
+    """
+        Return a list of documents ids for which the user has read permission.
+        If datasets are specified, return only documents from those datasets.
+    Args:
+        user_id: Id of the user
+        datasets: List of datasets
+
+    Returns:
+        list[str]: List of documents for which the user has read permission
+    """
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:

@@ -13,6 +13,18 @@ from cognee.modules.users.exceptions import (
 
 
 async def add_user_to_tenant(user_id: UUID, tenant_id: UUID, owner_id: UUID):
+    """
+        Add a user with the given id to the tenant with the given id.
+        This can only be successful if the request owner with the given id is the tenant owner.
+    Args:
+        user_id: Id of the user.
+        tenant_id: Id of the tenant.
+        owner_id: Id of the request owner.
+
+    Returns:
+        None
+
+    """
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         user = await get_user(user_id)
