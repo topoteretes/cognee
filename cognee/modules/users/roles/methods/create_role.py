@@ -16,6 +16,16 @@ async def create_role(
     role_name: str,
     owner_id: UUID,
 ):
+    """
+        Create a new role with the given name, if the request owner with the given id
+        has the necessary permission.
+    Args:
+        role_name: Name of the new role.
+        owner_id: Id of the request owner.
+
+    Returns:
+        None
+    """
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         user = await get_user(owner_id)
