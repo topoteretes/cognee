@@ -4,7 +4,9 @@ from pydantic import BaseModel
 from baml_py import ClientRegistry
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import SummarizedCode
-from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.async_client import b
+from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.async_client import (
+    b,
+)
 from cognee.infrastructure.llm.config import get_llm_config
 
 
@@ -82,7 +84,8 @@ async def extract_code_summary(content: str):
             )
         except Exception as e:
             logger.error(
-                "Failed to extract code summary with BAML, falling back to mock summary", exc_info=e
+                "Failed to extract code summary with BAML, falling back to mock summary",
+                exc_info=e,
             )
             result = get_mock_summarized_code()
 

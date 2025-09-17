@@ -33,10 +33,14 @@ class UserQAFeedback(BaseFeedback):
         )
 
         graph_engine = await get_graph_engine()
-        last_interaction_ids = await graph_engine.get_last_user_interaction_ids(limit=self.last_k)
+        last_interaction_ids = await graph_engine.get_last_user_interaction_ids(
+            limit=self.last_k
+        )
 
         nodeset_name = "UserQAFeedbacks"
-        feedbacks_node_set = NodeSet(id=uuid5(NAMESPACE_OID, name=nodeset_name), name=nodeset_name)
+        feedbacks_node_set = NodeSet(
+            id=uuid5(NAMESPACE_OID, name=nodeset_name), name=nodeset_name
+        )
         feedback_id = uuid5(NAMESPACE_OID, name=feedback_text)
 
         cognee_user_feedback = CogneeUserFeedback(
@@ -47,7 +51,9 @@ class UserQAFeedback(BaseFeedback):
             belongs_to_set=feedbacks_node_set,
         )
 
-        await add_data_points(data_points=[cognee_user_feedback], update_edge_collection=False)
+        await add_data_points(
+            data_points=[cognee_user_feedback], update_edge_collection=False
+        )
 
         relationships = []
         relationship_name = "gives_feedback_to"

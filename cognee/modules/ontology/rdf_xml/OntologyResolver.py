@@ -134,7 +134,11 @@ class OntologyResolver:
         try:
             closest_match = self.find_closest_match(name=node_name, category=node_type)
             if not closest_match:
-                logger.info("No close match found for '%s' in category '%s'", node_name, node_type)
+                logger.info(
+                    "No close match found for '%s' in category '%s'",
+                    node_name,
+                    node_type,
+                )
                 return [], [], None
 
             node = self.lookup[node_type].get(closest_match)

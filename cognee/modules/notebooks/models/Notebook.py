@@ -27,20 +27,28 @@ class NotebookCellList(TypeDecorator):
         if notebook_cells is None:
             return []
         return [
-            json.dumps(jsonable_encoder(cell)) if isinstance(cell, NotebookCell) else cell
+            (
+                json.dumps(jsonable_encoder(cell))
+                if isinstance(cell, NotebookCell)
+                else cell
+            )
             for cell in notebook_cells
         ]
 
     def process_result_value(self, cells_json_list, dialect):
         if cells_json_list is None:
             return []
-        return [NotebookCell(**json.loads(json_string)) for json_string in cells_json_list]
+        return [
+            NotebookCell(**json.loads(json_string)) for json_string in cells_json_list
+        ]
 
 
 class Notebook(Base):
     __tablename__ = "notebooks"
 
-    id: Mapped[UUID_t] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    id: Mapped[UUID_t] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
 
     owner_id: Mapped[UUID_t] = mapped_column(UUID(as_uuid=True), index=True)
 
@@ -50,4 +58,6 @@ class Notebook(Base):
 
     deletable: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )

@@ -60,20 +60,22 @@ async def modal_run_eval(eval_params=None):
         eval_params = EvalConfig().to_dict()
 
     version_name = "baseline"
-    benchmark_name = os.environ.get("BENCHMARK", eval_params.get("benchmark", "benchmark"))
+    benchmark_name = os.environ.get(
+        "BENCHMARK", eval_params.get("benchmark", "benchmark")
+    )
     timestamp = datetime.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
 
     answers_filename = (
         f"{version_name}_{benchmark_name}_{timestamp}_{eval_params.get('answers_path')}"
     )
-    html_filename = (
-        f"{version_name}_{benchmark_name}_{timestamp}_{eval_params.get('dashboard_path')}"
-    )
+    html_filename = f"{version_name}_{benchmark_name}_{timestamp}_{eval_params.get('dashboard_path')}"
 
     logger.info(f"Running evaluation with params: {eval_params}")
 
     # Run the evaluation pipeline
-    await run_corpus_builder(eval_params, instance_filter=eval_params.get("instance_filter"))
+    await run_corpus_builder(
+        eval_params, instance_filter=eval_params.get("instance_filter")
+    )
     await run_question_answering(eval_params)
     answers = await run_evaluation(eval_params)
 

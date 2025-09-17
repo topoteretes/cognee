@@ -176,9 +176,13 @@ def get_datasets_router() -> APIRouter:
             ) from error
 
     @router.delete(
-        "/{dataset_id}", response_model=None, responses={404: {"model": ErrorResponseDTO}}
+        "/{dataset_id}",
+        response_model=None,
+        responses={404: {"model": ErrorResponseDTO}},
     )
-    async def delete_dataset(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
+    async def delete_dataset(
+        dataset_id: UUID, user: User = Depends(get_authenticated_user)
+    ):
         """
         Delete a dataset by its ID.
 
@@ -209,7 +213,9 @@ def get_datasets_router() -> APIRouter:
         dataset = await get_dataset(user.id, dataset_id)
 
         if dataset is None:
-            raise DatasetNotFoundError(message=f"Dataset ({str(dataset_id)}) not found.")
+            raise DatasetNotFoundError(
+                message=f"Dataset ({str(dataset_id)}) not found."
+            )
 
         await delete_dataset(dataset)
 
@@ -256,7 +262,9 @@ def get_datasets_router() -> APIRouter:
         dataset = await get_dataset(user.id, dataset_id)
 
         if dataset is None:
-            raise DatasetNotFoundError(message=f"Dataset ({str(dataset_id)}) not found.")
+            raise DatasetNotFoundError(
+                message=f"Dataset ({str(dataset_id)}) not found."
+            )
 
         data = await get_data(user.id, data_id)
 
@@ -266,7 +274,9 @@ def get_datasets_router() -> APIRouter:
         await delete_data(data)
 
     @router.get("/{dataset_id}/graph", response_model=GraphDTO)
-    async def get_dataset_graph(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
+    async def get_dataset_graph(
+        dataset_id: UUID, user: User = Depends(get_authenticated_user)
+    ):
         """
         Get the knowledge graph visualization for a dataset.
 
@@ -296,7 +306,9 @@ def get_datasets_router() -> APIRouter:
         response_model=list[DataDTO],
         responses={404: {"model": ErrorResponseDTO}},
     )
-    async def get_dataset_data(dataset_id: UUID, user: User = Depends(get_authenticated_user)):
+    async def get_dataset_data(
+        dataset_id: UUID, user: User = Depends(get_authenticated_user)
+    ):
         """
         Get all data items in a dataset.
 
@@ -394,7 +406,9 @@ def get_datasets_router() -> APIRouter:
 
         try:
             # Verify user has permission to read dataset
-            authorized_datasets = await get_authorized_existing_datasets(datasets, "read", user)
+            authorized_datasets = await get_authorized_existing_datasets(
+                datasets, "read", user
+            )
 
             datasets_statuses = await cognee_datasets.get_status(
                 [dataset.id for dataset in authorized_datasets]
@@ -444,7 +458,8 @@ def get_datasets_router() -> APIRouter:
 
         if dataset is None:
             return JSONResponse(
-                status_code=404, content={"detail": f"Dataset ({dataset_id}) not found."}
+                status_code=404,
+                content={"detail": f"Dataset ({dataset_id}) not found."},
             )
 
         dataset_data = await get_dataset_data(dataset[0].id)

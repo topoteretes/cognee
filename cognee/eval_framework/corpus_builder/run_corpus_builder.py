@@ -3,7 +3,9 @@ import json
 from typing import List, Optional
 
 from cognee.infrastructure.files.storage import get_file_storage
-from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
+from cognee.eval_framework.corpus_builder.corpus_builder_executor import (
+    CorpusBuilderExecutor,
+)
 from cognee.modules.data.models.questions_base import QuestionsBase
 from cognee.modules.data.models.questions_data import Questions
 from cognee.infrastructure.databases.relational.get_relational_engine import (
@@ -43,9 +45,13 @@ async def run_corpus_builder(
         logger.info("Corpus Builder started...")
 
         try:
-            task_getter = TaskGetters(params.get("task_getter_type", "Default")).getter_func
+            task_getter = TaskGetters(
+                params.get("task_getter_type", "Default")
+            ).getter_func
         except KeyError:
-            raise ValueError(f"Invalid task getter type: {params.get('task_getter_type')}")
+            raise ValueError(
+                f"Invalid task getter type: {params.get('task_getter_type')}"
+            )
 
         corpus_builder = CorpusBuilderExecutor(
             benchmark=params["benchmark"],

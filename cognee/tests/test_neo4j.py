@@ -63,7 +63,9 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(query_type=SearchType.CHUNKS, query_text=random_node_name)
+    search_results = await cognee.search(
+        query_type=SearchType.CHUNKS, query_text=random_node_name
+    )
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
     for result in search_results:
@@ -108,13 +110,13 @@ async def main():
         node_name=["nonexistent"],
     ).get_context("What is in the context?")
 
-    assert isinstance(context_nonempty, list) and context_nonempty != [], (
-        f"Nodeset_search_test:Expected non-empty string for context_nonempty, got: {context_nonempty!r}"
-    )
+    assert (
+        isinstance(context_nonempty, list) and context_nonempty != []
+    ), f"Nodeset_search_test:Expected non-empty string for context_nonempty, got: {context_nonempty!r}"
 
-    assert context_empty == [], (
-        f"Nodeset_search_test:Expected empty string for context_empty, got: {context_empty!r}"
-    )
+    assert (
+        context_empty == []
+    ), f"Nodeset_search_test:Expected empty string for context_empty, got: {context_empty!r}"
 
     await cognee.prune.prune_data()
     data_root_directory = get_storage_config()["data_root_directory"]

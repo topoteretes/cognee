@@ -63,7 +63,9 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(query_type=SearchType.CHUNKS, query_text=random_node_name)
+    search_results = await cognee.search(
+        query_type=SearchType.CHUNKS, query_text=random_node_name
+    )
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
     for result in search_results:

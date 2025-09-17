@@ -44,7 +44,9 @@ async def resolve_authorized_user_datasets(
         authorized_datasets = existing_datasets
     else:
         # If dataset matches an existing Dataset (by name or id), reuse it. Otherwise, create a new Dataset.
-        authorized_datasets = await load_or_create_datasets(datasets, existing_datasets, user)
+        authorized_datasets = await load_or_create_datasets(
+            datasets, existing_datasets, user
+        )
 
     if not authorized_datasets:
         raise DatasetNotFoundError("There are no datasets to work with.")

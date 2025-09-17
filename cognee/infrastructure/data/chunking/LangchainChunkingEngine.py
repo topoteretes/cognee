@@ -10,7 +10,9 @@ class LangchainChunkEngine:
     Handles chunking of data using specified strategies.
     """
 
-    def __init__(self, chunk_strategy=None, source_data=None, chunk_size=None, chunk_overlap=None):
+    def __init__(
+        self, chunk_strategy=None, source_data=None, chunk_size=None, chunk_overlap=None
+    ):
         self.chunk_strategy = chunk_strategy
         self.source_data = source_data
         self.chunk_size = chunk_size
@@ -58,10 +60,15 @@ class LangchainChunkEngine:
                 source_data, self.chunk_size, self.chunk_overlap
             )
         else:
-            chunked_data, chunk_number = "Invalid chunk strategy.", [0, "Invalid chunk strategy."]
+            chunked_data, chunk_number = "Invalid chunk strategy.", [
+                0,
+                "Invalid chunk strategy.",
+            ]
         return chunked_data, chunk_number
 
-    def chunk_data_by_code(self, data_chunks, chunk_size, chunk_overlap=10, language=None):
+    def chunk_data_by_code(
+        self, data_chunks, chunk_size, chunk_overlap=10, language=None
+    ):
         """
         Chunk data specifically for code snippets.
 

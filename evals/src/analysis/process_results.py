@@ -91,7 +91,9 @@ def create_answers_df(transformed: dict, output_csv_path: str = None) -> pd.Data
     df = pd.DataFrame(index=questions)
 
     # Add golden_answer column
-    df["golden_answer"] = [transformed[first_file][q]["golden_answer"] for q in questions]
+    df["golden_answer"] = [
+        transformed[first_file][q]["golden_answer"] for q in questions
+    ]
 
     # Add one column per file's answers
     for filename, questions_data in transformed.items():
@@ -134,7 +136,10 @@ def create_single_metric_df(
 
 
 def create_all_metrics_df(
-    transformed: dict, metrics: list = None, save_folder: str = None, save_prefix: str = None
+    transformed: dict,
+    metrics: list = None,
+    save_folder: str = None,
+    save_prefix: str = None,
 ) -> dict:
     """Create dataframes for all metrics, with questions as rows and files as columns."""
     if metrics is None:
@@ -143,7 +148,9 @@ def create_all_metrics_df(
     metrics_dfs = {}
 
     for metric in metrics:
-        metrics_dfs[metric] = create_single_metric_df(transformed, metric, save_folder, save_prefix)
+        metrics_dfs[metric] = create_single_metric_df(
+            transformed, metric, save_folder, save_prefix
+        )
 
     return metrics_dfs
 
@@ -163,7 +170,9 @@ if __name__ == "__main__":
         f"Created answers dataframe with {len(answers_df)} questions and {len(answers_df.columns)} columns"
     )
 
-    metrics_dfs = create_all_metrics_df(transformed, save_folder="./temp", save_prefix="metrics")
+    metrics_dfs = create_all_metrics_df(
+        transformed, save_folder="./temp", save_prefix="metrics"
+    )
     print(f"Created metrics dataframes: {list(metrics_dfs.keys())}")
 
     aggregate_df = create_aggregate_metrics_df(
@@ -172,7 +181,9 @@ if __name__ == "__main__":
         save_folder="./temp",
         save_prefix="metrics",
     )
-    print(f"Created aggregate metrics dataframe with {len(aggregate_df.columns)} columns")
+    print(
+        f"Created aggregate metrics dataframe with {len(aggregate_df.columns)} columns"
+    )
 
     # Print averages of averages
     print("\nOverall averages:")

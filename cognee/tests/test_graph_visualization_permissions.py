@@ -9,7 +9,9 @@ from httpx import ASGITransport, AsyncClient
 import cognee
 from cognee.api.client import app
 from cognee.modules.users.methods import create_user, get_default_user
-from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+from cognee.modules.users.permissions.methods import (
+    authorized_give_permission_on_datasets,
+)
 
 # Use pytest-asyncio to handle all async tests
 pytestmark = pytest.mark.asyncio
@@ -51,7 +53,9 @@ async def setup_environment():
     await cognee.prune.prune_system(metadata=True)
 
     # 4. Add document for default user
-    explanation_file_path = os.path.join(base_dir, "test_data/Natural_language_processing.txt")
+    explanation_file_path = os.path.join(
+        base_dir, "test_data/Natural_language_processing.txt"
+    )
     await cognee.add([explanation_file_path], dataset_name="NLP")
     default_user = await get_default_user()
     nlp_cognify_result = await cognee.cognify(["NLP"], user=default_user)
@@ -71,7 +75,9 @@ async def setup_environment():
     await cognee.prune.prune_system(metadata=True)
 
 
-async def get_authentication_headers(client: AsyncClient, email: str, password: str) -> dict:
+async def get_authentication_headers(
+    client: AsyncClient, email: str, password: str
+) -> dict:
     """Authenticates and returns the Authorization header."""
     login_data = {"username": email, "password": password}
     response = await client.post("/api/v1/auth/login", data=login_data, timeout=15)
@@ -94,18 +100,22 @@ async def test_owner_can_access_graph(client: AsyncClient, setup_environment: in
 
     response = await client.get(
         f"/api/v1/datasets/{dataset_id}/graph",
-        headers=await get_authentication_headers(client, default_user_email, default_user_password),
+        headers=await get_authentication_headers(
+            client, default_user_email, default_user_password
+        ),
     )
-    assert response.status_code == 200, (
-        f"Owner failed to get the knowledge graph visualization. Response: {response.json()}"
-    )
+    assert (
+        response.status_code == 200
+    ), f"Owner failed to get the knowledge graph visualization. Response: {response.json()}"
     data = response.json()
     assert len(data) > 1, "The graph data is not valid."
 
     print("✅ Owner can access the graph visualization successfully.")
 
 
-async def test_granting_permission_enables_access(client: AsyncClient, setup_environment: int):
+async def test_granting_permission_enables_access(
+    client: AsyncClient, setup_environment: int
+):
     """
     Test Case 2: A user without any permissions should be denied access (404 Not Found).
     After granting permission, the user should be able to access the graph data.
@@ -119,11 +129,13 @@ async def test_granting_permission_enables_access(client: AsyncClient, setup_env
     # Test the access to graph visualization for the test user without any permissions
     response = await client.get(
         f"/api/v1/datasets/{dataset_id}/graph",
-        headers=await get_authentication_headers(client, test_user_email, test_user_password),
+        headers=await get_authentication_headers(
+            client, test_user_email, test_user_password
+        ),
     )
-    assert response.status_code == 403, (
-        "Access to graph visualization should be denied without READ permission."
-    )
+    assert (
+        response.status_code == 403
+    ), "Access to graph visualization should be denied without READ permission."
     assert (
         response.json()["detail"]
         == "Request owner does not have necessary permission: [read] for all datasets requested. [PermissionDeniedError]"
@@ -139,11 +151,13 @@ async def test_granting_permission_enables_access(client: AsyncClient, setup_env
     # Test the access to graph visualization for the test user
     response_for_test_user = await client.get(
         f"/api/v1/datasets/{dataset_id}/graph",
-        headers=await get_authentication_headers(client, test_user_email, test_user_password),
+        headers=await get_authentication_headers(
+            client, test_user_email, test_user_password
+        ),
     )
-    assert response_for_test_user.status_code == 200, (
-        "Access to graph visualization should succeed for user with been granted read permission"
-    )
+    assert (
+        response_for_test_user.status_code == 200
+    ), "Access to graph visualization should succeed for user with been granted read permission"
     print(
         "✅ Access to graph visualization should succeed for user with been granted read permission"
     )
@@ -153,9 +167,11 @@ async def test_granting_permission_enables_access(client: AsyncClient, setup_env
     default_user_password = "default_password"
     response_for_default_user = await client.get(
         f"/api/v1/datasets/{dataset_id}/graph",
-        headers=await get_authentication_headers(client, default_user_email, default_user_password),
+        headers=await get_authentication_headers(
+            client, default_user_email, default_user_password
+        ),
     )
-    assert response_for_test_user.json() == response_for_default_user.json(), (
-        "The graph data for the test user and the default user is not the same."
-    )
+    assert (
+        response_for_test_user.json() == response_for_default_user.json()
+    ), "The graph data for the test user and the default user is not the same."
     print("✅ The graph data for the test user and the default user is the same.")

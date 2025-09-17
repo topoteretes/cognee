@@ -39,8 +39,6 @@ def create_relational_engine(
         connection_string = f"sqlite+aiosqlite:///{db_path}/{db_name}"
 
     if db_provider == "postgres":
-        connection_string = (
-            f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
-        )
+        connection_string = f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
 
     return SQLAlchemyAdapter(connection_string)

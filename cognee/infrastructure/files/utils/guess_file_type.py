@@ -34,7 +34,9 @@ class TxtFileType(filetype.Type):
     EXTENSION = "txt"
 
     def __init__(self):
-        super(TxtFileType, self).__init__(mime=TxtFileType.MIME, extension=TxtFileType.EXTENSION)
+        super(TxtFileType, self).__init__(
+            mime=TxtFileType.MIME, extension=TxtFileType.EXTENSION
+        )
 
     def match(self, buf):
         """

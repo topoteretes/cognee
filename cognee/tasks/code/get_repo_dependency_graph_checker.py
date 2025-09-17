@@ -1,7 +1,9 @@
 import os
 import asyncio
 import argparse
-from cognee.tasks.repo_processor.get_repo_file_dependencies import get_repo_file_dependencies
+from cognee.tasks.repo_processor.get_repo_file_dependencies import (
+    get_repo_file_dependencies,
+)
 
 
 def main():

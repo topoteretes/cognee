@@ -2,7 +2,10 @@ import numpy as np
 import pytest
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
-from cognee.modules.graph.exceptions import InvalidDimensionsError, DimensionOutOfRangeError
+from cognee.modules.graph.exceptions import (
+    InvalidDimensionsError,
+    DimensionOutOfRangeError,
+)
 
 
 def test_node_initialization():

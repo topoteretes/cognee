@@ -19,13 +19,17 @@ class DefaultChunkEngine:
         self.chunk_overlap = chunk_overlap
 
     @staticmethod
-    def _split_text_with_regex(text: str, separator: str, keep_separator: bool) -> list[str]:
+    def _split_text_with_regex(
+        text: str, separator: str, keep_separator: bool
+    ) -> list[str]:
         # Now that we have the separator, split the text
         if separator:
             if keep_separator:
                 # The parentheses in the pattern keep the delimiters in the result.
                 _splits = re.split(f"({separator})", text)
-                splits = [_splits[i] + _splits[i + 1] for i in range(1, len(_splits), 2)]
+                splits = [
+                    _splits[i] + _splits[i + 1] for i in range(1, len(_splits), 2)
+                ]
                 if len(_splits) % 2 == 0:
                     splits += _splits[-1:]
                 splits = [_splits[0]] + splits
@@ -61,18 +65,27 @@ class DefaultChunkEngine:
 
         if self.chunk_strategy == ChunkStrategy.PARAGRAPH:
             chunked_data, chunk_number = self.chunk_data_by_paragraph(
-                source_data, chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap
+                source_data,
+                chunk_size=self.chunk_size,
+                chunk_overlap=self.chunk_overlap,
             )
         elif self.chunk_strategy == ChunkStrategy.SENTENCE:
             chunked_data, chunk_number = self.chunk_by_sentence(
-                source_data, chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap
+                source_data,
+                chunk_size=self.chunk_size,
+                chunk_overlap=self.chunk_overlap,
             )
         elif self.chunk_strategy == ChunkStrategy.EXACT:
             chunked_data, chunk_number = self.chunk_data_exact(
-                source_data, chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap
+                source_data,
+                chunk_size=self.chunk_size,
+                chunk_overlap=self.chunk_overlap,
             )
         else:
-            chunked_data, chunk_number = "Invalid chunk strategy.", [0, "Invalid chunk strategy."]
+            chunked_data, chunk_number = "Invalid chunk strategy.", [
+                0,
+                "Invalid chunk strategy.",
+            ]
 
         return chunked_data, chunk_number
 
@@ -129,7 +142,9 @@ class DefaultChunkEngine:
         for sentence in sentences:
             if len(sentence) > chunk_size:
                 chunks = self.chunk_data_exact(
-                    data_chunks=[sentence], chunk_size=chunk_size, chunk_overlap=chunk_overlap
+                    data_chunks=[sentence],
+                    chunk_size=chunk_size,
+                    chunk_overlap=chunk_overlap,
                 )
                 sentence_chunks.extend(chunks)
             else:
@@ -141,7 +156,9 @@ class DefaultChunkEngine:
             numbered_chunks.append(numbered_chunk)
         return sentence_chunks, numbered_chunks
 
-    def chunk_data_by_paragraph(self, data_chunks, chunk_size, chunk_overlap, bound=0.75):
+    def chunk_data_by_paragraph(
+        self, data_chunks, chunk_size, chunk_overlap, bound=0.75
+    ):
         """
         Chunk data based on paragraphs while considering overlaps and boundaries.
 
@@ -174,7 +191,9 @@ class DefaultChunkEngine:
             end_idx = min(start_idx + chunk_size, total_length)
 
             # Find the next paragraph index within the current chunk and bound
-            next_paragraph_index = data.find(chunk_splitter, start_idx + check_bound, end_idx)
+            next_paragraph_index = data.find(
+                chunk_splitter, start_idx + check_bound, end_idx
+            )
 
             # If a next paragraph index is found within the current chunk
             if next_paragraph_index != -1:

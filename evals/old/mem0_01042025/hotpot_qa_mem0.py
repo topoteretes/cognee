@@ -69,7 +69,9 @@ def answer_questions(
 
         # Retrieve relevant memories
         relevant_memories = memory.search(query=question, user_id=user_id, limit=5)
-        memories_str = "\n".join(f"- {entry['memory']}" for entry in relevant_memories["results"])
+        memories_str = "\n".join(
+            f"- {entry['memory']}" for entry in relevant_memories["results"]
+        )
 
         # Generate response
         system_prompt = f"You are a helpful AI assistant. Answer the question based on the provided context.\n\nContext:\n{memories_str}"
@@ -78,14 +80,20 @@ def answer_questions(
             {"role": "user", "content": question},
         ]
 
-        response = openai_client.chat.completions.create(model=model_name, messages=messages)
+        response = openai_client.chat.completions.create(
+            model=model_name, messages=messages
+        )
         answer = response.choices[0].message.content
 
         # Store the question and answer in memory
         messages.append({"role": "assistant", "content": answer})
         memory.add(messages, user_id=user_id)
 
-        result = {"question": question, "answer": answer, "golden_answer": expected_answer}
+        result = {
+            "question": question,
+            "answer": answer,
+            "golden_answer": expected_answer,
+        }
 
         if print_results:
             print(

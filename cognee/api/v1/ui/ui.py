@@ -24,7 +24,10 @@ def normalize_version_for_comparison(version: str) -> str:
     """
     # Remove common development suffixes for comparison
     normalized = (
-        version.replace("-local", "").replace("-dev", "").replace("-alpha", "").replace("-beta", "")
+        version.replace("-local", "")
+        .replace("-dev", "")
+        .replace("-alpha", "")
+        .replace("-beta", "")
     )
     return normalized.strip()
 
@@ -52,7 +55,9 @@ def get_frontend_download_info() -> Tuple[str, str]:
     clean_version = version.replace("-local", "")
 
     # Download from specific release tag to ensure version compatibility
-    download_url = f"https://github.com/topoteretes/cognee/archive/refs/tags/v{clean_version}.zip"
+    download_url = (
+        f"https://github.com/topoteretes/cognee/archive/refs/tags/v{clean_version}.zip"
+    )
 
     return download_url, version
 
@@ -82,13 +87,17 @@ def download_frontend_assets(force: bool = False) -> bool:
             current_normalized = normalize_version_for_comparison(current_version)
 
             if cached_normalized == current_normalized:
-                logger.debug(f"Frontend assets already cached for version {current_version}")
+                logger.debug(
+                    f"Frontend assets already cached for version {current_version}"
+                )
                 return True
             else:
                 logger.info(
                     f"Version mismatch detected: cached={cached_version}, current={current_version}"
                 )
-                logger.info("Updating frontend cache to match current cognee version...")
+                logger.info(
+                    "Updating frontend cache to match current cognee version..."
+                )
                 # Clear the old cached version
                 if frontend_dir.exists():
                     shutil.rmtree(frontend_dir)
@@ -146,7 +155,9 @@ def download_frontend_assets(force: bool = False) -> bool:
                     logger.error(
                         "Could not find cognee-frontend directory in downloaded release archive"
                     )
-                    logger.error("This might indicate a version mismatch or missing release.")
+                    logger.error(
+                        "This might indicate a version mismatch or missing release."
+                    )
                     return False
 
                 # Copy the cognee-frontend to our cache
@@ -164,7 +175,9 @@ def download_frontend_assets(force: bool = False) -> bool:
 
     except requests.exceptions.RequestException as e:
         if "404" in str(e):
-            logger.error(f"Release v{version.replace('-local', '')} not found on GitHub.")
+            logger.error(
+                f"Release v{version.replace('-local', '')} not found on GitHub."
+            )
             logger.error(
                 "This version might not have been released yet, or you're using a development version."
             )
@@ -188,7 +201,8 @@ def find_frontend_path() -> Optional[Path]:
 
     # First, try development paths (for contributors/developers)
     dev_search_paths = [
-        current_file.parents[4] / "cognee-frontend",  # from cognee/api/v1/ui/ui.py to project root
+        current_file.parents[4]
+        / "cognee-frontend",  # from cognee/api/v1/ui/ui.py to project root
         current_file.parents[3] / "cognee-frontend",  # fallback path
         current_file.parents[2] / "cognee-frontend",  # another fallback
     ]
@@ -216,7 +230,9 @@ def check_node_npm() -> tuple[bool, str]:
     """
     try:
         # Check Node.js
-        result = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            ["node", "--version"], capture_output=True, text=True, timeout=10
+        )
         if result.returncode != 0:
             return False, "Node.js is not installed or not in PATH"
 
@@ -224,7 +240,9 @@ def check_node_npm() -> tuple[bool, str]:
         logger.debug(f"Found Node.js version: {node_version}")
 
         # Check npm
-        result = subprocess.run(["npm", "--version"], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            ["npm", "--version"], capture_output=True, text=True, timeout=10
+        )
         if result.returncode != 0:
             return False, "npm is not installed or not in PATH"
 
@@ -236,7 +254,10 @@ def check_node_npm() -> tuple[bool, str]:
     except subprocess.TimeoutExpired:
         return False, "Timeout checking Node.js/npm installation"
     except FileNotFoundError:
-        return False, "Node.js/npm not found. Please install Node.js from https://nodejs.org/"
+        return (
+            False,
+            "Node.js/npm not found. Please install Node.js from https://nodejs.org/",
+        )
     except Exception as e:
         return False, f"Error checking Node.js/npm: {str(e)}"
 
@@ -318,7 +339,11 @@ def prompt_user_for_download() -> bool:
         print("• This is a one-time setup per cognee version")
         print("\nThe frontend will then be available offline for future use.")
 
-        response = input("\nWould you like to download the frontend now? (y/N): ").strip().lower()
+        response = (
+            input("\nWould you like to download the frontend now? (y/N): ")
+            .strip()
+            .lower()
+        )
         return response in ["y", "yes"]
     except (KeyboardInterrupt, EOFError):
         print("\nOperation cancelled by user.")
@@ -408,7 +433,9 @@ def start_ui(
                 logger.error("Backend server failed to start - process exited early")
                 return None
 
-            logger.info(f"✓ Backend API started at http://{backend_host}:{backend_port}")
+            logger.info(
+                f"✓ Backend API started at http://{backend_host}:{backend_port}"
+            )
 
         except Exception as e:
             logger.error(f"Failed to start backend server: {str(e)}")
@@ -418,7 +445,9 @@ def start_ui(
     frontend_path = find_frontend_path()
 
     if not frontend_path:
-        logger.info("Frontend not found locally. This is normal for pip-installed cognee.")
+        logger.info(
+            "Frontend not found locally. This is normal for pip-installed cognee."
+        )
 
         # Offer to download the frontend
         if auto_download or prompt_user_for_download():
@@ -434,14 +463,18 @@ def start_ui(
                 return None
         else:
             logger.info("Frontend download declined. UI functionality not available.")
-            logger.info("You can still use all other cognee features without the web interface.")
+            logger.info(
+                "You can still use all other cognee features without the web interface."
+            )
             return None
 
     # Check Node.js and npm
     node_available, node_message = check_node_npm()
     if not node_available:
         logger.error(f"Cannot start UI: {node_message}")
-        logger.error("Please install Node.js from https://nodejs.org/ to use the UI functionality")
+        logger.error(
+            "Please install Node.js from https://nodejs.org/ to use the UI functionality"
+        )
         return None
 
     logger.debug(f"Environment check passed: {node_message}")

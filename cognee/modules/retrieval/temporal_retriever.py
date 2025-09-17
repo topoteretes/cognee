@@ -72,9 +72,13 @@ class TemporalRetriever(GraphCompletionRetriever):
         else:
             base_directory = None
 
-        system_prompt = LLMGateway.render_prompt(prompt_path, {}, base_directory=base_directory)
+        system_prompt = LLMGateway.render_prompt(
+            prompt_path, {}, base_directory=base_directory
+        )
 
-        interval = await LLMGateway.acreate_structured_output(query, system_prompt, QueryInterval)
+        interval = await LLMGateway.acreate_structured_output(
+            query, system_prompt, QueryInterval
+        )
 
         time_from = interval.starts_at
         time_to = interval.ends_at
@@ -104,7 +108,9 @@ class TemporalRetriever(GraphCompletionRetriever):
         triplets = []
 
         if time_from and time_to:
-            ids = await graph_engine.collect_time_ids(time_from=time_from, time_to=time_to)
+            ids = await graph_engine.collect_time_ids(
+                time_from=time_from, time_to=time_to
+            )
         elif time_from:
             ids = await graph_engine.collect_time_ids(time_from=time_from)
         elif time_to:
@@ -132,11 +138,15 @@ class TemporalRetriever(GraphCompletionRetriever):
             collection_name="Event_name", query_vector=query_vector, limit=0
         )
 
-        top_k_events = await self.filter_top_k_events(relevant_events, vector_search_results)
+        top_k_events = await self.filter_top_k_events(
+            relevant_events, vector_search_results
+        )
 
         return self.descriptions_to_string(top_k_events)
 
-    async def get_completion(self, query: str, context: Optional[str] = None) -> List[str]:
+    async def get_completion(
+        self, query: str, context: Optional[str] = None
+    ) -> List[str]:
         """Generates a response using the query and optional context."""
         if not context:
             context = await self.get_context(query=query)

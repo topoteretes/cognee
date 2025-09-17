@@ -9,7 +9,9 @@ from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 
 async def main(repo_path, include_docs):
     run_status = False
-    async for run_status in run_code_graph_pipeline(repo_path, include_docs=include_docs):
+    async for run_status in run_code_graph_pipeline(
+        repo_path, include_docs=include_docs
+    ):
         run_status = run_status
 
     # Test CODE search
@@ -24,7 +26,9 @@ async def main(repo_path, include_docs):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repo_path", type=str, required=True, help="Path to the repository")
+    parser.add_argument(
+        "--repo_path", type=str, required=True, help="Path to the repository"
+    )
     parser.add_argument(
         "--include_docs",
         type=lambda x: x.lower() in ("true", "1"),

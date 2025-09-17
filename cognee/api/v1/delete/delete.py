@@ -83,7 +83,9 @@ async def delete(
         ).scalar_one_or_none()
 
         if dataset_data_link is None:
-            raise DocumentNotFoundError(f"Data {data_id} not found in dataset {dataset_id}")
+            raise DocumentNotFoundError(
+                f"Data {data_id} not found in dataset {dataset_id}"
+            )
 
         # Get the content hash for deletion
         data_id = str(data_point.id)
@@ -92,7 +94,9 @@ async def delete(
     return await delete_single_document(data_id, dataset.id, mode)
 
 
-async def delete_single_document(data_id: str, dataset_id: UUID = None, mode: str = "soft"):
+async def delete_single_document(
+    data_id: str, dataset_id: UUID = None, mode: str = "soft"
+):
     """Delete a single document by its content hash."""
 
     # Delete from graph database
@@ -151,7 +155,9 @@ async def delete_single_document(data_id: str, dataset_id: UUID = None, mode: st
         # Update graph_relationship_ledger with deleted_at timestamps
         from sqlalchemy import update, and_, or_
         from datetime import datetime
-        from cognee.modules.data.models.graph_relationship_ledger import GraphRelationshipLedger
+        from cognee.modules.data.models.graph_relationship_ledger import (
+            GraphRelationshipLedger,
+        )
 
         update_stmt = (
             update(GraphRelationshipLedger)
@@ -193,7 +199,9 @@ async def delete_single_document(data_id: str, dataset_id: UUID = None, mode: st
 
         # Check if the document is in any other datasets
         remaining_datasets = (
-            await session.execute(select(DatasetData).filter(DatasetData.data_id == doc_id))
+            await session.execute(
+                select(DatasetData).filter(DatasetData.data_id == doc_id)
+            )
         ).scalar_one_or_none()
 
         # If the document is not in any other datasets, delete it from the data table
@@ -220,7 +228,9 @@ async def delete_document_subgraph(document_id: str, mode: str = "soft"):
     graph_db = await get_graph_engine()
     subgraph = await graph_db.get_document_subgraph(document_id)
     if not subgraph:
-        raise DocumentSubgraphNotFoundError(f"Document not found with id: {document_id}")
+        raise DocumentSubgraphNotFoundError(
+            f"Document not found with id: {document_id}"
+        )
 
     # Delete in the correct order to maintain graph integrity
     deletion_order = [
@@ -252,14 +262,18 @@ async def delete_document_subgraph(document_id: str, mode: str = "soft"):
         for node in degree_one_entity_nodes:
             await graph_db.delete_node(node["id"])
             deleted_node_ids.append(node["id"])
-            deleted_counts["degree_one_entities"] = deleted_counts.get("degree_one_entities", 0) + 1
+            deleted_counts["degree_one_entities"] = (
+                deleted_counts.get("degree_one_entities", 0) + 1
+            )
 
         # Get and delete degree one entity types
         degree_one_entity_types = await graph_db.get_degree_one_nodes("EntityType")
         for node in degree_one_entity_types:
             await graph_db.delete_node(node["id"])
             deleted_node_ids.append(node["id"])
-            deleted_counts["degree_one_types"] = deleted_counts.get("degree_one_types", 0) + 1
+            deleted_counts["degree_one_types"] = (
+                deleted_counts.get("degree_one_types", 0) + 1
+            )
 
     return {
         "status": "success",

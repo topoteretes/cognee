@@ -38,7 +38,11 @@ class DebugAction(argparse.Action):
         help: str = None,
     ) -> None:
         super(DebugAction, self).__init__(
-            option_strings=option_strings, dest=dest, default=default, nargs=0, help=help
+            option_strings=option_strings,
+            dest=dest,
+            default=default,
+            nargs=0,
+            help=help,
         )
 
     def __call__(
@@ -62,7 +66,11 @@ class UiAction(argparse.Action):
         help: str = None,
     ) -> None:
         super(UiAction, self).__init__(
-            option_strings=option_strings, dest=dest, default=default, nargs=0, help=help
+            option_strings=option_strings,
+            dest=dest,
+            default=default,
+            nargs=0,
+            help=help,
         )
 
     def __call__(
@@ -144,7 +152,9 @@ def _create_parser() -> tuple[argparse.ArgumentParser, Dict[str, SupportsCliComm
         command_parser = subparsers.add_parser(
             command.command_string,
             help=command.help_string,
-            description=command.description if hasattr(command, "description") else None,
+            description=(
+                command.description if hasattr(command, "description") else None
+            ),
         )
         command.configure_parser(command_parser)
         installed_commands[command.command_string] = command
@@ -223,7 +233,9 @@ def main() -> int:
                     # Keep the server running
                     import time
 
-                    while server_process.poll() is None:  # While process is still running
+                    while (
+                        server_process.poll() is None
+                    ):  # While process is still running
                         time.sleep(1)
                 except KeyboardInterrupt:
                     # This shouldn't happen now due to signal handler, but kept for safety
@@ -231,7 +243,9 @@ def main() -> int:
 
                 return 0
             else:
-                fmt.error("Failed to start UI server. Check the logs above for details.")
+                fmt.error(
+                    "Failed to start UI server. Check the logs above for details."
+                )
                 signal_handler(signal.SIGTERM, None)
                 return 1
 
@@ -260,7 +274,9 @@ def main() -> int:
             if raiseable_exception:
                 fmt.error(str(ex))
 
-            fmt.note(f"Please refer to our docs at '{docs_url}' for further assistance.")
+            fmt.note(
+                f"Please refer to our docs at '{docs_url}' for further assistance."
+            )
 
             if debug.is_debug_enabled() and raiseable_exception:
                 raise raiseable_exception

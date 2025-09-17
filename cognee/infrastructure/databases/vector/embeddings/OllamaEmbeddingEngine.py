@@ -6,7 +6,9 @@ import os
 
 import aiohttp.http_exceptions
 
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
+    EmbeddingEngine,
+)
 from cognee.infrastructure.llm.tokenizer.HuggingFace import (
     HuggingFaceTokenizer,
 )
@@ -86,7 +88,9 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         if self.mock:
             return [[0.0] * self.dimensions for _ in text]
 
-        embeddings = await asyncio.gather(*[self._get_embedding(prompt) for prompt in text])
+        embeddings = await asyncio.gather(
+            *[self._get_embedding(prompt) for prompt in text]
+        )
         return embeddings
 
     @embedding_sleep_and_retry_async()
@@ -94,11 +98,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         """
         Internal method to call the Ollama embeddings endpoint for a single prompt.
         """
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "input": prompt
-        }
+        payload = {"model": self.model, "prompt": prompt, "input": prompt}
         headers = {}
         api_key = os.getenv("LLM_API_KEY")
         if api_key:
@@ -133,7 +133,8 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         """
         logger.debug("Loading HuggingfaceTokenizer for OllamaEmbeddingEngine...")
         tokenizer = HuggingFaceTokenizer(
-            model=self.huggingface_tokenizer_name, max_completion_tokens=self.max_completion_tokens
+            model=self.huggingface_tokenizer_name,
+            max_completion_tokens=self.max_completion_tokens,
         )
         logger.debug("Tokenizer loaded for OllamaEmbeddingEngine")
         return tokenizer

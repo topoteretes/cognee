@@ -3,7 +3,9 @@ from fastapi import Depends
 from cognee.modules.users.get_fastapi_users import get_fastapi_users
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.modules.users.authentication.get_client_auth_backend import get_client_auth_backend
+from cognee.modules.users.authentication.get_client_auth_backend import (
+    get_client_auth_backend,
+)
 
 
 def get_auth_router():

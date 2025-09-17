@@ -7,8 +7,13 @@ from fastapi.responses import JSONResponse
 from cognee.api.DTO import InDTO
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
-from cognee.modules.sync.methods import get_running_sync_operations_for_user, get_sync_operation
+from cognee.modules.users.permissions.methods import (
+    get_specific_user_permission_datasets,
+)
+from cognee.modules.sync.methods import (
+    get_running_sync_operations_for_user,
+    get_sync_operation,
+)
 from cognee.shared.utils import send_telemetry
 from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.sync import SyncResponse
@@ -99,9 +104,11 @@ def get_sync_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "POST /v1/sync",
-                "dataset_ids": [str(id) for id in request.dataset_ids]
-                if request.dataset_ids
-                else "*",
+                "dataset_ids": (
+                    [str(id) for id in request.dataset_ids]
+                    if request.dataset_ids
+                    else "*"
+                ),
             },
         )
 
@@ -148,11 +155,14 @@ def get_sync_router() -> APIRouter:
             return JSONResponse(status_code=403, content={"error": str(e)})
         except ConnectionError as e:
             return JSONResponse(
-                status_code=409, content={"error": f"Cloud service unavailable: {str(e)}"}
+                status_code=409,
+                content={"error": f"Cloud service unavailable: {str(e)}"},
             )
         except Exception as e:
             logger.error(f"Cloud sync operation failed: {str(e)}")
-            return JSONResponse(status_code=409, content={"error": "Cloud sync operation failed."})
+            return JSONResponse(
+                status_code=409, content={"error": "Cloud sync operation failed."}
+            )
 
     @router.get("/status")
     async def get_sync_status_overview(
@@ -225,9 +235,11 @@ def get_sync_router() -> APIRouter:
                     "dataset_ids": latest_sync.dataset_ids,
                     "dataset_names": latest_sync.dataset_names,
                     "progress_percentage": latest_sync.progress_percentage,
-                    "created_at": latest_sync.created_at.isoformat()
-                    if latest_sync.created_at
-                    else None,
+                    "created_at": (
+                        latest_sync.created_at.isoformat()
+                        if latest_sync.created_at
+                        else None
+                    ),
                 }
 
             return response

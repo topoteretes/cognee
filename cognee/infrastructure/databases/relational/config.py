@@ -27,7 +27,9 @@ class RelationalConfig(BaseSettings):
         # Set file path based on graph database provider if no file path is provided
         if not values.db_path:
             base_config = get_base_config()
-            databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
+            databases_directory_path = os.path.join(
+                base_config.system_root_directory, "databases"
+            )
             values.db_path = databases_directory_path
 
         return values

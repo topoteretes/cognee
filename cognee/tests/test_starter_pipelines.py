@@ -9,16 +9,22 @@ class TestPipelines(unittest.TestCase):
 
     def setUp(self):
         # Ensure we're in the correct directory
-        self.project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+        self.project_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "../..")
+        )
         self.pipelines_dir = os.path.join(self.project_root, "src", "pipelines")
 
         # Required environment variables
         self.required_env_vars = ["LLM_API_KEY", "EMBEDDING_API_KEY"]
 
         # Check if required environment variables are set
-        missing_vars = [var for var in self.required_env_vars if not os.environ.get(var)]
+        missing_vars = [
+            var for var in self.required_env_vars if not os.environ.get(var)
+        ]
         if missing_vars:
-            self.skipTest(f"Missing required environment variables: {', '.join(missing_vars)}")
+            self.skipTest(
+                f"Missing required environment variables: {', '.join(missing_vars)}"
+            )
 
     def _run_pipeline(self, script_name):
         """Helper method to run a pipeline script and return the result."""

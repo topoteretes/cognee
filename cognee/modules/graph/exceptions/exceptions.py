@@ -44,5 +44,7 @@ class DimensionOutOfRangeError(CogneeValidationError):
         name: str = "DimensionOutOfRangeError",
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
-        message = f"Dimension {dimension} is out of range. Valid range is 0 to {max_index}."
+        message = (
+            f"Dimension {dimension} is out of range. Valid range is 0 to {max_index}."
+        )
         super().__init__(message, name, status_code)

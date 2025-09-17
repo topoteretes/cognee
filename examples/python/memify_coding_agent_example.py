@@ -43,7 +43,9 @@ async def main():
     print(f"Coding rules conversation with manager: {coding_rules_chat_from_manager}")
 
     # Add the text, and make it available for cognify
-    await cognee.add([coding_rules_chat_from_principal_engineer, coding_rules_chat_from_manager])
+    await cognee.add(
+        [coding_rules_chat_from_principal_engineer, coding_rules_chat_from_manager]
+    )
     print("Text added successfully.\n")
 
     # Use LLMs and cognee to create knowledge graph
@@ -52,10 +54,14 @@ async def main():
 
     # Visualize graph after cognification
     file_path = os.path.join(
-        pathlib.Path(__file__).parent, ".artifacts", "graph_visualization_only_cognify.html"
+        pathlib.Path(__file__).parent,
+        ".artifacts",
+        "graph_visualization_only_cognify.html",
     )
     await visualize_graph(file_path)
-    print(f"Open file to see graph visualization only after cognification: {file_path}\n")
+    print(
+        f"Open file to see graph visualization only after cognification: {file_path}\n"
+    )
 
     # After graph is created, create a second pipeline that will go through the graph and enchance it with specific
     # coding rule nodes
@@ -94,10 +100,14 @@ async def main():
 
     # Visualize new graph with added memify context
     file_path = os.path.join(
-        pathlib.Path(__file__).parent, ".artifacts", "graph_visualization_after_memify.html"
+        pathlib.Path(__file__).parent,
+        ".artifacts",
+        "graph_visualization_after_memify.html",
     )
     await visualize_graph(file_path)
-    print(f"\nOpen file to see graph visualization after memify enhancment: {file_path}")
+    print(
+        f"\nOpen file to see graph visualization after memify enhancment: {file_path}"
+    )
 
 
 if __name__ == "__main__":

@@ -162,7 +162,9 @@ async def pipeline_method():
     print("------NEIGHBORING EDGES-------")
     center_node = nodes[2]
     neighbouring_edges = await na_adapter.get_edges(str(center_node.id))
-    print(f'found {len(neighbouring_edges)} edges neighbouring node "{center_node.name}"')
+    print(
+        f'found {len(neighbouring_edges)} edges neighbouring node "{center_node.name}"'
+    )
     for edge in neighbouring_edges:
         print(edge)
 
@@ -189,7 +191,9 @@ async def pipeline_method():
 
     print("------SUBGRAPH-------")
     node_names = ["neptune analytics", "amazon neptune database"]
-    subgraph_nodes, subgraph_edges = await na_adapter.get_nodeset_subgraph(Entity, node_names)
+    subgraph_nodes, subgraph_edges = await na_adapter.get_nodeset_subgraph(
+        Entity, node_names
+    )
     print(
         f"found {len(subgraph_nodes)} nodes and  {len(subgraph_edges)} edges in the subgraph around {node_names}"
     )
@@ -271,7 +275,9 @@ async def misc_methods():
     print("------Fetch and Remove connections (Predecessors)-------")
     # Fetch test edge
     (src_id, dest_id, relationship) = edges[0]
-    nodes_predecessors = await na_adapter.get_predecessors(node_id=dest_id, edge_label=relationship)
+    nodes_predecessors = await na_adapter.get_predecessors(
+        node_id=dest_id, edge_label=relationship
+    )
     assert len(nodes_predecessors) > 0
 
     await na_adapter.remove_connection_to_predecessors_of(
@@ -287,10 +293,14 @@ async def misc_methods():
     _, edges_suc = await na_adapter.get_graph_data()
     (src_id, dest_id, relationship, _) = edges_suc[0]
 
-    nodes_successors = await na_adapter.get_successors(node_id=src_id, edge_label=relationship)
+    nodes_successors = await na_adapter.get_successors(
+        node_id=src_id, edge_label=relationship
+    )
     assert len(nodes_successors) > 0
 
-    await na_adapter.remove_connection_to_successors_of(node_ids=[dest_id], edge_label=relationship)
+    await na_adapter.remove_connection_to_successors_of(
+        node_ids=[dest_id], edge_label=relationship
+    )
     nodes_successors_after = await na_adapter.get_successors(
         node_id=src_id, edge_label=relationship
     )

@@ -30,7 +30,9 @@ async def main():
 
     print("Running cognify to create knowledge graph...\n")
     print("Cognify process steps:")
-    print("1. Classifying the document: Determining the type and category of the input text.")
+    print(
+        "1. Classifying the document: Determining the type and category of the input text."
+    )
     print(
         "2. Checking permissions: Ensuring the user has the necessary rights to process the text."
     )
@@ -41,7 +43,9 @@ async def main():
     print(
         "5. Generating knowledge graph: Extracting entities and relationships to form a knowledge graph."
     )
-    print("6. Summarizing text: Creating concise summaries of the content for quick insights.\n")
+    print(
+        "6. Summarizing text: Creating concise summaries of the content for quick insights.\n"
+    )
 
     # Use LLMs and cognee to create knowledge graph
     await cognee.cognify()
@@ -50,7 +54,9 @@ async def main():
     query_text = "Tell me about NLP"
     print(f"Searching cognee for insights with query: '{query_text}'")
     # Query cognee for insights on the added text
-    search_results = await cognee.search(query_type=SearchType.INSIGHTS, query_text=query_text)
+    search_results = await cognee.search(
+        query_type=SearchType.INSIGHTS, query_text=query_text
+    )
 
     print("Search results:")
     # Display results

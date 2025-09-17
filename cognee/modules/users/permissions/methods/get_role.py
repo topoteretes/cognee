@@ -14,11 +14,17 @@ async def get_role(tenant_id: UUID, role_name: str):
     async with db_engine.get_async_session() as session:
         try:
             result = await session.execute(
-                select(Role).where(Role.name == role_name).where(Role.tenant_id == tenant_id)
+                select(Role)
+                .where(Role.name == role_name)
+                .where(Role.tenant_id == tenant_id)
             )
             role = result.unique().scalar_one()
             if not role:
-                raise RoleNotFoundError(message=f"Could not find {role_name} for given tenant")
+                raise RoleNotFoundError(
+                    message=f"Could not find {role_name} for given tenant"
+                )
             return role
         except sqlalchemy.exc.NoResultFound:
-            raise RoleNotFoundError(message=f"Could not find {role_name} for given tenant")
+            raise RoleNotFoundError(
+                message=f"Could not find {role_name} for given tenant"
+            )

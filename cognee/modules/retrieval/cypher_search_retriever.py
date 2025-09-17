@@ -2,7 +2,10 @@ from typing import Any, Optional
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.retrieval.exceptions import SearchTypeNotSupported, CypherSearchError
+from cognee.modules.retrieval.exceptions import (
+    SearchTypeNotSupported,
+    CypherSearchError,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("CypherSearchRetriever")

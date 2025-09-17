@@ -87,7 +87,9 @@ class TestCogneeServerStart(unittest.TestCase):
 
         payload = {"datasets": [dataset_name]}
 
-        add_response = requests.post(url, headers=headers, data=form_data, files=file, timeout=50)
+        add_response = requests.post(
+            url, headers=headers, data=form_data, files=file, timeout=50
+        )
         if add_response.status_code not in [200, 201, 409]:
             add_response.raise_for_status()
 
@@ -98,7 +100,9 @@ class TestCogneeServerStart(unittest.TestCase):
             "Content-Type": "application/json",
         }
 
-        cognify_response = requests.post(url, headers=headers, json=payload, timeout=150)
+        cognify_response = requests.post(
+            url, headers=headers, json=payload, timeout=150
+        )
         if cognify_response.status_code not in [200, 201, 409]:
             cognify_response.raise_for_status()
 

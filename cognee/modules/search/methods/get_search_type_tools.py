@@ -17,7 +17,9 @@ from cognee.modules.retrieval.coding_rules_retriever import CodingRulesRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
-from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_completion_cot_retriever import (
+    GraphCompletionCotRetriever,
+)
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
 )

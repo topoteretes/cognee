@@ -1,6 +1,11 @@
 import modal
 import asyncio
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from distributed.app import app
 from distributed.modal_image import image
@@ -15,7 +20,9 @@ logger = get_logger("graph_saving_worker")
 
 
 class GraphDatabaseDeadlockError(Exception):
-    message = "A deadlock occurred while trying to add data points to the vector database."
+    message = (
+        "A deadlock occurred while trying to add data points to the vector database."
+    )
 
 
 def is_deadlock_error(error):
@@ -57,7 +64,9 @@ async def graph_saving_worker():
                 continue
 
             if len(nodes_and_edges) == 0:
-                print("Finished processing all nodes and edges; stopping graph engine queue.")
+                print(
+                    "Finished processing all nodes and edges; stopping graph engine queue."
+                )
                 return True
 
             if len(nodes_and_edges) == 2:

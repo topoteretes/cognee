@@ -52,12 +52,16 @@ async def main():
     # schedule both cognify calls concurrently
     task1 = asyncio.create_task(
         cognee.cognify(
-            ["test1"], vector_db_config=task_1_config, graph_db_config=task_1_graph_config
+            ["test1"],
+            vector_db_config=task_1_config,
+            graph_db_config=task_1_graph_config,
         )
     )
     task2 = asyncio.create_task(
         cognee.cognify(
-            ["test2"], vector_db_config=task_2_config, graph_db_config=task_2_graph_config
+            ["test2"],
+            vector_db_config=task_2_config,
+            graph_db_config=task_2_graph_config,
         )
     )
 

@@ -9,7 +9,9 @@ from typing import Sequence, Union
 
 from alembic import op
 
-from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engine
+from cognee.infrastructure.databases.relational.get_relational_engine import (
+    get_relational_engine,
+)
 from cognee.modules.pipelines.models.PipelineRun import PipelineRun, PipelineRunStatus
 
 

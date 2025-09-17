@@ -21,7 +21,11 @@ def get_parsed_path(file_path: str) -> str:
                 # Remove leading slash from Windows paths like /C:/Users/...
                 # but handle UNC paths like //server/share correctly
                 parsed_path = parsed_url.path
-                if parsed_path.startswith("/") and len(parsed_path) > 1 and parsed_path[2] == ":":
+                if (
+                    parsed_path.startswith("/")
+                    and len(parsed_path) > 1
+                    and parsed_path[2] == ":"
+                ):
                     # This is a Windows drive path like /C:/Users/...
                     parsed_path = parsed_path[1:]
                 elif parsed_path.startswith("///"):
@@ -58,7 +62,9 @@ class LocalFileStorage(Storage):
     def __init__(self, storage_path: str):
         self.storage_path = storage_path
 
-    def store(self, file_path: str, data: Union[BinaryIO, str], overwrite: bool = False) -> str:
+    def store(
+        self, file_path: str, data: Union[BinaryIO, str], overwrite: bool = False
+    ) -> str:
         """
         Store data into a specified file path. The data can be either a string or a binary
         stream.

@@ -87,7 +87,8 @@ class TestInsightsRetriever:
     @pytest.mark.asyncio
     async def test_insights_context_complex(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_insights_context_complex"
+            pathlib.Path(__file__).parent,
+            ".cognee_system/test_insights_context_complex",
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
@@ -222,16 +223,20 @@ class TestInsightsRetriever:
 
         context = await retriever.get_context("Christina")
 
-        assert context[0][0]["name"] == "Christina Mayer", "Failed to get Christina Mayer"
+        assert (
+            context[0][0]["name"] == "Christina Mayer"
+        ), "Failed to get Christina Mayer"
 
     @pytest.mark.asyncio
     async def test_insights_context_on_empty_graph(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_insights_context_on_empty_graph"
+            pathlib.Path(__file__).parent,
+            ".cognee_system/test_insights_context_on_empty_graph",
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_insights_context_on_empty_graph"
+            pathlib.Path(__file__).parent,
+            ".data_storage/test_insights_context_on_empty_graph",
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -245,7 +250,9 @@ class TestInsightsRetriever:
 
         vector_engine = get_vector_engine()
         await vector_engine.create_collection("Entity_name", payload_schema=Entity)
-        await vector_engine.create_collection("EntityType_name", payload_schema=EntityType)
+        await vector_engine.create_collection(
+            "EntityType_name", payload_schema=EntityType
+        )
 
         context = await retriever.get_context("Christina Mayer")
         assert context == [], "Returned context should be empty on an empty graph"

@@ -51,7 +51,8 @@ def print_help() -> None:
     commands = get_command_info()
     command_list = "\n".join(f"    {cmd:<12} {desc}" for cmd, desc in commands.items())
 
-    print(f"""
+    print(
+        f"""
 usage: cognee [-h] [--version] [--debug] {{{"|".join(commands.keys())}}} ...
 
 Cognee CLI - Manage your knowledge graphs and cognitive processing pipelines.
@@ -66,7 +67,8 @@ Available commands:
 {command_list}
 
 For more information on each command, use: cognee <command> --help
-""")
+"""
+    )
 
 
 def main() -> int:

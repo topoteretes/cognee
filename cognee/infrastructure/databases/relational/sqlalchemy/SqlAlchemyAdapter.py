@@ -68,7 +68,9 @@ class SQLAlchemyAdapter:
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
     async def push_to_s3(self) -> None:
-        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_db_file"):
+        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(
+            self, "temp_db_file"
+        ):
             from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
             s3_file_storage = S3FileStorage("")
@@ -118,11 +120,15 @@ class SQLAlchemyAdapter:
         from cognee.modules.data.models import Dataset
 
         async with self.get_async_session() as session:
-            result = await session.execute(select(Dataset).options(joinedload(Dataset.data)))
+            result = await session.execute(
+                select(Dataset).options(joinedload(Dataset.data))
+            )
             datasets = result.unique().scalars().all()
             return datasets
 
-    async def create_table(self, schema_name: str, table_name: str, table_config: list[dict]):
+    async def create_table(
+        self, schema_name: str, table_name: str, table_config: list[dict]
+    ):
         """
         Create a table with the specified schema and configuration if it does not exist.
 
@@ -136,7 +142,9 @@ class SQLAlchemyAdapter:
         """
         fields_query_parts = [f"{item['name']} {item['type']}" for item in table_config]
         async with self.engine.begin() as connection:
-            await connection.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema_name};"))
+            await connection.execute(
+                text(f"CREATE SCHEMA IF NOT EXISTS {schema_name};")
+            )
             await connection.execute(
                 text(
                     f'CREATE TABLE IF NOT EXISTS {schema_name}."{table_name}" ({", ".join(fields_query_parts)});'
@@ -144,7 +152,9 @@ class SQLAlchemyAdapter:
             )
             await connection.close()
 
-    async def delete_table(self, table_name: str, schema_name: Optional[str] = "public"):
+    async def delete_table(
+        self, table_name: str, schema_name: Optional[str] = "public"
+    ):
         """
         Delete a table from the specified schema, if it exists.
 
@@ -257,12 +267,16 @@ class SQLAlchemyAdapter:
                 # so must be enabled for each database connection/session separately.
                 await session.execute(text("PRAGMA foreign_keys = ON;"))
 
-                await session.execute(TableModel.delete().where(TableModel.c.id == data_id))
+                await session.execute(
+                    TableModel.delete().where(TableModel.c.id == data_id)
+                )
                 await session.commit()
         else:
             async with self.get_async_session() as session:
                 TableModel = await self.get_table(table_name, schema_name)
-                await session.execute(TableModel.delete().where(TableModel.c.id == data_id))
+                await session.execute(
+                    TableModel.delete().where(TableModel.c.id == data_id)
+                )
                 await session.commit()
 
     async def delete_data_entity(self, data_id: UUID):
@@ -281,7 +295,9 @@ class SQLAlchemyAdapter:
                 await session.execute(text("PRAGMA foreign_keys = ON;"))
 
             try:
-                data_entity = (await session.scalars(select(Data).where(Data.id == data_id))).one()
+                data_entity = (
+                    await session.scalars(select(Data).where(Data.id == data_id))
+                ).one()
             except (ValueError, NoResultFound) as e:
                 raise EntityNotFoundError(message=f"Entity not found: {str(e)}")
 
@@ -303,9 +319,13 @@ class SQLAlchemyAdapter:
                     storage_config["data_root_directory"]
                     in raw_data_location_entities[0].raw_data_location
                 ):
-                    file_storage = get_file_storage(storage_config["data_root_directory"])
+                    file_storage = get_file_storage(
+                        storage_config["data_root_directory"]
+                    )
 
-                    file_path = os.path.basename(raw_data_location_entities[0].raw_data_location)
+                    file_path = os.path.basename(
+                        raw_data_location_entities[0].raw_data_location
+                    )
 
                     if await file_storage.file_exists(file_path):
                         await file_storage.remove(file_path)
@@ -316,7 +336,9 @@ class SQLAlchemyAdapter:
             await session.execute(delete(Data).where(Data.id == data_id))
             await session.commit()
 
-    async def get_table(self, table_name: str, schema_name: Optional[str] = "public") -> Table:
+    async def get_table(
+        self, table_name: str, schema_name: Optional[str] = "public"
+    ) -> Table:
         """
         Load a table dynamically using the specified name and schema information.
 
@@ -339,7 +361,9 @@ class SQLAlchemyAdapter:
                 if table_name in Base.metadata.tables:
                     return Base.metadata.tables[table_name]
                 else:
-                    raise EntityNotFoundError(message=f"Table '{table_name}' not found.")
+                    raise EntityNotFoundError(
+                        message=f"Table '{table_name}' not found."
+                    )
             else:
                 # Create a MetaData instance to load table information
                 metadata = MetaData()
@@ -350,7 +374,9 @@ class SQLAlchemyAdapter:
                 # Check if table is in list of tables for the given schema
                 if full_table_name in metadata.tables:
                     return metadata.tables[full_table_name]
-                raise EntityNotFoundError(message=f"Table '{full_table_name}' not found.")
+                raise EntityNotFoundError(
+                    message=f"Table '{full_table_name}' not found."
+                )
 
     async def get_table_names(self) -> List[str]:
         """
@@ -366,14 +392,18 @@ class SQLAlchemyAdapter:
             if self.engine.dialect.name == "sqlite":
                 # Use a new MetaData instance to reflect all tables
                 metadata = MetaData()
-                await connection.run_sync(metadata.reflect)  # Reflect the entire database
+                await connection.run_sync(
+                    metadata.reflect
+                )  # Reflect the entire database
                 table_names = list(metadata.tables.keys())  # Get table names
             else:
                 schema_list = await self.get_schema_list()
                 metadata = MetaData()
                 for schema_name in schema_list:
                     await connection.run_sync(metadata.reflect, schema=schema_name)
-                    table_names.extend(metadata.tables.keys())  # Append table names from schema
+                    table_names.extend(
+                        metadata.tables.keys()
+                    )  # Append table names from schema
                     metadata.clear()  # Clear metadata for the next schema
 
         return table_names
@@ -399,9 +429,11 @@ class SQLAlchemyAdapter:
             if filters:
                 filter_conditions = " AND ".join(
                     [
-                        f"{key} IN ({', '.join([f':{key}{i}' for i in range(len(value))])})"
-                        if isinstance(value, list)
-                        else f"{key} = :{key}"
+                        (
+                            f"{key} IN ({', '.join([f':{key}{i}' for i in range(len(value))])})"
+                            if isinstance(value, list)
+                            else f"{key} = :{key}"
+                        )
                         for key, value in filters.items()
                     ]
                 )
@@ -474,8 +506,12 @@ class SQLAlchemyAdapter:
         """
         async with self.engine.begin() as connection:
             try:
-                await connection.execute(text("DROP TABLE IF EXISTS group_permission CASCADE"))
-                await connection.execute(text("DROP TABLE IF EXISTS permissions CASCADE"))
+                await connection.execute(
+                    text("DROP TABLE IF EXISTS group_permission CASCADE")
+                )
+                await connection.execute(
+                    text("DROP TABLE IF EXISTS permissions CASCADE")
+                )
                 # Add more DROP TABLE statements for other tables as needed
                 logger.debug("Database tables dropped successfully.")
             except Exception as e:
@@ -550,7 +586,11 @@ class SQLAlchemyAdapter:
 
             if self.engine.dialect.name == "sqlite":
                 for table_name in tables:
-                    schema[table_name] = {"columns": [], "primary_key": None, "foreign_keys": []}
+                    schema[table_name] = {
+                        "columns": [],
+                        "primary_key": None,
+                        "foreign_keys": [],
+                    }
 
                     # Get column details
                     columns_result = await connection.execute(
@@ -585,14 +625,22 @@ class SQLAlchemyAdapter:
                 for schema_name in schema_list:
                     # Get tables for the current schema via the inspector.
                     tables = await connection.run_sync(
-                        lambda sync_conn: inspect(sync_conn).get_table_names(schema=schema_name)
+                        lambda sync_conn: inspect(sync_conn).get_table_names(
+                            schema=schema_name
+                        )
                     )
                     for table_name in tables:
                         # Optionally, qualify the table name with the schema if not in the default schema.
                         key = (
-                            table_name if schema_name == "public" else f"{schema_name}.{table_name}"
+                            table_name
+                            if schema_name == "public"
+                            else f"{schema_name}.{table_name}"
                         )
-                        schema[key] = {"columns": [], "primary_key": None, "foreign_keys": []}
+                        schema[key] = {
+                            "columns": [],
+                            "primary_key": None,
+                            "foreign_keys": [],
+                        }
 
                         # Helper function to get table details using the inspector.
                         def get_details(sync_conn, table, schema_name):
@@ -632,7 +680,8 @@ class SQLAlchemyAdapter:
                             schema[key]["primary_key"] = pk_columns[0]
                         for fk in fks:
                             for col, ref_col in zip(
-                                fk.get("constrained_columns", []), fk.get("referred_columns", [])
+                                fk.get("constrained_columns", []),
+                                fk.get("referred_columns", []),
                             ):
                                 if col and ref_col:
                                     schema[key]["foreign_keys"].append(

@@ -3,7 +3,9 @@ import os
 import json
 import random
 from typing import Optional, Any, List, Union, Tuple
-from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
+from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import (
+    BaseBenchmarkAdapter,
+)
 
 
 class HotpotQAAdapter(BaseBenchmarkAdapter):
@@ -18,9 +20,15 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
         super().__init__()
         self.metadata_field_name = "level"
 
-    def _is_valid_supporting_fact(self, sentences: List[str], sentence_idx: Any) -> bool:
+    def _is_valid_supporting_fact(
+        self, sentences: List[str], sentence_idx: Any
+    ) -> bool:
         """Validates if a supporting fact index is valid for the given sentences."""
-        return sentences and isinstance(sentence_idx, int) and 0 <= sentence_idx < len(sentences)
+        return (
+            sentences
+            and isinstance(sentence_idx, int)
+            and 0 <= sentence_idx < len(sentences)
+        )
 
     def _get_golden_context(self, item: dict[str, Any]) -> str:
         """Extracts and formats the golden context from supporting facts."""
@@ -86,7 +94,9 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
         raw_corpus = self._get_raw_corpus()
 
         if instance_filter is not None:
-            raw_corpus = self._filter_instances(raw_corpus, instance_filter, id_key="_id")
+            raw_corpus = self._filter_instances(
+                raw_corpus, instance_filter, id_key="_id"
+            )
 
         if limit is not None and 0 < limit < len(raw_corpus):
             random.seed(seed)
@@ -97,6 +107,8 @@ class HotpotQAAdapter(BaseBenchmarkAdapter):
 
         for item in raw_corpus:
             corpus_list.extend(self._get_corpus_entries(item))
-            question_answer_pairs.append(self._get_question_answer_pair(item, load_golden_context))
+            question_answer_pairs.append(
+                self._get_question_answer_pair(item, load_golden_context)
+            )
 
         return corpus_list, question_answer_pairs

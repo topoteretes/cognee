@@ -54,18 +54,24 @@ class CompletionRetriever(BaseRetriever):
         vector_engine = get_vector_engine()
 
         try:
-            found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
+            found_chunks = await vector_engine.search(
+                "DocumentChunk_text", query, limit=self.top_k
+            )
 
             if len(found_chunks) == 0:
                 return ""
 
             # Combine all chunks text returned from vector search (number of chunks is determined by top_k
-            chunks_payload = [found_chunk.payload["text"] for found_chunk in found_chunks]
+            chunks_payload = [
+                found_chunk.payload["text"] for found_chunk in found_chunks
+            ]
             combined_context = "\n".join(chunks_payload)
             return combined_context
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found")
-            raise NoDataError("No data found in the system, please add data first.") from error
+            raise NoDataError(
+                "No data found in the system, please add data first."
+            ) from error
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> str:
         """

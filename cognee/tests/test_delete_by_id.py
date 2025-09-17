@@ -5,7 +5,9 @@ from uuid import uuid4
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_default_user, create_user
-from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+from cognee.modules.users.permissions.methods import (
+    authorized_give_permission_on_datasets,
+)
 from cognee.modules.data.methods import get_dataset_data, get_datasets_by_name
 from cognee.api.v1.exceptions import DocumentNotFoundError, DatasetNotFoundError
 
@@ -19,12 +21,16 @@ async def main():
     # Clean up test directories before starting
     data_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_delete_by_id")
+            os.path.join(
+                pathlib.Path(__file__).parent, ".data_storage/test_delete_by_id"
+            )
         ).resolve()
     )
     cognee_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_delete_by_id")
+            os.path.join(
+                pathlib.Path(__file__).parent, ".cognee_system/test_delete_by_id"
+            )
         ).resolve()
     )
 
@@ -77,7 +83,9 @@ async def main():
     await cognee.add([text_2], dataset_name="tech_companies_2", user=test_user)
 
     # Create third user for isolation testing
-    isolation_user = await create_user("isolation_user@gmail.com", "isolation@example.com")
+    isolation_user = await create_user(
+        "isolation_user@gmail.com", "isolation@example.com"
+    )
 
     # Add data for isolation user (should remain unaffected by other deletions)
     await cognee.add([text_3], dataset_name="tech_companies_3", user=isolation_user)
@@ -124,10 +132,14 @@ async def main():
     # Create datasets objects for testing
     from cognee.modules.data.models import Dataset
 
-    default_dataset = Dataset(id=dataset_id_1, name="tech_companies_1", owner_id=default_user.id)
+    default_dataset = Dataset(
+        id=dataset_id_1, name="tech_companies_1", owner_id=default_user.id
+    )
 
     # Create dataset object for permission testing (test_user already created above)
-    test_dataset = Dataset(id=dataset_id_2, name="tech_companies_2", owner_id=test_user.id)
+    test_dataset = Dataset(
+        id=dataset_id_2, name="tech_companies_2", owner_id=test_user.id
+    )
 
     print(f"🔍 Data to delete ID: {data_to_delete_id}")
     print(f"🔍 Test user data ID: {data_to_delete_from_test_user}")
@@ -135,7 +147,9 @@ async def main():
     print("\n📝 Test 3: Testing delete endpoint with proper permissions")
 
     try:
-        result = await cognee.delete(data_id=data_to_delete_id, dataset_id=default_dataset.id)
+        result = await cognee.delete(
+            data_id=data_to_delete_id, dataset_id=default_dataset.id
+        )
         print("✅ Delete successful for data owner")
         assert result["status"] == "success", "Delete should succeed for data owner"
     except Exception as e:
@@ -167,7 +181,9 @@ async def main():
     data_not_found_error = False
     try:
         await cognee.delete(
-            data_id=non_existent_data_id, dataset_id=default_dataset.id, user=default_user
+            data_id=non_existent_data_id,
+            dataset_id=default_dataset.id,
+            user=default_user,
         )
     except DocumentNotFoundError:
         data_not_found_error = True
@@ -220,7 +236,9 @@ async def main():
     except Exception as e:
         print(f"❌ Unexpected error type: {e}")
 
-    assert data_not_in_dataset_error, "Delete should fail when data doesn't belong to dataset"
+    assert (
+        data_not_in_dataset_error
+    ), "Delete should fail when data doesn't belong to dataset"
 
     # Test 8: Test permission granting and delete
     print("\n📝 Test 8: Testing delete after granting permissions")
@@ -240,7 +258,9 @@ async def main():
             user=default_user,  # Now should work with granted permission
         )
         print("✅ Delete successful after granting permission", result)
-        assert result["status"] == "success", "Delete should succeed after granting permission"
+        assert (
+            result["status"] == "success"
+        ), "Delete should succeed after granting permission"
     except Exception as e:
         print(f"❌ Unexpected error after granting permission: {e}")
         raise
@@ -254,7 +274,9 @@ async def main():
     nodes, edges = await graph_engine.get_graph_data()
 
     # We should still have some nodes/edges from the remaining data, but fewer than before
-    print(f"✅ Graph database state after deletions - Nodes: {len(nodes)}, Edges: {len(edges)}")
+    print(
+        f"✅ Graph database state after deletions - Nodes: {len(nodes)}, Edges: {len(edges)}"
+    )
 
     # Test 10: Verify isolation user's data remains untouched
     print("\n📝 Test 10: Verifying isolation user's data remains intact")
@@ -268,23 +290,29 @@ async def main():
         )
 
         # Verify data count is unchanged
-        assert len(isolation_dataset_data_after) == len(dataset_data_3), (
-            f"Isolation user's data count changed! Expected {len(dataset_data_3)}, got {len(isolation_dataset_data_after)}"
-        )
+        assert len(isolation_dataset_data_after) == len(
+            dataset_data_3
+        ), f"Isolation user's data count changed! Expected {len(dataset_data_3)}, got {len(isolation_dataset_data_after)}"
 
         # Verify specific data items are still there
         original_data_ids = {str(data.id) for data in dataset_data_3}
         remaining_data_ids = {str(data.id) for data in isolation_dataset_data_after}
 
-        assert original_data_ids == remaining_data_ids, "Isolation user's data IDs have changed!"
+        assert (
+            original_data_ids == remaining_data_ids
+        ), "Isolation user's data IDs have changed!"
 
         # Try to search isolation user's data to ensure it's still accessible
         isolation_search_results = await cognee.search(
             "Google technology company", user=isolation_user
         )
-        assert len(isolation_search_results) > 0, "Isolation user's data should still be searchable"
+        assert (
+            len(isolation_search_results) > 0
+        ), "Isolation user's data should still be searchable"
 
-        print("✅ Isolation user's data completely unaffected by other users' deletions")
+        print(
+            "✅ Isolation user's data completely unaffected by other users' deletions"
+        )
         print(f"   - Data count unchanged: {len(isolation_dataset_data_after)} items")
         print("   - All original data IDs preserved")
         print(f"   - Data still searchable: {len(isolation_search_results)} results")
@@ -297,7 +325,8 @@ async def main():
     print("🎉 All tests passed! Delete by ID endpoint working correctly.")
     print("=" * 60)
 
-    print("""
+    print(
+        """
 📋 SUMMARY OF TESTED FUNCTIONALITY:
 ✅ Delete endpoint accepts data_id and dataset_id parameters
 ✅ Permission checking works for delete operations
@@ -307,7 +336,8 @@ async def main():
 ✅ Comprehensive deletion across all databases (graph, vector, relational)
 ✅ Dataset data endpoint now checks read permissions properly
 ✅ Data isolation: Other users' data remains completely unaffected by deletions
-    """)
+    """
+    )
 
 
 if __name__ == "__main__":

@@ -63,7 +63,9 @@ async def test_rate_limiting_realistic():
         ]
 
         limiter = llm_rate_limiter()
-        print(f"Rate limiter initialized with {limiter._rate_per_minute} requests per minute")
+        print(
+            f"Rate limiter initialized with {limiter._rate_per_minute} requests per minute"
+        )
 
         # First batch - should allow 5 and limit the rest
         print("\nBatch 1: Sending 10 requests (expecting only 5 to succeed)...")
@@ -79,14 +81,18 @@ async def test_rate_limiting_realistic():
                 batch1_failure.append(i)
                 print(f"✗ Request {i}: Rate limited")
 
-        print(f"Batch 1 results: {len(batch1_success)} successes, {len(batch1_failure)} failures")
+        print(
+            f"Batch 1 results: {len(batch1_success)} successes, {len(batch1_failure)} failures"
+        )
 
         if len(batch1_failure) > 0:
             print(f"First rate-limited request: #{batch1_failure[0]}")
 
         # Wait for window to partially reset
         wait_time = 5  # seconds - half the rate limit interval
-        print(f"\nWaiting for {wait_time} seconds to allow capacity to partially regenerate...")
+        print(
+            f"\nWaiting for {wait_time} seconds to allow capacity to partially regenerate..."
+        )
         await asyncio.sleep(wait_time)
 
         # Second batch - should get some capacity back
@@ -103,7 +109,9 @@ async def test_rate_limiting_realistic():
                 batch2_failure.append(i)
                 print(f"✗ Request {i}: Rate limited")
 
-        print(f"Batch 2 results: {len(batch2_success)} successes, {len(batch2_failure)} failures")
+        print(
+            f"Batch 2 results: {len(batch2_success)} successes, {len(batch2_failure)} failures"
+        )
 
         # Wait for full window to reset
         full_wait = 10  # seconds - full rate limit interval
@@ -124,7 +132,9 @@ async def test_rate_limiting_realistic():
                 batch3_failure.append(i)
                 print(f"✗ Request {i}: Rate limited")
 
-        print(f"Batch 3 results: {len(batch3_success)} successes, {len(batch3_failure)} failures")
+        print(
+            f"Batch 3 results: {len(batch3_success)} successes, {len(batch3_failure)} failures"
+        )
 
         # Calculate total successes and failures
         total_success = len(batch1_success) + len(batch2_success) + len(batch3_success)
@@ -138,17 +148,27 @@ async def test_rate_limiting_realistic():
         if len(batch1_success) == 5 and len(batch1_failure) == 5:
             print("\n✅ PASS: Rate limiter correctly limited first batch to 5 requests")
         else:
-            print(f"\n❌ FAIL: First batch should allow 5 requests, got {len(batch1_success)}")
+            print(
+                f"\n❌ FAIL: First batch should allow 5 requests, got {len(batch1_success)}"
+            )
 
         if len(batch2_success) == 2 and len(batch2_failure) == 3:
-            print("✅ PASS: Rate limiter correctly allowed 2 requests after partial wait")
+            print(
+                "✅ PASS: Rate limiter correctly allowed 2 requests after partial wait"
+            )
         else:
-            print(f"❌ FAIL: Second batch should allow 2 requests, got {len(batch2_success)}")
+            print(
+                f"❌ FAIL: Second batch should allow 2 requests, got {len(batch2_success)}"
+            )
 
         if len(batch3_success) == 5 and len(batch3_failure) == 0:
-            print("✅ PASS: Rate limiter correctly allowed all requests after full window expired")
+            print(
+                "✅ PASS: Rate limiter correctly allowed all requests after full window expired"
+            )
         else:
-            print(f"❌ FAIL: Third batch should allow all 5 requests, got {len(batch3_success)}")
+            print(
+                f"❌ FAIL: Third batch should allow all 5 requests, got {len(batch3_success)}"
+            )
 
     print("=== Rate Limiting Test Complete ===\n")
 

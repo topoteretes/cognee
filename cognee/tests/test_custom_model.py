@@ -13,13 +13,17 @@ logger = get_logger()
 async def main():
     data_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_custom_model")
+            os.path.join(
+                pathlib.Path(__file__).parent, ".data_storage/test_custom_model"
+            )
         ).resolve()
     )
     cognee.config.data_root_directory(data_directory_path)
     cognee_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_custom_model")
+            os.path.join(
+                pathlib.Path(__file__).parent, ".cognee_system/test_custom_model"
+            )
         ).resolve()
     )
     cognee.config.system_root_directory(cognee_directory_path)

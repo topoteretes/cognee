@@ -16,8 +16,12 @@ class Task(Base):
 
     executable = Column(Text)
 
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at = Column(
+        DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)
+    )
 
     datasets: Mapped[list["Pipeline"]] = relationship(
         secondary=PipelineTask.__tablename__, back_populates="task"

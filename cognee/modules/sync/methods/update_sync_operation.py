@@ -2,7 +2,12 @@ import asyncio
 from typing import Optional, List
 from datetime import datetime, timezone
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError, DisconnectionError, OperationalError, TimeoutError
+from sqlalchemy.exc import (
+    SQLAlchemyError,
+    DisconnectionError,
+    OperationalError,
+    TimeoutError,
+)
 from cognee.modules.sync.models import SyncOperation, SyncStatus
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.shared.logging_utils import get_logger
@@ -42,7 +47,9 @@ async def _retry_db_operation(operation_func, run_id: str, max_retries: int = 3)
                 )
                 break
 
-            backoff_time = calculate_backoff(attempt - 1)  # calculate_backoff is 0-indexed
+            backoff_time = calculate_backoff(
+                attempt - 1
+            )  # calculate_backoff is 0-indexed
             logger.warning(
                 f"Database operation failed for run_id {run_id}, retrying in {backoff_time:.2f}s (attempt {attempt}/{max_retries}): {str(e)}"
             )
@@ -130,14 +137,18 @@ async def update_sync_operation(
                     updates.append(f"total_upload={total_records_to_upload}")
 
                 if updates:
-                    logger.debug(f"Updating sync operation {run_id}: {', '.join(updates)}")
+                    logger.debug(
+                        f"Updating sync operation {run_id}: {', '.join(updates)}"
+                    )
 
                 # Update fields that were provided
                 if status is not None:
                     sync_operation.status = status
 
                 if progress_percentage is not None:
-                    sync_operation.progress_percentage = max(0, min(100, progress_percentage))
+                    sync_operation.progress_percentage = max(
+                        0, min(100, progress_percentage)
+                    )
 
                 if records_downloaded is not None:
                     sync_operation.records_downloaded = records_downloaded
@@ -177,13 +188,17 @@ async def update_sync_operation(
 
                 # Auto-set completion timestamp for terminal statuses
                 if (
-                    status in [SyncStatus.COMPLETED, SyncStatus.FAILED, SyncStatus.CANCELLED]
+                    status
+                    in [SyncStatus.COMPLETED, SyncStatus.FAILED, SyncStatus.CANCELLED]
                     and completed_at is None
                 ):
                     sync_operation.completed_at = datetime.now(timezone.utc)
 
                 # Auto-set started timestamp when moving to IN_PROGRESS
-                if status == SyncStatus.IN_PROGRESS and sync_operation.started_at is None:
+                if (
+                    status == SyncStatus.IN_PROGRESS
+                    and sync_operation.started_at is None
+                ):
                     sync_operation.started_at = datetime.now(timezone.utc)
 
                 await session.commit()
@@ -194,13 +209,15 @@ async def update_sync_operation(
 
             except SQLAlchemyError as e:
                 logger.error(
-                    f"Database error updating sync operation {run_id}: {str(e)}", exc_info=True
+                    f"Database error updating sync operation {run_id}: {str(e)}",
+                    exc_info=True,
                 )
                 await session.rollback()
                 raise
             except Exception as e:
                 logger.error(
-                    f"Unexpected error updating sync operation {run_id}: {str(e)}", exc_info=True
+                    f"Unexpected error updating sync operation {run_id}: {str(e)}",
+                    exc_info=True,
                 )
                 await session.rollback()
                 raise
@@ -212,7 +229,9 @@ async def update_sync_operation(
 async def mark_sync_started(run_id: str) -> Optional[SyncOperation]:
     """Convenience method to mark a sync operation as started."""
     return await update_sync_operation(
-        run_id=run_id, status=SyncStatus.IN_PROGRESS, started_at=datetime.now(timezone.utc)
+        run_id=run_id,
+        status=SyncStatus.IN_PROGRESS,
+        started_at=datetime.now(timezone.utc),
     )
 
 

@@ -81,7 +81,9 @@ class TestCliMain:
         mock_debug.return_value = False
 
         mock_command = MagicMock()
-        mock_command.execute.side_effect = CliCommandException("Test error", error_code=2)
+        mock_command.execute.side_effect = CliCommandException(
+            "Test error", error_code=2
+        )
 
         mock_parser = MagicMock()
         mock_args = MagicMock(command="test")
@@ -139,7 +141,9 @@ class TestCliMain:
         parser, _ = _create_parser()
 
         # Check that version action exists
-        version_actions = [action for action in parser._actions if action.dest == "version"]
+        version_actions = [
+            action for action in parser._actions if action.dest == "version"
+        ]
         assert len(version_actions) == 1
 
         version_action = version_actions[0]
@@ -170,4 +174,6 @@ class TestDebugAction:
         action(parser, namespace, None)
 
         mock_enable_debug.assert_called_once()
-        mock_note.assert_called_once_with("Debug mode enabled. Full stack traces will be shown.")
+        mock_note.assert_called_once_with(
+            "Debug mode enabled. Full stack traces will be shown."
+        )

@@ -103,13 +103,18 @@ class ProcurementMemorySystem:
 
         # Store data in different memory categories
         await cognee.add(
-            data=[vendor_conversation_text_techsupply, vendor_conversation_text_office_solutions],
+            data=[
+                vendor_conversation_text_techsupply,
+                vendor_conversation_text_office_solutions,
+            ],
             node_set=["vendor_conversations"],
         )
 
         await cognee.add(data=previous_purchases_text, node_set=["purchase_history"])
 
-        await cognee.add(data=procurement_preferences_text, node_set=["procurement_policies"])
+        await cognee.add(
+            data=procurement_preferences_text, node_set=["procurement_policies"]
+        )
 
         # Process all data through Cognee's knowledge graph
         await cognee.cognify()
@@ -167,7 +172,9 @@ async def run_procurement_example():
         research_notes[category] = []
         for q in questions:
             print(f"Question: \n{q}")
-            results = await procurement_system.search_memory(q, search_categories=[category])
+            results = await procurement_system.search_memory(
+                q, search_categories=[category]
+            )
             top_answer = results[category][0]
             print(f"Answer: \n{top_answer.strip()}\n")
             research_notes[category].append({"question": q, "answer": top_answer})

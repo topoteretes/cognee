@@ -47,14 +47,19 @@ async def test_single_weight_edge():
     user = User(
         name="John Doe",
         email="john@example.com",
-        purchased_products=(Edge(weight=0.8, relationship_type="purchased"), [product1, product2]),
+        purchased_products=(
+            Edge(weight=0.8, relationship_type="purchased"),
+            [product1, product2],
+        ),
     )
 
     added_nodes = {}
     added_edges = {}
     visited_properties = {}
 
-    nodes, edges = await get_graph_from_model(user, added_nodes, added_edges, visited_properties)
+    nodes, edges = await get_graph_from_model(
+        user, added_nodes, added_edges, visited_properties
+    )
 
     # Should have user + 2 products = 3 nodes
     assert len(nodes) == 3, f"Expected 3 nodes, got {len(nodes)}"
@@ -65,9 +70,9 @@ async def test_single_weight_edge():
     for edge in edges:
         source_id, target_id, relationship_name, edge_properties = edge
         assert "weight" in edge_properties, "Edge should contain weight property"
-        assert edge_properties["weight"] == 0.8, (
-            f"Expected weight 0.8, got {edge_properties['weight']}"
-        )
+        assert (
+            edge_properties["weight"] == 0.8
+        ), f"Expected weight 0.8, got {edge_properties['weight']}"
         assert edge_properties["relationship_name"] == "purchased"
 
 
@@ -99,7 +104,9 @@ async def test_multiple_weights_edge():
     added_edges = {}
     visited_properties = {}
 
-    nodes, edges = await get_graph_from_model(user, added_nodes, added_edges, visited_properties)
+    nodes, edges = await get_graph_from_model(
+        user, added_nodes, added_edges, visited_properties
+    )
 
     # Should have user + 2 categories = 3 nodes
     assert len(nodes) == 3, f"Expected 3 nodes, got {len(nodes)}"
@@ -135,7 +142,10 @@ async def test_mixed_single_and_multiple_weights():
         purchased_products=(
             Edge(
                 weight=0.7,  # Single weight (backward compatible)
-                weights={"satisfaction": 0.9, "value_for_money": 0.6},  # Multiple weights
+                weights={
+                    "satisfaction": 0.9,
+                    "value_for_money": 0.6,
+                },  # Multiple weights
                 relationship_type="owns",
             ),
             [product],
@@ -146,7 +156,9 @@ async def test_mixed_single_and_multiple_weights():
     added_edges = {}
     visited_properties = {}
 
-    nodes, edges = await get_graph_from_model(user, added_nodes, added_edges, visited_properties)
+    nodes, edges = await get_graph_from_model(
+        user, added_nodes, added_edges, visited_properties
+    )
 
     assert len(nodes) == 2, f"Expected 2 nodes, got {len(nodes)}"
     assert len(edges) == 1, f"Expected 1 edge, got {len(edges)}"
@@ -169,9 +181,13 @@ async def test_complex_weighted_relationships():
 
     # Create products and categories
     product1 = Product(name="Gaming Chair", description="Ergonomic gaming chair")
-    product2 = Product(name="Mechanical Keyboard", description="RGB mechanical keyboard")
+    product2 = Product(
+        name="Mechanical Keyboard", description="RGB mechanical keyboard"
+    )
 
-    category = Category(name="Gaming Accessories", description="Gaming accessories category")
+    category = Category(
+        name="Gaming Accessories", description="Gaming accessories category"
+    )
     category.products = [product1, product2]
 
     # Create users with different weighted relationships
@@ -195,7 +211,10 @@ async def test_complex_weighted_relationships():
     user2 = User(
         name="Casual User",
         email="casual@example.com",
-        purchased_products=(Edge(weight=0.6, relationship_type="purchased"), [product1]),
+        purchased_products=(
+            Edge(weight=0.6, relationship_type="purchased"),
+            [product1],
+        ),
     )
 
     # Create weighted user relationships
@@ -216,7 +235,9 @@ async def test_complex_weighted_relationships():
     visited_properties = {}
 
     # Process user1 (which should process all connected nodes)
-    nodes, edges = await get_graph_from_model(user1, added_nodes, added_edges, visited_properties)
+    nodes, edges = await get_graph_from_model(
+        user1, added_nodes, added_edges, visited_properties
+    )
 
     # Should have: user1, user2, 2 products, 1 category = 5 nodes
     assert len(nodes) == 5, f"Expected 5 nodes, got {len(nodes)}"
@@ -237,7 +258,9 @@ async def test_complex_weighted_relationships():
             weighted_edges += 1
 
         # Count edges with multiple weights
-        multi_weight_fields = [k for k in edge_properties.keys() if k.startswith("weight_")]
+        multi_weight_fields = [
+            k for k in edge_properties.keys() if k.startswith("weight_")
+        ]
         if len(multi_weight_fields) > 1:
             multi_weighted_edges += 1
 
@@ -274,7 +297,11 @@ async def test_company_hierarchy_with_weights():
     # Create partnership with weights
     startup.partners = (
         Edge(
-            weights={"trust_level": 0.7, "business_value": 0.8, "strategic_importance": 0.6},
+            weights={
+                "trust_level": 0.7,
+                "business_value": 0.8,
+                "strategic_importance": 0.6,
+            },
             relationship_type="partners_with",
         ),
         [corporation],
@@ -284,7 +311,9 @@ async def test_company_hierarchy_with_weights():
     added_edges = {}
     visited_properties = {}
 
-    nodes, edges = await get_graph_from_model(startup, added_nodes, added_edges, visited_properties)
+    nodes, edges = await get_graph_from_model(
+        startup, added_nodes, added_edges, visited_properties
+    )
 
     # Should have: startup, corporation, 3 users = 5 nodes
     assert len(nodes) == 5, f"Expected 5 nodes, got {len(nodes)}"
@@ -320,7 +349,11 @@ async def test_edge_metadata_preservation():
         name="Test User",
         email="test@example.com",
         purchased_products=(
-            Edge(weight=0.8, weights={"quality": 0.9, "price": 0.7}, relationship_type="purchased"),
+            Edge(
+                weight=0.8,
+                weights={"quality": 0.9, "price": 0.7},
+                relationship_type="purchased",
+            ),
             [product],
         ),
     )
@@ -329,7 +362,9 @@ async def test_edge_metadata_preservation():
     added_edges = {}
     visited_properties = {}
 
-    nodes, edges = await get_graph_from_model(user, added_nodes, added_edges, visited_properties)
+    nodes, edges = await get_graph_from_model(
+        user, added_nodes, added_edges, visited_properties
+    )
 
     assert len(edges) == 1, "Should have exactly one edge"
 
@@ -371,7 +406,9 @@ async def test_no_weights_edge():
     added_edges = {}
     visited_properties = {}
 
-    nodes, edges = await get_graph_from_model(user, added_nodes, added_edges, visited_properties)
+    nodes, edges = await get_graph_from_model(
+        user, added_nodes, added_edges, visited_properties
+    )
 
     assert len(nodes) == 2, f"Expected 2 nodes, got {len(nodes)}"
     assert len(edges) == 1, f"Expected 1 edge, got {len(edges)}"
@@ -388,4 +425,6 @@ async def test_no_weights_edge():
     # Should not have weight fields
     assert "weight" not in edge_properties
     weight_fields = [k for k in edge_properties.keys() if k.startswith("weight_")]
-    assert len(weight_fields) == 0, f"Should have no weight fields, but found: {weight_fields}"
+    assert (
+        len(weight_fields) == 0
+    ), f"Should have no weight fields, but found: {weight_fields}"

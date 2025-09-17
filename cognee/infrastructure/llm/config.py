@@ -59,7 +59,9 @@ class LLMConfig(BaseSettings):
     llm_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
     embedding_rate_limit_enabled: bool = False
     embedding_rate_limit_requests: int = 60
-    embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
+    embedding_rate_limit_interval: int = (
+        60  # in seconds (default is 60 requests per minute)
+    )
 
     fallback_api_key: str = ""
     fallback_endpoint: str = ""
@@ -145,7 +147,9 @@ class LLMConfig(BaseSettings):
             "HUGGINGFACE_TOKENIZER": is_env_set("HUGGINGFACE_TOKENIZER"),
         }
         if any(embedding_env_vars.values()) and not all(embedding_env_vars.values()):
-            missing_embed = [key for key, is_set in embedding_env_vars.items() if not is_set]
+            missing_embed = [
+                key for key, is_set in embedding_env_vars.items() if not is_set
+            ]
             raise ValueError(
                 "You have set some but not all of the required environment variables "
                 "for embeddings (EMBEDDING_PROVIDER, EMBEDDING_MODEL, "

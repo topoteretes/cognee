@@ -12,7 +12,9 @@ async def run_pipeline(ontology_path=None):
     await cognee.prune.prune_system(metadata=True)
 
     scientific_papers_dir = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "scientific_papers/"
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "data",
+        "scientific_papers/",
     )
 
     await cognee.add(scientific_papers_dir)

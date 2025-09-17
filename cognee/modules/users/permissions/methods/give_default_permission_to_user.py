@@ -18,19 +18,29 @@ from cognee.modules.users.models import (
 async def give_default_permission_to_user(user_id: UUID, permission_name: str):
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
-        user = (await session.execute(select(User).where(User.id == user_id))).scalars().first()
+        user = (
+            (await session.execute(select(User).where(User.id == user_id)))
+            .scalars()
+            .first()
+        )
 
         if not user:
             raise UserNotFoundError
 
         permission_entity = (
-            (await session.execute(select(Permission).where(Permission.name == permission_name)))
+            (
+                await session.execute(
+                    select(Permission).where(Permission.name == permission_name)
+                )
+            )
             .scalars()
             .first()
         )
 
         if not permission_entity:
-            create_permission_statement = insert(Permission).values(name=permission_name)
+            create_permission_statement = insert(Permission).values(
+                name=permission_name
+            )
             await session.execute(create_permission_statement)
             permission_entity = (
                 (

@@ -106,7 +106,8 @@ class DataPoint(BaseModel):
         """
         if data_point.metadata and len(data_point.metadata["index_fields"]) > 0:
             return [
-                getattr(data_point, field, None) for field in data_point.metadata["index_fields"]
+                getattr(data_point, field, None)
+                for field in data_point.metadata["index_fields"]
             ]
 
         return []

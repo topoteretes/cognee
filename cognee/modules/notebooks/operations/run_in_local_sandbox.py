@@ -47,7 +47,8 @@ def run_in_local_sandbox(code, environment=None, loop=None):
 
 
 if __name__ == "__main__":
-    run_in_local_sandbox("""
+    run_in_local_sandbox(
+        """
 import cognee
 
 await cognee.add("Test file with some random content 3.")
@@ -55,4 +56,5 @@ await cognee.add("Test file with some random content 3.")
 a = "asd"
 
 b = {"c": "dfgh"}
-""")
+"""
+    )

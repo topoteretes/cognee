@@ -83,7 +83,9 @@ class LoaderEngine:
             for loader_name in preferred_loaders:
                 if loader_name in self._loaders:
                     loader = self._loaders[loader_name]
-                    if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
+                    if loader.can_handle(
+                        extension=file_info.extension, mime_type=file_info.mime
+                    ):
                         return loader
                 else:
                     raise ValueError(f"Loader does not exist: {loader_name}")
@@ -92,7 +94,9 @@ class LoaderEngine:
         for loader_name in self.default_loader_priority:
             if loader_name in self._loaders:
                 loader = self._loaders[loader_name]
-                if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
+                if loader.can_handle(
+                    extension=file_info.extension, mime_type=file_info.mime
+                ):
                     return loader
             else:
                 raise ValueError(f"Loader does not exist: {loader_name}")

@@ -39,6 +39,7 @@ if get_llm_config().llm_provider.lower() == "gemini":
         description: str
         nodes: List[Node] = Field(..., default_factory=list)
         edges: List[Edge] = Field(..., default_factory=list)
+
 else:
 
     class Node(BaseModel):

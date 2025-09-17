@@ -17,7 +17,9 @@ CORPUS_FILE = Path("hotpot_qa_24_corpus.json")
 QA_PAIRS_FILE = Path("hotpot_qa_24_qa_pairs.json")
 
 
-def _create_benchmark_folder(volume_name: str, benchmark_name: str, timestamp: str) -> str:
+def _create_benchmark_folder(
+    volume_name: str, benchmark_name: str, timestamp: str
+) -> str:
     """Create benchmark folder structure and return the answers folder path."""
     benchmark_folder = f"/{volume_name}/{benchmark_name}_{timestamp}"
     answers_folder = f"{benchmark_folder}/answers"

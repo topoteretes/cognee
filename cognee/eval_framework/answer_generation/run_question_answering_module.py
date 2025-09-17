@@ -35,7 +35,9 @@ async def create_and_insert_answers_table(questions_payload):
 
 
 async def run_question_answering(
-    params: dict, system_prompt="answer_simple_question.txt", top_k: Optional[int] = None
+    params: dict,
+    system_prompt="answer_simple_question.txt",
+    top_k: Optional[int] = None,
 ) -> List[dict]:
     if params.get("answering_questions"):
         logger.info("Question answering started...")
@@ -43,11 +45,17 @@ async def run_question_answering(
             with open(params["questions_path"], "r", encoding="utf-8") as f:
                 questions = json.load(f)
         except FileNotFoundError:
-            raise FileNotFoundError(f"Could not find the file: {params['questions_path']}")
+            raise FileNotFoundError(
+                f"Could not find the file: {params['questions_path']}"
+            )
         except json.JSONDecodeError as e:
-            raise ValueError(f"Error decoding JSON from {params['questions_path']}: {e}")
+            raise ValueError(
+                f"Error decoding JSON from {params['questions_path']}: {e}"
+            )
 
-        logger.info(f"Loaded {len(questions)} questions from {params['questions_path']}")
+        logger.info(
+            f"Loaded {len(questions)} questions from {params['questions_path']}"
+        )
         answer_generator = AnswerGeneratorExecutor()
         answers = await answer_generator.question_answering_non_parallel(
             questions=questions,

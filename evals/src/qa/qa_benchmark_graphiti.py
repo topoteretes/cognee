@@ -43,7 +43,9 @@ class QABenchmarkGraphiti(QABenchmarkRAG):
 
     async def initialize_rag(self) -> Any:
         """Initialize Graphiti and LLM."""
-        llm_config = LLMConfig(model=self.config.model_name, max_completion_tokens=65536)
+        llm_config = LLMConfig(
+            model=self.config.model_name, max_completion_tokens=65536
+        )
         llm_client = OpenAIClient(config=llm_config)
         graphiti = Graphiti(
             self.config.db_url,
@@ -66,7 +68,9 @@ class QABenchmarkGraphiti(QABenchmarkRAG):
             indexes_result = await graphiti.driver.execute_query("SHOW INDEXES")
             print(f"Indexes found: {len(indexes_result.records)}")
             for record in indexes_result.records:
-                print(f"  - {record.get('name', 'unnamed')}: {record.get('type', 'unknown')}")
+                print(
+                    f"  - {record.get('name', 'unnamed')}: {record.get('type', 'unknown')}"
+                )
         except Exception as e:
             print(f"❌ Error checking schema: {e}")
 

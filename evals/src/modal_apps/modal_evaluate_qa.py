@@ -105,7 +105,9 @@ def calculate_qa_metrics(benchmark_folder: str, filename: str):
 
         # Deepeval config for evaluation
         eval_config_deepeval = EvalConfig(
-            answers_path=input_file_path, metrics_path=deepeval_path, evaluating_contexts=False
+            answers_path=input_file_path,
+            metrics_path=deepeval_path,
+            evaluating_contexts=False,
         )
 
         # DirectLLM config for evaluation
@@ -164,8 +166,12 @@ def calculate_qa_metrics(benchmark_folder: str, filename: str):
                     "answer": deepeval_item["answer"],
                     "golden_answer": deepeval_item["golden_answer"],
                     "metrics": {
-                        "directllm_correctness": directllm_item["metrics"]["correctness"]["score"],
-                        "deepeval_correctness": deepeval_item["metrics"]["correctness"]["score"],
+                        "directllm_correctness": directllm_item["metrics"][
+                            "correctness"
+                        ]["score"],
+                        "deepeval_correctness": deepeval_item["metrics"]["correctness"][
+                            "score"
+                        ],
                         "EM": deepeval_item["metrics"]["EM"]["score"],
                         "f1": deepeval_item["metrics"]["f1"]["score"],
                     },

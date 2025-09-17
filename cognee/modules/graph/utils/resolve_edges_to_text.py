@@ -22,13 +22,17 @@ async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
             def _top_n_words(text, stop_words=None, top_n=3, separator=", "):
                 """Concatenates the top N frequent words in text."""
                 if stop_words is None:
-                    from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
+                    from cognee.modules.retrieval.utils.stop_words import (
+                        DEFAULT_STOP_WORDS,
+                    )
 
                     stop_words = DEFAULT_STOP_WORDS
 
                 import string
 
-                words = [word.lower().strip(string.punctuation) for word in text.split()]
+                words = [
+                    word.lower().strip(string.punctuation) for word in text.split()
+                ]
 
                 if stop_words:
                     words = [word for word in words if word and word not in stop_words]

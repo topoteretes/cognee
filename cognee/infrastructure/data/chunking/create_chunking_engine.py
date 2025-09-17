@@ -41,7 +41,9 @@ def create_chunking_engine(config: ChunkingConfig):
         DefaultChunkEngine, or HaystackChunkEngine).
     """
     if config["chunk_engine"] == ChunkEngine.LANGCHAIN_ENGINE:
-        from cognee.infrastructure.data.chunking.LangchainChunkingEngine import LangchainChunkEngine
+        from cognee.infrastructure.data.chunking.LangchainChunkingEngine import (
+            LangchainChunkEngine,
+        )
 
         return LangchainChunkEngine(
             chunk_size=config["chunk_size"],
@@ -49,7 +51,9 @@ def create_chunking_engine(config: ChunkingConfig):
             chunk_strategy=config["chunk_strategy"],
         )
     elif config["chunk_engine"] == ChunkEngine.DEFAULT_ENGINE:
-        from cognee.infrastructure.data.chunking.DefaultChunkEngine import DefaultChunkEngine
+        from cognee.infrastructure.data.chunking.DefaultChunkEngine import (
+            DefaultChunkEngine,
+        )
 
         return DefaultChunkEngine(
             chunk_size=config["chunk_size"],
@@ -57,7 +61,9 @@ def create_chunking_engine(config: ChunkingConfig):
             chunk_strategy=config["chunk_strategy"],
         )
     elif config["chunk_engine"] == ChunkEngine.HAYSTACK_ENGINE:
-        from cognee.infrastructure.data.chunking.HaystackChunkEngine import HaystackChunkEngine
+        from cognee.infrastructure.data.chunking.HaystackChunkEngine import (
+            HaystackChunkEngine,
+        )
 
         return HaystackChunkEngine(
             chunk_size=config["chunk_size"],

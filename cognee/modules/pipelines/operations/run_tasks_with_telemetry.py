@@ -17,7 +17,9 @@ async def run_tasks_with_telemetry(
 ):
     config = get_current_settings()
 
-    logger.debug("\nRunning pipeline with configuration:\n%s\n", json.dumps(config, indent=1))
+    logger.debug(
+        "\nRunning pipeline with configuration:\n%s\n", json.dumps(config, indent=1)
+    )
 
     try:
         logger.info("Pipeline run started: `%s`", pipeline_name)

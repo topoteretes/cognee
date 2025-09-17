@@ -105,7 +105,11 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             )
             logger.info(f"Chain-of-thought: round {round_idx} - answer: {completion}")
             if round_idx < max_iter:
-                valid_args = {"query": query, "answer": completion, "context": context_text}
+                valid_args = {
+                    "query": query,
+                    "answer": completion,
+                    "context": context_text,
+                }
                 valid_user_prompt = LLMGateway.render_prompt(
                     filename=self.validation_user_prompt_path, context=valid_args
                 )
@@ -118,7 +122,11 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                     system_prompt=valid_system_prompt,
                     response_model=str,
                 )
-                followup_args = {"query": query, "answer": completion, "reasoning": reasoning}
+                followup_args = {
+                    "query": query,
+                    "answer": completion,
+                    "reasoning": reasoning,
+                }
                 followup_prompt = LLMGateway.render_prompt(
                     filename=self.followup_user_prompt_path, context=followup_args
                 )
@@ -127,7 +135,9 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 )
 
                 followup_question = await LLMGateway.acreate_structured_output(
-                    text_input=followup_prompt, system_prompt=followup_system, response_model=str
+                    text_input=followup_prompt,
+                    system_prompt=followup_system,
+                    response_model=str,
                 )
                 logger.info(
                     f"Chain-of-thought: round {round_idx} - follow-up question: {followup_question}"
@@ -135,7 +145,10 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
         if self.save_interaction and context and triplets and completion:
             await self.save_qa(
-                question=query, answer=completion, context=context_text, triplets=triplets
+                question=query,
+                answer=completion,
+                context=context_text,
+                triplets=triplets,
             )
 
         return [completion]

@@ -84,7 +84,9 @@ def collect_people(payloads: Iterable[Mapping[str, Any]]) -> list[Mapping[str, A
 
 def collect_companies(payloads: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     """Collect companies from payloads."""
-    companies = [company for payload in payloads for company in payload.get("companies", [])]
+    companies = [
+        company for payload in payloads for company in payload.get("companies", [])
+    ]
     return companies
 
 
@@ -123,7 +125,9 @@ def build_department_nodes(dept_names: Iterable[str]) -> dict:
     return nodes
 
 
-def build_company_nodes(companies: Iterable[Mapping[str, Any]], company_type: CompanyType) -> dict:
+def build_company_nodes(
+    companies: Iterable[Mapping[str, Any]], company_type: CompanyType
+) -> dict:
     """Build company nodes keyed by name."""
     nodes = {
         c["name"]: Company(name=c["name"], departments=[], is_type=company_type)

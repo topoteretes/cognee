@@ -34,7 +34,10 @@ def _process_ontology_nodes(
 
         if ontology_node.category == "classes":
             ont_node_key = _create_node_key(ont_node_id, "type")
-            if ont_node_key not in added_nodes_map and ont_node_key not in added_ontology_nodes_map:
+            if (
+                ont_node_key not in added_nodes_map
+                and ont_node_key not in added_ontology_nodes_map
+            ):
                 added_ontology_nodes_map[ont_node_key] = EntityType(
                     id=ont_node_id,
                     name=ont_node_name,
@@ -44,7 +47,10 @@ def _process_ontology_nodes(
 
         elif ontology_node.category == "individuals":
             ont_node_key = _create_node_key(ont_node_id, "entity")
-            if ont_node_key not in added_nodes_map and ont_node_key not in added_ontology_nodes_map:
+            if (
+                ont_node_key not in added_nodes_map
+                and ont_node_key not in added_ontology_nodes_map
+            ):
                 added_ontology_nodes_map[ont_node_key] = Entity(
                     id=ont_node_id,
                     name=ont_node_name,
@@ -130,7 +136,9 @@ def _create_type_node(
     added_nodes_map[type_node_key] = type_node
 
     # Process ontology nodes and edges
-    _process_ontology_nodes(ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map)
+    _process_ontology_nodes(
+        ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map
+    )
     _process_ontology_edges(ontology_edges, existing_edges_map, ontology_relationships)
 
     return type_node
@@ -189,7 +197,9 @@ def _create_entity_node(
     added_nodes_map[entity_node_key] = entity_node
 
     # Process ontology nodes and edges
-    _process_ontology_nodes(ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map)
+    _process_ontology_nodes(
+        ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map
+    )
     _process_ontology_edges(ontology_edges, existing_edges_map, ontology_relationships)
 
     return entity_node
@@ -244,7 +254,10 @@ def _process_graph_nodes(
 
 
 def _process_graph_edges(
-    graph: KnowledgeGraph, name_mapping: dict, existing_edges_map: dict, relationships: list
+    graph: KnowledgeGraph,
+    name_mapping: dict,
+    existing_edges_map: dict,
+    relationships: list,
 ) -> None:
     """Process edges in a knowledge graph"""
     for edge in graph.edges:

@@ -8,13 +8,17 @@ from cognee.low_level import DataPoint
 
 async def main():
     data_directory_path = str(
-        pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".data_storage")).resolve()
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent, ".data_storage")
+        ).resolve()
     )
     # Set up the data directory. Cognee will store files here.
     config.data_root_directory(data_directory_path)
 
     cognee_directory_path = str(
-        pathlib.Path(os.path.join(pathlib.Path(__file__).parent, ".cognee_system")).resolve()
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent, ".cognee_system")
+        ).resolve()
     )
     # Set up the Cognee system directory. Cognee will store system files and databases here.
     config.system_root_directory(cognee_directory_path)
@@ -52,7 +56,9 @@ async def main():
     # Or use our simple graph preview
     graph_file_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".artifacts/graph_visualization.html")
+            os.path.join(
+                pathlib.Path(__file__).parent, ".artifacts/graph_visualization.html"
+            )
         ).resolve()
     )
     await visualize_graph(graph_file_path)

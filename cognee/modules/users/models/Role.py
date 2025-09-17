@@ -24,7 +24,9 @@ class Role(Principal):
     tenant = relationship("Tenant", back_populates="roles", foreign_keys=[tenant_id])
 
     # Unique constraint on tenant_id and name
-    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_roles_tenant_id_name"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_roles_tenant_id_name"),
+    )
 
     __mapper_args__ = {
         "polymorphic_identity": "role",

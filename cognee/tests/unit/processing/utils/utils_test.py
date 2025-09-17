@@ -7,7 +7,9 @@ from uuid import uuid4
 from pathlib import Path
 
 from cognee.root_dir import ensure_absolute_path
-from cognee.infrastructure.files.utils.get_file_content_hash import get_file_content_hash
+from cognee.infrastructure.files.utils.get_file_content_hash import (
+    get_file_content_hash,
+)
 from cognee.shared.utils import get_anonymous_id
 
 
@@ -30,7 +32,9 @@ async def test_get_file_content_hash_file():
     temp_file_path = None
     text_content = "Test content with UTF-8: café ☕"
 
-    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt", encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".txt", encoding="utf-8"
+    ) as f:
         test_content = text_content
         f.write(test_content)
         temp_file_path = f.name

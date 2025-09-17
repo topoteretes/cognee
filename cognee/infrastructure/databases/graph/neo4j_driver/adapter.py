@@ -61,7 +61,9 @@ class Neo4jAdapter(GraphDBInterface):
             auth = (graph_database_username, graph_database_password)
         elif graph_database_username or graph_database_password:
             logger = get_logger(__name__)
-            logger.warning("Neo4j credentials incomplete – falling back to anonymous connection.")
+            logger.warning(
+                "Neo4j credentials incomplete – falling back to anonymous connection."
+            )
         self.graph_database_name = graph_database_name
         self.driver = driver or AsyncGraphDatabase.driver(
             graph_database_url,
@@ -75,7 +77,9 @@ class Neo4jAdapter(GraphDBInterface):
         Initializes the database: adds uniqueness constraint on id and performs indexing
         """
         await self.query(
-            (f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:`{BASE_LABEL}`) REQUIRE n.id IS UNIQUE;")
+            (
+                f"CREATE CONSTRAINT IF NOT EXISTS FOR (n:`{BASE_LABEL}`) REQUIRE n.id IS UNIQUE;"
+            )
         )
 
     @asynccontextmanager
@@ -447,7 +451,9 @@ class Neo4jAdapter(GraphDBInterface):
 
     @record_graph_changes
     @override_distributed(queued_add_edges)
-    async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
+    async def add_edges(
+        self, edges: list[tuple[str, str, str, dict[str, Any]]]
+    ) -> None:
         """
         Add multiple edges between nodes in a single query.
 
@@ -523,7 +529,11 @@ class Neo4jAdapter(GraphDBInterface):
         results = await self.query(query, dict(node_id=node_id))
 
         return [
-            (result["n"]["id"], result["m"]["id"], {"relationship_name": result["r"][1]})
+            (
+                result["n"]["id"],
+                result["m"]["id"],
+                {"relationship_name": result["r"][1]},
+            )
             for result in results
         ]
 
@@ -760,11 +770,15 @@ class Neo4jAdapter(GraphDBInterface):
 
         for neighbour in predecessors:
             neighbour = neighbour["relation"]
-            connections.append((neighbour[0], {"relationship_name": neighbour[1]}, neighbour[2]))
+            connections.append(
+                (neighbour[0], {"relationship_name": neighbour[1]}, neighbour[2])
+            )
 
         for neighbour in successors:
             neighbour = neighbour["relation"]
-            connections.append((neighbour[0], {"relationship_name": neighbour[1]}, neighbour[2]))
+            connections.append(
+                (neighbour[0], {"relationship_name": neighbour[1]}, neighbour[2])
+            )
 
         return connections
 
@@ -873,7 +887,9 @@ class Neo4jAdapter(GraphDBInterface):
                 continue
 
             if isinstance(property_value, dict):
-                serialized_properties[property_key] = json.dumps(property_value, cls=JSONEncoder)
+                serialized_properties[property_key] = json.dumps(
+                    property_value, cls=JSONEncoder
+                )
                 continue
 
             serialized_properties[property_key] = property_value
@@ -1057,7 +1073,8 @@ class Neo4jAdapter(GraphDBInterface):
         where_clauses = []
         for attribute, values in attribute_filters[0].items():
             values_str = ", ".join(
-                f"'{value}'" if isinstance(value, str) else str(value) for value in values
+                f"'{value}'" if isinstance(value, str) else str(value)
+                for value in values
             )
             where_clauses.append(f"n.{attribute} IN [{values_str}]")
 
@@ -1144,7 +1161,9 @@ class Neo4jAdapter(GraphDBInterface):
         relationship_types_query = "CALL db.relationshipTypes() YIELD relationshipType RETURN collect(relationshipType) AS relationships;"
         relationship_types_result = await self.query(relationship_types_query)
         relationship_types = (
-            relationship_types_result[0]["relationships"] if relationship_types_result else []
+            relationship_types_result[0]["relationships"]
+            if relationship_types_result
+            else []
         )
 
         if not relationship_types:
@@ -1152,7 +1171,9 @@ class Neo4jAdapter(GraphDBInterface):
 
         relationship_types_undirected_str = (
             "{"
-            + ", ".join(f"{rel}" + ": {orientation: 'UNDIRECTED'}" for rel in relationship_types)
+            + ", ".join(
+                f"{rel}" + ": {orientation: 'UNDIRECTED'}" for rel in relationship_types
+            )
             + "}"
         )
         return relationship_types_undirected_str
@@ -1228,7 +1249,9 @@ class Neo4jAdapter(GraphDBInterface):
             "num_edges": num_edges,
             "mean_degree": (2 * num_edges) / num_nodes if num_nodes != 0 else None,
             "edge_density": await get_edge_density(self),
-            "num_connected_components": await get_num_connected_components(self, graph_name),
+            "num_connected_components": await get_num_connected_components(
+                self, graph_name
+            ),
             "sizes_of_connected_components": await get_size_of_connected_components(
                 self, graph_name
             ),
@@ -1239,9 +1262,11 @@ class Neo4jAdapter(GraphDBInterface):
             optional_metrics = {
                 "num_selfloops": await count_self_loops(self),
                 "diameter": max(shortest_path_lengths) if shortest_path_lengths else -1,
-                "avg_shortest_path_length": sum(shortest_path_lengths) / len(shortest_path_lengths)
-                if shortest_path_lengths
-                else -1,
+                "avg_shortest_path_length": (
+                    sum(shortest_path_lengths) / len(shortest_path_lengths)
+                    if shortest_path_lengths
+                    else -1
+                ),
                 "avg_clustering": await get_avg_clustering(self, graph_name),
             }
         else:

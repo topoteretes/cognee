@@ -161,7 +161,10 @@ def create_cross_benchmark_summary(volume_path: str, results: dict) -> None:
                 df = pd.read_csv(aggregate_csv_path, index_col=0)
 
                 # Calculate average of averages for each metric
-                benchmark_summary = {"benchmark": benchmark_folder, "questions_count": len(df)}
+                benchmark_summary = {
+                    "benchmark": benchmark_folder,
+                    "questions_count": len(df),
+                }
 
                 for metric in metrics:
                     mean_col = f"{metric}_mean"

@@ -13,7 +13,9 @@ from neo4j.exceptions import Neo4jError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
 from cognee.modules.storage.utils import JSONEncoder
-from cognee.infrastructure.databases.exceptions.exceptions import NodesetFilterNotSupportedError
+from cognee.infrastructure.databases.exceptions.exceptions import (
+    NodesetFilterNotSupportedError,
+)
 
 logger = get_logger("MemgraphAdapter", level=ERROR)
 
@@ -382,7 +384,9 @@ class MemgraphAdapter(GraphDBInterface):
             The result of the edge addition operation, including relationship details.
         """
 
-        exists = await asyncio.gather(self.has_node(str(from_node)), self.has_node(str(to_node)))
+        exists = await asyncio.gather(
+            self.has_node(str(from_node)), self.has_node(str(to_node))
+        )
 
         if not all(exists):
             return None
@@ -410,7 +414,9 @@ class MemgraphAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
-    async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
+    async def add_edges(
+        self, edges: list[tuple[str, str, str, dict[str, Any]]]
+    ) -> None:
         """
         Batch add multiple edges between nodes, enforcing specified relationships.
 
@@ -485,7 +491,11 @@ class MemgraphAdapter(GraphDBInterface):
         results = await self.query(query, dict(node_id=node_id))
 
         return [
-            (result["n"]["id"], result["m"]["id"], {"relationship_name": result["r"][1]})
+            (
+                result["n"]["id"],
+                result["m"]["id"],
+                {"relationship_name": result["r"][1]},
+            )
             for result in results
         ]
 
@@ -699,11 +709,15 @@ class MemgraphAdapter(GraphDBInterface):
 
         for neighbour in predecessors:
             neighbour = neighbour["relation"]
-            connections.append((neighbour[0], {"relationship_name": neighbour[1]}, neighbour[2]))
+            connections.append(
+                (neighbour[0], {"relationship_name": neighbour[1]}, neighbour[2])
+            )
 
         for neighbour in successors:
             neighbour = neighbour["relation"]
-            connections.append((neighbour[0], {"relationship_name": neighbour[1]}, neighbour[2]))
+            connections.append(
+                (neighbour[0], {"relationship_name": neighbour[1]}, neighbour[2])
+            )
 
         return connections
 
@@ -800,7 +814,9 @@ class MemgraphAdapter(GraphDBInterface):
                 continue
 
             if isinstance(property_value, dict):
-                serialized_properties[property_key] = json.dumps(property_value, cls=JSONEncoder)
+                serialized_properties[property_key] = json.dumps(
+                    property_value, cls=JSONEncoder
+                )
                 continue
 
             serialized_properties[property_key] = property_value
@@ -893,7 +909,8 @@ class MemgraphAdapter(GraphDBInterface):
         where_clauses = []
         for attribute, values in attribute_filters[0].items():
             values_str = ", ".join(
-                f"'{value}'" if isinstance(value, str) else str(value) for value in values
+                f"'{value}'" if isinstance(value, str) else str(value)
+                for value in values
             )
             where_clauses.append(f"n.{attribute} IN [{values_str}]")
 
@@ -971,7 +988,9 @@ class MemgraphAdapter(GraphDBInterface):
         )
         relationship_types_result = await self.query(relationship_types_query)
         relationship_types = (
-            relationship_types_result[0]["relationships"] if relationship_types_result else []
+            relationship_types_result[0]["relationships"]
+            if relationship_types_result
+            else []
         )
 
         if not relationship_types:
@@ -979,7 +998,9 @@ class MemgraphAdapter(GraphDBInterface):
 
         relationship_types_undirected_str = (
             "{"
-            + ", ".join(f"{rel}" + ": {orientation: 'UNDIRECTED'}" for rel in relationship_types)
+            + ", ".join(
+                f"{rel}" + ": {orientation: 'UNDIRECTED'}" for rel in relationship_types
+            )
             + "}"
         )
         return relationship_types_undirected_str
@@ -1013,7 +1034,9 @@ class MemgraphAdapter(GraphDBInterface):
                 "num_nodes": num_nodes,
                 "num_edges": num_edges,
                 "mean_degree": (2 * num_edges) / num_nodes if num_nodes > 0 else 0,
-                "edge_density": (num_edges) / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0,
+                "edge_density": (
+                    (num_edges) / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0
+                ),
             }
 
             # Calculate connected components
@@ -1026,7 +1049,9 @@ class MemgraphAdapter(GraphDBInterface):
             """
             components_result = await self.query(components_query)
             component_sizes = (
-                [len(comp) for comp in components_result[0][0]] if components_result else []
+                [len(comp) for comp in components_result[0][0]]
+                if components_result
+                else []
             )
 
             mandatory_metrics.update(
@@ -1085,10 +1110,12 @@ class MemgraphAdapter(GraphDBInterface):
                 optional_metrics = {
                     "num_selfloops": num_selfloops,
                     "diameter": max(path_lengths) if path_lengths else -1,
-                    "avg_shortest_path_length": sum(path_lengths) / len(path_lengths)
-                    if path_lengths
-                    else -1,
-                    "avg_clustering": clustering[0][0] if clustering and clustering[0][0] else -1,
+                    "avg_shortest_path_length": (
+                        sum(path_lengths) / len(path_lengths) if path_lengths else -1
+                    ),
+                    "avg_clustering": (
+                        clustering[0][0] if clustering and clustering[0][0] else -1
+                    ),
                 }
             else:
                 optional_metrics = {

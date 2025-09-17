@@ -2,12 +2,17 @@ from typing import Union, List
 
 from cognee.modules.users.permissions.methods import get_principal
 from cognee.modules.users.permissions.methods import give_permission_on_dataset
-from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
+from cognee.modules.users.permissions.methods import (
+    get_specific_user_permission_datasets,
+)
 from uuid import UUID
 
 
 async def authorized_give_permission_on_datasets(
-    principal_id: UUID, dataset_ids: Union[List[UUID], UUID], permission_name: str, owner_id: UUID
+    principal_id: UUID,
+    dataset_ids: Union[List[UUID], UUID],
+    permission_name: str,
+    owner_id: UUID,
 ):
     # If only a single dataset UUID is provided transform it to a list
     if not isinstance(dataset_ids, list):
@@ -16,7 +21,9 @@ async def authorized_give_permission_on_datasets(
     principal = await get_principal(principal_id)
 
     # Check if request owner has permission to share dataset access
-    datasets = await get_specific_user_permission_datasets(owner_id, "share", dataset_ids)
+    datasets = await get_specific_user_permission_datasets(
+        owner_id, "share", dataset_ids
+    )
 
     # TODO: Do we want to enforce sharing of datasets to only be between users of the same tenant?
     for dataset in datasets:

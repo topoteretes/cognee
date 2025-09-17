@@ -12,7 +12,9 @@ def get_session_from_args(args):
 
 def with_async_session(func: Callable[..., Any]) -> Callable[..., Any]:
     async def wrapper(*args, **kwargs):
-        session = kwargs.get("session") or get_session_from_args(args)  # type: Optional[AsyncSession]
+        session = kwargs.get("session") or get_session_from_args(
+            args
+        )  # type: Optional[AsyncSession]
 
         if session is None:
             async with get_async_session() as session:

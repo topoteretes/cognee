@@ -388,7 +388,9 @@ class TestDeleteCommandEdgeCases:
 
         with patch.dict(sys.modules, {"cognee": mock_cognee}):
             command = DeleteCommand()
-            args = argparse.Namespace(dataset_name=None, user_id="test_user", all=True, force=False)
+            args = argparse.Namespace(
+                dataset_name=None, user_id="test_user", all=True, force=False
+            )
 
             mock_confirm.return_value = True
 
@@ -398,13 +400,17 @@ class TestDeleteCommandEdgeCases:
         mock_confirm.assert_called_once_with("Delete ALL data from cognee?")
         mock_asyncio_run.assert_called_once()
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        mock_cognee.delete.assert_awaited_once_with(dataset_name=None, user_id="test_user")
+        mock_cognee.delete.assert_awaited_once_with(
+            dataset_name=None, user_id="test_user"
+        )
 
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     def test_delete_confirmation_keyboard_interrupt(self, mock_confirm):
         """Test delete command when user interrupts confirmation"""
         command = DeleteCommand()
-        args = argparse.Namespace(dataset_name="test_dataset", user_id=None, all=False, force=False)
+        args = argparse.Namespace(
+            dataset_name="test_dataset", user_id=None, all=False, force=False
+        )
 
         mock_confirm.side_effect = KeyboardInterrupt()
 
@@ -416,7 +422,9 @@ class TestDeleteCommandEdgeCases:
     def test_delete_async_exception_handling(self, mock_asyncio_run):
         """Test delete command async exception handling"""
         command = DeleteCommand()
-        args = argparse.Namespace(dataset_name="test_dataset", user_id=None, all=False, force=True)
+        args = argparse.Namespace(
+            dataset_name="test_dataset", user_id=None, all=False, force=True
+        )
 
         # Mock asyncio.run to raise exception directly
         mock_asyncio_run.side_effect = ValueError("Database connection failed")
@@ -482,7 +490,9 @@ class TestConfigCommandEdgeCases:
         command = ConfigCommand()
         complex_json = '{"nested": {"key": "value"}, "array": [1, 2, 3]}'
         complex_json_expected_value = {"nested": {"key": "value"}, "array": [1, 2, 3]}
-        args = argparse.Namespace(config_action="set", key="complex_config", value=complex_json)
+        args = argparse.Namespace(
+            config_action="set", key="complex_config", value=complex_json
+        )
 
         command.execute(args)
         mock_cognee.config.set.assert_called_once_with(
@@ -499,7 +509,9 @@ class TestConfigCommandEdgeCases:
 
         command = ConfigCommand()
         invalid_json = '{"invalid": json}'
-        args = argparse.Namespace(config_action="set", key="test_key", value=invalid_json)
+        args = argparse.Namespace(
+            config_action="set", key="test_key", value=invalid_json
+        )
 
         command.execute(args)
         mock_cognee.config.set.assert_called_once_with("test_key", invalid_json)
@@ -512,7 +524,9 @@ class TestConfigCommandEdgeCases:
 
         with patch.dict(sys.modules, {"cognee": mock_cognee}):
             command = ConfigCommand()
-            args = argparse.Namespace(config_action="unset", key="unknown_key", force=False)
+            args = argparse.Namespace(
+                config_action="unset", key="unknown_key", force=False
+            )
 
             mock_confirm.return_value = True
 

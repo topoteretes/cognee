@@ -45,7 +45,9 @@ class GraphConfig(BaseSettings):
     graph_filename: str = ""
     graph_model: object = KnowledgeGraph
     graph_topology: object = KnowledgeGraph
-    model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
+    model_config = SettingsConfigDict(
+        env_file=".env", extra="allow", populate_by_name=True
+    )
 
     # Model validator updates graph_filename and path dynamically after class creation based on current database provider
     # If no specific graph_filename or path are provided
@@ -66,8 +68,12 @@ class GraphConfig(BaseSettings):
             )
         else:
             # Default path
-            databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
-            values.graph_file_path = os.path.join(databases_directory_path, values.graph_filename)
+            databases_directory_path = os.path.join(
+                base_config.system_root_directory, "databases"
+            )
+            values.graph_file_path = os.path.join(
+                databases_directory_path, values.graph_filename
+            )
 
         return values
 

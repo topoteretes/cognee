@@ -6,7 +6,12 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import JSON, Column, Table, select, delete, MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.exc import ProgrammingError
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 
 
@@ -66,7 +71,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         else:
             # If not create new instances of engine and sessionmaker
             self.engine = create_async_engine(self.db_uri)
-            self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
+            self.sessionmaker = async_sessionmaker(
+                bind=self.engine, expire_on_commit=False
+            )
 
         # Has to be imported at class level
         # Functions reading tables from database need to know what a Vector column type is
@@ -159,7 +166,8 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 async with self.engine.begin() as connection:
                     if len(Base.metadata.tables.keys()) > 0:
                         await connection.run_sync(
-                            Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
+                            Base.metadata.create_all,
+                            tables=[PGVectorDataPoint.__table__],
                         )
 
     @retry(
@@ -168,7 +176,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         wait=wait_exponential(multiplier=2, min=1, max=6),
     )
     @override_distributed(queued_add_data_points)
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_data_points(
+        self, collection_name: str, data_points: List[DataPoint]
+    ):
         data_point_types = get_type_hints(DataPoint)
         if not await self.has_collection(collection_name):
             await self.create_collection(
@@ -241,7 +251,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             insert_statement = insert(PGVectorDataPoint).values(
                 [to_dict(data_point) for data_point in pgvector_data_points]
             )
-            insert_statement = insert_statement.on_conflict_do_nothing(index_elements=["id"])
+            insert_statement = insert_statement.on_conflict_do_nothing(
+                index_elements=["id"]
+            )
             await session.execute(insert_statement)
             await session.commit()
 
@@ -285,7 +297,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         async with self.get_async_session() as session:
             results = await session.execute(
-                select(PGVectorDataPoint).where(PGVectorDataPoint.c.id.in_(data_point_ids))
+                select(PGVectorDataPoint).where(
+                    PGVectorDataPoint.c.id.in_(data_point_ids)
+                )
             )
             results = results.all()
 
@@ -318,7 +332,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         async with self.get_async_session() as session:
             query = select(
                 PGVectorDataPoint,
-                PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
+                PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
+                    "similarity"
+                ),
             ).order_by("similarity")
 
             if limit > 0:
@@ -349,7 +365,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Create and return ScoredResult objects
         return [
-            ScoredResult(id=row.get("id"), payload=row.get("payload"), score=row.get("score"))
+            ScoredResult(
+                id=row.get("id"), payload=row.get("payload"), score=row.get("score")
+            )
             for row in vector_list
         ]
 
@@ -379,7 +397,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             # Get PGVectorDataPoint Table from database
             PGVectorDataPoint = await self.get_table(collection_name)
             results = await session.execute(
-                delete(PGVectorDataPoint).where(PGVectorDataPoint.c.id.in_(data_point_ids))
+                delete(PGVectorDataPoint).where(
+                    PGVectorDataPoint.c.id.in_(data_point_ids)
+                )
             )
             await session.commit()
             return results

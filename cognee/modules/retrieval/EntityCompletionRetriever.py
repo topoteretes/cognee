@@ -77,7 +77,9 @@ class EntityCompletionRetriever(BaseRetriever):
             logger.error(f"Context retrieval failed: {str(e)}")
             return None
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> List[str]:
+    async def get_completion(
+        self, query: str, context: Optional[Any] = None
+    ) -> List[str]:
         """
         Generate completion using provided context or fetch new context.
 

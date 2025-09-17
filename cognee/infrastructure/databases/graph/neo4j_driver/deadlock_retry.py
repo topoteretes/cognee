@@ -49,7 +49,10 @@ def deadlock_retry(max_retries=5):
                         raise  # Re-raise the original error
 
                     error_str = str(error)
-                    if "DeadlockDetected" in error_str or "Neo.TransientError" in error_str:
+                    if (
+                        "DeadlockDetected" in error_str
+                        or "Neo.TransientError" in error_str
+                    ):
                         await wait()
                     else:
                         raise  # Re-raise the original error

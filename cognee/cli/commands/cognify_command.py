@@ -45,7 +45,8 @@ After successful cognify processing, use `cognee search` to query the knowledge 
             help="Maximum tokens per chunk. Auto-calculated based on LLM if not specified (~512-8192 tokens)",
         )
         parser.add_argument(
-            "--ontology-file", help="Path to RDF/OWL ontology file for domain-specific entity types"
+            "--ontology-file",
+            help="Path to RDF/OWL ontology file for domain-specific entity types",
         )
         parser.add_argument(
             "--chunker",
@@ -60,7 +61,10 @@ After successful cognify processing, use `cognee search` to query the knowledge 
             help="Run processing in background and return immediately (recommended for large datasets)",
         )
         parser.add_argument(
-            "--verbose", "-v", action="store_true", help="Show detailed progress information"
+            "--verbose",
+            "-v",
+            action="store_true",
+            help="Show detailed progress information",
         )
 
     def execute(self, args: argparse.Namespace) -> None:
@@ -70,11 +74,15 @@ After successful cognify processing, use `cognee search` to query the knowledge 
 
             # Prepare datasets parameter
             datasets = args.datasets if args.datasets else None
-            dataset_msg = f" for datasets {datasets}" if datasets else " for all available data"
+            dataset_msg = (
+                f" for datasets {datasets}" if datasets else " for all available data"
+            )
             fmt.echo(f"Starting cognification{dataset_msg}...")
 
             if args.verbose:
-                fmt.note("This process will analyze your data and build knowledge graphs.")
+                fmt.note(
+                    "This process will analyze your data and build knowledge graphs."
+                )
                 fmt.note("Depending on data size, this may take several minutes.")
                 if args.background:
                     fmt.note(
@@ -92,11 +100,15 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                     chunker_class = TextChunker  # Default
                     if args.chunker == "LangchainChunker":
                         try:
-                            from cognee.modules.chunking.LangchainChunker import LangchainChunker
+                            from cognee.modules.chunking.LangchainChunker import (
+                                LangchainChunker,
+                            )
 
                             chunker_class = LangchainChunker
                         except ImportError:
-                            fmt.warning("LangchainChunker not available, using TextChunker")
+                            fmt.warning(
+                                "LangchainChunker not available, using TextChunker"
+                            )
 
                     result = await cognee.cognify(
                         datasets=datasets,
@@ -125,4 +137,6 @@ After successful cognify processing, use `cognee search` to query the knowledge 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1)
-            raise CliCommandException(f"Error during cognification: {str(e)}", error_code=1)
+            raise CliCommandException(
+                f"Error during cognification: {str(e)}", error_code=1
+            )

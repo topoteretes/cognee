@@ -30,11 +30,13 @@ class TestRAGCompletionRetriever:
     @pytest.mark.asyncio
     async def test_rag_completion_context_simple(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_rag_completion_context_simple"
+            pathlib.Path(__file__).parent,
+            ".cognee_system/test_rag_completion_context_simple",
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_rag_completion_context_simple"
+            pathlib.Path(__file__).parent,
+            ".data_storage/test_rag_completion_context_simple",
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -87,11 +89,13 @@ class TestRAGCompletionRetriever:
     @pytest.mark.asyncio
     async def test_rag_completion_context_complex(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_rag_completion_context_complex"
+            pathlib.Path(__file__).parent,
+            ".cognee_system/test_rag_completion_context_complex",
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_rag_completion_context_complex"
+            pathlib.Path(__file__).parent,
+            ".data_storage/test_rag_completion_context_complex",
         )
         cognee.config.data_root_directory(data_directory_path)
 

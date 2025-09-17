@@ -20,9 +20,7 @@ def generate_timestamp_datapoint(ts: Timestamp) -> Timestamp:
     """
 
     time_at = date_to_int(ts)
-    timestamp_str = (
-        f"{ts.year:04d}-{ts.month:02d}-{ts.day:02d} {ts.hour:02d}:{ts.minute:02d}:{ts.second:02d}"
-    )
+    timestamp_str = f"{ts.year:04d}-{ts.month:02d}-{ts.day:02d} {ts.hour:02d}:{ts.minute:02d}:{ts.second:02d}"
     return Timestamp(
         id=generate_node_id(str(time_at)),
         time_at=time_at,
@@ -46,6 +44,8 @@ def date_to_int(ts: Timestamp) -> int:
     Returns:
         int: The UTC timestamp in milliseconds since January 1, 1970.
     """
-    dt = datetime(ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second, tzinfo=timezone.utc)
+    dt = datetime(
+        ts.year, ts.month, ts.day, ts.hour, ts.minute, ts.second, tzinfo=timezone.utc
+    )
     time = int(dt.timestamp() * 1000)
     return time
