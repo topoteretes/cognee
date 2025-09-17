@@ -94,11 +94,8 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         """
         Internal method to call the Ollama embeddings endpoint for a single prompt.
         """
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "input": prompt
-        }
+        payload = {"model": self.model, "prompt": prompt, "input": prompt}
+
         headers = {}
         api_key = os.getenv("LLM_API_KEY")
         if api_key:
