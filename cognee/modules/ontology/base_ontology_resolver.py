@@ -2,10 +2,20 @@ from abc import ABC, abstractmethod
 from typing import List, Tuple, Optional
 
 from cognee.modules.ontology.models import AttachedOntologyNode
+from cognee.modules.ontology.matching_strategies import MatchingStrategy, FuzzyMatchingStrategy
 
 
 class BaseOntologyResolver(ABC):
     """Abstract base class for ontology resolvers."""
+    
+    def __init__(self, matching_strategy: Optional[MatchingStrategy] = None):
+        """Initialize the ontology resolver with a matching strategy.
+        
+        Args:
+            matching_strategy: The strategy to use for entity matching. 
+                              Defaults to FuzzyMatchingStrategy if None.
+        """
+        self.matching_strategy = matching_strategy or FuzzyMatchingStrategy()
 
     @abstractmethod
     def build_lookup(self) -> None:

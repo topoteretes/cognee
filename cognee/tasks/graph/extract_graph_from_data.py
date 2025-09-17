@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.tasks.storage.add_data_points import add_data_points
-from cognee.modules.ontology.rdf_xml.OntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.graph.utils import (
     expand_with_nodes_and_edges,

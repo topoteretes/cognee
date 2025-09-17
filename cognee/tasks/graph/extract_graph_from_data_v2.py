@@ -3,7 +3,7 @@ from typing import List
 
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.modules.ontology.rdf_xml.OntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.tasks.graph.cascade_extract.utils.extract_nodes import extract_nodes
 from cognee.tasks.graph.cascade_extract.utils.extract_content_nodes_and_relationship_names import (
     extract_content_nodes_and_relationship_names,

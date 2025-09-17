@@ -10,7 +10,7 @@ from cognee.infrastructure.llm import get_max_chunk_tokens
 from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.ontology.rdf_xml.OntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.users.models import User
 
 from cognee.tasks.documents import (

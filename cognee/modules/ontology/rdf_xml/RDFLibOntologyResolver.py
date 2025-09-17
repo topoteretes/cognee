@@ -12,6 +12,7 @@ from cognee.modules.ontology.exceptions import (
 )
 from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.models import AttachedOntologyNode
+from cognee.modules.ontology.matching_strategies import MatchingStrategy, FuzzyMatchingStrategy
 
 logger = get_logger("OntologyAdapter")
 
@@ -23,7 +24,8 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
     It provides fuzzy matching and subgraph extraction capabilities for ontology entities.
     """
     
-    def __init__(self, ontology_file: Optional[str] = None):
+    def __init__(self, ontology_file: Optional[str] = None, matching_strategy: Optional[MatchingStrategy] = None):
+        super().__init__(matching_strategy)
         self.ontology_file = ontology_file
         try:
             if ontology_file and os.path.exists(ontology_file):
@@ -94,13 +96,8 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
         try:
             normalized_name = name.lower().replace(" ", "_").strip()
             possible_matches = list(self.lookup.get(category, {}).keys())
-            if normalized_name in possible_matches:
-                return normalized_name
-
-            best_match = difflib.get_close_matches(
-                normalized_name, possible_matches, n=1, cutoff=0.8
-            )
-            return best_match[0] if best_match else None
+            
+            return self.matching_strategy.find_match(normalized_name, possible_matches)
         except Exception as e:
             logger.error("Error in find_closest_match: %s", str(e))
             raise FindClosestMatchError() from e

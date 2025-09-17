@@ -8,7 +8,7 @@ from cognee.modules.engine.utils import (
     generate_node_name,
 )
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.modules.ontology.rdf_xml.OntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
 
 def _create_node_key(node_id: str, category: str) -> str:

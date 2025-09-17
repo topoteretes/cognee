@@ -5,7 +5,7 @@ from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.modules.ontology.rdf_xml.OntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
 
 async def get_default_tasks_by_indices(

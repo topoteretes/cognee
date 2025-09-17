@@ -1,6 +1,6 @@
 import pytest
 from rdflib import Graph, Namespace, RDF, OWL, RDFS
-from cognee.modules.ontology.rdf_xml.OntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.ontology.models import AttachedOntologyNode
 
 
