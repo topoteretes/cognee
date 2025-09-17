@@ -4,6 +4,18 @@ from cognee.infrastructure.llm import get_llm_config
 
 
 class LLMGateway:
+    @staticmethod
+    def generate_embedding(text: str) -> Optional[list]:
+        """
+        Generate an embedding for the given text using the configured embedding API.
+        Returns None if the API is unavailable or fails.
+        """
+        try:
+            from cognee.infrastructure.llm.embeddings import get_embedding_engine
+            embedding_engine = get_embedding_engine()
+            return embedding_engine.generate_embedding(text)
+        except Exception:
+            return None
     """
     Class handles selection of structured output frameworks and LLM functions.
     Class used as a namespace for LLM related functions, should not be instantiated, all methods are static.

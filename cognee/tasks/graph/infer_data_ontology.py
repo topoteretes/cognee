@@ -139,16 +139,14 @@ class OntologyEngine:
 
     async def load_data(self, file_path: str) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """
-        Load data from a specified JSON or CSV file and return it in a structured format.
+        Load data from a specified JSON, CSV, or OWL/RDF file and return it in a structured format.
 
         Parameters:
         -----------
-
             - file_path (str): The path to the file to load data from.
 
         Returns:
         --------
-
             - Union[List[Dict[str, Any]], Dict[str, Any]]: Parsed data from the file as either a
               list of dictionaries or a single dictionary depending on content type.
         """
@@ -162,6 +160,37 @@ class OntologyEngine:
                     content = await f.read()
                     reader = csv.DictReader(content.splitlines())
                     return list(reader)
+            elif file_path.endswith(".owl") or file_path.endswith(".rdf"):
+                from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
+                from cognee.modules.engine.models.Entity import Entity
+                from cognee.tasks.storage.add_data_points import add_data_points
+                from cognee.infrastructure.llm.LLMGateway import LLMGateway
+
+                resolver = OntologyResolver(ontology_file=file_path)
+                datapoints = []
+                embeddings = {}
+                embedding_fn = getattr(LLMGateway, "generate_embedding", None)
+                for category in ["classes", "individuals"]:
+                    for key, uri in resolver.lookup.get(category, {}).items():
+                        if embedding_fn:
+                            try:
+                                embedding = embedding_fn(text=f"{key} {str(uri)}")
+                            except Exception:
+                                embedding = None
+                        else:
+                            embedding = None
+                        datapoint = Entity(
+                            name=key,
+                            description=str(uri),
+                            metadata={"category": category, "uri": str(uri)}
+                        )
+                        datapoints.append(datapoint)
+                        embeddings[str(uri)] = embedding
+                await add_data_points(datapoints, update_edge_collection=True)
+                self.ontology_nodes = [dp.dict() for dp in datapoints]
+                self.ontology_edges = []  # Edges handled by add_data_points
+                self.ontology_embeddings = embeddings
+                return {"nodes": self.ontology_nodes, "edges": self.ontology_edges, "embeddings": embeddings}
             else:
                 raise IngestionError(message="Unsupported file format")
         except Exception as e:
