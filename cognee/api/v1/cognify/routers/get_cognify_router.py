@@ -3,6 +3,7 @@ import asyncio
 from uuid import UUID
 from pydantic import Field
 from typing import List, Optional
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect
 from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
@@ -119,7 +120,7 @@ def get_cognify_router() -> APIRouter:
 
             # If any cognify run errored return JSONResponse with proper error status code
             if any(isinstance(v, PipelineRunErrored) for v in cognify_run.values()):
-                return JSONResponse(status_code=420, content=cognify_run)
+                return JSONResponse(status_code=420, content=jsonable_encoder(cognify_run))
             return cognify_run
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})
