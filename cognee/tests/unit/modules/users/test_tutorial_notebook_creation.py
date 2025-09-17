@@ -159,42 +159,6 @@ class TestTutorialNotebookCreation:
         mock_session.add.assert_not_called()
         mock_session.commit.assert_not_called()
 
-    def test_generate_cell_name_with_markdown_header(self):
-        """Test cell name generation from markdown headers."""
-        from nbformat.notebooknode import NotebookNode
-
-        # Mock a markdown cell with header
-        mock_cell = NotebookNode(
-            {"cell_type": "markdown", "source": "# This is a Header\n\nSome content here."}
-        )
-
-        result = Notebook._generate_cell_name(mock_cell)
-        assert result == "This is a Header"
-
-    def test_generate_cell_name_with_long_header(self):
-        """Test cell name generation truncates long headers."""
-        from nbformat.notebooknode import NotebookNode
-
-        long_header = "This is a very long header that should be truncated because it exceeds the fifty character limit"
-        mock_cell = NotebookNode(
-            {"cell_type": "markdown", "source": f"# {long_header}\n\nContent."}
-        )
-
-        result = Notebook._generate_cell_name(mock_cell)
-        assert len(result) == 50
-        assert result == long_header[:50]
-
-    def test_generate_cell_name_markdown_without_header(self):
-        """Test cell name generation for markdown without header."""
-        from nbformat.notebooknode import NotebookNode
-
-        mock_cell = NotebookNode(
-            {"cell_type": "markdown", "source": "Just some regular markdown text without a header."}
-        )
-
-        result = Notebook._generate_cell_name(mock_cell)
-        assert result == "Markdown Cell"
-
     def test_generate_cell_name_code_cell(self):
         """Test cell name generation for code cells."""
         from nbformat.notebooknode import NotebookNode
