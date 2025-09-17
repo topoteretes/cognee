@@ -102,5 +102,5 @@ async def extract_graph_from_data(
             ]
 
     return await integrate_chunk_graphs(
-        data_chunks, chunk_graphs, graph_model, ontology_adapter or OntologyResolver()
+        data_chunks, chunk_graphs, graph_model, ontology_adapter
     )

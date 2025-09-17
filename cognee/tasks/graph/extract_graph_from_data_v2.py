@@ -44,5 +44,5 @@ async def extract_graph_from_data(
         data_chunks=data_chunks,
         chunk_graphs=chunk_graphs,
         graph_model=KnowledgeGraph,
-        ontology_adapter=ontology_adapter or OntologyResolver(),
+        ontology_adapter=ontology_adapter,
     )
