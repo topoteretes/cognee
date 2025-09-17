@@ -7,12 +7,12 @@ from cognee.modules.ontology.matching_strategies import MatchingStrategy, FuzzyM
 
 class BaseOntologyResolver(ABC):
     """Abstract base class for ontology resolvers."""
-    
+
     def __init__(self, matching_strategy: Optional[MatchingStrategy] = None):
         """Initialize the ontology resolver with a matching strategy.
-        
+
         Args:
-            matching_strategy: The strategy to use for entity matching. 
+            matching_strategy: The strategy to use for entity matching.
                               Defaults to FuzzyMatchingStrategy if None.
         """
         self.matching_strategy = matching_strategy or FuzzyMatchingStrategy()
@@ -35,6 +35,8 @@ class BaseOntologyResolver(ABC):
     @abstractmethod
     def get_subgraph(
         self, node_name: str, node_type: str = "individuals", directed: bool = True
-    ) -> Tuple[List[AttachedOntologyNode], List[Tuple[str, str, str]], Optional[AttachedOntologyNode]]:
+    ) -> Tuple[
+        List[AttachedOntologyNode], List[Tuple[str, str, str]], Optional[AttachedOntologyNode]
+    ]:
         """Get a subgraph for the given node."""
         pass

@@ -19,12 +19,16 @@ logger = get_logger("OntologyAdapter")
 
 class RDFLibOntologyResolver(BaseOntologyResolver):
     """RDFLib-based ontology resolver implementation.
-    
+
     This implementation uses RDFLib to parse and work with RDF/OWL ontology files.
     It provides fuzzy matching and subgraph extraction capabilities for ontology entities.
     """
-    
-    def __init__(self, ontology_file: Optional[str] = None, matching_strategy: Optional[MatchingStrategy] = None):
+
+    def __init__(
+        self,
+        ontology_file: Optional[str] = None,
+        matching_strategy: Optional[MatchingStrategy] = None,
+    ):
         super().__init__(matching_strategy)
         self.ontology_file = ontology_file
         try:
@@ -96,7 +100,7 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
         try:
             normalized_name = name.lower().replace(" ", "_").strip()
             possible_matches = list(self.lookup.get(category, {}).keys())
-            
+
             return self.matching_strategy.find_match(normalized_name, possible_matches)
         except Exception as e:
             logger.error("Error in find_closest_match: %s", str(e))
@@ -111,7 +115,9 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
 
     def get_subgraph(
         self, node_name: str, node_type: str = "individuals", directed: bool = True
-    ) -> Tuple[List[AttachedOntologyNode], List[Tuple[str, str, str]], Optional[AttachedOntologyNode]]:
+    ) -> Tuple[
+        List[AttachedOntologyNode], List[Tuple[str, str, str]], Optional[AttachedOntologyNode]
+    ]:
         nodes_set = set()
         edges: List[Tuple[str, str, str]] = []
         visited = set()
