@@ -1,12 +1,13 @@
 import pytest
 from rdflib import Graph, Namespace, RDF, OWL, RDFS
-from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver, AttachedOntologyNode
+from cognee.modules.ontology.rdf_xml.OntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.models import AttachedOntologyNode
 
 
 def test_ontology_adapter_initialization_success():
     """Test successful initialization of OntologyAdapter."""
 
-    adapter = OntologyResolver()
+    adapter = RDFLibOntologyResolver()
     adapter.build_lookup()
 
     assert isinstance(adapter.lookup, dict)
@@ -14,7 +15,7 @@ def test_ontology_adapter_initialization_success():
 
 def test_ontology_adapter_initialization_file_not_found():
     """Test OntologyAdapter initialization with nonexistent file."""
-    adapter = OntologyResolver(ontology_file="nonexistent.owl")
+    adapter = RDFLibOntologyResolver(ontology_file="nonexistent.owl")
     assert adapter.graph is None
 
 
@@ -27,7 +28,7 @@ def test_build_lookup():
 
     g.add((ns.Audi, RDF.type, ns.Car))
 
-    resolver = OntologyResolver()
+    resolver = RDFLibOntologyResolver()
     resolver.graph = g
     resolver.build_lookup()
 
@@ -50,7 +51,7 @@ def test_find_closest_match_exact():
     g.add((ns.Car, RDF.type, OWL.Class))
     g.add((ns.Audi, RDF.type, ns.Car))
 
-    resolver = OntologyResolver()
+    resolver = RDFLibOntologyResolver()
     resolver.graph = g
     resolver.build_lookup()
 
@@ -71,7 +72,7 @@ def test_find_closest_match_fuzzy():
     g.add((ns.Audi, RDF.type, ns.Car))
     g.add((ns.BMW, RDF.type, ns.Car))
 
-    resolver = OntologyResolver()
+    resolver = RDFLibOntologyResolver()
     resolver.graph = g
     resolver.build_lookup()
 
@@ -92,7 +93,7 @@ def test_find_closest_match_no_match():
     g.add((ns.Audi, RDF.type, ns.Car))
     g.add((ns.BMW, RDF.type, ns.Car))
 
-    resolver = OntologyResolver()
+    resolver = RDFLibOntologyResolver()
     resolver.graph = g
     resolver.build_lookup()
 
@@ -105,7 +106,7 @@ def test_get_subgraph_no_match_rdflib():
     """Test get_subgraph returns empty results for a non-existent node."""
     g = Graph()
 
-    resolver = OntologyResolver()
+    resolver = RDFLibOntologyResolver()
     resolver.graph = g
     resolver.build_lookup()
 
@@ -138,7 +139,7 @@ def test_get_subgraph_success_rdflib():
     g.add((ns.VW, owns, ns.Audi))
     g.add((ns.VW, owns, ns.Porsche))
 
-    resolver = OntologyResolver()
+    resolver = RDFLibOntologyResolver()
     resolver.graph = g
     resolver.build_lookup()
 
@@ -163,7 +164,7 @@ def test_refresh_lookup_rdflib():
     """Test that refresh_lookup rebuilds the lookup dict into a new object."""
     g = Graph()
 
-    resolver = OntologyResolver()
+    resolver = RDFLibOntologyResolver()
     resolver.graph = g
     resolver.build_lookup()
 

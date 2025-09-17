@@ -10,30 +10,19 @@ from cognee.modules.ontology.exceptions import (
     FindClosestMatchError,
     GetSubgraphError,
 )
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.models import AttachedOntologyNode
 
 logger = get_logger("OntologyAdapter")
 
 
-class AttachedOntologyNode:
-    """Lightweight wrapper to be able to parse any ontology solution and generalize cognee interface."""
-
-    def __init__(self, uri: URIRef, category: str):
-        self.uri = uri
-        self.name = self._extract_name(uri)
-        self.category = category
-
-    @staticmethod
-    def _extract_name(uri: URIRef) -> str:
-        uri_str = str(uri)
-        if "#" in uri_str:
-            return uri_str.split("#")[-1]
-        return uri_str.rstrip("/").split("/")[-1]
-
-    def __repr__(self):
-        return f"AttachedOntologyNode(name={self.name}, category={self.category})"
-
-
-class OntologyResolver:
+class RDFLibOntologyResolver(BaseOntologyResolver):
+    """RDFLib-based ontology resolver implementation.
+    
+    This implementation uses RDFLib to parse and work with RDF/OWL ontology files.
+    It provides fuzzy matching and subgraph extraction capabilities for ontology entities.
+    """
+    
     def __init__(self, ontology_file: Optional[str] = None):
         self.ontology_file = ontology_file
         try:
@@ -60,7 +49,7 @@ class OntologyResolver:
             name = uri_str.rstrip("/").split("/")[-1]
         return name.lower().replace(" ", "_").strip()
 
-    def build_lookup(self):
+    def build_lookup(self) -> None:
         try:
             classes: Dict[str, URIRef] = {}
             individuals: Dict[str, URIRef] = {}
@@ -97,7 +86,7 @@ class OntologyResolver:
             logger.error("Failed to build lookup dictionary: %s", str(e))
             raise RuntimeError("Lookup build failed") from e
 
-    def refresh_lookup(self):
+    def refresh_lookup(self) -> None:
         self.build_lookup()
         logger.info("Ontology lookup refreshed.")
 
@@ -125,7 +114,7 @@ class OntologyResolver:
 
     def get_subgraph(
         self, node_name: str, node_type: str = "individuals", directed: bool = True
-    ) -> Tuple[List[Any], List[Tuple[str, str, str]], Optional[Any]]:
+    ) -> Tuple[List[AttachedOntologyNode], List[Tuple[str, str, str]], Optional[AttachedOntologyNode]]:
         nodes_set = set()
         edges: List[Tuple[str, str, str]] = []
         visited = set()

@@ -10,7 +10,7 @@ from cognee.infrastructure.llm import get_max_chunk_tokens
 from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
+from cognee.modules.ontology.rdf_xml.OntologyResolver import RDFLibOntologyResolver
 from cognee.modules.users.models import User
 
 from cognee.tasks.documents import (
@@ -230,7 +230,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         Task(
             extract_graph_from_data,
             graph_model=graph_model,
-            ontology_adapter=OntologyResolver(ontology_file=ontology_file_path),
+            ontology_adapter=RDFLibOntologyResolver(ontology_file=ontology_file_path),
             custom_prompt=custom_prompt,
             task_config={"batch_size": 10},
         ),  # Generate knowledge graphs from the document chunks.
