@@ -24,13 +24,12 @@ def get_ontology_resolver(
 
     if resolver is not None:
         config["resolver"] = resolver
+        config["matching_strategy"] = matching_strategy or resolver.matching_strategy
     else:
         default_strategy = matching_strategy or FuzzyMatchingStrategy()
         config["resolver"] = RDFLibOntologyResolver(
             ontology_file=None, matching_strategy=default_strategy
         )
-
-    if matching_strategy is not None and resolver is None:
-        config["matching_strategy"] = matching_strategy
+        config["matching_strategy"] = default_strategy
 
     return config
