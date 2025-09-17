@@ -92,10 +92,10 @@ export default function AddDataToCognee({ datasets, refreshDatasets, useCloud = 
           <div className="mt-8 mb-6">Please select a {useCloud ? "cloud" : "local"} dataset to add data in.<br/> If you don&apos;t have any, don&apos;t worry, we will create one for you.</div>
           <form onSubmit={submitDataToCognee}>
             <div className="max-w-md flex flex-col gap-4">
-              <Select name="datasetName">
+              <Select defaultValue={datasets.length ? datasets[0].id : ""} name="datasetName">
                 {!datasets.length && <option value="">main_dataset</option>}
-                {datasets.map((dataset: Dataset, index) => (
-                  <option selected={index===0} key={dataset.id} value={dataset.id}>{dataset.name}</option>
+                {datasets.map((dataset: Dataset) => (
+                  <option key={dataset.id} value={dataset.id}>{dataset.name}</option>
                 ))}
               </Select>
 
