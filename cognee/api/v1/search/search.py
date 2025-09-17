@@ -22,7 +22,7 @@ async def search(
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: bool = False,
-    last_k: Optional[int] = None,
+    last_k: Optional[int] = 1,
     only_context: bool = False,
     use_combined_context: bool = False,
 ) -> Union[List[SearchResult], CombinedSearchResult]:
