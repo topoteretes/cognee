@@ -1,7 +1,10 @@
 from uuid import UUID
 from typing import Optional, List
 
-from cognee.modules.pipelines.methods import get_pipeline_runs_by_dataset, reset_pipeline_run_status
+from cognee.modules.pipelines.methods import (
+    get_pipeline_runs_by_dataset,
+    reset_pipeline_run_status,
+)
 from cognee.modules.pipelines.models.PipelineRun import PipelineRunStatus
 from cognee.modules.users.models import User
 
@@ -22,7 +25,10 @@ async def reset_dataset_pipeline_run_status(
             continue
 
         # If a name filter is provided, skip non-matching runs
-        if pipeline_names is not None and pipeline_run.pipeline_name not in pipeline_names:
+        if (
+            pipeline_names is not None
+            and pipeline_run.pipeline_name not in pipeline_names
+        ):
             continue
 
         await reset_pipeline_run_status(user.id, dataset_id, pipeline_run.pipeline_name)

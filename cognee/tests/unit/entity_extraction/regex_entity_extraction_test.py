@@ -13,7 +13,9 @@ def regex_extractor():
 @pytest.mark.asyncio
 async def test_extract_emails(regex_extractor):
     """Test extraction of email addresses."""
-    text = "Contact us at support@example.com or sales@company.co.uk for more information."
+    text = (
+        "Contact us at support@example.com or sales@company.co.uk for more information."
+    )
     entities = await regex_extractor.extract_entities(text)
 
     # Filter only EMAIL entities

@@ -14,7 +14,9 @@ def run_sync(coro, running_loop=None, timeout=None):
                 if not running_loop:
                     running_loop = asyncio.get_running_loop()
 
-                result = asyncio.run_coroutine_threadsafe(coro, running_loop).result(timeout)
+                result = asyncio.run_coroutine_threadsafe(coro, running_loop).result(
+                    timeout
+                )
             except RuntimeError:
                 result = asyncio.run(coro)
 

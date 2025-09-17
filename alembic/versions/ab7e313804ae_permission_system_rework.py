@@ -88,7 +88,9 @@ def _ensure_permission(conn, permission_name) -> str:
         sa.MetaData(),
         sa.Column("id", UUID, primary_key=True, index=True, default=uuid4),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+            "created_at",
+            sa.DateTime(timezone=True),
+            default=lambda: datetime.now(timezone.utc),
         ),
         sa.Column(
             "updated_at",
@@ -133,7 +135,10 @@ def _build_acl_row(*, user_id, target_id, permission_id, target_col) -> dict:
 def _create_dataset_permission(conn, user_id, dataset_id, permission_name):
     perm_id = _ensure_permission(conn, permission_name)
     return _build_acl_row(
-        user_id=user_id, target_id=dataset_id, permission_id=perm_id, target_col="dataset_id"
+        user_id=user_id,
+        target_id=dataset_id,
+        permission_id=perm_id,
+        target_col="dataset_id",
     )
 
 
@@ -154,10 +159,14 @@ def upgrade() -> None:
         "acls",
         sa.Column("id", UUID, primary_key=True, default=uuid4),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+            "created_at",
+            sa.DateTime(timezone=True),
+            default=lambda: datetime.now(timezone.utc),
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)
+            "updated_at",
+            sa.DateTime(timezone=True),
+            onupdate=lambda: datetime.now(timezone.utc),
         ),
         sa.Column("principal_id", UUID, sa.ForeignKey("principals.id")),
         sa.Column("permission_id", UUID, sa.ForeignKey("permissions.id")),
@@ -175,10 +184,18 @@ def upgrade() -> None:
     acl_list = []
 
     for dataset in datasets:
-        acl_list.append(_create_dataset_permission(conn, dataset.owner_id, dataset.id, "read"))
-        acl_list.append(_create_dataset_permission(conn, dataset.owner_id, dataset.id, "write"))
-        acl_list.append(_create_dataset_permission(conn, dataset.owner_id, dataset.id, "share"))
-        acl_list.append(_create_dataset_permission(conn, dataset.owner_id, dataset.id, "delete"))
+        acl_list.append(
+            _create_dataset_permission(conn, dataset.owner_id, dataset.id, "read")
+        )
+        acl_list.append(
+            _create_dataset_permission(conn, dataset.owner_id, dataset.id, "write")
+        )
+        acl_list.append(
+            _create_dataset_permission(conn, dataset.owner_id, dataset.id, "share")
+        )
+        acl_list.append(
+            _create_dataset_permission(conn, dataset.owner_id, dataset.id, "delete")
+        )
 
     if acl_list:
         op.bulk_insert(acls_table, acl_list)
@@ -193,10 +210,14 @@ def downgrade() -> None:
         "acls",
         sa.Column("id", UUID, primary_key=True, nullable=False, default=uuid4),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+            "created_at",
+            sa.DateTime(timezone=True),
+            default=lambda: datetime.now(timezone.utc),
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc)
+            "updated_at",
+            sa.DateTime(timezone=True),
+            onupdate=lambda: datetime.now(timezone.utc),
         ),
         sa.Column("principal_id", UUID, sa.ForeignKey("principals.id")),
         sa.Column("permission_id", UUID, sa.ForeignKey("permissions.id")),
@@ -213,7 +234,9 @@ def downgrade() -> None:
 
     acl_list = []
     for single_data in data:
-        acl_list.append(_create_data_permission(conn, single_data.owner_id, single_data.id, "read"))
+        acl_list.append(
+            _create_data_permission(conn, single_data.owner_id, single_data.id, "read")
+        )
         acl_list.append(
             _create_data_permission(conn, single_data.owner_id, single_data.id, "write")
         )

@@ -38,7 +38,9 @@ def test_descriptions_to_string_basic_and_empty():
     ]
 
     s = tr.descriptions_to_string(results)
-    assert s == "First\n#####################\nSecond\n#####################\nThird line"
+    assert (
+        s == "First\n#####################\nSecond\n#####################\nThird line"
+    )
 
     assert tr.descriptions_to_string([]) == ""
 
@@ -201,7 +203,9 @@ class _FakeRetriever(TemporalRetriever):
         vector_search_results = await self._fake_vector_search(
             collection_name="Event_name", query_vector=[0.0], limit=0
         )
-        top_k_events = await self.filter_top_k_events(relevant_events, vector_search_results)
+        top_k_events = await self.filter_top_k_events(
+            relevant_events, vector_search_results
+        )
         return self.descriptions_to_string(top_k_events)
 
 

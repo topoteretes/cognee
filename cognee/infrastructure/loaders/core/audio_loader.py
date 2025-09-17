@@ -60,7 +60,10 @@ class AudioLoader(LoaderInterface):
         Returns:
             True if file can be handled, False otherwise
         """
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
+        if (
+            extension in self.supported_extensions
+            and mime_type in self.supported_mime_types
+        ):
             return True
         return False
 

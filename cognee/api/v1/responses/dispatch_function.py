@@ -46,9 +46,13 @@ async def dispatch_function(tool_call: Union[ToolCall, Dict[str, Any]]) -> str:
 
 async def handle_search(arguments: Dict[str, Any], user) -> list:
     """Handle search function call"""
-    search_tool = next((tool for tool in DEFAULT_TOOLS if tool["name"] == "search"), None)
+    search_tool = next(
+        (tool for tool in DEFAULT_TOOLS if tool["name"] == "search"), None
+    )
     required_params = (
-        search_tool["parameters"].get("required", []) if search_tool else ["search_query"]
+        search_tool["parameters"].get("required", [])
+        if search_tool
+        else ["search_query"]
     )
 
     query = arguments.get("search_query")
@@ -63,14 +67,18 @@ async def handle_search(arguments: Dict[str, Any], user) -> list:
     )
 
     if search_type_str not in valid_search_types:
-        logger.warning(f"Invalid search_type: {search_type_str}, defaulting to GRAPH_COMPLETION")
+        logger.warning(
+            f"Invalid search_type: {search_type_str}, defaulting to GRAPH_COMPLETION"
+        )
         search_type_str = "GRAPH_COMPLETION"
 
     query_type = SearchType[search_type_str]
 
     top_k = arguments.get("top_k")
     datasets = arguments.get("datasets")
-    system_prompt_path = arguments.get("system_prompt_path", "answer_simple_question.txt")
+    system_prompt_path = arguments.get(
+        "system_prompt_path", "answer_simple_question.txt"
+    )
 
     results = await search(
         query_text=query,

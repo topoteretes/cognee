@@ -4,7 +4,9 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.exceptions.exceptions import (
+    CollectionNotFoundError,
+)
 
 logger = get_logger("SummariesRetriever")
 
@@ -56,13 +58,17 @@ class SummariesRetriever(BaseRetriever):
             logger.info(f"Found {len(summaries_results)} summaries from vector search")
         except CollectionNotFoundError as error:
             logger.error("TextSummary_text collection not found in vector database")
-            raise NoDataError("No data found in the system, please add data first.") from error
+            raise NoDataError(
+                "No data found in the system, please add data first."
+            ) from error
 
         summary_payloads = [summary.payload for summary in summaries_results]
         logger.info(f"Returning {len(summary_payloads)} summary payloads")
         return summary_payloads
 
-    async def get_completion(self, query: str, context: Optional[Any] = None, **kwargs) -> Any:
+    async def get_completion(
+        self, query: str, context: Optional[Any] = None, **kwargs
+    ) -> Any:
         """
         Generates a completion using summaries context.
 

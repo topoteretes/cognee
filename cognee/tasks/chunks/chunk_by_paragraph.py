@@ -37,7 +37,9 @@ def chunk_by_paragraph(
     for paragraph_id, sentence, sentence_size, end_type in chunk_by_sentence(
         data, maximum_size=max_chunk_size
     ):
-        if current_chunk_size > 0 and (current_chunk_size + sentence_size > max_chunk_size):
+        if current_chunk_size > 0 and (
+            current_chunk_size + sentence_size > max_chunk_size
+        ):
             # Yield current chunk
             chunk_dict = {
                 "text": current_chunk,

@@ -33,14 +33,20 @@ class F1ScoreMetric:
         actual_counts = Counter(actual_tokens)
         expected_counts = Counter(expected_tokens)
 
-        tp = sum(min(actual_counts[word], expected_counts[word]) for word in actual_counts)
+        tp = sum(
+            min(actual_counts[word], expected_counts[word]) for word in actual_counts
+        )
         fp = sum(actual_counts[word] for word in actual_counts) - tp
         fn = sum(expected_counts[word] for word in expected_counts) - tp
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
 
-        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+        f1 = (
+            2 * (precision * recall) / (precision + recall)
+            if (precision + recall) > 0
+            else 0.0
+        )
         self.score = f1
         self.reason = f"F1: {f1:.2f} (Precision: {precision:.2f}, Recall: {recall:.2f})"
         return self.score

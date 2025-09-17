@@ -69,7 +69,9 @@ async def run_pipeline_per_dataset(
     if not data:
         data: list[Data] = await get_dataset_data(dataset_id=dataset.id)
 
-    process_pipeline_status = await check_pipeline_run_qualification(dataset, data, pipeline_name)
+    process_pipeline_status = await check_pipeline_run_qualification(
+        dataset, data, pipeline_name
+    )
     if process_pipeline_status:
         # If pipeline was already processed or is currently being processed
         # return status information to async generator and finish execution

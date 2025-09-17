@@ -9,7 +9,9 @@ from sqlalchemy import select
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.pipelines.operations.run_tasks_distributed import run_tasks_distributed
+from cognee.modules.pipelines.operations.run_tasks_distributed import (
+    run_tasks_distributed,
+)
 from cognee.modules.users.models import User
 from cognee.modules.data.models import Data
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
@@ -43,8 +45,12 @@ def override_run_tasks(new_gen):
     def decorator(original_gen):
         @wraps(original_gen)
         async def wrapper(*args, distributed=None, **kwargs):
-            default_distributed_value = os.getenv("COGNEE_DISTRIBUTED", "False").lower() == "true"
-            distributed = default_distributed_value if distributed is None else distributed
+            default_distributed_value = (
+                os.getenv("COGNEE_DISTRIBUTED", "False").lower() == "true"
+            )
+            distributed = (
+                default_distributed_value if distributed is None else distributed
+            )
 
             if distributed:
                 async for run_info in new_gen(*args, **kwargs):
@@ -99,7 +105,9 @@ async def run_tasks(
             ).scalar_one_or_none()
             if data_point:
                 if (
-                    data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
+                    data_point.pipeline_status.get(pipeline_name, {}).get(
+                        str(dataset.id)
+                    )
                     == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
                 ):
                     yield {
@@ -249,7 +257,9 @@ async def run_tasks(
         dataset = await session.get(Dataset, dataset_id)
 
     pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
-    pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset_id, data)
+    pipeline_run = await log_pipeline_run_start(
+        pipeline_id, pipeline_name, dataset_id, data
+    )
     pipeline_run_id = pipeline_run.pipeline_run_id
 
     yield PipelineRunStarted(
@@ -290,7 +300,9 @@ async def run_tasks(
 
         # If any data item could not be processed propagate error
         errored_results = [
-            result for result in results if isinstance(result["run_info"], PipelineRunErrored)
+            result
+            for result in results
+            if isinstance(result["run_info"], PipelineRunErrored)
         ]
         if errored_results:
             raise PipelineRunFailedError(

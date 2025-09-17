@@ -34,7 +34,9 @@ def extract_keywords(text: str) -> list[str]:
     tfidf = vectorizer.fit_transform(nouns)
 
     top_nouns = sorted(
-        vectorizer.vocabulary_, key=lambda x: tfidf[0, vectorizer.vocabulary_[x]], reverse=True
+        vectorizer.vocabulary_,
+        key=lambda x: tfidf[0, vectorizer.vocabulary_[x]],
+        reverse=True,
     )
 
     keywords = []

@@ -36,7 +36,9 @@ class CogneeGraph(CogneeAbstractGraph):
         if node.id not in self.nodes:
             self.nodes[node.id] = node
         else:
-            raise EntityAlreadyExistsError(message=f"Node with id {node.id} already exists.")
+            raise EntityAlreadyExistsError(
+                message=f"Node with id {node.id} already exists."
+            )
 
     def add_edge(self, edge: Edge) -> None:
         self.edges.append(edge)
@@ -87,7 +89,9 @@ class CogneeGraph(CogneeAbstractGraph):
             elif len(memory_fragment_filter) == 0:
                 nodes_data, edges_data = await adapter.get_graph_data()
                 if not nodes_data or not edges_data:
-                    raise EntityNotFoundError(message="Empty graph projected from the database.")
+                    raise EntityNotFoundError(
+                        message="Empty graph projected from the database."
+                    )
             else:
                 nodes_data, edges_data = await adapter.get_filtered_graph_data(
                     attribute_filters=memory_fragment_filter
@@ -99,8 +103,12 @@ class CogneeGraph(CogneeAbstractGraph):
 
             # Process nodes
             for node_id, properties in nodes_data:
-                node_attributes = {key: properties.get(key) for key in node_properties_to_project}
-                self.add_node(Node(str(node_id), node_attributes, dimension=node_dimension))
+                node_attributes = {
+                    key: properties.get(key) for key in node_properties_to_project
+                }
+                self.add_node(
+                    Node(str(node_id), node_attributes, dimension=node_dimension)
+                )
 
             # Process edges
             for source_id, target_id, relationship_type, properties in edges_data:
@@ -168,7 +176,9 @@ class CogneeGraph(CogneeAbstractGraph):
                     f"Edge collection distances were calculated separately from nodes in {projection_time:.2f}s"
                 )
 
-            embedding_map = {result.payload["text"]: result.score for result in edge_distances}
+            embedding_map = {
+                result.payload["text"]: result.score for result in edge_distances
+            }
 
             for edge in self.edges:
                 relationship_type = edge.attributes.get("relationship_type")

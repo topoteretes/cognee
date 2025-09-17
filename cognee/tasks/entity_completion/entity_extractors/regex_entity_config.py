@@ -21,7 +21,12 @@ class RegexEntityConfig:
 
     def _validate_config_fields(self, config: Dict[str, Any]) -> None:
         """Validate that all required fields are present in the configuration."""
-        required_fields = ["entity_name", "entity_description", "regex", "description_template"]
+        required_fields = [
+            "entity_name",
+            "entity_description",
+            "regex",
+            "description_template",
+        ]
         missing_fields = [field for field in required_fields if field not in config]
 
         if missing_fields:
@@ -35,7 +40,9 @@ class RegexEntityConfig:
             return re.compile(pattern)
         except re.error as e:
             logger.error(f"Invalid regex pattern for entity '{entity_name}': {str(e)}")
-            raise ValueError(f"Invalid regex pattern for entity '{entity_name}': {str(e)}")
+            raise ValueError(
+                f"Invalid regex pattern for entity '{entity_name}': {str(e)}"
+            )
 
     def _load_config(self) -> None:
         """Load and process the configuration from the JSON file."""
@@ -53,7 +60,9 @@ class RegexEntityConfig:
             self._validate_config_fields(config)
             entity_name = config["entity_name"]
 
-            entity_type = EntityType(name=entity_name, description=config["entity_description"])
+            entity_type = EntityType(
+                name=entity_name, description=config["entity_description"]
+            )
 
             compiled_pattern = self._compile_regex(config["regex"], entity_name)
 

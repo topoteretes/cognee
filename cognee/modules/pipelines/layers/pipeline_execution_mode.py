@@ -1,6 +1,9 @@
 import asyncio
 from typing import Any, AsyncIterable, AsyncGenerator, Callable, Dict, Union, Awaitable
-from cognee.modules.pipelines.models.PipelineRunInfo import PipelineRunCompleted, PipelineRunErrored
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunCompleted,
+    PipelineRunErrored,
+)
 from cognee.modules.pipelines.queues.pipeline_run_info_queues import push_to_queue
 
 AsyncGenLike = Union[
@@ -81,9 +84,9 @@ async def run_pipeline_as_background_process(
 
                     push_to_queue(pipeline_run_info.pipeline_run_id, pipeline_run_info)
 
-                    if isinstance(pipeline_run_info, PipelineRunCompleted) or isinstance(
-                        pipeline_run_info, PipelineRunErrored
-                    ):
+                    if isinstance(
+                        pipeline_run_info, PipelineRunCompleted
+                    ) or isinstance(pipeline_run_info, PipelineRunErrored):
                         break
                 except StopAsyncIteration:
                     break
@@ -124,4 +127,8 @@ def get_pipeline_executor(
         run_fn = get_run_pipeline_fn(run_in_background=True)
         result = await run_fn(pipeline, **params)
     """
-    return run_pipeline_as_background_process if run_in_background else run_pipeline_blocking
+    return (
+        run_pipeline_as_background_process
+        if run_in_background
+        else run_pipeline_blocking
+    )

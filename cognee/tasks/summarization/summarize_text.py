@@ -40,7 +40,9 @@ async def summarize_text(
     if not isinstance(data_chunks, list):
         raise InvalidSummaryInputsError("data_chunks must be a list.")
     if not all(hasattr(c, "text") for c in data_chunks):
-        raise InvalidSummaryInputsError("each DocumentChunk must have a 'text' attribute.")
+        raise InvalidSummaryInputsError(
+            "each DocumentChunk must have a 'text' attribute."
+        )
 
     if len(data_chunks) == 0:
         return data_chunks
@@ -50,7 +52,10 @@ async def summarize_text(
         summarization_model = cognee_config.summarization_model
 
     chunk_summaries = await asyncio.gather(
-        *[LLMGateway.extract_summary(chunk.text, summarization_model) for chunk in data_chunks]
+        *[
+            LLMGateway.extract_summary(chunk.text, summarization_model)
+            for chunk in data_chunks
+        ]
     )
 
     summaries = [

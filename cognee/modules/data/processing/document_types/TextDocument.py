@@ -9,7 +9,9 @@ class TextDocument(Document):
 
     async def read(self, chunker_cls: Chunker, max_chunk_size: int):
         async def get_text():
-            async with open_data_file(self.raw_data_location, mode="r", encoding="utf-8") as file:
+            async with open_data_file(
+                self.raw_data_location, mode="r", encoding="utf-8"
+            ) as file:
                 while True:
                     text = file.read(1000000)
                     if not text.strip():

@@ -148,7 +148,9 @@ def get_responses_router() -> APIRouter:
                     id=call_id,
                     type="function",
                     function=FunctionCall(name=function_name, arguments=arguments_str),
-                    output=ToolCallOutput(status=output_status, data={"result": function_result}),
+                    output=ToolCallOutput(
+                        status=output_status, data={"result": function_result}
+                    ),
                 )
 
                 processed_tool_calls.append(processed_call)

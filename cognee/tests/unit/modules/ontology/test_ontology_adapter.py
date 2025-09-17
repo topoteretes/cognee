@@ -1,6 +1,9 @@
 import pytest
 from rdflib import Graph, Namespace, RDF, OWL, RDFS
-from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver, AttachedOntologyNode
+from cognee.modules.ontology.rdf_xml.OntologyResolver import (
+    OntologyResolver,
+    AttachedOntologyNode,
+)
 
 
 def test_ontology_adapter_initialization_success():
@@ -109,7 +112,9 @@ def test_get_subgraph_no_match_rdflib():
     resolver.graph = g
     resolver.build_lookup()
 
-    nodes, relationships, start_node = resolver.get_subgraph("Nonexistent", "individuals")
+    nodes, relationships, start_node = resolver.get_subgraph(
+        "Nonexistent", "individuals"
+    )
 
     assert nodes == []
     assert relationships == []

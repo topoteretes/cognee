@@ -13,10 +13,15 @@ async def summarize_code(
     if len(code_graph_nodes) == 0:
         return
 
-    code_data_points = [file for file in code_graph_nodes if hasattr(file, "source_code")]
+    code_data_points = [
+        file for file in code_graph_nodes if hasattr(file, "source_code")
+    ]
 
     file_summaries = await asyncio.gather(
-        *[LLMGateway.extract_code_summary(file.source_code) for file in code_data_points]
+        *[
+            LLMGateway.extract_code_summary(file.source_code)
+            for file in code_data_points
+        ]
     )
 
     file_summaries_map = {

@@ -3,10 +3,14 @@ from typing import Type, List
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.tasks.temporal_graph.models import EventList
-from cognee.modules.engine.utils.generate_event_datapoint import generate_event_datapoint
+from cognee.modules.engine.utils.generate_event_datapoint import (
+    generate_event_datapoint,
+)
 
 
-async def extract_events_and_timestamps(data_chunks: List[DocumentChunk]) -> List[DocumentChunk]:
+async def extract_events_and_timestamps(
+    data_chunks: List[DocumentChunk],
+) -> List[DocumentChunk]:
     """
     Extracts events and their timestamps from document chunks using an LLM.
 
@@ -21,7 +25,10 @@ async def extract_events_and_timestamps(data_chunks: List[DocumentChunk]) -> Lis
         List[DocumentChunk]: The same list of document chunks, enriched with extracted Event datapoints.
     """
     events = await asyncio.gather(
-        *[LLMGateway.extract_event_graph(chunk.text, EventList) for chunk in data_chunks]
+        *[
+            LLMGateway.extract_event_graph(chunk.text, EventList)
+            for chunk in data_chunks
+        ]
     )
 
     for data_chunk, event_list in zip(data_chunks, events):

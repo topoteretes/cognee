@@ -67,7 +67,9 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(query_type=SearchType.CHUNKS, query_text=random_node_name)
+    search_results = await cognee.search(
+        query_type=SearchType.CHUNKS, query_text=random_node_name
+    )
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
     for result in search_results:
@@ -143,8 +145,12 @@ async def vector_backend_api_test():
 
     # # Retrieve data-points
     result = await engine.retrieve(TEST_COLLECTION_NAME, [TEST_UUID, TEST_UUID_2])
-    assert any(str(r.id) == TEST_UUID and r.payload["text"] == TEST_TEXT for r in result)
-    assert any(str(r.id) == TEST_UUID_2 and r.payload["text"] == TEST_TEXT_2 for r in result)
+    assert any(
+        str(r.id) == TEST_UUID and r.payload["text"] == TEST_TEXT for r in result
+    )
+    assert any(
+        str(r.id) == TEST_UUID_2 and r.payload["text"] == TEST_TEXT_2 for r in result
+    )
     # Search multiple
     result_search_batch = await engine.batch_search(
         collection_name=TEST_COLLECTION_NAME,
@@ -152,7 +158,9 @@ async def vector_backend_api_test():
         limit=10,
         with_vectors=False,
     )
-    assert len(result_search_batch) == 2 and all(len(batch) == 2 for batch in result_search_batch)
+    assert len(result_search_batch) == 2 and all(
+        len(batch) == 2 for batch in result_search_batch
+    )
 
     # Delete datapoint from vector store
     await engine.delete_data_points(TEST_COLLECTION_NAME, [TEST_UUID, TEST_UUID_2])

@@ -39,7 +39,9 @@ TEST_TEXT = """
 
 
 @patch.object(
-    chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
+    chunk_by_sentence_module,
+    "get_embedding_engine",
+    side_effect=mock_get_embedding_engine,
 )
 @pytest.mark.asyncio
 async def test_AudioDocument(mock_engine):
@@ -55,12 +57,12 @@ async def test_AudioDocument(mock_engine):
             GROUND_TRUTH,
             document.read(chunker_cls=TextChunker, max_chunk_size=64),
         ):
-            assert ground_truth["word_count"] == paragraph_data.chunk_size, (
-                f'{ground_truth["word_count"] = } != {paragraph_data.chunk_size = }'
-            )
-            assert ground_truth["len_text"] == len(paragraph_data.text), (
-                f'{ground_truth["len_text"] = } != {len(paragraph_data.text) = }'
-            )
-            assert ground_truth["cut_type"] == paragraph_data.cut_type, (
-                f'{ground_truth["cut_type"] = } != {paragraph_data.cut_type = }'
-            )
+            assert (
+                ground_truth["word_count"] == paragraph_data.chunk_size
+            ), f'{ground_truth["word_count"] = } != {paragraph_data.chunk_size = }'
+            assert ground_truth["len_text"] == len(
+                paragraph_data.text
+            ), f'{ground_truth["len_text"] = } != {len(paragraph_data.text) = }'
+            assert (
+                ground_truth["cut_type"] == paragraph_data.cut_type
+            ), f'{ground_truth["cut_type"] = } != {paragraph_data.cut_type = }'

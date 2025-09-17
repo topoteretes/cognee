@@ -58,7 +58,9 @@ async def test_get_graph_from_model_simple_structure():
     added_edges = {}
     visited_properties = {}
 
-    nodes, edges = await get_graph_from_model(entity, added_nodes, added_edges, visited_properties)
+    nodes, edges = await get_graph_from_model(
+        entity, added_nodes, added_edges, visited_properties
+    )
 
     assert len(nodes) == 2, f"Expected 2 nodes, got {len(nodes)}"
     assert len(edges) == 1, f"Expected 1 edges, got {len(edges)}"
@@ -135,7 +137,9 @@ async def test_get_graph_from_model_multi_level_nesting():
     added_edges = {}
     visited_properties = {}
 
-    nodes, edges = await get_graph_from_model(chunk1, added_nodes, added_edges, visited_properties)
+    nodes, edges = await get_graph_from_model(
+        chunk1, added_nodes, added_edges, visited_properties
+    )
 
     nodes2, edges2 = await get_graph_from_model(
         chunk2, added_nodes, added_edges, visited_properties
@@ -158,7 +162,9 @@ async def test_get_graph_from_model_no_contains():
     added_edges = {}
     visited_properties = {}
 
-    nodes, edges = await get_graph_from_model(chunk, added_nodes, added_edges, visited_properties)
+    nodes, edges = await get_graph_from_model(
+        chunk, added_nodes, added_edges, visited_properties
+    )
 
     assert len(nodes) == 2, f"Expected 2 nodes, got {len(nodes)}"
     assert len(edges) == 1, f"Expected 1 edge, got {len(edges)}"
@@ -182,13 +188,19 @@ async def test_get_graph_from_model_flexible_edges():
             (Edge(weight=0.9, relationship_type="manages"), manager),
             # Multiple weights relationship
             (
-                Edge(weights={"performance": 0.8, "experience": 0.7}, relationship_type="employs"),
+                Edge(
+                    weights={"performance": 0.8, "experience": 0.7},
+                    relationship_type="employs",
+                ),
                 sales1,
             ),
             # Simple relationship
             sales2,
             # Group relationship
-            (Edge(weights={"team_efficiency": 0.8}, relationship_type="employs"), [admin1, admin2]),
+            (
+                Edge(weights={"team_efficiency": 0.8}, relationship_type="employs"),
+                [admin1, admin2],
+            ),
         ],
     )
 
@@ -196,7 +208,9 @@ async def test_get_graph_from_model_flexible_edges():
     added_edges = {}
     visited_properties = {}
 
-    nodes, edges = await get_graph_from_model(company, added_nodes, added_edges, visited_properties)
+    nodes, edges = await get_graph_from_model(
+        company, added_nodes, added_edges, visited_properties
+    )
 
     # Should have 6 nodes: company + 5 employees
     assert len(nodes) == 6, f"Expected 6 nodes, got {len(nodes)}"

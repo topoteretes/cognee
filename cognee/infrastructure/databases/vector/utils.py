@@ -29,7 +29,8 @@ def normalize_distances(result_values: List[dict]) -> List[float]:
         normalized_values = [0 for _ in result_values]
     else:
         normalized_values = [
-            (result["_distance"] - min_value) / (max_value - min_value) for result in result_values
+            (result["_distance"] - min_value) / (max_value - min_value)
+            for result in result_values
         ]
 
     return normalized_values

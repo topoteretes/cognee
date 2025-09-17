@@ -1,4 +1,8 @@
-from cognee.shared.data_models import SummarizedCode, SummarizedClass, SummarizedFunction
+from cognee.shared.data_models import (
+    SummarizedCode,
+    SummarizedClass,
+    SummarizedFunction,
+)
 
 
 def get_mock_summarized_code() -> SummarizedCode:

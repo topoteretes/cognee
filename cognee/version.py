@@ -9,7 +9,8 @@ def get_cognee_version() -> str:
     found in nearby pyproject.toml"""
     with suppress(FileNotFoundError, StopIteration):
         with open(
-            os.path.join(Path(__file__).parent.parent, "pyproject.toml"), encoding="utf-8"
+            os.path.join(Path(__file__).parent.parent, "pyproject.toml"),
+            encoding="utf-8",
         ) as pyproject_toml:
             version = (
                 next(line for line in pyproject_toml if line.startswith("version"))

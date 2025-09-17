@@ -6,13 +6,17 @@ from typing import List, Optional, Any, Dict, Type, Tuple
 from uuid import UUID
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
-from cognee.infrastructure.databases.exceptions import MutuallyExclusiveQueryParametersError
+from cognee.infrastructure.databases.exceptions import (
+    MutuallyExclusiveQueryParametersError,
+)
 from cognee.infrastructure.databases.graph.neptune_driver.adapter import NeptuneGraphDB
 from cognee.infrastructure.databases.vector.vector_db_interface import VectorDBInterface
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
+    EmbeddingEngine,
+)
 from cognee.infrastructure.databases.vector.models.PayloadSchema import PayloadSchema
 from cognee.infrastructure.databases.vector.models.ScoredResult import ScoredResult
 
@@ -153,7 +157,9 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         """
         return None
 
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_data_points(
+        self, collection_name: str, data_points: List[DataPoint]
+    ):
         """
         Insert new data points into the specified collection, by first inserting the node itself on the graph,
         then execute neptune.algo.vectors.upsert() to insert the corresponded embedding.
@@ -266,7 +272,11 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             )
 
         # In the case of excessive limit, or zero / negative value, limit will be set to 10.
-        if not limit or limit <= self._TOPK_LOWER_BOUND or limit > self._TOPK_UPPER_BOUND:
+        if (
+            not limit
+            or limit <= self._TOPK_LOWER_BOUND
+            or limit > self._TOPK_UPPER_BOUND
+        ):
             logger.warning(
                 "Provided limit (%s) is invalid (zero, negative, or exceeds maximum). "
                 "Defaulting to limit=10.",
@@ -314,12 +324,19 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         try:
             query_response = self._client.query(query_string, params)
-            return [self._get_scored_result(item=item, with_score=True) for item in query_response]
+            return [
+                self._get_scored_result(item=item, with_score=True)
+                for item in query_response
+            ]
         except Exception as e:
             self._na_exception_handler(e, query_string)
 
     async def batch_search(
-        self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False
+        self,
+        collection_name: str,
+        query_texts: List[str],
+        limit: int,
+        with_vectors: bool = False,
     ):
         """
         Perform a batch search using multiple text queries against a collection.
@@ -434,7 +451,9 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         """
         Generic exception handler for NA langchain.
         """
-        logger.error("Neptune Analytics query failed: %s | Query: [%s]", ex, query_string)
+        logger.error(
+            "Neptune Analytics query failed: %s | Query: [%s]", ex, query_string
+        )
         raise ex
 
     def _validate_embedding_engine(self):

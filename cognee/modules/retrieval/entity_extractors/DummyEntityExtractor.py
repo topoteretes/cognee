@@ -11,5 +11,7 @@ class DummyEntityExtractor(BaseEntityExtractor):
 
     async def extract_entities(self, text: str) -> List[Entity]:
         entity_type = EntityType(name="Person", description="A human individual")
-        entity = Entity(name="Albert Einstein", is_a=entity_type, description="A famous physicist")
+        entity = Entity(
+            name="Albert Einstein", is_a=entity_type, description="A famous physicist"
+        )
         return [entity]

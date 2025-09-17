@@ -77,7 +77,9 @@ log_levels = {
 _is_structlog_configured = False
 
 # Path to logs directory
-LOGS_DIR = Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs"))
+LOGS_DIR = Path(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
+)
 LOGS_DIR.mkdir(exist_ok=True)  # Create logs dir if it doesn't exist
 
 # Maximum number of log files to keep
@@ -134,7 +136,11 @@ class PlainFileHandler(logging.FileHandler):
 
                 # Handle exception if present
                 # Check both record.exc_info and the 'exc_info' in the message dict
-                record_has_exc = record.exc_info and record.exc_info != (None, None, None)
+                record_has_exc = record.exc_info and record.exc_info != (
+                    None,
+                    None,
+                    None,
+                )
                 msg_has_exc = "exc_info" in record.msg and record.msg["exc_info"]
 
                 if record_has_exc:
@@ -144,13 +150,17 @@ class PlainFileHandler(logging.FileHandler):
                     self.flush()
                 elif msg_has_exc and isinstance(record.msg["exc_info"], tuple):
                     # Use the exception info from the message
-                    tb_str = "".join(traceback.format_exception(*record.msg["exc_info"]))
+                    tb_str = "".join(
+                        traceback.format_exception(*record.msg["exc_info"])
+                    )
                     self.stream.write(tb_str + "\n")
                     self.flush()
                 elif msg_has_exc and hasattr(record.msg["exc_info"], "__traceback__"):
                     # Handle exceptions that are passed directly
                     exc = record.msg["exc_info"]
-                    tb_str = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+                    tb_str = "".join(
+                        traceback.format_exception(type(exc), exc, exc.__traceback__)
+                    )
                     self.stream.write(tb_str + "\n")
                     self.flush()
             else:
@@ -268,7 +278,9 @@ def setup_logging(log_level=None, name=None):
     global _is_structlog_configured
 
     # Regular detailed logging for non-CLI usage
-    log_level = log_level if log_level else log_levels[os.getenv("LOG_LEVEL", "INFO").upper()]
+    log_level = (
+        log_level if log_level else log_levels[os.getenv("LOG_LEVEL", "INFO").upper()]
+    )
 
     # Configure external library logging early to suppress verbose output
     configure_external_library_logging()
@@ -459,10 +471,14 @@ def setup_logging(log_level=None, name=None):
         from sqlalchemy.exc import SAWarning
 
         warnings.filterwarnings(
-            "ignore", category=SAWarning, module="dlt.destinations.impl.sqlalchemy.merge_job"
+            "ignore",
+            category=SAWarning,
+            module="dlt.destinations.impl.sqlalchemy.merge_job",
         )
         warnings.filterwarnings(
-            "ignore", category=SAWarning, module="dlt.destinations.impl.sqlalchemy.load_jobs"
+            "ignore",
+            category=SAWarning,
+            module="dlt.destinations.impl.sqlalchemy.load_jobs",
         )
 
     # Clean up old log files, keeping only the most recent ones

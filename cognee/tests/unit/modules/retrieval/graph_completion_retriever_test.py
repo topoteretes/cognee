@@ -15,11 +15,13 @@ class TestGraphCompletionRetriever:
     @pytest.mark.asyncio
     async def test_graph_completion_context_simple(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context_simple"
+            pathlib.Path(__file__).parent,
+            ".cognee_system/test_graph_completion_context_simple",
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_graph_completion_context_simple"
+            pathlib.Path(__file__).parent,
+            ".data_storage/test_graph_completion_context_simple",
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -44,7 +46,9 @@ class TestGraphCompletionRetriever:
             works_for=company1,
         )
         person2 = Person(
-            name="Ike Loma", description="This is description about Ike Loma", works_for=company1
+            name="Ike Loma",
+            description="This is description about Ike Loma",
+            works_for=company1,
         )
         person3 = Person(
             name="Jason Statham",
@@ -68,7 +72,9 @@ class TestGraphCompletionRetriever:
 
         retriever = GraphCompletionRetriever()
 
-        context = await resolve_edges_to_text(await retriever.get_context("Who works at Canva?"))
+        context = await resolve_edges_to_text(
+            await retriever.get_context("Who works at Canva?")
+        )
 
         # Ensure the top-level sections are present
         assert "Nodes:" in context, "Missing 'Nodes:' section in context"
@@ -81,16 +87,19 @@ class TestGraphCompletionRetriever:
         assert "Node: Jason Statham" in context, "Missing node header for Jason Statham"
         assert "Node: Mike Broski" in context, "Missing node header for Mike Broski"
         assert "Node: Canva" in context, "Missing node header for Canva"
-        assert "Node: Christina Mayer" in context, "Missing node header for Christina Mayer"
+        assert (
+            "Node: Christina Mayer" in context
+        ), "Missing node header for Christina Mayer"
 
         # --- Node contents ---
         assert (
             "__node_content_start__\nThis is description about Steve Rodger\n__node_content_end__"
             in context
         ), "Description block for Steve Rodger altered"
-        assert "__node_content_start__\nFigma is a company\n__node_content_end__" in context, (
-            "Description block for Figma altered"
-        )
+        assert (
+            "__node_content_start__\nFigma is a company\n__node_content_end__"
+            in context
+        ), "Description block for Figma altered"
         assert (
             "__node_content_start__\nThis is description about Ike Loma\n__node_content_end__"
             in context
@@ -103,39 +112,42 @@ class TestGraphCompletionRetriever:
             "__node_content_start__\nThis is description about Mike Broski\n__node_content_end__"
             in context
         ), "Description block for Mike Broski altered"
-        assert "__node_content_start__\nCanvas is a company\n__node_content_end__" in context, (
-            "Description block for Canva altered"
-        )
+        assert (
+            "__node_content_start__\nCanvas is a company\n__node_content_end__"
+            in context
+        ), "Description block for Canva altered"
         assert (
             "__node_content_start__\nThis is description about Christina Mayer\n__node_content_end__"
             in context
         ), "Description block for Christina Mayer altered"
 
         # --- Connections ---
-        assert "Steve Rodger --[works_for]--> Figma" in context, (
-            "Connection Steve Rodger→Figma missing or changed"
-        )
-        assert "Ike Loma --[works_for]--> Figma" in context, (
-            "Connection Ike Loma→Figma missing or changed"
-        )
-        assert "Jason Statham --[works_for]--> Figma" in context, (
-            "Connection Jason Statham→Figma missing or changed"
-        )
-        assert "Mike Broski --[works_for]--> Canva" in context, (
-            "Connection Mike Broski→Canva missing or changed"
-        )
-        assert "Christina Mayer --[works_for]--> Canva" in context, (
-            "Connection Christina Mayer→Canva missing or changed"
-        )
+        assert (
+            "Steve Rodger --[works_for]--> Figma" in context
+        ), "Connection Steve Rodger→Figma missing or changed"
+        assert (
+            "Ike Loma --[works_for]--> Figma" in context
+        ), "Connection Ike Loma→Figma missing or changed"
+        assert (
+            "Jason Statham --[works_for]--> Figma" in context
+        ), "Connection Jason Statham→Figma missing or changed"
+        assert (
+            "Mike Broski --[works_for]--> Canva" in context
+        ), "Connection Mike Broski→Canva missing or changed"
+        assert (
+            "Christina Mayer --[works_for]--> Canva" in context
+        ), "Connection Christina Mayer→Canva missing or changed"
 
     @pytest.mark.asyncio
     async def test_graph_completion_context_complex(self):
         system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_graph_completion_context_complex"
+            pathlib.Path(__file__).parent,
+            ".cognee_system/test_graph_completion_context_complex",
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_graph_completion_context_complex"
+            pathlib.Path(__file__).parent,
+            ".data_storage/test_graph_completion_context_complex",
         )
         cognee.config.data_root_directory(data_directory_path)
 
@@ -192,13 +204,19 @@ class TestGraphCompletionRetriever:
 
         retriever = GraphCompletionRetriever(top_k=20)
 
-        context = await resolve_edges_to_text(await retriever.get_context("Who works at Figma?"))
+        context = await resolve_edges_to_text(
+            await retriever.get_context("Who works at Figma?")
+        )
 
         print(context)
 
-        assert "Mike Rodger --[works_for]--> Figma" in context, "Failed to get Mike Rodger"
+        assert (
+            "Mike Rodger --[works_for]--> Figma" in context
+        ), "Failed to get Mike Rodger"
         assert "Ike Loma --[works_for]--> Figma" in context, "Failed to get Ike Loma"
-        assert "Jason Statham --[works_for]--> Figma" in context, "Failed to get Jason Statham"
+        assert (
+            "Jason Statham --[works_for]--> Figma" in context
+        ), "Failed to get Jason Statham"
 
     @pytest.mark.asyncio
     async def test_get_graph_completion_context_on_empty_graph(self):

@@ -392,7 +392,8 @@ def embedding_sleep_and_retry_sync(max_retries=5, base_backoff=1.0, jitter=0.5):
                     error_str = str(e).lower()
                     error_type = type(e).__name__
                     is_rate_limit = any(
-                        pattern in error_str.lower() for pattern in RATE_LIMIT_ERROR_PATTERNS
+                        pattern in error_str.lower()
+                        for pattern in RATE_LIMIT_ERROR_PATTERNS
                     )
 
                     if disable_retries:
@@ -402,7 +403,9 @@ def embedding_sleep_and_retry_sync(max_retries=5, base_backoff=1.0, jitter=0.5):
                     if is_rate_limit and retries < max_retries:
                         # Calculate backoff with jitter
                         backoff = (
-                            base_backoff * (2**retries) * (1 + random.uniform(-jitter, jitter))
+                            base_backoff
+                            * (2**retries)
+                            * (1 + random.uniform(-jitter, jitter))
                         )
 
                         logger.warning(
@@ -509,7 +512,8 @@ def embedding_sleep_and_retry_async(max_retries=5, base_backoff=1.0, jitter=0.5)
                     error_str = str(e).lower()
                     error_type = type(e).__name__
                     is_rate_limit = any(
-                        pattern in error_str.lower() for pattern in RATE_LIMIT_ERROR_PATTERNS
+                        pattern in error_str.lower()
+                        for pattern in RATE_LIMIT_ERROR_PATTERNS
                     )
 
                     if disable_retries:
@@ -519,7 +523,9 @@ def embedding_sleep_and_retry_async(max_retries=5, base_backoff=1.0, jitter=0.5)
                     if is_rate_limit and retries < max_retries:
                         # Calculate backoff with jitter
                         backoff = (
-                            base_backoff * (2**retries) * (1 + random.uniform(-jitter, jitter))
+                            base_backoff
+                            * (2**retries)
+                            * (1 + random.uniform(-jitter, jitter))
                         )
 
                         logger.warning(

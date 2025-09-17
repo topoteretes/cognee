@@ -163,13 +163,17 @@ async def sync(
     )
 
 
-async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: User) -> None:
+async def _perform_background_sync(
+    run_id: str, datasets: List[Dataset], user: User
+) -> None:
     """Perform the actual sync operation in the background for multiple datasets."""
     start_time = datetime.now(timezone.utc)
 
     try:
         dataset_info = ", ".join([f"{d.name} ({d.id})" for d in datasets])
-        logger.info(f"Background sync {run_id}: Starting sync for datasets {dataset_info}")
+        logger.info(
+            f"Background sync {run_id}: Starting sync for datasets {dataset_info}"
+        )
 
         # Mark sync as in progress
         await mark_sync_started(run_id)
@@ -197,7 +201,9 @@ async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: U
                 continue
 
         if retry_count == MAX_RETRY_COUNT:
-            logger.error(f"Background sync {run_id}: Failed after {MAX_RETRY_COUNT} retries")
+            logger.error(
+                f"Background sync {run_id}: Failed after {MAX_RETRY_COUNT} retries"
+            )
             await mark_sync_failed(run_id, "Failed after 3 retries")
             return
 
@@ -222,7 +228,9 @@ async def _perform_background_sync(run_id: str, datasets: List[Dataset], user: U
         end_time = datetime.now(timezone.utc)
         duration = (end_time - start_time).total_seconds()
 
-        logger.error(f"Background sync {run_id}: Failed after {duration}s with error: {str(e)}")
+        logger.error(
+            f"Background sync {run_id}: Failed after {duration}s with error: {str(e)}"
+        )
 
         # Mark sync as failed with error message
         await mark_sync_failed(run_id, str(e))
@@ -329,7 +337,9 @@ async def _sync_to_cognee_cloud(
                 await _trigger_remote_cognify(
                     cloud_base_url, cloud_auth_token, datasets[0].id, run_id
                 )
-                logger.info("Cognify processing triggered successfully for all datasets")
+                logger.info(
+                    "Cognify processing triggered successfully for all datasets"
+                )
             except Exception as e:
                 logger.warning(f"Failed to trigger cognify processing: {str(e)}")
                 # Don't fail the entire sync if cognify fails
@@ -345,7 +355,9 @@ async def _sync_to_cognee_cloud(
             )
             try:
                 await cognify()
-                logger.info("Local cognify processing completed successfully for all datasets")
+                logger.info(
+                    "Local cognify processing completed successfully for all datasets"
+                )
             except Exception as e:
                 logger.warning(f"Failed to run local cognify processing: {str(e)}")
                 # Don't fail the entire sync if local cognify fails
@@ -403,7 +415,11 @@ class DatasetSyncResult:
 
 
 async def _sync_dataset_files(
-    dataset: Dataset, cloud_base_url: str, cloud_auth_token: str, user: User, run_id: str
+    dataset: Dataset,
+    cloud_base_url: str,
+    cloud_auth_token: str,
+    user: User,
+    run_id: str,
 ) -> Optional[DatasetSyncResult]:
     """
     Sync files for a single dataset (2-way: upload to cloud, download from cloud).
@@ -438,7 +454,12 @@ async def _sync_dataset_files(
 
         # Step 3: Upload files that are missing on cloud
         bytes_uploaded = await _upload_missing_files(
-            cloud_base_url, cloud_auth_token, dataset, local_files, hashes_missing_on_remote, run_id
+            cloud_base_url,
+            cloud_auth_token,
+            dataset,
+            local_files,
+            hashes_missing_on_remote,
+            run_id,
         )
         logger.info(
             f"Dataset {dataset.name}: Upload complete - {len(hashes_missing_on_remote)} files, {bytes_uploaded} bytes"
@@ -466,7 +487,9 @@ async def _sync_dataset_files(
         )
 
     except Exception as e:
-        logger.error(f"Failed to sync files for dataset {dataset.name} ({dataset.id}): {str(e)}")
+        logger.error(
+            f"Failed to sync files for dataset {dataset.name} ({dataset.id}): {str(e)}"
+        )
         raise  # Re-raise to be handled by the caller
 
 
@@ -565,7 +588,11 @@ async def _get_cloud_auth_token(user: User) -> str:
 
 
 async def _check_hashes_diff(
-    cloud_base_url: str, auth_token: str, dataset: Dataset, local_hashes: List[str], run_id: str
+    cloud_base_url: str,
+    auth_token: str,
+    dataset: Dataset,
+    local_hashes: List[str],
+    run_id: str,
 ) -> CheckHashesDiffResponse:
     """
     Check which hashes are missing on cloud.
@@ -584,7 +611,9 @@ async def _check_hashes_diff(
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload.dict(), headers=headers) as response:
+            async with session.post(
+                url, json=payload.dict(), headers=headers
+            ) as response:
                 if response.status == 200:
                     data = await response.json()
                     missing_response = CheckHashesDiffResponse(**data)
@@ -634,7 +663,9 @@ async def _download_missing_files(
         for file_hash in hashes_missing_on_local:
             try:
                 # Download file from cloud by hash
-                download_url = f"{cloud_base_url}/api/sync/{dataset.id}/data/{file_hash}"
+                download_url = (
+                    f"{cloud_base_url}/api/sync/{dataset.id}/data/{file_hash}"
+                )
 
                 logger.debug(f"Downloading file with hash: {file_hash}")
 
@@ -644,7 +675,9 @@ async def _download_missing_files(
                         file_size = len(file_content)
 
                         # Get file metadata from response headers
-                        file_name = response.headers.get("X-File-Name", f"file_{file_hash}")
+                        file_name = response.headers.get(
+                            "X-File-Name", f"file_{file_hash}"
+                        )
 
                         # Save file locally using ingestion pipeline
                         await _save_downloaded_file(
@@ -654,7 +687,9 @@ async def _download_missing_files(
                         total_bytes_downloaded += file_size
                         downloaded_count += 1
 
-                        logger.debug(f"Successfully downloaded {file_name} ({file_size} bytes)")
+                        logger.debug(
+                            f"Successfully downloaded {file_name} ({file_size} bytes)"
+                        )
 
                     elif response.status == 404:
                         logger.warning(f"File with hash {file_hash} not found on cloud")
@@ -714,7 +749,9 @@ async def _save_downloaded_file(
             dataset_id=dataset.id,
         )
 
-        logger.debug(f"Successfully saved downloaded file: {file_name} (hash: {file_hash})")
+        logger.debug(
+            f"Successfully saved downloaded file: {file_name} (hash: {file_hash})"
+        )
 
     except Exception as e:
         logger.error(f"Failed to save downloaded file {file_name}: {str(e)}")
@@ -736,7 +773,9 @@ async def _upload_missing_files(
         int: Total bytes uploaded
     """
     # Filter local files to only those with missing hashes
-    files_to_upload = [f for f in local_files if f.content_hash in hashes_missing_on_remote]
+    files_to_upload = [
+        f for f in local_files if f.content_hash in hashes_missing_on_remote
+    ]
 
     logger.info(f"Uploading {len(files_to_upload)} missing files to cloud")
 
@@ -765,7 +804,10 @@ async def _upload_missing_files(
                 request_data = aiohttp.FormData()
 
                 request_data.add_field(
-                    "file", file_content, content_type=file_info.mime_type, filename=file_info.name
+                    "file",
+                    file_content,
+                    content_type=file_info.mime_type,
+                    filename=file_info.name,
                 )
                 request_data.add_field("dataset_id", str(dataset.id))
                 request_data.add_field("dataset_name", dataset.name)
@@ -774,7 +816,9 @@ async def _upload_missing_files(
                 request_data.add_field("extension", file_info.extension)
                 request_data.add_field("md5", file_info.content_hash)
 
-                async with session.put(url, data=request_data, headers=headers) as response:
+                async with session.put(
+                    url, data=request_data, headers=headers
+                ) as response:
                     if response.status in [200, 201]:
                         total_bytes_uploaded += len(file_content)
                         uploaded_count += 1
@@ -791,12 +835,18 @@ async def _upload_missing_files(
                 logger.error(f"Error uploading file {file_info.name}: {str(e)}")
                 raise ConnectionError(f"Upload failed for {file_info.name}: {str(e)}")
 
-    logger.info(f"All {uploaded_count} files uploaded successfully: {total_bytes_uploaded} bytes")
+    logger.info(
+        f"All {uploaded_count} files uploaded successfully: {total_bytes_uploaded} bytes"
+    )
     return total_bytes_uploaded
 
 
 async def _prune_cloud_dataset(
-    cloud_base_url: str, auth_token: str, dataset_id: str, local_hashes: List[str], run_id: str
+    cloud_base_url: str,
+    auth_token: str,
+    dataset_id: str,
+    local_hashes: List[str],
+    run_id: str,
 ) -> None:
     """
     Prune cloud dataset to match local state.
@@ -810,7 +860,9 @@ async def _prune_cloud_dataset(
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.put(url, json=payload.dict(), headers=headers) as response:
+            async with session.put(
+                url, json=payload.dict(), headers=headers
+            ) as response:
                 if response.status == 200:
                     data = await response.json()
                     deleted_entries = data.get("deleted_database_entries", 0)
@@ -844,7 +896,9 @@ async def _trigger_remote_cognify(
     headers = {"X-Api-Key": auth_token, "Content-Type": "application/json"}
 
     payload = {
-        "dataset_ids": [str(dataset_id)],  # Convert UUID to string for JSON serialization
+        "dataset_ids": [
+            str(dataset_id)
+        ],  # Convert UUID to string for JSON serialization
         "run_in_background": False,
         "custom_prompt": "",
     }
@@ -861,7 +915,10 @@ async def _trigger_remote_cognify(
                     # Extract pipeline run IDs for monitoring if available
                     if isinstance(data, dict):
                         for dataset_key, run_info in data.items():
-                            if isinstance(run_info, dict) and "pipeline_run_id" in run_info:
+                            if (
+                                isinstance(run_info, dict)
+                                and "pipeline_run_id" in run_info
+                            ):
                                 logger.info(
                                     f"Cognify pipeline run ID for dataset {dataset_key}: {run_info['pipeline_run_id']}"
                                 )

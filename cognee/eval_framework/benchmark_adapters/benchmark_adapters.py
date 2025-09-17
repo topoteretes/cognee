@@ -4,7 +4,9 @@ from typing import Type
 from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
 from cognee.eval_framework.benchmark_adapters.musique_adapter import MusiqueQAAdapter
 from cognee.eval_framework.benchmark_adapters.dummy_adapter import DummyAdapter
-from cognee.eval_framework.benchmark_adapters.twowikimultihop_adapter import TwoWikiMultihopAdapter
+from cognee.eval_framework.benchmark_adapters.twowikimultihop_adapter import (
+    TwoWikiMultihopAdapter,
+)
 
 
 class BenchmarkAdapter(Enum):

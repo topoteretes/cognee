@@ -17,7 +17,12 @@ def visualize_benchmarks(benchmark_file, output_file=None):
     data = load_benchmark_data(benchmark_file)
 
     # Define metrics to plot
-    metrics = ["Human-like Correctness", "DeepEval Correctness", "DeepEval EM", "DeepEval F1"]
+    metrics = [
+        "Human-like Correctness",
+        "DeepEval Correctness",
+        "DeepEval EM",
+        "DeepEval F1",
+    ]
     colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
 
     # Setup plot
@@ -52,7 +57,9 @@ def visualize_benchmarks(benchmark_file, output_file=None):
         ax.bar(x_pos + i * 0.2, means, 0.2, label=metric, color=colors[i], alpha=0.8)
 
         # Add error bars
-        for j, (mean, err_lower, err_upper) in enumerate(zip(means, errors_lower, errors_upper)):
+        for j, (mean, err_lower, err_upper) in enumerate(
+            zip(means, errors_lower, errors_upper)
+        ):
             if mean > 0:  # Only show error bars for non-zero values
                 ax.errorbar(
                     x_pos[j] + i * 0.2,

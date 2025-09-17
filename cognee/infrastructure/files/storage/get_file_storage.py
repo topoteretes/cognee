@@ -18,6 +18,8 @@ def get_file_storage(storage_path: str) -> StorageManager:
 
         return StorageManager(S3FileStorage(storage_path))
     else:
-        from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
+        from cognee.infrastructure.files.storage.LocalFileStorage import (
+            LocalFileStorage,
+        )
 
         return StorageManager(LocalFileStorage(storage_path))

@@ -100,7 +100,9 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(query_type=SearchType.CHUNKS, query_text=random_node_name)
+    search_results = await cognee.search(
+        query_type=SearchType.CHUNKS, query_text=random_node_name
+    )
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
     for result in search_results:
@@ -138,9 +140,9 @@ async def main():
             # Graph exists but should be empty
             vector_graph_data = await vector_engine.get_graph_data()
             vector_nodes, vector_edges = vector_graph_data
-            assert len(vector_nodes) == 0 and len(vector_edges) == 0, (
-                "FalkorDB vector database is not empty"
-            )
+            assert (
+                len(vector_nodes) == 0 and len(vector_edges) == 0
+            ), "FalkorDB vector database is not empty"
     else:
         # Fallback for other vector engines like LanceDB
         connection = await vector_engine.get_connection()
@@ -149,9 +151,9 @@ async def main():
 
     from cognee.infrastructure.databases.relational import get_relational_engine
 
-    assert not os.path.exists(get_relational_engine().db_path), (
-        "SQLite relational database is not empty"
-    )
+    assert not os.path.exists(
+        get_relational_engine().db_path
+    ), "SQLite relational database is not empty"
 
     # For FalkorDB, check if the graph database is empty
     from cognee.infrastructure.databases.graph import get_graph_engine

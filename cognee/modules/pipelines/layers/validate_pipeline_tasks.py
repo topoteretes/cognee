@@ -11,7 +11,9 @@ def validate_pipeline_tasks(tasks: list[Task]):
     """
 
     if not isinstance(tasks, list):
-        raise WrongTaskTypeError(f"tasks argument must be a list, got {type(tasks).__name__}.")
+        raise WrongTaskTypeError(
+            f"tasks argument must be a list, got {type(tasks).__name__}."
+        )
 
     for task in tasks:
         if not isinstance(task, Task):

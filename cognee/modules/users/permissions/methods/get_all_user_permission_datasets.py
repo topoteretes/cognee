@@ -8,7 +8,9 @@ from cognee.modules.users.permissions.methods import get_role, get_tenant
 logger = get_logger()
 
 
-async def get_all_user_permission_datasets(user: User, permission_type: str) -> list[Dataset]:
+async def get_all_user_permission_datasets(
+    user: User, permission_type: str
+) -> list[Dataset]:
     datasets = list()
     # Get all datasets User has explicit access to
     datasets.extend(await get_principal_datasets(user, permission_type))

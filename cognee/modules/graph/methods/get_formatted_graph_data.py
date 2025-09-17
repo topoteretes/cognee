@@ -21,9 +21,11 @@ async def get_formatted_graph_data(dataset_id: UUID, user: User):
             map(
                 lambda node: {
                     "id": str(node[0]),
-                    "label": node[1]["name"]
-                    if ("name" in node[1] and node[1]["name"] != "")
-                    else f"{node[1]['type']}_{str(node[0])}",
+                    "label": (
+                        node[1]["name"]
+                        if ("name" in node[1] and node[1]["name"] != "")
+                        else f"{node[1]['type']}_{str(node[0])}"
+                    ),
                     "type": node[1]["type"],
                     "properties": {
                         key: value

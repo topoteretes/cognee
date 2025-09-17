@@ -3,7 +3,9 @@ from uuid import UUID
 
 from cognee.shared.logging_utils import get_logger
 
-from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
+from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+    get_memory_fragment,
+)
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.pipelines import run_pipeline
@@ -16,7 +18,9 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
     reset_dataset_pipeline_run_status,
 )
 from cognee.modules.engine.operations.setup import setup
-from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
+from cognee.modules.pipelines.layers.pipeline_execution_mode import (
+    get_pipeline_executor,
+)
 from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
 from cognee.tasks.codingagents.coding_rule_associations import (
     add_rule_associations,
@@ -79,7 +83,9 @@ async def memify(
 
     await setup()
 
-    user, authorized_dataset_list = await resolve_authorized_user_datasets(dataset, user)
+    user, authorized_dataset_list = await resolve_authorized_user_datasets(
+        dataset, user
+    )
     authorized_dataset = authorized_dataset_list[0]
 
     if not data:
@@ -88,7 +94,9 @@ async def memify(
             authorized_dataset.id, authorized_dataset.owner_id
         )
 
-        memory_fragment = await get_memory_fragment(node_type=node_type, node_name=node_name)
+        memory_fragment = await get_memory_fragment(
+            node_type=node_type, node_name=node_name
+        )
         # Subgraphs should be a single element in the list to represent one data item
         data = [memory_fragment]
 

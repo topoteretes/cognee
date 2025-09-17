@@ -53,9 +53,13 @@ class TestDashboardFunctions(unittest.TestCase):
             figures + [ci_plot], generate_details_html(self.detail_data), "Benchmark 1"
         )
 
-        self.assertIn("<title>LLM Evaluation Dashboard Benchmark 1</title>", dashboard_html)
+        self.assertIn(
+            "<title>LLM Evaluation Dashboard Benchmark 1</title>", dashboard_html
+        )
         self.assertIn("<h2>Metrics Distribution</h2>", dashboard_html)
-        self.assertIn("<h2>95% confidence interval for all the metrics</h2>", dashboard_html)
+        self.assertIn(
+            "<h2>95% confidence interval for all the metrics</h2>", dashboard_html
+        )
         self.assertIn("Benchmark 1", dashboard_html)
 
     def test_create_dashboard(self):

@@ -87,7 +87,9 @@ async def main():
 
     # 2. Search for text chunks related to "graph database"
     chunks_results = await cognee.search(
-        query_type=SearchType.CHUNKS, query_text="graph database", datasets=[dataset_name]
+        query_type=SearchType.CHUNKS,
+        query_text="graph database",
+        datasets=[dataset_name],
     )
     print("\n========Chunks about graph database========:")
     for result in chunks_results:

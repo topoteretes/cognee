@@ -64,14 +64,18 @@ async def main():
 
     # Now let's perform some searches
     # 1. Search for insights related to "Neo4j"
-    insights_results = await cognee.search(query_type=SearchType.INSIGHTS, query_text="Neo4j")
+    insights_results = await cognee.search(
+        query_type=SearchType.INSIGHTS, query_text="Neo4j"
+    )
     print("\nInsights about Neo4j:")
     for result in insights_results:
         print(f"- {result}")
 
     # 2. Search for text chunks related to "graph database"
     chunks_results = await cognee.search(
-        query_type=SearchType.CHUNKS, query_text="graph database", datasets=[dataset_name]
+        query_type=SearchType.CHUNKS,
+        query_text="graph database",
+        datasets=[dataset_name],
     )
     print("\nChunks about graph database:")
     for result in chunks_results:

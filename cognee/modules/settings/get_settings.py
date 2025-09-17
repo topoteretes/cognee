@@ -81,9 +81,14 @@ def get_settings() -> SettingsDict:
                 "model": llm_config.llm_model,
                 "endpoint": llm_config.llm_endpoint,
                 "api_version": llm_config.llm_api_version,
-                "api_key": (llm_config.llm_api_key[0:10] + "*" * (len(llm_config.llm_api_key) - 10))
-                if llm_config.llm_api_key
-                else None,
+                "api_key": (
+                    (
+                        llm_config.llm_api_key[0:10]
+                        + "*" * (len(llm_config.llm_api_key) - 10)
+                    )
+                    if llm_config.llm_api_key
+                    else None
+                ),
                 "providers": llm_providers,
                 "models": {
                     "openai": [

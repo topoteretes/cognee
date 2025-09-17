@@ -9,7 +9,10 @@ from analysis.process_results import (
     create_answers_df,
     create_all_metrics_df,
 )
-from analysis.analyze_results import create_aggregate_metrics_df, cumulative_all_metrics_analysis
+from analysis.analyze_results import (
+    create_aggregate_metrics_df,
+    cumulative_all_metrics_analysis,
+)
 
 
 def create_project_structure(project_dir: str) -> str:
@@ -49,7 +52,9 @@ def create_all_dataframes(transformed: dict, analysis_folder: str) -> None:
     print("Creating dataframes...")
 
     # Create answers dataframe
-    answers_df = create_answers_df(transformed, output_csv_path=f"{analysis_folder}/answers.csv")
+    answers_df = create_answers_df(
+        transformed, output_csv_path=f"{analysis_folder}/answers.csv"
+    )
     print(f"Created answers dataframe with {len(answers_df)} questions")
 
     # Create metrics dataframes
@@ -65,7 +70,9 @@ def create_all_dataframes(transformed: dict, analysis_folder: str) -> None:
         save_folder=analysis_folder,
         save_prefix="metrics",
     )
-    print(f"Created aggregate metrics dataframe with {len(aggregate_df.columns)} columns")
+    print(
+        f"Created aggregate metrics dataframe with {len(aggregate_df.columns)} columns"
+    )
 
     # Create cumulative analysis
     cumulative_dfs = cumulative_all_metrics_analysis(

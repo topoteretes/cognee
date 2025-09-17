@@ -33,7 +33,9 @@ def is_real_paragraph_end(last_char: str, current_pos: int, text: str) -> bool:
         return False
 
     next_character = text[j]
-    while j < len(text) and (re.match(PARAGRAPH_ENDINGS, next_character) or next_character == " "):
+    while j < len(text) and (
+        re.match(PARAGRAPH_ENDINGS, next_character) or next_character == " "
+    ):
         j += 1
         if j >= len(text):
             return False
@@ -78,8 +80,13 @@ def chunk_by_word(data: str) -> Iterator[Tuple[str, str]]:
                 current_chunk += data[next_i]
                 next_i += 1
 
-            is_paragraph_end = next_i < len(data) and re.match(PARAGRAPH_ENDINGS, data[next_i])
-            yield (current_chunk, "paragraph_end" if is_paragraph_end else "sentence_end")
+            is_paragraph_end = next_i < len(data) and re.match(
+                PARAGRAPH_ENDINGS, data[next_i]
+            )
+            yield (
+                current_chunk,
+                "paragraph_end" if is_paragraph_end else "sentence_end",
+            )
             current_chunk = ""
             i = next_i
             continue

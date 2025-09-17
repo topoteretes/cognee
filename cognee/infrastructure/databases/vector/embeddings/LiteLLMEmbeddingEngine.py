@@ -5,7 +5,9 @@ import numpy as np
 import math
 import litellm
 import os
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
+    EmbeddingEngine,
+)
 from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.llm.tokenizer.Gemini import (
     GeminiTokenizer,
@@ -97,7 +99,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         """
         try:
             if self.mock:
-                response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}
+                response = {
+                    "data": [{"embedding": [0.0] * self.dimensions} for _ in text]
+                }
                 return [data["embedding"] for data in response["data"]]
             else:
                 response = await litellm.aembedding(
@@ -123,7 +127,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 # If caller passed ONE oversize string split the string itself into
                 # half so we can process it
             if isinstance(text, list) and len(text) == 1:
-                logger.debug(f"Pooling embeddings of text string with size: {len(text[0])}")
+                logger.debug(
+                    f"Pooling embeddings of text string with size: {len(text[0])}"
+                )
                 s = text[0]
                 third = len(s) // 3
                 # We are using thirds to intentionally have overlap between split parts
@@ -148,7 +154,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             litellm.exceptions.NotFoundError,
         ) as e:
             logger.error(f"Embedding error with model {self.model}: {str(e)}")
-            raise EmbeddingException(f"Failed to index data points using model {self.model}")
+            raise EmbeddingException(
+                f"Failed to index data points using model {self.model}"
+            )
 
         except Exception as error:
             logger.error("Error embedding text: %s", str(error))

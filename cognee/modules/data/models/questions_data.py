@@ -12,4 +12,6 @@ class Questions(QuestionsBase):
 
     payload = Column(JSON, nullable=False)
 
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )

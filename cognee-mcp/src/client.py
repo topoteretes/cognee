@@ -42,7 +42,8 @@ async def run():
             )
 
             toolResult = await session.call_tool(
-                "search", arguments={"search_type": "CODE", "search_query": "exceptions"}
+                "search",
+                arguments={"search_type": "CODE", "search_query": "exceptions"},
             )
 
             print(f"Cognify result: {toolResult.content}")

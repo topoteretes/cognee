@@ -49,7 +49,9 @@ Search Types & Use Cases:
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("query_text", help="Your question or search query in natural language")
+        parser.add_argument(
+            "query_text", help="Your question or search query in natural language"
+        )
         parser.add_argument(
             "--query-type",
             "-t",
@@ -92,9 +94,13 @@ Search Types & Use Cases:
             query_type = SearchType[args.query_type]
 
             datasets_msg = (
-                f" in datasets {args.datasets}" if args.datasets else " across all datasets"
+                f" in datasets {args.datasets}"
+                if args.datasets
+                else " across all datasets"
             )
-            fmt.echo(f"Searching for: '{args.query_text}' (type: {args.query_type}){datasets_msg}")
+            fmt.echo(
+                f"Searching for: '{args.query_text}' (type: {args.query_type}){datasets_msg}"
+            )
 
             # Run the async search function
             async def run_search():
@@ -103,7 +109,8 @@ Search Types & Use Cases:
                         query_text=args.query_text,
                         query_type=query_type,
                         datasets=args.datasets,
-                        system_prompt_path=args.system_prompt or "answer_simple_question.txt",
+                        system_prompt_path=args.system_prompt
+                        or "answer_simple_question.txt",
                         top_k=args.top_k,
                     )
                     return results

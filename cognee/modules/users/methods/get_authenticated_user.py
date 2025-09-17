@@ -17,7 +17,9 @@ REQUIRE_AUTHENTICATION = (
 
 fastapi_users = get_fastapi_users()
 
-_auth_dependency = fastapi_users.current_user(active=True, optional=not REQUIRE_AUTHENTICATION)
+_auth_dependency = fastapi_users.current_user(
+    active=True, optional=not REQUIRE_AUTHENTICATION
+)
 
 
 async def get_authenticated_user(
@@ -37,6 +39,8 @@ async def get_authenticated_user(
         except Exception as e:
             # Convert any get_default_user failure into a proper HTTP 500 error
             logger.error(f"Failed to create default user: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Failed to create default user: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to create default user: {str(e)}"
+            )
 
     return user

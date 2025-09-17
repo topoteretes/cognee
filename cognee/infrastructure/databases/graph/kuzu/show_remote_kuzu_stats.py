@@ -1,12 +1,16 @@
 import asyncio
-from cognee.infrastructure.databases.graph.kuzu.remote_kuzu_adapter import RemoteKuzuAdapter
+from cognee.infrastructure.databases.graph.kuzu.remote_kuzu_adapter import (
+    RemoteKuzuAdapter,
+)
 from cognee.infrastructure.databases.graph.config import get_graph_config
 
 
 async def main():
     config = get_graph_config()
     adapter = RemoteKuzuAdapter(
-        config.graph_database_url, config.graph_database_username, config.graph_database_password
+        config.graph_database_url,
+        config.graph_database_username,
+        config.graph_database_password,
     )
     try:
         print("Node Count:")

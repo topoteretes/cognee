@@ -42,7 +42,9 @@ async def load_corpus_to_graphiti(
     return graphiti
 
 
-async def search_graphiti(query: str, graphiti_client: Graphiti, num_results: int = 10) -> str:
+async def search_graphiti(
+    query: str, graphiti_client: Graphiti, num_results: int = 10
+) -> str:
     """Search the graphiti graph for information related to the query"""
     results = await graphiti_client.search(query=query, num_results=num_results)
     return "\n".join(f"- {entry.fact}" for entry in results)
@@ -104,7 +106,11 @@ async def answer_questions(
             reference_time=datetime.now(timezone.utc),
         )
 
-        result = {"question": question, "answer": answer, "golden_answer": expected_answer}
+        result = {
+            "question": question,
+            "answer": answer,
+            "golden_answer": expected_answer,
+        }
 
         if print_results:
             print(

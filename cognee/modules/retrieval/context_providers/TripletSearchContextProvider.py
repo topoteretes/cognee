@@ -65,7 +65,9 @@ class TripletSearchContextProvider(BaseContextProvider):
         direct_text = format_triplets(triplets)
         return f"Context for {entity_name}:\n{direct_text}\n---\n"
 
-    async def _results_to_context(self, entities: List[DataPoint], results: List) -> str:
+    async def _results_to_context(
+        self, entities: List[DataPoint], results: List
+    ) -> str:
         """Formats search results into context string."""
         triplets = []
 

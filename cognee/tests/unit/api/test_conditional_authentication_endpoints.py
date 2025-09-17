@@ -46,7 +46,10 @@ class TestConditionalAuthenticationEndpoints:
     def test_health_endpoint_no_auth_required(self, client):
         """Test that health endpoint works without authentication."""
         response = client.get("/health")
-        assert response.status_code in [200, 503]  # 503 is also acceptable for health checks
+        assert response.status_code in [
+            200,
+            503,
+        ]  # 503 is also acceptable for health checks
 
     def test_root_endpoint_no_auth_required(self, client):
         """Test that root endpoint works without authentication."""
@@ -175,7 +178,12 @@ class TestConditionalAuthenticationBehavior:
     @patch.object(gsm_mod, "get_llm_config")
     @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     def test_settings_endpoint_integration(
-        self, mock_get_default, mock_llm_config, mock_vector_config, client, mock_default_user
+        self,
+        mock_get_default,
+        mock_llm_config,
+        mock_vector_config,
+        client,
+        mock_default_user,
     ):
         """Test that settings endpoint integration works with conditional authentication."""
         mock_get_default.return_value = mock_default_user

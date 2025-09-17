@@ -66,7 +66,9 @@ def validate_file_results(
     return True
 
 
-def validate_metrics(metrics: Dict[str, Any], expected_metrics: List[str] = None) -> bool:
+def validate_metrics(
+    metrics: Dict[str, Any], expected_metrics: List[str] = None
+) -> bool:
     """Validate that metrics have correct structure and expected keys."""
     if expected_metrics is None:
         expected_metrics = ["directllm_correctness", "deepeval_correctness", "EM", "f1"]
@@ -93,7 +95,9 @@ def validate_metrics(metrics: Dict[str, Any], expected_metrics: List[str] = None
                 return False
 
             if not isinstance(metric_data["score"], (int, float)):
-                print(f"Metric '{metric_name}' score is not a number: {metric_data['score']}")
+                print(
+                    f"Metric '{metric_name}' score is not a number: {metric_data['score']}"
+                )
                 return False
         elif isinstance(metric_data, (int, float)):
             # Direct numeric format is also valid
@@ -107,7 +111,9 @@ def validate_metrics(metrics: Dict[str, Any], expected_metrics: List[str] = None
     return True
 
 
-def validate_folder_results(results: Dict[str, Any], expected_keys: List[str] = None) -> bool:
+def validate_folder_results(
+    results: Dict[str, Any], expected_keys: List[str] = None
+) -> bool:
     """Validate that all files have same length and all dictionaries contain same keys."""
     if expected_keys is None:
         expected_keys = ["answer", "golden_answer", "metrics", "question"]
@@ -129,7 +135,9 @@ def validate_folder_results(results: Dict[str, Any], expected_keys: List[str] = 
         if not validate_file_results(data, filename, expected_keys):
             return False
 
-    print("Validation passed: all lists have same length and all dictionaries have expected keys")
+    print(
+        "Validation passed: all lists have same length and all dictionaries have expected keys"
+    )
     print(f"Expected keys: {sorted(expected_keys)}")
     return True
 

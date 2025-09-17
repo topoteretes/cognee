@@ -26,12 +26,16 @@ Configuration changes will affect how cognee processes and stores data.
     """
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        subparsers = parser.add_subparsers(dest="config_action", help="Configuration actions")
+        subparsers = parser.add_subparsers(
+            dest="config_action", help="Configuration actions"
+        )
 
         # Get command
         get_parser = subparsers.add_parser("get", help="Get configuration value(s)")
         get_parser.add_argument(
-            "key", nargs="?", help="Configuration key to retrieve (shows all if not specified)"
+            "key",
+            nargs="?",
+            help="Configuration key to retrieve (shows all if not specified)",
         )
 
         # Set command
@@ -43,14 +47,18 @@ Configuration changes will affect how cognee processes and stores data.
         subparsers.add_parser("list", help="List all configuration keys")
 
         # Unset command
-        unset_parser = subparsers.add_parser("unset", help="Remove/unset a configuration value")
+        unset_parser = subparsers.add_parser(
+            "unset", help="Remove/unset a configuration value"
+        )
         unset_parser.add_argument("key", help="Configuration key to unset")
         unset_parser.add_argument(
             "--force", "-f", action="store_true", help="Skip confirmation prompt"
         )
 
         # Reset command
-        reset_parser = subparsers.add_parser("reset", help="Reset configuration to defaults")
+        reset_parser = subparsers.add_parser(
+            "reset", help="Reset configuration to defaults"
+        )
         reset_parser.add_argument(
             "--force", "-f", action="store_true", help="Skip confirmation prompt"
         )
@@ -61,7 +69,9 @@ Configuration changes will affect how cognee processes and stores data.
             import cognee
 
             if not hasattr(args, "config_action") or args.config_action is None:
-                fmt.error("Please specify a config action: get, set, unset, list, or reset")
+                fmt.error(
+                    "Please specify a config action: get, set, unset, list, or reset"
+                )
                 return
 
             if args.config_action == "get":
@@ -80,7 +90,9 @@ Configuration changes will affect how cognee processes and stores data.
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1)
-            raise CliCommandException(f"Error managing configuration: {str(e)}", error_code=1)
+            raise CliCommandException(
+                f"Error managing configuration: {str(e)}", error_code=1
+            )
 
     def _handle_get(self, args: argparse.Namespace) -> None:
         try:
@@ -97,9 +109,13 @@ Configuration changes will affect how cognee processes and stores data.
                         fmt.note(
                             "The config system currently only supports setting values, not retrieving them"
                         )
-                        fmt.note(f"To set this value: 'cognee config set {args.key} <value>'")
+                        fmt.note(
+                            f"To set this value: 'cognee config set {args.key} <value>'"
+                        )
                 except Exception:
-                    fmt.error(f"Configuration key '{args.key}' not found or retrieval failed")
+                    fmt.error(
+                        f"Configuration key '{args.key}' not found or retrieval failed"
+                    )
             else:
                 # Get all configuration
                 try:
@@ -116,7 +132,9 @@ Configuration changes will affect how cognee processes and stores data.
                         fmt.note(
                             "The config system currently only supports setting values, not retrieving them"
                         )
-                        fmt.note("Available commands: 'cognee config set <key> <value>'")
+                        fmt.note(
+                            "Available commands: 'cognee config set <key> <value>'"
+                        )
                 except Exception:
                     fmt.error("Failed to retrieve configuration")
                     fmt.note("Configuration viewing not fully implemented yet")
@@ -186,7 +204,9 @@ Configuration changes will affect how cognee processes and stores data.
             else:
                 fmt.error(f"Unknown configuration key '{args.key}'")
                 fmt.note("Available keys: " + ", ".join(config_key_mappings.keys()))
-                fmt.note("Use 'cognee config list' to see all available configuration options")
+                fmt.note(
+                    "Use 'cognee config list' to see all available configuration options"
+                )
 
         except Exception as e:
             raise CliCommandInnerException(f"Failed to unset configuration: {str(e)}")

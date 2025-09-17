@@ -36,7 +36,9 @@ def parse_neptune_url(url: str) -> Tuple[str, str]:
         parsed = urlparse(url)
 
         if parsed.scheme != "neptune-graph":
-            raise ValueError(f"Invalid scheme: {parsed.scheme}. Expected 'neptune-graph'")
+            raise ValueError(
+                f"Invalid scheme: {parsed.scheme}. Expected 'neptune-graph'"
+            )
 
         graph_id = parsed.hostname or parsed.path.lstrip("/")
         if not graph_id:

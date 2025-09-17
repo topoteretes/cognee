@@ -23,7 +23,9 @@ async def index_data_points(data_points: list[DataPoint]):
             index_name = f"{data_point_type.__name__}_{field_name}"
 
             if index_name not in created_indexes:
-                await vector_engine.create_vector_index(data_point_type.__name__, field_name)
+                await vector_engine.create_vector_index(
+                    data_point_type.__name__, field_name
+                )
                 created_indexes[index_name] = True
 
             if index_name not in index_points:
@@ -44,7 +46,9 @@ async def index_data_points(data_points: list[DataPoint]):
                 batch = indexable_points[i : i + batch_size]
                 await vector_engine.index_data_points(index_name, field_name, batch)
         except EmbeddingException as e:
-            logger.warning(f"Failed to index data points for {index_name}.{field_name}: {e}")
+            logger.warning(
+                f"Failed to index data points for {index_name}.{field_name}: {e}"
+            )
 
     return data_points
 
@@ -80,7 +84,9 @@ async def get_data_points_from_model(
             and isinstance(field_value[0], DataPoint)
         ):
             for field_value_item in field_value:
-                property_key = f"{str(data_point.id)}{field_name}{str(field_value_item.id)}"
+                property_key = (
+                    f"{str(data_point.id)}{field_name}{str(field_value_item.id)}"
+                )
 
                 if property_key in visited_properties:
                     return []

@@ -63,11 +63,15 @@ class QABenchmarkMem0(QABenchmarkRAG):
         # Search Mem0 for relevant memories
         relevant_memories = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: self.rag_client.search(query=question, user_id=self.config.user_id, limit=5),
+            lambda: self.rag_client.search(
+                query=question, user_id=self.config.user_id, limit=5
+            ),
         )
 
         # Format memories for context
-        memories_str = "\n".join(f"- {entry['memory']}" for entry in relevant_memories["results"])
+        memories_str = "\n".join(
+            f"- {entry['memory']}" for entry in relevant_memories["results"]
+        )
 
         # Generate response with OpenAI
         system_prompt = f"You are a helpful AI assistant. Answer the question based on the provided context.\n\nContext:\n{memories_str}"

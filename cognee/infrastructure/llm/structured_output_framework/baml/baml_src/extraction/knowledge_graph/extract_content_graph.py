@@ -2,7 +2,9 @@ from typing import Type, Optional
 from pydantic import BaseModel
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.shared.logging_utils import get_logger, setup_logging
-from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.async_client import b
+from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.async_client import (
+    b,
+)
 
 
 async def extract_content_graph(

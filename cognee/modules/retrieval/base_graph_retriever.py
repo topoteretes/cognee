@@ -13,6 +13,8 @@ class BaseGraphRetriever(ABC):
         pass
 
     @abstractmethod
-    async def get_completion(self, query: str, context: Optional[List[Edge]] = None) -> str:
+    async def get_completion(
+        self, query: str, context: Optional[List[Edge]] = None
+    ) -> str:
         """Generates a response using the query and optional context (triplets)."""
         pass

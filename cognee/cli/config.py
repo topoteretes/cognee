@@ -3,7 +3,9 @@ CLI configuration and constants to avoid hardcoded values
 """
 
 # CLI Constants
-CLI_DESCRIPTION = "Cognee CLI - Manage your knowledge graphs and cognitive processing pipelines."
+CLI_DESCRIPTION = (
+    "Cognee CLI - Manage your knowledge graphs and cognitive processing pipelines."
+)
 DEFAULT_DOCS_URL = "https://docs.cognee.ai"
 
 # Command descriptions - these should match the actual command implementations

@@ -9,7 +9,10 @@ from cognee.modules.pipelines.models import (
     PipelineRunYield,
     PipelineRunCompleted,
 )
-from cognee.modules.pipelines.operations import log_pipeline_run_start, log_pipeline_run_complete
+from cognee.modules.pipelines.operations import (
+    log_pipeline_run_start,
+    log_pipeline_run_complete,
+)
 from cognee.modules.pipelines.utils.generate_pipeline_id import generate_pipeline_id
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -32,7 +35,9 @@ if modal:
         secrets=[modal.Secret.from_name("distributed_cognee")],
     )
     async def run_tasks_on_modal(tasks, data_item, user, pipeline_name, context):
-        pipeline_run = run_tasks_with_telemetry(tasks, data_item, user, pipeline_name, context)
+        pipeline_run = run_tasks_with_telemetry(
+            tasks, data_item, user, pipeline_name, context
+        )
 
         run_info = None
 
@@ -54,7 +59,9 @@ async def run_tasks_distributed(tasks, dataset_id, data, user, pipeline_name, co
 
     pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
 
-    pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset_id, data)
+    pipeline_run = await log_pipeline_run_start(
+        pipeline_id, pipeline_name, dataset_id, data
+    )
 
     pipeline_run_id = pipeline_run.pipeline_run_id
 
@@ -85,7 +92,9 @@ async def run_tasks_distributed(tasks, dataset_id, data, user, pipeline_name, co
             payload=result,
         )
 
-    await log_pipeline_run_complete(pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data)
+    await log_pipeline_run_complete(
+        pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data
+    )
 
     yield PipelineRunCompleted(
         pipeline_run_id=pipeline_run_id,

@@ -77,7 +77,9 @@ def save_aggregate_metrics(
 
 def calculate_metrics_statistics(
     json_data: str, aggregate_output_path: str
-) -> Tuple[Dict[str, List[float]], Dict[str, List[Dict]], Dict[str, Tuple[float, float, float]]]:
+) -> Tuple[
+    Dict[str, List[float]], Dict[str, List[Dict]], Dict[str, Tuple[float, float, float]]
+]:
     """Calculate metrics statistics and save aggregated results."""
     data = load_metrics_data(json_data)
     metrics_data, metric_details = extract_metrics_and_details(data)

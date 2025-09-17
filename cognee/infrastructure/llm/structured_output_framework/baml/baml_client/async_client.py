@@ -17,7 +17,9 @@ import baml_py
 from . import stream_types, types, type_builder
 from .parser import LlmResponseParser, LlmStreamParser
 from .runtime import DoNotUseDirectlyCallManager, BamlCallOptions
-from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME as __runtime__
+from .globals import (
+    DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME as __runtime__,
+)
 
 
 class BamlAsyncClient:
@@ -41,7 +43,9 @@ class BamlAsyncClient:
         tb: typing.Optional[type_builder.TypeBuilder] = None,
         client_registry: typing.Optional[baml_py.baml_py.ClientRegistry] = None,
         collector: typing.Optional[
-            typing.Union[baml_py.baml_py.Collector, typing.List[baml_py.baml_py.Collector]]
+            typing.Union[
+                baml_py.baml_py.Collector, typing.List[baml_py.baml_py.Collector]
+            ]
         ] = None,
         env: typing.Optional[typing.Dict[str, typing.Optional[str]]] = None,
     ) -> "BamlAsyncClient":
@@ -116,7 +120,8 @@ class BamlAsyncClient:
             },
         )
         return typing.cast(
-            types.KnowledgeGraph, result.cast_to(types, types, stream_types, False, __runtime__)
+            types.KnowledgeGraph,
+            result.cast_to(types, types, stream_types, False, __runtime__),
         )
 
     async def ExtractDynamicContentGraph(
@@ -159,7 +164,8 @@ class BamlAsyncClient:
             },
         )
         return typing.cast(
-            types.SummarizedCode, result.cast_to(types, types, stream_types, False, __runtime__)
+            types.SummarizedCode,
+            result.cast_to(types, types, stream_types, False, __runtime__),
         )
 
     async def SummarizeContent(
@@ -174,7 +180,8 @@ class BamlAsyncClient:
             },
         )
         return typing.cast(
-            types.SummarizedContent, result.cast_to(types, types, stream_types, False, __runtime__)
+            types.SummarizedContent,
+            result.cast_to(types, types, stream_types, False, __runtime__),
         )
 
 
@@ -188,7 +195,9 @@ class BamlStreamClient:
         self,
         content: str,
         baml_options: BamlCallOptions = {},
-    ) -> baml_py.BamlStream[stream_types.DefaultContentPrediction, types.DefaultContentPrediction]:
+    ) -> baml_py.BamlStream[
+        stream_types.DefaultContentPrediction, types.DefaultContentPrediction
+    ]:
         ctx, result = self.__options.merge_options(baml_options).create_async_stream(
             function_name="ExtractCategories",
             args={
@@ -240,7 +249,8 @@ class BamlStreamClient:
                 x.cast_to(types, types, stream_types, True, __runtime__),
             ),
             lambda x: typing.cast(
-                types.KnowledgeGraph, x.cast_to(types, types, stream_types, False, __runtime__)
+                types.KnowledgeGraph,
+                x.cast_to(types, types, stream_types, False, __runtime__),
             ),
             ctx,
         )
@@ -259,7 +269,9 @@ class BamlStreamClient:
         ] = None,
         custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
-    ) -> baml_py.BamlStream[stream_types.DynamicKnowledgeGraph, types.DynamicKnowledgeGraph]:
+    ) -> baml_py.BamlStream[
+        stream_types.DynamicKnowledgeGraph, types.DynamicKnowledgeGraph
+    ]:
         ctx, result = self.__options.merge_options(baml_options).create_async_stream(
             function_name="ExtractDynamicContentGraph",
             args={
@@ -268,7 +280,9 @@ class BamlStreamClient:
                 "custom_prompt_content": custom_prompt_content,
             },
         )
-        return baml_py.BamlStream[stream_types.DynamicKnowledgeGraph, types.DynamicKnowledgeGraph](
+        return baml_py.BamlStream[
+            stream_types.DynamicKnowledgeGraph, types.DynamicKnowledgeGraph
+        ](
             result,
             lambda x: typing.cast(
                 stream_types.DynamicKnowledgeGraph,
@@ -299,7 +313,8 @@ class BamlStreamClient:
                 x.cast_to(types, types, stream_types, True, __runtime__),
             ),
             lambda x: typing.cast(
-                types.SummarizedCode, x.cast_to(types, types, stream_types, False, __runtime__)
+                types.SummarizedCode,
+                x.cast_to(types, types, stream_types, False, __runtime__),
             ),
             ctx,
         )
@@ -315,14 +330,17 @@ class BamlStreamClient:
                 "content": content,
             },
         )
-        return baml_py.BamlStream[stream_types.SummarizedContent, types.SummarizedContent](
+        return baml_py.BamlStream[
+            stream_types.SummarizedContent, types.SummarizedContent
+        ](
             result,
             lambda x: typing.cast(
                 stream_types.SummarizedContent,
                 x.cast_to(types, types, stream_types, True, __runtime__),
             ),
             lambda x: typing.cast(
-                types.SummarizedContent, x.cast_to(types, types, stream_types, False, __runtime__)
+                types.SummarizedContent,
+                x.cast_to(types, types, stream_types, False, __runtime__),
             ),
             ctx,
         )
@@ -339,7 +357,9 @@ class BamlHttpRequestClient:
         content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
+        result = await self.__options.merge_options(
+            baml_options
+        ).create_http_request_async(
             function_name="ExtractCategories",
             args={
                 "content": content,
@@ -363,7 +383,9 @@ class BamlHttpRequestClient:
         custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
+        result = await self.__options.merge_options(
+            baml_options
+        ).create_http_request_async(
             function_name="ExtractContentGraphGeneric",
             args={
                 "content": content,
@@ -389,7 +411,9 @@ class BamlHttpRequestClient:
         custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
+        result = await self.__options.merge_options(
+            baml_options
+        ).create_http_request_async(
             function_name="ExtractDynamicContentGraph",
             args={
                 "content": content,
@@ -405,7 +429,9 @@ class BamlHttpRequestClient:
         content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
+        result = await self.__options.merge_options(
+            baml_options
+        ).create_http_request_async(
             function_name="SummarizeCode",
             args={
                 "content": content,
@@ -419,7 +445,9 @@ class BamlHttpRequestClient:
         content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
+        result = await self.__options.merge_options(
+            baml_options
+        ).create_http_request_async(
             function_name="SummarizeContent",
             args={
                 "content": content,
@@ -440,7 +468,9 @@ class BamlHttpStreamRequestClient:
         content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
+        result = await self.__options.merge_options(
+            baml_options
+        ).create_http_request_async(
             function_name="ExtractCategories",
             args={
                 "content": content,
@@ -464,7 +494,9 @@ class BamlHttpStreamRequestClient:
         custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
+        result = await self.__options.merge_options(
+            baml_options
+        ).create_http_request_async(
             function_name="ExtractContentGraphGeneric",
             args={
                 "content": content,
@@ -490,7 +522,9 @@ class BamlHttpStreamRequestClient:
         custom_prompt_content: typing.Optional[str] = None,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
+        result = await self.__options.merge_options(
+            baml_options
+        ).create_http_request_async(
             function_name="ExtractDynamicContentGraph",
             args={
                 "content": content,
@@ -506,7 +540,9 @@ class BamlHttpStreamRequestClient:
         content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
+        result = await self.__options.merge_options(
+            baml_options
+        ).create_http_request_async(
             function_name="SummarizeCode",
             args={
                 "content": content,
@@ -520,7 +556,9 @@ class BamlHttpStreamRequestClient:
         content: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
-        result = await self.__options.merge_options(baml_options).create_http_request_async(
+        result = await self.__options.merge_options(
+            baml_options
+        ).create_http_request_async(
             function_name="SummarizeContent",
             args={
                 "content": content,

@@ -76,7 +76,8 @@ class CogneeTestClient:
         # Create test Python files
         test_py_file = os.path.join(self.test_repo_dir, "main.py")
         with open(test_py_file, "w") as f:
-            f.write("""
+            f.write(
+                """
 def hello_world():
     '''A simple hello world function.'''
     return "Hello, World!"
@@ -88,23 +89,28 @@ class TestClass:
 
     def greet(self):
         return f"Hello, {self.name}!"
-""")
+"""
+            )
 
         # Create a test configuration file
         config_file = os.path.join(self.test_repo_dir, "config.py")
         with open(config_file, "w") as f:
-            f.write("""
+            f.write(
+                """
 # Configuration settings
 DATABASE_URL = "sqlite:///test.db"
 DEBUG = True
-""")
+"""
+            )
 
         # Create test developer rules files
         cursorrules_file = os.path.join(self.test_data_dir, ".cursorrules")
         with open(cursorrules_file, "w") as f:
             f.write("# Test cursor rules\nUse Python best practices.")
 
-        self.temp_files.extend([self.test_text_file, test_py_file, config_file, cursorrules_file])
+        self.temp_files.extend(
+            [self.test_text_file, test_py_file, config_file, cursorrules_file]
+        )
         print(f"✅ Test environment created at: {self.test_data_dir}")
 
     async def cleanup(self):
@@ -205,7 +211,9 @@ DEBUG = True
         try:
             # Test with simple text using MCP client
             async with self.mcp_server_session() as session:
-                cognify_result = await session.call_tool("cognify", arguments={"data": test_text})
+                cognify_result = await session.call_tool(
+                    "cognify", arguments={"data": test_text}
+                )
 
                 start = time.time()  # mark the start
                 while True:
@@ -214,7 +222,9 @@ DEBUG = True
                         await asyncio.sleep(5)
 
                         # Check if cognify processing is finished
-                        status_result = await session.call_tool("cognify_status", arguments={})
+                        status_result = await session.call_tool(
+                            "cognify_status", arguments={}
+                        )
                         if hasattr(status_result, "content") and status_result.content:
                             status_text = (
                                 status_result.content[0].text
@@ -224,7 +234,10 @@ DEBUG = True
                         else:
                             status_text = str(status_result)
 
-                        if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_text:
+                        if (
+                            str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED)
+                            in status_text
+                        ):
                             break
                         elif time.time() - start > TIMEOUT:
                             raise TimeoutError("Cognify did not complete in 5min")
@@ -263,7 +276,9 @@ DEBUG = True
                         await asyncio.sleep(5)
 
                         # Check if codify processing is finished
-                        status_result = await session.call_tool("codify_status", arguments={})
+                        status_result = await session.call_tool(
+                            "codify_status", arguments={}
+                        )
                         if hasattr(status_result, "content") and status_result.content:
                             status_text = (
                                 status_result.content[0].text
@@ -273,7 +288,10 @@ DEBUG = True
                         else:
                             status_text = str(status_result)
 
-                        if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_text:
+                        if (
+                            str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED)
+                            in status_text
+                        ):
                             break
                         elif time.time() - start > TIMEOUT:
                             raise TimeoutError("Codify did not complete in 5min")
@@ -302,7 +320,8 @@ DEBUG = True
         try:
             async with self.mcp_server_session() as session:
                 result = await session.call_tool(
-                    "cognee_add_developer_rules", arguments={"base_path": self.test_data_dir}
+                    "cognee_add_developer_rules",
+                    arguments={"base_path": self.test_data_dir},
                 )
 
                 start = time.time()  # mark the start
@@ -312,7 +331,9 @@ DEBUG = True
                         await asyncio.sleep(5)
 
                         # Check if developer rule cognify processing is finished
-                        status_result = await session.call_tool("cognify_status", arguments={})
+                        status_result = await session.call_tool(
+                            "cognify_status", arguments={}
+                        )
                         if hasattr(status_result, "content") and status_result.content:
                             status_text = (
                                 status_result.content[0].text
@@ -322,7 +343,10 @@ DEBUG = True
                         else:
                             status_text = str(status_result)
 
-                        if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_text:
+                        if (
+                            str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED)
+                            in status_text
+                        ):
                             break
                         elif time.time() - start > TIMEOUT:
                             raise TimeoutError(
@@ -365,7 +389,10 @@ DEBUG = True
                 async with self.mcp_server_session() as session:
                     result = await session.call_tool(
                         "search",
-                        arguments={"search_query": search_query, "search_type": search_type.value},
+                        arguments={
+                            "search_query": search_query,
+                            "search_type": search_type.value,
+                        },
                     )
                     self.test_results[f"search_{search_type}"] = {
                         "status": "PASS",
@@ -394,10 +421,15 @@ DEBUG = True
                     content = result.content[0].text
 
                     # Check if the output contains expected elements
-                    if "Available Datasets:" in content or "No datasets found" in content:
+                    if (
+                        "Available Datasets:" in content
+                        or "No datasets found" in content
+                    ):
                         self.test_results["list_data_all"] = {
                             "status": "PASS",
-                            "result": content[:200] + "..." if len(content) > 200 else content,
+                            "result": (
+                                content[:200] + "..." if len(content) > 200 else content
+                            ),
                             "message": "list_data (all datasets) successful",
                         }
                         print("✅ list_data (all datasets) test passed")
@@ -418,23 +450,32 @@ DEBUG = True
                                     "list_data", arguments={"dataset_id": dataset_id}
                                 )
 
-                                if specific_result.content and len(specific_result.content) > 0:
+                                if (
+                                    specific_result.content
+                                    and len(specific_result.content) > 0
+                                ):
                                     specific_content = specific_result.content[0].text
                                     if "Dataset:" in specific_content:
                                         self.test_results["list_data_specific"] = {
                                             "status": "PASS",
-                                            "result": specific_content[:200] + "..."
-                                            if len(specific_content) > 200
-                                            else specific_content,
+                                            "result": (
+                                                specific_content[:200] + "..."
+                                                if len(specific_content) > 200
+                                                else specific_content
+                                            ),
                                             "message": "list_data (specific dataset) successful",
                                         }
-                                        print("✅ list_data (specific dataset) test passed")
+                                        print(
+                                            "✅ list_data (specific dataset) test passed"
+                                        )
                                     else:
                                         raise Exception(
                                             "Specific dataset listing returned unexpected format"
                                         )
                                 else:
-                                    raise Exception("Specific dataset listing returned no content")
+                                    raise Exception(
+                                        "Specific dataset listing returned no content"
+                                    )
                     else:
                         raise Exception("list_data returned unexpected format")
                 else:
@@ -458,7 +499,9 @@ DEBUG = True
                 list_result = await session.call_tool("list_data", arguments={})
 
                 if not (list_result.content and len(list_result.content) > 0):
-                    raise Exception("No data available for delete test - list_data returned empty")
+                    raise Exception(
+                        "No data available for delete test - list_data returned empty"
+                    )
 
                 content = list_result.content[0].text
 
@@ -478,7 +521,11 @@ DEBUG = True
                     # Test soft delete (default)
                     delete_result = await session.call_tool(
                         "delete",
-                        arguments={"data_id": data_id, "dataset_id": dataset_id, "mode": "soft"},
+                        arguments={
+                            "data_id": data_id,
+                            "dataset_id": dataset_id,
+                            "mode": "soft",
+                        },
                     )
 
                     if delete_result.content and len(delete_result.content) > 0:
@@ -487,9 +534,11 @@ DEBUG = True
                         if "Delete operation completed successfully" in delete_content:
                             self.test_results["delete_soft"] = {
                                 "status": "PASS",
-                                "result": delete_content[:200] + "..."
-                                if len(delete_content) > 200
-                                else delete_content,
+                                "result": (
+                                    delete_content[:200] + "..."
+                                    if len(delete_content) > 200
+                                    else delete_content
+                                ),
                                 "message": "delete (soft mode) successful",
                             }
                             print("✅ delete (soft mode) test passed")
@@ -501,7 +550,9 @@ DEBUG = True
                                     "result": delete_content,
                                     "message": "delete test passed with expected 'not found' error",
                                 }
-                                print("✅ delete test passed (expected 'not found' error)")
+                                print(
+                                    "✅ delete test passed (expected 'not found' error)"
+                                )
                             else:
                                 raise Exception(
                                     f"Delete returned unexpected content: {delete_content}"
@@ -531,7 +582,9 @@ DEBUG = True
                             }
                             print("✅ delete error handling test passed")
                         else:
-                            raise Exception(f"Expected UUID error not found: {invalid_content}")
+                            raise Exception(
+                                f"Expected UUID error not found: {invalid_content}"
+                            )
                     else:
                         raise Exception("Delete error test returned no content")
 
@@ -567,7 +620,9 @@ DEBUG = True
                     "expected": expected,
                     "message": "node_to_string function output mismatch",
                 }
-                print(f"❌ node_to_string test failed: expected {expected}, got {result}")
+                print(
+                    f"❌ node_to_string test failed: expected {expected}, got {result}"
+                )
 
         except Exception as e:
             self.test_results["node_to_string"] = {
@@ -587,9 +642,7 @@ DEBUG = True
                 )
             ]
             result = retrieved_edges_to_string(test_triplet)
-            expected = (
-                'Node(id: "node1", name: "Node1") CONNECTS_TO Node(id: "node2", name: "Node2")'
-            )
+            expected = 'Node(id: "node1", name: "Node1") CONNECTS_TO Node(id: "node2", name: "Node2")'
             if result == expected:
                 self.test_results["retrieved_edges_to_string"] = {
                     "status": "PASS",
@@ -624,14 +677,16 @@ DEBUG = True
             # Create a temporary Python file with a test class
             test_module_file = os.path.join(self.test_data_dir, "test_model.py")
             with open(test_module_file, "w") as f:
-                f.write("""
+                f.write(
+                    """
 class TestModel:
     def __init__(self):
         self.name = "TestModel"
 
     def get_name(self):
         return self.name
-""")
+"""
+                )
 
             # Test loading the class
             loaded_class = load_class(test_module_file, "TestModel")

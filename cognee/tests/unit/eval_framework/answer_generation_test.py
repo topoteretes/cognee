@@ -24,12 +24,12 @@ async def test_answer_generation():
     mock_retriever.get_context.assert_any_await(qa_pairs[0]["question"])
 
     assert len(answers) == len(qa_pairs)
-    assert answers[0]["question"] == qa_pairs[0]["question"], (
-        "AnswerGeneratorExecutor is passing the question incorrectly"
-    )
-    assert answers[0]["golden_answer"] == qa_pairs[0]["answer"], (
-        "AnswerGeneratorExecutor is passing the golden answer incorrectly"
-    )
-    assert answers[0]["answer"] == "Mocked answer", (
-        "AnswerGeneratorExecutor is passing the generated answer incorrectly"
-    )
+    assert (
+        answers[0]["question"] == qa_pairs[0]["question"]
+    ), "AnswerGeneratorExecutor is passing the question incorrectly"
+    assert (
+        answers[0]["golden_answer"] == qa_pairs[0]["answer"]
+    ), "AnswerGeneratorExecutor is passing the golden answer incorrectly"
+    assert (
+        answers[0]["answer"] == "Mocked answer"
+    ), "AnswerGeneratorExecutor is passing the generated answer incorrectly"

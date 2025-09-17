@@ -31,19 +31,27 @@ async def test_deduplication():
 
     result = await relational_engine.get_all_data_from_table("data")
     assert len(result) == 1, "More than one data entity was found."
-    assert result[0]["name"] == "Natural_language_processing_copy", (
-        "Result name does not match expected value."
-    )
+    assert (
+        result[0]["name"] == "Natural_language_processing_copy"
+    ), "Result name does not match expected value."
 
     result = await relational_engine.get_all_data_from_table("datasets")
     assert len(result) == 2, "Unexpected number of datasets found."
-    assert result[0]["name"] == dataset_name, "Result name does not match expected value."
-    assert result[1]["name"] == dataset_name2, "Result name does not match expected value."
+    assert (
+        result[0]["name"] == dataset_name
+    ), "Result name does not match expected value."
+    assert (
+        result[1]["name"] == dataset_name2
+    ), "Result name does not match expected value."
 
     result = await relational_engine.get_all_data_from_table("dataset_data")
     assert len(result) == 2, "Unexpected number of dataset data relationships found."
-    assert result[0]["data_id"] == result[1]["data_id"], "Data item is not reused between datasets."
-    assert result[0]["dataset_id"] != result[1]["dataset_id"], "Dataset items are not different."
+    assert (
+        result[0]["data_id"] == result[1]["data_id"]
+    ), "Data item is not reused between datasets."
+    assert (
+        result[0]["dataset_id"] != result[1]["dataset_id"]
+    ), "Dataset items are not different."
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -62,15 +70,17 @@ async def test_deduplication():
 
     result = await relational_engine.get_all_data_from_table("data")
     assert len(result) == 1, "More than one data entity was found."
-    assert hashlib.md5(text.encode("utf-8")).hexdigest() in result[0]["name"], (
-        "Content hash is not a part of file name."
-    )
+    assert (
+        hashlib.md5(text.encode("utf-8")).hexdigest() in result[0]["name"]
+    ), "Content hash is not a part of file name."
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
     # Test deduplication of image files
-    explanation_file_path = os.path.join(pathlib.Path(__file__).parent, "test_data/example.png")
+    explanation_file_path = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/example.png"
+    )
     explanation_file_path2 = os.path.join(
         pathlib.Path(__file__).parent, "test_data/example_copy.png"
     )
@@ -138,13 +148,17 @@ async def test_deduplication_sqlite():
 async def main():
     data_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_deduplication")
+            os.path.join(
+                pathlib.Path(__file__).parent, ".data_storage/test_deduplication"
+            )
         ).resolve()
     )
     cognee.config.data_root_directory(data_directory_path)
     cognee_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_deduplication")
+            os.path.join(
+                pathlib.Path(__file__).parent, ".cognee_system/test_deduplication"
+            )
         ).resolve()
     )
     cognee.config.system_root_directory(cognee_directory_path)

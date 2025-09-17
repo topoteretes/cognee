@@ -19,8 +19,13 @@ from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.infrastructure.data.chunking.config import get_chunk_config
 from cognee.infrastructure.data.chunking.get_chunking_engine import get_chunk_engine
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
-from cognee.infrastructure.files.utils.extract_text_from_file import extract_text_from_file
-from cognee.infrastructure.files.utils.guess_file_type import guess_file_type, FileTypeException
+from cognee.infrastructure.files.utils.extract_text_from_file import (
+    extract_text_from_file,
+)
+from cognee.infrastructure.files.utils.guess_file_type import (
+    guess_file_type,
+    FileTypeException,
+)
 from cognee.modules.data.methods.add_model_class_to_graph import (
     add_model_class_to_graph,
 )
@@ -55,7 +60,9 @@ async def extract_ontology(content: str, response_model: Type[BaseModel]):
 
     system_prompt = LLMGateway.read_query_prompt("extract_ontology.txt")
 
-    ontology = await LLMGateway.acreate_structured_output(content, system_prompt, response_model)
+    ontology = await LLMGateway.acreate_structured_output(
+        content, system_prompt, response_model
+    )
 
     return ontology
 
@@ -106,7 +113,9 @@ class OntologyEngine:
         return result
 
     async def recursive_flatten(
-        self, items: Union[List[Dict[str, Any]], Dict[str, Any]], parent_id: Optional[str] = None
+        self,
+        items: Union[List[Dict[str, Any]], Dict[str, Any]],
+        parent_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Recursively flatten a hierarchical structure of models into a flat list of dictionaries.
@@ -137,7 +146,9 @@ class OntologyEngine:
                 flat_list.extend(await self.recursive_flatten(child, model.node_id))
         return flat_list
 
-    async def load_data(self, file_path: str) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+    async def load_data(
+        self, file_path: str
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Load data from a specified JSON or CSV file and return it in a structured format.
 
@@ -204,14 +215,19 @@ class OntologyEngine:
                         )
 
                         if chunks_with_ids[0][0] == 1:
-                            initial_chunks_and_ids.append({base_file.id: chunks_with_ids})
+                            initial_chunks_and_ids.append(
+                                {base_file.id: chunks_with_ids}
+                            )
 
                     except FileTypeException:
                         logger.warning(
-                            "File (%s) has an unknown file type. We are skipping it.", file["id"]
+                            "File (%s) has an unknown file type. We are skipping it.",
+                            file["id"],
                         )
 
-            ontology = await extract_ontology(str(initial_chunks_and_ids), GraphOntology)
+            ontology = await extract_ontology(
+                str(initial_chunks_and_ids), GraphOntology
+            )
             graph_client = await get_graph_engine()
 
             await graph_client.add_nodes(
@@ -223,7 +239,9 @@ class OntologyEngine:
                             name=generate_node_name(node.name),
                             type=generate_node_id(node.id),
                             description=node.description,
-                            updated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                            updated_at=datetime.now(timezone.utc).strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            ),
                         ),
                     )
                     for node in ontology.nodes
@@ -239,7 +257,9 @@ class OntologyEngine:
                         source_node_id=generate_node_id(edge.source_id),
                         target_node_id=generate_node_id(edge.target_id),
                         relationship_name=edge.relationship_type,
-                        updated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                        updated_at=datetime.now(timezone.utc).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ),
                     ),
                 )
                 for edge in ontology.edges
@@ -284,10 +304,14 @@ class OntologyEngine:
 
                 return
             except Exception as e:
-                raise RuntimeError(f"Failed to add graph ontology from {file_path}: {e}") from e
+                raise RuntimeError(
+                    f"Failed to add graph ontology from {file_path}: {e}"
+                ) from e
 
 
-async def infer_data_ontology(documents, ontology_model=KnowledgeGraph, root_node_id=None):
+async def infer_data_ontology(
+    documents, ontology_model=KnowledgeGraph, root_node_id=None
+):
     """
     Infer data ontology from provided documents and optionally add it to a graph.
 

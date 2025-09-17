@@ -24,7 +24,9 @@ async def main():
     await add_data_points_queue.clear.aio()
 
     number_of_graph_saving_workers = 1  # Total number of graph_saving_worker to spawn
-    number_of_data_point_saving_workers = 5  # Total number of graph_saving_worker to spawn
+    number_of_data_point_saving_workers = (
+        5  # Total number of graph_saving_worker to spawn
+    )
 
     results = []
     consumer_futures = []

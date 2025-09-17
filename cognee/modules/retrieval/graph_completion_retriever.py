@@ -8,7 +8,9 @@ from cognee.tasks.storage import add_data_points
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_graph_retriever import BaseGraphRetriever
-from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+    brute_force_triplet_search,
+)
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.utils.extract_uuid_from_node import extract_uuid_from_node
@@ -87,11 +89,16 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         for subclass in subclasses:
             if "metadata" in subclass.model_fields:
                 metadata_field = subclass.model_fields["metadata"]
-                if hasattr(metadata_field, "default") and metadata_field.default is not None:
+                if (
+                    hasattr(metadata_field, "default")
+                    and metadata_field.default is not None
+                ):
                     if isinstance(metadata_field.default, dict):
                         index_fields = metadata_field.default.get("index_fields", [])
                         for field_name in index_fields:
-                            vector_index_collections.append(f"{subclass.__name__}_{field_name}")
+                            vector_index_collections.append(
+                                f"{subclass.__name__}_{field_name}"
+                            )
 
         user = await get_default_user()
 
@@ -168,12 +175,17 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
         if self.save_interaction and context and triplets and completion:
             await self.save_qa(
-                question=query, answer=completion, context=context_text, triplets=triplets
+                question=query,
+                answer=completion,
+                context=context_text,
+                triplets=triplets,
             )
 
         return [completion]
 
-    async def save_qa(self, question: str, answer: str, context: str, triplets: List) -> None:
+    async def save_qa(
+        self, question: str, answer: str, context: str, triplets: List
+    ) -> None:
         """
         Saves a question and answer pair for later analysis or storage.
         Parameters:
@@ -197,7 +209,9 @@ class GraphCompletionRetriever(BaseGraphRetriever):
             belongs_to_set=interactions_node_set,
         )
 
-        await add_data_points(data_points=[cognee_user_interaction], update_edge_collection=False)
+        await add_data_points(
+            data_points=[cognee_user_interaction], update_edge_collection=False
+        )
 
         relationships = []
         relationship_name = "used_graph_element_to_answer"

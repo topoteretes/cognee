@@ -91,7 +91,12 @@ async def run_code_graph_pipeline(
             yield run_status
 
     async for run_status in run_tasks(
-        tasks, dataset.id, repo_path, user, "cognify_code_pipeline", incremental_loading=False
+        tasks,
+        dataset.id,
+        repo_path,
+        user,
+        "cognify_code_pipeline",
+        incremental_loading=False,
     ):
         yield run_status
 

@@ -39,7 +39,9 @@ class LlmResponseParser:
         baml_options: BamlCallOptions = {},
     ) -> types.KnowledgeGraph:
         result = self.__options.merge_options(baml_options).parse_response(
-            function_name="ExtractContentGraphGeneric", llm_response=llm_response, mode="request"
+            function_name="ExtractContentGraphGeneric",
+            llm_response=llm_response,
+            mode="request",
         )
         return typing.cast(types.KnowledgeGraph, result)
 
@@ -49,7 +51,9 @@ class LlmResponseParser:
         baml_options: BamlCallOptions = {},
     ) -> types.DynamicKnowledgeGraph:
         result = self.__options.merge_options(baml_options).parse_response(
-            function_name="ExtractDynamicContentGraph", llm_response=llm_response, mode="request"
+            function_name="ExtractDynamicContentGraph",
+            llm_response=llm_response,
+            mode="request",
         )
         return typing.cast(types.DynamicKnowledgeGraph, result)
 
@@ -96,7 +100,9 @@ class LlmStreamParser:
         baml_options: BamlCallOptions = {},
     ) -> stream_types.KnowledgeGraph:
         result = self.__options.merge_options(baml_options).parse_response(
-            function_name="ExtractContentGraphGeneric", llm_response=llm_response, mode="stream"
+            function_name="ExtractContentGraphGeneric",
+            llm_response=llm_response,
+            mode="stream",
         )
         return typing.cast(stream_types.KnowledgeGraph, result)
 
@@ -106,7 +112,9 @@ class LlmStreamParser:
         baml_options: BamlCallOptions = {},
     ) -> stream_types.DynamicKnowledgeGraph:
         result = self.__options.merge_options(baml_options).parse_response(
-            function_name="ExtractDynamicContentGraph", llm_response=llm_response, mode="stream"
+            function_name="ExtractDynamicContentGraph",
+            llm_response=llm_response,
+            mode="stream",
         )
         return typing.cast(stream_types.DynamicKnowledgeGraph, result)
 

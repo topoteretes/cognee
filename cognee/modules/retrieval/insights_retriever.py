@@ -7,7 +7,9 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.exceptions.exceptions import (
+    CollectionNotFoundError,
+)
 
 logger = get_logger("InsightsRetriever")
 
@@ -63,21 +65,32 @@ class InsightsRetriever(BaseGraphRetriever):
 
             try:
                 results = await asyncio.gather(
-                    vector_engine.search("Entity_name", query_text=query, limit=self.top_k),
-                    vector_engine.search("EntityType_name", query_text=query, limit=self.top_k),
+                    vector_engine.search(
+                        "Entity_name", query_text=query, limit=self.top_k
+                    ),
+                    vector_engine.search(
+                        "EntityType_name", query_text=query, limit=self.top_k
+                    ),
                 )
             except CollectionNotFoundError as error:
                 logger.error("Entity collections not found")
-                raise NoDataError("No data found in the system, please add data first.") from error
+                raise NoDataError(
+                    "No data found in the system, please add data first."
+                ) from error
 
             results = [*results[0], *results[1]]
-            relevant_results = [result for result in results if result.score < 0.5][: self.top_k]
+            relevant_results = [result for result in results if result.score < 0.5][
+                : self.top_k
+            ]
 
             if len(relevant_results) == 0:
                 return []
 
             node_connections_results = await asyncio.gather(
-                *[graph_engine.get_connections(result.id) for result in relevant_results]
+                *[
+                    graph_engine.get_connections(result.id)
+                    for result in relevant_results
+                ]
             )
 
             node_connections = []

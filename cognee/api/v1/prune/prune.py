@@ -1,4 +1,7 @@
-from cognee.modules.data.deletion import prune_system as _prune_system, prune_data as _prune_data
+from cognee.modules.data.deletion import (
+    prune_system as _prune_system,
+    prune_data as _prune_data,
+)
 
 
 class prune:

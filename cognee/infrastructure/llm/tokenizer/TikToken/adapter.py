@@ -74,7 +74,9 @@ class TikTokenTokenizer(TokenizerInterface):
 
             The decoded text representation of the token.
         """
-        return self.tokenizer.decode_single_token_bytes(token).decode("utf-8", errors="replace")
+        return self.tokenizer.decode_single_token_bytes(token).decode(
+            "utf-8", errors="replace"
+        )
 
     def count_tokens(self, text: str) -> int:
         """

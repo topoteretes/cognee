@@ -51,8 +51,12 @@ async def modal_evaluate_answers(
     eval_params = eval_config.copy()
     eval_params["answers_path"] = temp_answers_path
     eval_params["metrics_path"] = f"/data/metrics_{answers_filename}"
-    eval_params["aggregate_metrics_path"] = f"/data/aggregate_metrics_{answers_filename}"
-    eval_params["dashboard_path"] = f"/data/dashboard_{os.path.splitext(answers_filename)[0]}.html"
+    eval_params["aggregate_metrics_path"] = (
+        f"/data/aggregate_metrics_{answers_filename}"
+    )
+    eval_params["dashboard_path"] = (
+        f"/data/dashboard_{os.path.splitext(answers_filename)[0]}.html"
+    )
 
     # eval_params["evaluation_engine"] = "DirectLLM"
     # eval_params["evaluation_metrics"] = ["correctness"]
@@ -91,9 +95,9 @@ async def modal_evaluate_answers(
             "answers_file": answers_filename,
             "metrics_path": eval_params["metrics_path"],
             "aggregate_metrics_path": eval_params["aggregate_metrics_path"],
-            "dashboard_path": eval_params["dashboard_path"]
-            if eval_params.get("dashboard")
-            else None,
+            "dashboard_path": (
+                eval_params["dashboard_path"] if eval_params.get("dashboard") else None
+            ),
             "evaluated_answers_path": evaluated_answers_path,
         }
 
@@ -137,7 +141,9 @@ async def main():
             filename = os.path.basename(json_path)
 
             # Create remote evaluation task with JSON content
-            task = modal_evaluate_answers.remote.aio(json_content, filename, eval_config)
+            task = modal_evaluate_answers.remote.aio(
+                json_content, filename, eval_config
+            )
             modal_tasks.append(task)
 
         except (FileNotFoundError, json.JSONDecodeError) as e:

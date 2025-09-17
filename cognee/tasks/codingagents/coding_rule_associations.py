@@ -17,7 +17,9 @@ logger = get_logger("coding_rule_association")
 class Rule(DataPoint):
     """A single developer rule extracted from text."""
 
-    text: str = Field(..., description="The coding rule associated with the conversation")
+    text: str = Field(
+        ..., description="The coding rule associated with the conversation"
+    )
     belongs_to_set: Optional[NodeSet] = None
     metadata: dict = {"index_fields": ["rule"]}
 

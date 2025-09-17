@@ -4,7 +4,9 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
-from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.infrastructure.databases.vector.exceptions.exceptions import (
+    CollectionNotFoundError,
+)
 
 logger = get_logger("ChunksRetriever")
 
@@ -51,11 +53,15 @@ class ChunksRetriever(BaseRetriever):
         vector_engine = get_vector_engine()
 
         try:
-            found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
+            found_chunks = await vector_engine.search(
+                "DocumentChunk_text", query, limit=self.top_k
+            )
             logger.info(f"Found {len(found_chunks)} chunks from vector search")
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")
-            raise NoDataError("No data found in the system, please add data first.") from error
+            raise NoDataError(
+                "No data found in the system, please add data first."
+            ) from error
 
         chunk_payloads = [result.payload for result in found_chunks]
         logger.info(f"Returning {len(chunk_payloads)} chunk payloads")

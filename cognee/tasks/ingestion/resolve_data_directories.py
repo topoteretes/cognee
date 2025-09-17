@@ -8,7 +8,8 @@ from cognee.infrastructure.files.storage.s3_config import get_s3_config
 
 
 async def resolve_data_directories(
-    data: Union[BinaryIO, List[BinaryIO], str, List[str]], include_subdirectories: bool = True
+    data: Union[BinaryIO, List[BinaryIO], str, List[str]],
+    include_subdirectories: bool = True,
 ):
     """
     Resolves directories by replacing them with their contained files.
@@ -28,11 +29,16 @@ async def resolve_data_directories(
     s3_config = get_s3_config()
 
     fs = None
-    if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
+    if (
+        s3_config.aws_access_key_id is not None
+        and s3_config.aws_secret_access_key is not None
+    ):
         import s3fs
 
         fs = s3fs.S3FileSystem(
-            key=s3_config.aws_access_key_id, secret=s3_config.aws_secret_access_key, anon=False
+            key=s3_config.aws_access_key_id,
+            secret=s3_config.aws_secret_access_key,
+            anon=False,
         )
 
     for item in data:

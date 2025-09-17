@@ -2,7 +2,9 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 
 
-async def remove_disconnected_chunks(data_chunks: list[DocumentChunk]) -> list[DocumentChunk]:
+async def remove_disconnected_chunks(
+    data_chunks: list[DocumentChunk],
+) -> list[DocumentChunk]:
     """
     Removes disconnected or obsolete chunks from the graph database.
 

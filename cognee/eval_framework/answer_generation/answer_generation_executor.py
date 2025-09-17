@@ -3,7 +3,9 @@ from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
 )
-from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_completion_cot_retriever import (
+    GraphCompletionCotRetriever,
+)
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
@@ -33,7 +35,9 @@ class AnswerGeneratorExecutor:
             correct_answer = instance["answer"]
 
             retrieval_context = await retriever.get_context(query_text)
-            search_results = await retriever.get_completion(query_text, retrieval_context)
+            search_results = await retriever.get_completion(
+                query_text, retrieval_context
+            )
 
             answer = {
                 "question": query_text,

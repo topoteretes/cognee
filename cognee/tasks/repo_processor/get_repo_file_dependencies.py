@@ -80,7 +80,9 @@ async def get_source_code_files(
                 continue
             # Exclude tests, common build/venv directories and files provided in exclude_paths
             excluded_dirs = EXCLUDED_DIRS
-            excluded_paths = {Path(p).resolve() for p in (excluded_paths or [])}  # full paths
+            excluded_paths = {
+                Path(p).resolve() for p in (excluded_paths or [])
+            }  # full paths
 
             root_path = Path(root).resolve()
             root_parts = set(root_path.parts)  # same as before
@@ -203,8 +205,11 @@ async def get_repo_file_dependencies(
     ]
 
     # Import dependency extractors for each language (Python for now, extend later)
-    from cognee.tasks.repo_processor.get_local_dependencies import get_local_script_dependencies
+    from cognee.tasks.repo_processor.get_local_dependencies import (
+        get_local_script_dependencies,
+    )
     import aiofiles
+
     # TODO: Add other language extractors here
 
     for start_range, end_range in chunk_ranges:
@@ -213,7 +218,9 @@ async def get_repo_file_dependencies(
             # For now, only Python is supported; extend with other languages
             if lang == "python":
                 tasks.append(
-                    get_local_script_dependencies(repo_path, file_path, detailed_extraction)
+                    get_local_script_dependencies(
+                        repo_path, file_path, detailed_extraction
+                    )
                 )
             else:
                 # Placeholder: create a minimal CodeFile for other languages

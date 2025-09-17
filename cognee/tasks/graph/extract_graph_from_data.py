@@ -86,7 +86,9 @@ async def extract_graph_from_data(
 
     chunk_graphs = await asyncio.gather(
         *[
-            LLMGateway.extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt)
+            LLMGateway.extract_content_graph(
+                chunk.text, graph_model, custom_prompt=custom_prompt
+            )
             for chunk in data_chunks
         ]
     )
@@ -98,7 +100,8 @@ async def extract_graph_from_data(
             graph.edges = [
                 edge
                 for edge in graph.edges
-                if edge.source_node_id in valid_node_ids and edge.target_node_id in valid_node_ids
+                if edge.source_node_id in valid_node_ids
+                and edge.target_node_id in valid_node_ids
             ]
 
     return await integrate_chunk_graphs(

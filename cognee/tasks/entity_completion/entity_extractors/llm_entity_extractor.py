@@ -36,7 +36,8 @@ class LLMEntityExtractor(BaseEntityExtractor):
 
         if type_name not in self._entity_type_cache:
             self._entity_type_cache[type_name] = EntityType(
-                name=type_name, description=f"Entity type for {type_name.lower()} entities"
+                name=type_name,
+                description=f"Entity type for {type_name.lower()} entities",
             )
 
         return self._entity_type_cache[type_name]
@@ -50,7 +51,9 @@ class LLMEntityExtractor(BaseEntityExtractor):
         try:
             logger.info(f"Extracting entities from text: {text[:100]}...")
 
-            user_prompt = LLMGateway.render_prompt(self.user_prompt_template, {"text": text})
+            user_prompt = LLMGateway.render_prompt(
+                self.user_prompt_template, {"text": text}
+            )
             system_prompt = LLMGateway.read_query_prompt(self.system_prompt_template)
 
             response = await LLMGateway.acreate_structured_output(

@@ -15,7 +15,9 @@ def create_distribution_plots(metrics_data: Dict[str, List[float]]) -> List[str]
     figures = []
     for metric, scores in metrics_data.items():
         fig = go.Figure()
-        fig.add_trace(go.Histogram(x=scores, name=metric, nbinsx=10, marker_color="#1f77b4"))
+        fig.add_trace(
+            go.Histogram(x=scores, name=metric, nbinsx=10, marker_color="#1f77b4")
+        )
 
         fig.update_layout(
             title=f"{metric} Score Distribution",
@@ -75,20 +77,26 @@ def generate_details_html(metrics_data: List[Dict]) -> List[str]:
             )
 
     for metric, details in metric_details.items():
-        formatted_column_names = [key.replace("_", " ").title() for key in details[0].keys()]
+        formatted_column_names = [
+            key.replace("_", " ").title() for key in details[0].keys()
+        ]
         details_html.append(f"<h3>{metric} Details</h3>")
-        details_html.append(f"""
+        details_html.append(
+            f"""
             <table class="metric-table">
                 <tr>
                     {"".join(f"<th>{col}</th>" for col in formatted_column_names)}
                 </tr>
-        """)
+        """
+        )
         for item in details:
-            details_html.append(f"""
+            details_html.append(
+                f"""
                 <tr>
                     {"".join(f"<td>{value}</td>" for value in item.values())}
                 </tr>
-            """)
+            """
+            )
         details_html.append("</table>")
     return details_html
 

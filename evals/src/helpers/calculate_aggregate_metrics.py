@@ -2,7 +2,9 @@
 """Simple script to calculate aggregate metrics for multiple JSON files."""
 
 import os
-from cognee.eval_framework.analysis.metrics_calculator import calculate_metrics_statistics
+from cognee.eval_framework.analysis.metrics_calculator import (
+    calculate_metrics_statistics,
+)
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()

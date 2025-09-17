@@ -47,7 +47,9 @@ class NaturalLanguageRetriever(BaseRetriever):
         )
         return node_schemas, edge_schemas
 
-    async def _generate_cypher_query(self, query: str, edge_schemas, previous_attempts=None) -> str:
+    async def _generate_cypher_query(
+        self, query: str, edge_schemas, previous_attempts=None
+    ) -> str:
         """Generate a Cypher query using LLM based on natural language query and schema information."""
         system_prompt = LLMGateway.render_prompt(
             self.system_prompt_path,
@@ -63,14 +65,18 @@ class NaturalLanguageRetriever(BaseRetriever):
             response_model=str,
         )
 
-    async def _execute_cypher_query(self, query: str, graph_engine: GraphDBInterface) -> Any:
+    async def _execute_cypher_query(
+        self, query: str, graph_engine: GraphDBInterface
+    ) -> Any:
         """Execute the natural language query against Neo4j with multiple attempts."""
         node_schemas, edge_schemas = await self._get_graph_schema(graph_engine)
         previous_attempts = ""
         cypher_query = ""
 
         for attempt in range(self.max_attempts):
-            logger.info(f"Starting attempt {attempt + 1}/{self.max_attempts} for query generation")
+            logger.info(
+                f"Starting attempt {attempt + 1}/{self.max_attempts} for query generation"
+            )
             try:
                 cypher_query = await self._generate_cypher_query(
                     query, edge_schemas, previous_attempts

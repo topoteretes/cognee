@@ -4,7 +4,10 @@ import numpy as np
 import pytest
 
 from cognee.tasks.chunks import chunk_by_sentence
-from cognee.tests.unit.processing.chunks.test_input import INPUT_TEXTS_LONGWORDS, INPUT_TEXTS
+from cognee.tests.unit.processing.chunks.test_input import (
+    INPUT_TEXTS_LONGWORDS,
+    INPUT_TEXTS,
+)
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 
 maximum_length_vals = [None, 16, 64]
@@ -17,9 +20,9 @@ maximum_length_vals = [None, 16, 64]
 def test_chunk_by_sentence_isomorphism(input_text, maximum_length):
     chunks = chunk_by_sentence(input_text, maximum_length)
     reconstructed_text = "".join([chunk[1] for chunk in chunks])
-    assert reconstructed_text == input_text, (
-        f"texts are not identical: {len(input_text) = }, {len(reconstructed_text) = }"
-    )
+    assert (
+        reconstructed_text == input_text
+    ), f"texts are not identical: {len(input_text) = }, {len(reconstructed_text) = }"
 
 
 @pytest.mark.parametrize(
@@ -40,9 +43,9 @@ def test_paragraph_chunk_length(input_text, maximum_length):
     )
 
     larger_chunks = chunk_lengths[chunk_lengths > maximum_length]
-    assert np.all(chunk_lengths <= maximum_length), (
-        f"{maximum_length = }: {larger_chunks} are too large"
-    )
+    assert np.all(
+        chunk_lengths <= maximum_length
+    ), f"{maximum_length = }: {larger_chunks} are too large"
 
 
 @pytest.mark.parametrize(

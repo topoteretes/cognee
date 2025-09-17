@@ -45,12 +45,16 @@ async def main():
             (Edge(weight=0.9, relationship_type="manager"), michael),
             # Sales team with performance weights
             (
-                Edge(weights={"sales_performance": 0.8, "loyalty": 0.9}, relationship_type="sales"),
+                Edge(
+                    weights={"sales_performance": 0.8, "loyalty": 0.9},
+                    relationship_type="sales",
+                ),
                 dwight,
             ),
             (
                 Edge(
-                    weights={"sales_performance": 0.7, "creativity": 0.8}, relationship_type="sales"
+                    weights={"sales_performance": 0.7, "creativity": 0.8},
+                    relationship_type="sales",
                 ),
                 jim,
             ),
@@ -63,7 +67,8 @@ async def main():
             ),
             (
                 Edge(
-                    weights={"sales_performance": 0.5, "experience": 0.8}, relationship_type="sales"
+                    weights={"sales_performance": 0.5, "experience": 0.8},
+                    relationship_type="sales",
                 ),
                 stanley,
             ),
@@ -97,7 +102,9 @@ async def main():
     await add_data_points(all_data_points)
 
     # Visualize the graph
-    graph_visualization_path = path.join(path.dirname(__file__), "dunder_mifflin_graph.html")
+    graph_visualization_path = path.join(
+        path.dirname(__file__), "dunder_mifflin_graph.html"
+    )
     await visualize_graph(graph_visualization_path)
 
     print("Dynamic multiple edges graph has been created and visualized!")

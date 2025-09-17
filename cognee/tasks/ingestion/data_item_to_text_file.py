@@ -44,21 +44,23 @@ async def data_item_to_text_file(
             # TODO: Rework this to work with file streams and not saving data to temp storage
             # Note: proper suffix information is needed for OpenAI to handle mp3 files
             path_info = Path(parsed_url.path)
-            with tempfile.NamedTemporaryFile(mode="wb", suffix=path_info.suffix) as temp_file:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", suffix=path_info.suffix
+            ) as temp_file:
                 await pull_from_s3(data_item_path, temp_file)
                 temp_file.flush()  # Data needs to be saved to local storage
                 loader = get_loader_engine()
-                return await loader.load_file(temp_file.name, preferred_loaders), loader.get_loader(
+                return await loader.load_file(
                     temp_file.name, preferred_loaders
-                )
+                ), loader.get_loader(temp_file.name, preferred_loaders)
 
         # data is local file path
         elif parsed_url.scheme == "file":
             if settings.accept_local_file_path:
                 loader = get_loader_engine()
-                return await loader.load_file(data_item_path, preferred_loaders), loader.get_loader(
+                return await loader.load_file(
                     data_item_path, preferred_loaders
-                )
+                ), loader.get_loader(data_item_path, preferred_loaders)
             else:
                 raise IngestionError(message="Local files are not accepted.")
 
@@ -69,9 +71,9 @@ async def data_item_to_text_file(
             # Handle both Unix absolute paths (/path) and Windows absolute paths (C:\path)
             if settings.accept_local_file_path:
                 loader = get_loader_engine()
-                return await loader.load_file(data_item_path, preferred_loaders), loader.get_loader(
+                return await loader.load_file(
                     data_item_path, preferred_loaders
-                )
+                ), loader.get_loader(data_item_path, preferred_loaders)
             else:
                 raise IngestionError(message="Local files are not accepted.")
 

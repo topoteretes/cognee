@@ -57,7 +57,8 @@ async def main():
     # Step 3: Create knowledge graph
 
     ontology_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "ontology_input_example/basic_ontology.owl"
+        os.path.dirname(os.path.abspath(__file__)),
+        "ontology_input_example/basic_ontology.owl",
     )
 
     await cognee.cognify(ontology_file_path=ontology_path)

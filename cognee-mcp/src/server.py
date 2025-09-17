@@ -122,7 +122,10 @@ async def cognee_add_developer_rules(
 
 @mcp.tool()
 async def cognify(
-    data: str, graph_model_file: str = None, graph_model_name: str = None, custom_prompt: str = None
+    data: str,
+    graph_model_file: str = None,
+    graph_model_name: str = None,
+    custom_prompt: str = None,
 ) -> list:
     """
     Transform ingested data into a structured knowledge graph.
@@ -250,7 +253,9 @@ async def cognify(
             await cognee.add(data)
 
             try:
-                await cognee.cognify(graph_model=graph_model, custom_prompt=custom_prompt)
+                await cognee.cognify(
+                    graph_model=graph_model, custom_prompt=custom_prompt
+                )
                 logger.info("Cognify process finished.")
             except Exception as e:
                 logger.error("Cognify process failed.")
@@ -281,7 +286,8 @@ async def cognify(
 
 
 @mcp.tool(
-    name="save_interaction", description="Logs user-agent interactions and query-answer pairs"
+    name="save_interaction",
+    description="Logs user-agent interactions and query-answer pairs",
 )
 async def save_interaction(data: str) -> list:
     """
@@ -310,7 +316,9 @@ async def save_interaction(data: str) -> list:
                 logger.info("Save interaction process finished.")
                 logger.info("Generating associated rules from interaction data.")
 
-                await add_rule_associations(data=data, rules_nodeset_name="coding_agent_rules")
+                await add_rule_associations(
+                    data=data, rules_nodeset_name="coding_agent_rules"
+                )
 
                 logger.info("Associated rules generated from interaction data.")
 
@@ -530,7 +538,8 @@ async def search(search_query: str, search_type: str) -> list:
             if search_type.upper() == "CODE":
                 return json.dumps(search_results, cls=JSONEncoder)
             elif (
-                search_type.upper() == "GRAPH_COMPLETION" or search_type.upper() == "RAG_COMPLETION"
+                search_type.upper() == "GRAPH_COMPLETION"
+                or search_type.upper() == "RAG_COMPLETION"
             ):
                 return str(search_results[0])
             elif search_type.upper() == "CHUNKS":
@@ -572,7 +581,9 @@ async def get_developer_rules() -> list:
     async def fetch_rules_from_cognee() -> str:
         """Collect all developer rules from Cognee"""
         with redirect_stdout(sys.stderr):
-            developer_rules = await get_existing_rules(rules_nodeset_name="coding_agent_rules")
+            developer_rules = await get_existing_rules(
+                rules_nodeset_name="coding_agent_rules"
+            )
             return developer_rules
 
     rules_text = await fetch_rules_from_cognee()
@@ -626,7 +637,9 @@ async def list_data(dataset_id: str = None) -> list:
 
                 if not dataset:
                     return [
-                        types.TextContent(type="text", text=f"❌ Dataset not found: {dataset_id}")
+                        types.TextContent(
+                            type="text", text=f"❌ Dataset not found: {dataset_id}"
+                        )
                     ]
 
                 # Get data items in the dataset
@@ -642,7 +655,9 @@ async def list_data(dataset_id: str = None) -> list:
                     for i, data_item in enumerate(data_items, 1):
                         output_lines.append(f"   📄 Data item #{i}:")
                         output_lines.append(f"      Data ID: {data_item.id}")
-                        output_lines.append(f"      Name: {data_item.name or 'Unnamed'}")
+                        output_lines.append(
+                            f"      Name: {data_item.name or 'Unnamed'}"
+                        )
                         output_lines.append(f"      Created: {data_item.created_at}")
                         output_lines.append("")
                 else:
@@ -683,7 +698,9 @@ async def list_data(dataset_id: str = None) -> list:
                 output_lines.append('   list_data(dataset_id="your-dataset-id-here")')
                 output_lines.append("")
                 output_lines.append("🗑️  To delete specific data, use:")
-                output_lines.append('   delete(data_id="data-id", dataset_id="dataset-id")')
+                output_lines.append(
+                    '   delete(data_id="data-id", dataset_id="dataset-id")'
+                )
 
             result_text = "\n".join(output_lines)
             logger.info("List data operation completed successfully")
@@ -880,7 +897,9 @@ def retrieved_edges_to_string(search_results):
     for triplet in search_results:
         node1, edge, node2 = triplet
         relationship_type = edge["relationship_name"]
-        edge_str = f"{node_to_string(node1)} {relationship_type} {node_to_string(node2)}"
+        edge_str = (
+            f"{node_to_string(node1)} {relationship_type} {node_to_string(node2)}"
+        )
         edge_strings.append(edge_str)
 
     return "\n".join(edge_strings)
@@ -963,9 +982,13 @@ async def main():
                 "UserAlreadyExists" in migration_output
                 or "User default_user@example.com already exists" in migration_output
             ):
-                logger.warning("Warning: Default user already exists, continuing startup...")
+                logger.warning(
+                    "Warning: Default user already exists, continuing startup..."
+                )
             else:
-                logger.error(f"Migration failed with unexpected error: {migration_output}")
+                logger.error(
+                    f"Migration failed with unexpected error: {migration_output}"
+                )
                 sys.exit(1)
 
         logger.info("Database migrations done.")

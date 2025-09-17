@@ -21,7 +21,9 @@ class SettingsDTO(OutDTO):
 
 
 class LLMConfigInputDTO(InDTO):
-    provider: Union[Literal["openai"], Literal["ollama"], Literal["anthropic"], Literal["gemini"]]
+    provider: Union[
+        Literal["openai"], Literal["ollama"], Literal["anthropic"], Literal["gemini"]
+    ]
     model: str
     api_key: str
 

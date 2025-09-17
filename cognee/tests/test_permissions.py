@@ -6,7 +6,9 @@ from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user, create_user
-from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+from cognee.modules.users.permissions.methods import (
+    authorized_give_permission_on_datasets,
+)
 from cognee.modules.data.methods import get_dataset_data
 
 logger = get_logger()
@@ -19,12 +21,16 @@ async def main():
     # Clean up test directories before starting
     data_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_permissions")
+            os.path.join(
+                pathlib.Path(__file__).parent, ".data_storage/test_permissions"
+            )
         ).resolve()
     )
     cognee_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_permissions")
+            os.path.join(
+                pathlib.Path(__file__).parent, ".cognee_system/test_permissions"
+            )
         ).resolve()
     )
 
@@ -79,9 +85,9 @@ async def main():
     print("\n\nExtracted sentences are:\n")
     for result in search_results:
         print(f"{result}\n")
-    assert search_results[0]["dataset_name"] == "NLP", (
-        f"Dict must contain dataset name 'NLP': {search_results[0]}"
-    )
+    assert (
+        search_results[0]["dataset_name"] == "NLP"
+    ), f"Dict must contain dataset name 'NLP': {search_results[0]}"
 
     # Check if test_user can only see information from the QUANTUM dataset
     search_results = await cognee.search(
@@ -93,9 +99,9 @@ async def main():
     print("\n\nExtracted sentences are:\n")
     for result in search_results:
         print(f"{result}\n")
-    assert search_results[0]["dataset_name"] == "QUANTUM", (
-        f"Dict must contain dataset name 'QUANTUM': {search_results[0]}"
-    )
+    assert (
+        search_results[0]["dataset_name"] == "QUANTUM"
+    ), f"Dict must contain dataset name 'QUANTUM': {search_results[0]}"
 
     # Try to add document with default_user to test_users dataset (test write permission enforcement)
     add_error = False
@@ -116,7 +122,9 @@ async def main():
         await cognee.cognify(datasets=[test_user_dataset_id], user=default_user)
     except PermissionDeniedError:
         cognify_error = True
-    assert cognify_error, "PermissionDeniedError was not raised during cognify as expected"
+    assert (
+        cognify_error
+    ), "PermissionDeniedError was not raised during cognify as expected"
 
     # Try to add permission for a dataset default_user does not have share permission for
     give_permission_error = False
@@ -129,9 +137,9 @@ async def main():
         )
     except PermissionDeniedError:
         give_permission_error = True
-    assert give_permission_error, (
-        "PermissionDeniedError was not raised during assignment of permission as expected"
-    )
+    assert (
+        give_permission_error
+    ), "PermissionDeniedError was not raised during assignment of permission as expected"
 
     # Actually give permission to default_user to write on test_users dataset
     await authorized_give_permission_on_datasets(
@@ -170,9 +178,9 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    assert search_results[0]["dataset_name"] == "QUANTUM", (
-        f"Dict must contain dataset name 'QUANTUM': {search_results[0]}"
-    )
+    assert (
+        search_results[0]["dataset_name"] == "QUANTUM"
+    ), f"Dict must contain dataset name 'QUANTUM': {search_results[0]}"
 
     # Check if default_user can only see information from both datasets now
     search_results = await cognee.search(
@@ -198,14 +206,18 @@ async def main():
     except PermissionDeniedError:
         delete_error = True
 
-    assert delete_error, "PermissionDeniedError was not raised during delete operation as expected"
+    assert (
+        delete_error
+    ), "PermissionDeniedError was not raised during delete operation as expected"
 
     # Try deleting data from test_user dataset with test_user
     # Get the dataset data to find the ID of the first data item (text)
     test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
     text_data_id = test_user_dataset_data[0].id
 
-    await cognee.delete(data_id=text_data_id, dataset_id=test_user_dataset_id, user=test_user)
+    await cognee.delete(
+        data_id=text_data_id, dataset_id=test_user_dataset_id, user=test_user
+    )
 
     # Actually give permission to default_user to delete data for test_users dataset
     await authorized_give_permission_on_datasets(
@@ -221,7 +233,9 @@ async def main():
     explanation_file_data_id = test_user_dataset_data[0].id
 
     await cognee.delete(
-        data_id=explanation_file_data_id, dataset_id=test_user_dataset_id, user=default_user
+        data_id=explanation_file_data_id,
+        dataset_id=test_user_dataset_id,
+        user=default_user,
     )
 
 

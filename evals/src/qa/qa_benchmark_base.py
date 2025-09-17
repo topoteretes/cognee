@@ -24,7 +24,10 @@ class QABenchmarkRAG(ABC):
     """Abstract base class for QA benchmarking with different RAG systems."""
 
     def __init__(
-        self, corpus: List[str], qa_pairs: List[Dict[str, Any]], config: QABenchmarkConfig
+        self,
+        corpus: List[str],
+        qa_pairs: List[Dict[str, Any]],
+        config: QABenchmarkConfig,
     ):
         """Initialize the benchmark with corpus and QA data."""
         self.corpus = corpus
@@ -107,7 +110,11 @@ class QABenchmarkRAG(ABC):
                 print(f"Error processing question {i + 1}: {e}")
                 answer = f"Error: {str(e)}"
 
-            result = {"question": question, "answer": answer, "golden_answer": expected_answer}
+            result = {
+                "question": question,
+                "answer": answer,
+                "golden_answer": expected_answer,
+            }
 
             if self.config.print_results:
                 print(

@@ -1,6 +1,9 @@
 import pytest
 
-from cognee.modules.graph.exceptions import EntityNotFoundError, EntityAlreadyExistsError
+from cognee.modules.graph.exceptions import (
+    EntityNotFoundError,
+    EntityAlreadyExistsError,
+)
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 
@@ -24,7 +27,9 @@ def test_add_duplicate_node(setup_graph):
     graph = setup_graph
     node = Node("node1")
     graph.add_node(node)
-    with pytest.raises(EntityAlreadyExistsError, match="Node with id node1 already exists."):
+    with pytest.raises(
+        EntityAlreadyExistsError, match="Node with id node1 already exists."
+    ):
         graph.add_node(node)
 
 
@@ -71,5 +76,7 @@ def test_get_edges_success(setup_graph):
 def test_get_edges_nonexistent_node(setup_graph):
     """Test retrieving edges for a nonexistent node raises an exception."""
     graph = setup_graph
-    with pytest.raises(EntityNotFoundError, match="Node with id nonexistent does not exist."):
+    with pytest.raises(
+        EntityNotFoundError, match="Node with id nonexistent does not exist."
+    ):
         graph.get_edges_from_node("nonexistent")

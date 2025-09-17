@@ -60,7 +60,10 @@ class UnstructuredLoader(LoaderInterface):
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """Check if file can be handled by this loader."""
         # Check file extension
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
+        if (
+            extension in self.supported_extensions
+            and mime_type in self.supported_mime_types
+        ):
             return True
 
         return False

@@ -88,7 +88,8 @@ class TestCliIntegration:
             has_error = "error" in stderr_lower
             has_expected_failure = "failed to add data" in stderr_lower
             has_litellm_cancellation = (
-                "loggingworker cancelled" in stderr_lower or "cancellederror" in stderr_lower
+                "loggingworker cancelled" in stderr_lower
+                or "cancellederror" in stderr_lower
             )
 
             assert not has_error or has_expected_failure or has_litellm_cancellation
@@ -102,7 +103,14 @@ class TestCliIntegration:
 
         for subcommand in subcommands:
             result = subprocess.run(
-                [sys.executable, "-m", "cognee.cli._cognee", "config", subcommand, "--help"],
+                [
+                    sys.executable,
+                    "-m",
+                    "cognee.cli._cognee",
+                    "config",
+                    subcommand,
+                    "--help",
+                ],
                 capture_output=True,
                 text=True,
                 cwd=Path(__file__).parent.parent.parent,  # Go to project root
@@ -171,7 +179,8 @@ class TestCliArgumentParsing:
 
             # Test that argument parsing works (regardless of actual execution)
             assert (
-                "argument" not in result.stderr.lower() or "failed to add" in result.stderr.lower()
+                "argument" not in result.stderr.lower()
+                or "failed to add" in result.stderr.lower()
             )
 
     def test_search_with_all_options(self):
@@ -232,7 +241,15 @@ class TestCliArgumentParsing:
     def test_config_set_command(self):
         """Test config set command argument parsing"""
         result = subprocess.run(
-            [sys.executable, "-m", "cognee.cli._cognee", "config", "set", "test_key", "test_value"],
+            [
+                sys.executable,
+                "-m",
+                "cognee.cli._cognee",
+                "config",
+                "set",
+                "test_key",
+                "test_value",
+            ],
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent.parent,  # Go to project root
@@ -240,7 +257,10 @@ class TestCliArgumentParsing:
 
         # Should not have argument parsing errors
         assert "unrecognized arguments" not in result.stderr.lower()
-        assert "required" not in result.stderr.lower() or "failed to set" in result.stderr.lower()
+        assert (
+            "required" not in result.stderr.lower()
+            or "failed to set" in result.stderr.lower()
+        )
 
     def test_delete_with_force(self):
         """Test delete command with force flag"""
@@ -269,7 +289,14 @@ class TestCliErrorHandling:
     def test_debug_mode_flag(self):
         """Test that debug flag is accepted"""
         result = subprocess.run(
-            [sys.executable, "-m", "cognee.cli._cognee", "--debug", "search", "test query"],
+            [
+                sys.executable,
+                "-m",
+                "cognee.cli._cognee",
+                "--debug",
+                "search",
+                "test query",
+            ],
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent.parent,  # Go to project root
@@ -301,7 +328,14 @@ class TestCliErrorHandling:
     def test_invalid_chunker(self):
         """Test invalid chunker handling"""
         result = subprocess.run(
-            [sys.executable, "-m", "cognee.cli._cognee", "cognify", "--chunker", "InvalidChunker"],
+            [
+                sys.executable,
+                "-m",
+                "cognee.cli._cognee",
+                "cognify",
+                "--chunker",
+                "InvalidChunker",
+            ],
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent.parent,  # Go to project root

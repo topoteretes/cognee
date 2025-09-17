@@ -51,7 +51,9 @@ def get_permissions_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+        from cognee.modules.users.permissions.methods import (
+            authorized_give_permission_on_datasets,
+        )
 
         await authorized_give_permission_on_datasets(
             principal_id,
@@ -96,7 +98,9 @@ def get_permissions_router() -> APIRouter:
 
         await create_role_method(role_name=role_name, owner_id=user.id)
 
-        return JSONResponse(status_code=200, content={"message": "Role created for tenant"})
+        return JSONResponse(
+            status_code=200, content={"message": "Role created for tenant"}
+        )
 
     @permissions_router.post("/users/{user_id}/roles")
     async def add_user_to_role(
@@ -134,9 +138,13 @@ def get_permissions_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.users.roles.methods import add_user_to_role as add_user_to_role_method
+        from cognee.modules.users.roles.methods import (
+            add_user_to_role as add_user_to_role_method,
+        )
 
-        await add_user_to_role_method(user_id=user_id, role_id=role_id, owner_id=user.id)
+        await add_user_to_role_method(
+            user_id=user_id, role_id=role_id, owner_id=user.id
+        )
 
         return JSONResponse(status_code=200, content={"message": "User added to role"})
 
@@ -180,10 +188,14 @@ def get_permissions_router() -> APIRouter:
 
         await add_user_to_tenant(user_id=user_id, tenant_id=tenant_id, owner_id=user.id)
 
-        return JSONResponse(status_code=200, content={"message": "User added to tenant"})
+        return JSONResponse(
+            status_code=200, content={"message": "User added to tenant"}
+        )
 
     @permissions_router.post("/tenants")
-    async def create_tenant(tenant_name: str, user: User = Depends(get_authenticated_user)):
+    async def create_tenant(
+        tenant_name: str, user: User = Depends(get_authenticated_user)
+    ):
         """
         Create a new tenant.
 
@@ -210,7 +222,9 @@ def get_permissions_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.users.tenants.methods import create_tenant as create_tenant_method
+        from cognee.modules.users.tenants.methods import (
+            create_tenant as create_tenant_method,
+        )
 
         await create_tenant_method(tenant_name=tenant_name, user_id=user.id)
 

@@ -46,12 +46,15 @@ async def relational_db_migration():
 
     # 1. Search the graph
     search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION, query_text="Tell me about the artist AC/DC"
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="Tell me about the artist AC/DC",
     )
     print("Search results:", search_results)
 
     # 2. Assert that the search results contain "AC/DC"
-    assert any("AC/DC" in r for r in search_results), "AC/DC not found in search results!"
+    assert any(
+        "AC/DC" in r for r in search_results
+    ), "AC/DC not found in search results!"
 
     migration_db_provider = migration_engine.engine.dialect.name
     if migration_db_provider == "postgresql":
@@ -112,10 +115,12 @@ async def relational_db_migration():
     else:
         raise ValueError(f"Unsupported graph database provider: {graph_db_provider}")
 
-    assert len(distinct_node_names) == 12, (
-        f"Expected 12 distinct node references, found {len(distinct_node_names)}"
-    )
-    assert len(found_edges) == 15, f"Expected 15 {relationship_label} edges, got {len(found_edges)}"
+    assert (
+        len(distinct_node_names) == 12
+    ), f"Expected 12 distinct node references, found {len(distinct_node_names)}"
+    assert (
+        len(found_edges) == 15
+    ), f"Expected 15 {relationship_label} edges, got {len(found_edges)}"
 
     expected_edges = {
         ("Employee:5", "Employee:2"),
@@ -127,7 +132,9 @@ async def relational_db_migration():
         ("Employee:3", "Employee:2"),
     }
     for e in expected_edges:
-        assert e in found_edges, f"Edge {e} not found in the actual '{relationship_label}' edges!"
+        assert (
+            e in found_edges
+        ), f"Edge {e} not found in the actual '{relationship_label}' edges!"
 
     # 4. Verify the total number of nodes and edges in the graph
     if migration_db_provider == "sqlite":
@@ -192,9 +199,13 @@ async def relational_db_migration():
         assert node_count == 522, f"Expected 522 nodes, got {node_count}"
         assert edge_count == 961, f"Expected 961 edges, got {edge_count}"
 
-    print(f"Node & edge count validated: node_count={node_count}, edge_count={edge_count}.")
+    print(
+        f"Node & edge count validated: node_count={node_count}, edge_count={edge_count}."
+    )
 
-    print(f"All checks passed for {graph_db_provider} provider with '{relationship_label}' edges!")
+    print(
+        f"All checks passed for {graph_db_provider} provider with '{relationship_label}' edges!"
+    )
 
 
 async def test_migration_sqlite():

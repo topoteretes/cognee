@@ -20,7 +20,9 @@ class EvaluationExecutor:
             self.eval_adapter = evaluator_engine
         self.evaluate_contexts = evaluate_contexts
 
-    async def execute(self, answers: List[Dict[str, str]], evaluator_metrics: Any) -> Any:
+    async def execute(
+        self, answers: List[Dict[str, str]], evaluator_metrics: Any
+    ) -> Any:
         if self.evaluate_contexts:
             evaluator_metrics.append("contextual_relevancy")
             evaluator_metrics.append("context_coverage")

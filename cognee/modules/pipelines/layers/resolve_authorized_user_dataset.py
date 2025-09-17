@@ -10,14 +10,18 @@ from cognee.modules.data.methods import (
 )
 
 
-async def resolve_authorized_user_dataset(dataset_id: UUID, dataset_name: str, user: User):
+async def resolve_authorized_user_dataset(
+    dataset_id: UUID, dataset_name: str, user: User
+):
     if not user:
         user = await get_default_user()
 
     if dataset_id:
         authorized_dataset = await get_authorized_dataset(user, dataset_id, "write")
     elif dataset_name:
-        authorized_dataset = await get_authorized_dataset_by_name(dataset_name, user, "write")
+        authorized_dataset = await get_authorized_dataset_by_name(
+            dataset_name, user, "write"
+        )
 
         if not authorized_dataset:
             authorized_dataset = await create_authorized_dataset(

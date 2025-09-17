@@ -20,7 +20,9 @@ def main():
 
     print(f"Local sum: {local_sum}")
 
-    batches = [list(numbers[i : i + batch_size]) for i in range(0, len(numbers), batch_size)]
+    batches = [
+        list(numbers[i : i + batch_size]) for i in range(0, len(numbers), batch_size)
+    ]
 
     for result in sum_distributed.map(batches):
         sum += result

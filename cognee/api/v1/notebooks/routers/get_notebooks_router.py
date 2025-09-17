@@ -44,13 +44,17 @@ def get_notebooks_router():
 
     @router.put("/{notebook_id}")
     async def update_notebook_endpoint(
-        notebook_id: UUID, notebook_data: NotebookData, user: User = Depends(get_authenticated_user)
+        notebook_id: UUID,
+        notebook_data: NotebookData,
+        user: User = Depends(get_authenticated_user),
     ):
         async with get_async_session(auto_commit=True) as session:
             notebook: Notebook = await get_notebook(notebook_id, user.id, session)
 
             if notebook is None:
-                return JSONResponse(status_code=404, content={"error": "Notebook not found"})
+                return JSONResponse(
+                    status_code=404, content={"error": "Notebook not found"}
+                )
 
             if notebook_data.name and notebook_data.name != notebook.name:
                 notebook.name = notebook_data.name
@@ -74,12 +78,15 @@ def get_notebooks_router():
             notebook: Notebook = await get_notebook(notebook_id, user.id, session)
 
             if notebook is None:
-                return JSONResponse(status_code=404, content={"error": "Notebook not found"})
+                return JSONResponse(
+                    status_code=404, content={"error": "Notebook not found"}
+                )
 
             result, error = await run_async(run_in_local_sandbox, run_code.content)
 
             return JSONResponse(
-                status_code=200, content={"result": jsonable_encoder(result), "error": error}
+                status_code=200,
+                content={"result": jsonable_encoder(result), "error": error},
             )
 
     @router.delete("/{notebook_id}")
@@ -90,7 +97,9 @@ def get_notebooks_router():
             notebook: Notebook = await get_notebook(notebook_id, user.id, session)
 
             if notebook is None:
-                return JSONResponse(status_code=404, content={"error": "Notebook not found"})
+                return JSONResponse(
+                    status_code=404, content={"error": "Notebook not found"}
+                )
 
             return await delete_notebook(notebook, session)
 

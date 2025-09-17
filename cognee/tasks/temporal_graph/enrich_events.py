@@ -23,12 +23,15 @@ async def enrich_events(events: List[Event]) -> List[EventWithEntities]:
 
     # Convert events to JSON format for LLM processing
     events_json = [
-        {"event_name": event.name, "description": event.description or ""} for event in events
+        {"event_name": event.name, "description": event.description or ""}
+        for event in events
     ]
 
     events_json_str = json.dumps(events_json)
 
     # Extract entities from events
-    entity_result = await LLMGateway.extract_event_entities(events_json_str, EventEntityList)
+    entity_result = await LLMGateway.extract_event_entities(
+        events_json_str, EventEntityList
+    )
 
     return entity_result.events

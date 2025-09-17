@@ -31,7 +31,9 @@ async def create_user(
                 async with get_user_manager_context(user_db) as user_manager:
                     if tenant_id:
                         # Check if the tenant already exists
-                        result = await session.execute(select(Tenant).where(Tenant.id == tenant_id))
+                        result = await session.execute(
+                            select(Tenant).where(Tenant.id == tenant_id)
+                        )
                         tenant = result.scalars().first()
                         if not tenant:
                             raise TenantNotFoundError

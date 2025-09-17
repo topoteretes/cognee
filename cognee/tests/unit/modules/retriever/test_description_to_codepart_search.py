@@ -115,5 +115,7 @@ async def test_code_description_to_code_part_execution_error():
             code_description_to_code_part,
         )
 
-        with pytest.raises(RuntimeError, match="An error occurred while processing your request."):
+        with pytest.raises(
+            RuntimeError, match="An error occurred while processing your request."
+        ):
             await code_description_to_code_part("search query", mock_user, 2)

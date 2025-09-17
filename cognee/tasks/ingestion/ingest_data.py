@@ -8,7 +8,9 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
-from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
+from cognee.modules.users.permissions.methods import (
+    get_specific_user_permission_datasets,
+)
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 from cognee.modules.data.methods import (
@@ -32,7 +34,9 @@ async def ingest_data(
     if not user:
         user = await get_default_user()
 
-    def get_external_metadata_dict(data_item: Union[BinaryIO, str, Any]) -> dict[str, Any]:
+    def get_external_metadata_dict(
+        data_item: Union[BinaryIO, str, Any],
+    ) -> dict[str, Any]:
         if hasattr(data_item, "dict") and inspect.ismethod(getattr(data_item, "dict")):
             return {"metadata": data_item.dict(), "origin": str(type(data_item))}
         else:
@@ -56,7 +60,9 @@ async def ingest_data(
 
         if dataset_id:
             # Retrieve existing dataset
-            dataset = await get_specific_user_permission_datasets(user.id, "write", [dataset_id])
+            dataset = await get_specific_user_permission_datasets(
+                user.id, "write", [dataset_id]
+            )
             # Convert from list to Dataset element
             if isinstance(dataset, list):
                 dataset = dataset[0]

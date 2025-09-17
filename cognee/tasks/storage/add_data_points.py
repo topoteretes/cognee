@@ -44,7 +44,9 @@ async def add_data_points(
     if not isinstance(data_points, list):
         raise InvalidDataPointsInAddDataPointsError("data_points must be a list.")
     if not all(isinstance(dp, DataPoint) for dp in data_points):
-        raise InvalidDataPointsInAddDataPointsError("data_points: each item must be a DataPoint.")
+        raise InvalidDataPointsInAddDataPointsError(
+            "data_points: each item must be a DataPoint."
+        )
 
     nodes = []
     edges = []

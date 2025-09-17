@@ -32,9 +32,7 @@ def get_data_file_path(file_path: str):
         # Handle S3 URLs without normalization (which corrupts them)
         parsed_url = urlparse(file_path)
 
-        normalized_url = (
-            f"s3://{parsed_url.netloc}{os.sep}{os.path.normpath(parsed_url.path).lstrip(os.sep)}"
-        )
+        normalized_url = f"s3://{parsed_url.netloc}{os.sep}{os.path.normpath(parsed_url.path).lstrip(os.sep)}"
 
         return normalized_url
 

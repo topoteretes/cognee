@@ -96,4 +96,6 @@ async def main():
     # Start two separate containers concurrently
     import asyncio
 
-    await asyncio.gather(start_neo4j_server.remote.aio(), start_neo4j_server.remote.aio())
+    await asyncio.gather(
+        start_neo4j_server.remote.aio(), start_neo4j_server.remote.aio()
+    )

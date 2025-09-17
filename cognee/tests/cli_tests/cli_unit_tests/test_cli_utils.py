@@ -104,7 +104,9 @@ class TestCliReference:
 
         # Get abstract methods
         abstract_methods = []
-        for name, method in inspect.getmembers(SupportsCliCommand, predicate=inspect.ismethod):
+        for name, method in inspect.getmembers(
+            SupportsCliCommand, predicate=inspect.ismethod
+        ):
             if getattr(method, "__isabstractmethod__", False):
                 abstract_methods.append(name)
 

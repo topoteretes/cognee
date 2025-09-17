@@ -55,7 +55,9 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
             # Import cognee here to avoid circular imports
             import cognee
 
-            fmt.echo(f"Adding {len(args.data)} item(s) to dataset '{args.dataset_name}'...")
+            fmt.echo(
+                f"Adding {len(args.data)} item(s) to dataset '{args.dataset_name}'..."
+            )
 
             # Run the async add function
             async def run_add():
@@ -68,7 +70,9 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
 
                     fmt.echo("Processing data...")
                     await cognee.add(data=data_to_add, dataset_name=args.dataset_name)
-                    fmt.success(f"Successfully added data to dataset '{args.dataset_name}'")
+                    fmt.success(
+                        f"Successfully added data to dataset '{args.dataset_name}'"
+                    )
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to add data: {str(e)}")
 

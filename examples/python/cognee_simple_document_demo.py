@@ -20,7 +20,9 @@ async def cognee_demo():
     await cognee.cognify()
 
     # Query Cognee for information from provided document
-    answer = await cognee.search("List me all the important characters in Alice in Wonderland.")
+    answer = await cognee.search(
+        "List me all the important characters in Alice in Wonderland."
+    )
     print(answer)
 
     answer = await cognee.search("How did Alice end up in Wonderland?")

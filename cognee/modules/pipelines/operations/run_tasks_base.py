@@ -29,7 +29,10 @@ async def handle_task(
     )
 
     has_context = any(
-        [key == "context" for key in inspect.signature(running_task.executable).parameters.keys()]
+        [
+            key == "context"
+            for key in inspect.signature(running_task.executable).parameters.keys()
+        ]
     )
 
     if has_context:
@@ -37,7 +40,9 @@ async def handle_task(
 
     try:
         async for result_data in running_task.execute(args, next_task_batch_size):
-            async for result in run_tasks_base(leftover_tasks, result_data, user, context):
+            async for result in run_tasks_base(
+                leftover_tasks, result_data, user, context
+            ):
                 yield result
 
         logger.info(f"{task_type} task completed: `{running_task.executable.__name__}`")
@@ -63,7 +68,9 @@ async def handle_task(
         raise error
 
 
-async def run_tasks_base(tasks: list[Task], data=None, user: User = None, context: dict = None):
+async def run_tasks_base(
+    tasks: list[Task], data=None, user: User = None, context: dict = None
+):
     """Base function to execute tasks in a pipeline, handling task type detection and execution."""
     if len(tasks) == 0:
         yield data

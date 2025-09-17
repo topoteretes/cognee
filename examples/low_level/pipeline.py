@@ -56,13 +56,17 @@ def ingest_files(data: List[Any]):
                     name=person["department"], employees=[new_person]
                 )
             else:
-                departments_data_points[person["department"]].employees.append(new_person)
+                departments_data_points[person["department"]].employees.append(
+                    new_person
+                )
 
         # Create a single CompanyType node, so we connect all companies to it.
         companyType = CompanyType()
 
         for company in companies:
-            new_company = Company(name=company["name"], departments=[], is_type=companyType)
+            new_company = Company(
+                name=company["name"], departments=[], is_type=companyType
+            )
             companies_data_points[company["name"]] = new_company
 
             for department_name in company["departments"]:

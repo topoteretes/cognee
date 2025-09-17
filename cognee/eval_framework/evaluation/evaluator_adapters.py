@@ -1,7 +1,9 @@
 from enum import Enum
 from typing import Type
 from cognee.eval_framework.evaluation.deep_eval_adapter import DeepEvalAdapter
-from cognee.eval_framework.evaluation.direct_llm_eval_adapter import DirectLLMEvalAdapter
+from cognee.eval_framework.evaluation.direct_llm_eval_adapter import (
+    DirectLLMEvalAdapter,
+)
 
 
 class EvaluatorAdapter(Enum):

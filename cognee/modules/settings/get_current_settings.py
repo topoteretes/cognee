@@ -53,8 +53,10 @@ def get_current_settings() -> SettingsDict:
         },
         relational={
             "provider": relational_config.db_provider,
-            "url": f"{relational_config.db_host}:{relational_config.db_port}"
-            if relational_config.db_host
-            else f"{relational_config.db_path}/{relational_config.db_name}",
+            "url": (
+                f"{relational_config.db_host}:{relational_config.db_port}"
+                if relational_config.db_host
+                else f"{relational_config.db_path}/{relational_config.db_name}"
+            ),
         },
     )

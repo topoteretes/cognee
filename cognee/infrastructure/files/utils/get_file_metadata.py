@@ -4,7 +4,9 @@ from typing import BinaryIO, TypedDict
 from pathlib import Path
 
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.files.utils.get_file_content_hash import get_file_content_hash
+from cognee.infrastructure.files.utils.get_file_content_hash import (
+    get_file_content_hash,
+)
 from .guess_file_type import guess_file_type
 
 logger = get_logger("FileMetadata")
@@ -51,7 +53,9 @@ async def get_file_metadata(file: BinaryIO) -> FileMetadata:
         content_hash = await get_file_content_hash(file)
         file.seek(0)
     except io.UnsupportedOperation as error:
-        logger.error(f"Error retrieving content hash for file: {file.name} \n{str(error)}\n\n")
+        logger.error(
+            f"Error retrieving content hash for file: {file.name} \n{str(error)}\n\n"
+        )
 
     file_type = guess_file_type(file)
 

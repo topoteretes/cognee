@@ -23,7 +23,9 @@ class GeminiTokenizer(TokenizerInterface):
         self.max_completion_tokens = max_completion_tokens
 
         # Get LLM API key from config
-        from cognee.infrastructure.databases.vector.embeddings.config import get_embedding_config
+        from cognee.infrastructure.databases.vector.embeddings.config import (
+            get_embedding_config,
+        )
         from cognee.infrastructure.llm.config import (
             get_llm_config,
         )

@@ -8,7 +8,9 @@ import streamlit as st
 # ----------------------------------------------------------------------------
 # Volume and Image Setup
 # ----------------------------------------------------------------------------
-metrics_volume = modal.Volume.from_name("evaluation_dashboard_results", create_if_missing=True)
+metrics_volume = modal.Volume.from_name(
+    "evaluation_dashboard_results", create_if_missing=True
+)
 
 image = (
     modal.Image.debian_slim(python_version="3.11")

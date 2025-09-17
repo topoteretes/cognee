@@ -2,7 +2,9 @@ from cognee.shared.logging_utils import get_logger
 import json
 from typing import List
 from cognee.eval_framework.evaluation.evaluation_executor import EvaluationExecutor
-from cognee.eval_framework.analysis.metrics_calculator import calculate_metrics_statistics
+from cognee.eval_framework.analysis.metrics_calculator import (
+    calculate_metrics_statistics,
+)
 from cognee.eval_framework.analysis.dashboard_generator import create_dashboard
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.infrastructure.databases.relational.get_relational_engine import (
@@ -72,7 +74,8 @@ async def run_evaluation(params: dict) -> List[dict]:
     if params.get("calculate_metrics"):
         logger.info("Calculating metrics statistics...")
         calculate_metrics_statistics(
-            json_data=params["metrics_path"], aggregate_output_path=params["aggregate_metrics_path"]
+            json_data=params["metrics_path"],
+            aggregate_output_path=params["aggregate_metrics_path"],
         )
         logger.info("Metrics calculation completed")
         return metrics

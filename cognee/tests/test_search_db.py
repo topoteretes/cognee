@@ -6,7 +6,9 @@ from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionR
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
 )
-from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_completion_cot_retriever import (
+    GraphCompletionCotRetriever,
+)
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
@@ -63,9 +65,9 @@ async def main():
 
         context_text = await resolve_edges_to_text(context)
         lower = context_text.lower()
-        assert "germany" in lower or "netherlands" in lower, (
-            f"{name}: Context did not contain 'germany' or 'netherlands'; got: {context!r}"
-        )
+        assert (
+            "germany" in lower or "netherlands" in lower
+        ), f"{name}: Context did not contain 'germany' or 'netherlands'; got: {context!r}"
 
     triplets_gk = await GraphCompletionRetriever().get_triplets(
         query="Next to which country is Germany located?"
@@ -93,18 +95,18 @@ async def main():
             distance = edge.attributes.get("vector_distance")
             node1_distance = edge.node1.attributes.get("vector_distance")
             node2_distance = edge.node2.attributes.get("vector_distance")
-            assert isinstance(distance, float), (
-                f"{name}: vector_distance should be float, got {type(distance)}"
-            )
-            assert 0 <= distance <= 1, (
-                f"{name}: edge vector_distance {distance} out of [0,1], this shouldn't happen"
-            )
-            assert 0 <= node1_distance <= 1, (
-                f"{name}: node_1 vector_distance {distance} out of [0,1], this shouldn't happen"
-            )
-            assert 0 <= node2_distance <= 1, (
-                f"{name}: node_2 vector_distance {distance} out of [0,1], this shouldn't happen"
-            )
+            assert isinstance(
+                distance, float
+            ), f"{name}: vector_distance should be float, got {type(distance)}"
+            assert (
+                0 <= distance <= 1
+            ), f"{name}: edge vector_distance {distance} out of [0,1], this shouldn't happen"
+            assert (
+                0 <= node1_distance <= 1
+            ), f"{name}: node_1 vector_distance {distance} out of [0,1], this shouldn't happen"
+            assert (
+                0 <= node2_distance <= 1
+            ), f"{name}: node_2 vector_distance {distance} out of [0,1], this shouldn't happen"
 
     completion_gk = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
@@ -123,7 +125,9 @@ async def main():
     )
 
     await cognee.search(
-        query_type=SearchType.FEEDBACK, query_text="This was not the best answer", last_k=1
+        query_type=SearchType.FEEDBACK,
+        query_text="This was not the best answer",
+        last_k=1,
     )
 
     completion_sum = await cognee.search(
@@ -145,15 +149,15 @@ async def main():
         ("GRAPH_SUMMARY_COMPLETION", completion_sum),
     ]:
         assert isinstance(search_results, list), f"{name}: should return a list"
-        assert len(search_results) == 1, (
-            f"{name}: expected single-element list, got {len(search_results)}"
-        )
+        assert (
+            len(search_results) == 1
+        ), f"{name}: expected single-element list, got {len(search_results)}"
         text = search_results[0]
         assert isinstance(text, str), f"{name}: element should be a string"
         assert text.strip(), f"{name}: string should not be empty"
-        assert "netherlands" in text.lower(), (
-            f"{name}: expected 'netherlands' in result, got: {text!r}"
-        )
+        assert (
+            "netherlands" in text.lower()
+        ), f"{name}: expected 'netherlands' in result, got: {text!r}"
 
     graph_engine = await get_graph_engine()
     graph = await graph_engine.get_graph_data()
@@ -163,34 +167,34 @@ async def main():
     edge_type_counts = Counter(edge_type[2] for edge_type in graph[1])
 
     # Assert there are exactly 4 CogneeUserInteraction nodes.
-    assert type_counts.get("CogneeUserInteraction", 0) == 4, (
-        f"Expected exactly four DCogneeUserInteraction nodes, but found {type_counts.get('CogneeUserInteraction', 0)}"
-    )
+    assert (
+        type_counts.get("CogneeUserInteraction", 0) == 4
+    ), f"Expected exactly four DCogneeUserInteraction nodes, but found {type_counts.get('CogneeUserInteraction', 0)}"
 
     # Assert there is exactly two CogneeUserFeedback nodes.
-    assert type_counts.get("CogneeUserFeedback", 0) == 2, (
-        f"Expected exactly two CogneeUserFeedback nodes, but found {type_counts.get('CogneeUserFeedback', 0)}"
-    )
+    assert (
+        type_counts.get("CogneeUserFeedback", 0) == 2
+    ), f"Expected exactly two CogneeUserFeedback nodes, but found {type_counts.get('CogneeUserFeedback', 0)}"
 
     # Assert there is exactly two NodeSet.
-    assert type_counts.get("NodeSet", 0) == 2, (
-        f"Expected exactly two NodeSet nodes, but found {type_counts.get('NodeSet', 0)}"
-    )
+    assert (
+        type_counts.get("NodeSet", 0) == 2
+    ), f"Expected exactly two NodeSet nodes, but found {type_counts.get('NodeSet', 0)}"
 
     # Assert that there are at least 10 'used_graph_element_to_answer' edges.
-    assert edge_type_counts.get("used_graph_element_to_answer", 0) >= 10, (
-        f"Expected at least ten 'used_graph_element_to_answer' edges, but found {edge_type_counts.get('used_graph_element_to_answer', 0)}"
-    )
+    assert (
+        edge_type_counts.get("used_graph_element_to_answer", 0) >= 10
+    ), f"Expected at least ten 'used_graph_element_to_answer' edges, but found {edge_type_counts.get('used_graph_element_to_answer', 0)}"
 
     # Assert that there are exactly 2 'gives_feedback_to' edges.
-    assert edge_type_counts.get("gives_feedback_to", 0) == 2, (
-        f"Expected exactly two 'gives_feedback_to' edges, but found {edge_type_counts.get('gives_feedback_to', 0)}"
-    )
+    assert (
+        edge_type_counts.get("gives_feedback_to", 0) == 2
+    ), f"Expected exactly two 'gives_feedback_to' edges, but found {edge_type_counts.get('gives_feedback_to', 0)}"
 
     # Assert that there are at least 6 'belongs_to_set' edges.
-    assert edge_type_counts.get("belongs_to_set", 0) == 6, (
-        f"Expected at least six 'belongs_to_set' edges, but found {edge_type_counts.get('belongs_to_set', 0)}"
-    )
+    assert (
+        edge_type_counts.get("belongs_to_set", 0) == 6
+    ), f"Expected at least six 'belongs_to_set' edges, but found {edge_type_counts.get('belongs_to_set', 0)}"
 
     nodes = graph[0]
 
@@ -199,26 +203,26 @@ async def main():
 
     for node_id, data in nodes:
         if data.get("type") == "CogneeUserInteraction":
-            assert required_fields_user_interaction.issubset(data.keys()), (
-                f"Node {node_id} is missing fields: {required_fields_user_interaction - set(data.keys())}"
-            )
+            assert required_fields_user_interaction.issubset(
+                data.keys()
+            ), f"Node {node_id} is missing fields: {required_fields_user_interaction - set(data.keys())}"
 
             for field in required_fields_user_interaction:
                 value = data[field]
-                assert isinstance(value, str) and value.strip(), (
-                    f"Node {node_id} has invalid value for '{field}': {value!r}"
-                )
+                assert (
+                    isinstance(value, str) and value.strip()
+                ), f"Node {node_id} has invalid value for '{field}': {value!r}"
 
         if data.get("type") == "CogneeUserFeedback":
-            assert required_fields_feedback.issubset(data.keys()), (
-                f"Node {node_id} is missing fields: {required_fields_feedback - set(data.keys())}"
-            )
+            assert required_fields_feedback.issubset(
+                data.keys()
+            ), f"Node {node_id} is missing fields: {required_fields_feedback - set(data.keys())}"
 
             for field in required_fields_feedback:
                 value = data[field]
-                assert isinstance(value, str) and value.strip(), (
-                    f"Node {node_id} has invalid value for '{field}': {value!r}"
-                )
+                assert (
+                    isinstance(value, str) and value.strip()
+                ), f"Node {node_id} has invalid value for '{field}': {value!r}"
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -253,9 +257,9 @@ async def main():
 
     for from_node, to_node, relationship_name, properties in edges:
         if relationship_name == "used_graph_element_to_answer":
-            assert properties["feedback_weight"] >= 6, (
-                "Feedback weight calculation is not correct, it should be more then 6."
-            )
+            assert (
+                properties["feedback_weight"] >= 6
+            ), "Feedback weight calculation is not correct, it should be more then 6."
 
 
 if __name__ == "__main__":

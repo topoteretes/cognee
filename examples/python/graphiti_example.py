@@ -10,7 +10,9 @@ from cognee.infrastructure.databases.relational import (
 from cognee.tasks.temporal_awareness.index_graphiti_objects import (
     index_and_transform_graphiti_nodes_and_edges,
 )
-from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
+from cognee.modules.retrieval.utils.brute_force_triplet_search import (
+    brute_force_triplet_search,
+)
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.users.methods import get_default_user
@@ -49,7 +51,11 @@ async def main():
         query=query,
         user=user,
         top_k=3,
-        collections=["graphitinode_content", "graphitinode_name", "graphitinode_summary"],
+        collections=[
+            "graphitinode_content",
+            "graphitinode_name",
+            "graphitinode_summary",
+        ],
     )
 
     retriever = GraphCompletionRetriever()
@@ -61,7 +67,9 @@ async def main():
     }
 
     user_prompt = LLMGateway.render_prompt("graph_context_for_question.txt", args)
-    system_prompt = LLMGateway.read_query_prompt("answer_simple_question_restricted.txt")
+    system_prompt = LLMGateway.read_query_prompt(
+        "answer_simple_question_restricted.txt"
+    )
 
     computed_answer = await LLMGateway.acreate_structured_output(
         text_input=user_prompt,

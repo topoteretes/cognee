@@ -10,7 +10,10 @@ class SummarizedTripletSearchContextProvider(TripletSearchContextProvider):
     """Context provider that uses summarized triplet search results."""
 
     async def _format_triplets(
-        self, triplets: List, entity_name: str, summarize_prompt_path: Optional[str] = None
+        self,
+        triplets: List,
+        entity_name: str,
+        summarize_prompt_path: Optional[str] = None,
     ) -> str:
         """Format triplets into a summarized text."""
         direct_text = await super()._format_triplets(triplets, entity_name)

@@ -74,9 +74,7 @@ class DoNotUseDirectlyCallManager:
         collectors_as_list = (
             collector
             if isinstance(collector, list)
-            else [collector]
-            if collector is not None
-            else []
+            else [collector] if collector is not None else []
         )
         env_vars = os.environ.copy()
         for k, v in self.__baml_options.get("env", {}).items():
@@ -139,7 +137,9 @@ class DoNotUseDirectlyCallManager:
         *,
         function_name: str,
         args: typing.Dict[str, typing.Any],
-    ) -> typing.Tuple[baml_py.baml_py.RuntimeContextManager, baml_py.baml_py.FunctionResultStream]:
+    ) -> typing.Tuple[
+        baml_py.baml_py.RuntimeContextManager, baml_py.baml_py.FunctionResultStream
+    ]:
         resolved_options = self.__resolve()
         ctx = __ctx__manager__.clone_context()
         result = __runtime__.stream_function(

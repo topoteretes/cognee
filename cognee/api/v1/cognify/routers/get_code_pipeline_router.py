@@ -50,7 +50,9 @@ def get_code_pipeline_router() -> APIRouter:
         from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 
         try:
-            async for result in run_code_graph_pipeline(payload.repo_path, payload.include_docs):
+            async for result in run_code_graph_pipeline(
+                payload.repo_path, payload.include_docs
+            ):
                 logger.info(result)
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})

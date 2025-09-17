@@ -19,15 +19,20 @@ def get_model_instance_from_graph(nodes: list[DataPoint], edges: list, entity_id
 
         if edge_type == "list":
             NewModel = copy_model(
-                type(source_node), {edge_label: (list[type(target_node)], PydanticUndefined)}
+                type(source_node),
+                {edge_label: (list[type(target_node)], PydanticUndefined)},
             )
 
-            node_map[edge[0]] = NewModel(**source_node.model_dump(), **{edge_label: [target_node]})
+            node_map[edge[0]] = NewModel(
+                **source_node.model_dump(), **{edge_label: [target_node]}
+            )
         else:
             NewModel = copy_model(
                 type(source_node), {edge_label: (type(target_node), PydanticUndefined)}
             )
 
-            node_map[edge[0]] = NewModel(**source_node.model_dump(), **{edge_label: target_node})
+            node_map[edge[0]] = NewModel(
+                **source_node.model_dump(), **{edge_label: target_node}
+            )
 
     return node_map[entity_id]

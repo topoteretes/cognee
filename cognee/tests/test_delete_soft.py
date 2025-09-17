@@ -20,11 +20,17 @@ async def main():
         pathlib.Path(__file__).parent, "test_data/Natural_language_processing_copy.txt"
     )
 
-    audio_document = os.path.join(pathlib.Path(__file__).parent, "test_data/text_to_speech.mp3")
+    audio_document = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/text_to_speech.mp3"
+    )
 
-    image_document = os.path.join(pathlib.Path(__file__).parent, "test_data/example.png")
+    image_document = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/example.png"
+    )
 
-    unstructured_document = os.path.join(pathlib.Path(__file__).parent, "test_data/example.pptx")
+    unstructured_document = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/example.pptx"
+    )
 
     text_document_as_literal = """
     1. Audi
@@ -76,7 +82,9 @@ async def main():
 
     nodes, edges = await graph_engine.get_graph_data()
 
-    assert len(nodes) == 0 and len(edges) == 0, "Document is not deleted with soft delete."
+    assert (
+        len(nodes) == 0 and len(edges) == 0
+    ), "Document is not deleted with soft delete."
 
 
 if __name__ == "__main__":

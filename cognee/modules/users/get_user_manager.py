@@ -18,7 +18,9 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     reset_password_token_secret = os.getenv(
         "FASTAPI_USERS_RESET_PASSWORD_TOKEN_SECRET", "super_secret"
     )
-    verification_token_secret = os.getenv("FASTAPI_USERS_VERIFICATION_TOKEN_SECRET", "super_secret")
+    verification_token_secret = os.getenv(
+        "FASTAPI_USERS_VERIFICATION_TOKEN_SECRET", "super_secret"
+    )
 
     # async def get(self, id: models.ID) -> models.UP:
     #     """
@@ -44,7 +46,10 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         return user
 
     async def on_after_login(
-        self, user: User, request: Optional[Request] = None, response: Optional[Response] = None
+        self,
+        user: User,
+        request: Optional[Request] = None,
+        response: Optional[Response] = None,
     ):
         access_token_cookie = response.headers.get("Set-Cookie")
         match = re.search(

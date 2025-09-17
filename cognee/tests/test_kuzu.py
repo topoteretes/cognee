@@ -104,17 +104,19 @@ async def main():
             node_name=["nonexistent"],
         ).get_context("What is in the context?")
 
-        assert isinstance(context_nonempty, list) and context_nonempty != [], (
-            f"Nodeset_search_test:Expected non-empty string for context_nonempty, got: {context_nonempty!r}"
-        )
+        assert (
+            isinstance(context_nonempty, list) and context_nonempty != []
+        ), f"Nodeset_search_test:Expected non-empty string for context_nonempty, got: {context_nonempty!r}"
 
-        assert context_empty == [], (
-            f"Nodeset_search_test:Expected empty string for context_empty, got: {context_empty!r}"
-        )
+        assert (
+            context_empty == []
+        ), f"Nodeset_search_test:Expected empty string for context_empty, got: {context_empty!r}"
 
         await cognee.prune.prune_data()
         data_root_directory = get_storage_config()["data_root_directory"]
-        assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
+        assert not os.path.isdir(
+            data_root_directory
+        ), "Local data files are not deleted"
 
         await cognee.prune.prune_system(metadata=True)
         from cognee.infrastructure.databases.graph import get_graph_engine

@@ -1,6 +1,8 @@
 from typing import Optional, Any, List, Union, Tuple
 
-from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
+from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import (
+    BaseBenchmarkAdapter,
+)
 
 
 class DummyAdapter(BaseBenchmarkAdapter):

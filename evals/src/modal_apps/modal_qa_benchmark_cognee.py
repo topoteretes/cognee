@@ -46,7 +46,9 @@ def run_cognee_benchmark(config_params: dict, dir_suffix: str):
 
     # Create benchmark folder structure
     qa_engine = config_params.get("qa_engine", "cognee_graph_completion")
-    answers_folder = _create_benchmark_folder(VOLUME_NAME, BENCHMARK_NAME, dir_suffix, qa_engine)
+    answers_folder = _create_benchmark_folder(
+        VOLUME_NAME, BENCHMARK_NAME, dir_suffix, qa_engine
+    )
     print(f"Created benchmark folder: {answers_folder}")
 
     config = CogneeConfig(**config_params)
@@ -77,7 +79,9 @@ async def main(
     print_results: bool = True,
 ):
     """Trigger Cognee QA benchmark runs on Modal."""
-    print(f"🚀 Launching {runs} Cognee QA benchmark run(s) on Modal with these parameters:")
+    print(
+        f"🚀 Launching {runs} Cognee QA benchmark run(s) on Modal with these parameters:"
+    )
     print(f"  - runs: {runs}")
     print(f"  - corpus_limit: {corpus_limit}")
     print(f"  - qa_limit: {qa_limit}")

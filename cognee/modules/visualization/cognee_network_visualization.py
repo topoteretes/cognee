@@ -83,7 +83,9 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
             "relation": relation,
             "weight": primary_weight,  # Primary weight for backward compatibility
             "all_weights": all_weights,  # All weights for display
-            "relationship_type": edge_info.get("relationship_type") if edge_info else None,
+            "relationship_type": (
+                edge_info.get("relationship_type") if edge_info else None
+            ),
             "edge_info": edge_info if edge_info else {},
         }
         links_list.append(link_data)

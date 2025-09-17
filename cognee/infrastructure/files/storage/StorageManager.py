@@ -52,7 +52,9 @@ class StorageManager:
         else:
             return self.storage.get_size(file_path)
 
-    async def store(self, file_path: str, data: BinaryIO, overwrite: bool = False) -> str:
+    async def store(
+        self, file_path: str, data: BinaryIO, overwrite: bool = False
+    ) -> str:
         """
         Store data at the specified file path.
 

@@ -1,5 +1,9 @@
 from fastapi import status
-from cognee.exceptions import CogneeSystemError, CogneeValidationError, CogneeConfigurationError
+from cognee.exceptions import (
+    CogneeSystemError,
+    CogneeValidationError,
+    CogneeConfigurationError,
+)
 
 
 class DatabaseNotCreatedError(CogneeSystemError):

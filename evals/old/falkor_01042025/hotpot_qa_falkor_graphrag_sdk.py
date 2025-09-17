@@ -143,7 +143,11 @@ def answer_questions(
             print(f"Error processing question: {str(e)}")
             response = "Error: Unable to generate answer due to an internal error."
 
-        result = {"question": question, "answer": response, "golden_answer": expected_answer}
+        result = {
+            "question": question,
+            "answer": response,
+            "golden_answer": expected_answer,
+        }
 
         if print_results:
             print(f"{json.dumps(result, indent=2)}{'-' * 50}\n")

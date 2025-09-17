@@ -90,7 +90,9 @@ def chunk_by_sentence(
 
     if len(sentence) > 0:
         if maximum_size and sentence_size > maximum_size:
-            raise ValueError(f"Input word {word} longer than chunking size {maximum_size}.")
+            raise ValueError(
+                f"Input word {word} longer than chunking size {maximum_size}."
+            )
 
         section_end = "sentence_cut" if word_type_state == "word" else word_type_state
         yield (
