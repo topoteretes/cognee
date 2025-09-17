@@ -1,3 +1,4 @@
+import os
 from typing import Callable, List, Optional, Type
 
 from cognee.modules.engine.models.node_set import NodeSet
@@ -159,6 +160,12 @@ async def get_search_type_tools(
     # If the query type is FEELING_LUCKY, select the search type intelligently
     if query_type is SearchType.FEELING_LUCKY:
         query_type = await select_search_type(query_text)
+
+    if (
+        query_type in [SearchType.CYPHER, SearchType.NATURAL_LANGUAGE]
+        and os.getenv("ALLOW_CYPHER_QUERY", "true").lower() == "false"
+    ):
+        raise UnsupportedSearchTypeError("Cypher query search types are disabled.")
 
     search_type_tools = search_tasks.get(query_type)
 
