@@ -220,9 +220,11 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
     chunk_size: int = None,
-    ontology_config: OntologyConfig = get_ontology_resolver(),
+    ontology_config: OntologyConfig = None,
     custom_prompt: Optional[str] = None,
 ) -> list[Task]:
+    if ontology_config is None:
+        ontology_config = get_ontology_resolver()
     default_tasks = [
         Task(classify_documents),
         Task(check_permissions_on_dataset, user=user, permissions=["write"]),
