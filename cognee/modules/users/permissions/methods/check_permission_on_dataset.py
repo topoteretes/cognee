@@ -10,6 +10,17 @@ logger = get_logger()
 
 
 async def check_permission_on_dataset(user: User, permission_type: str, dataset_id: UUID):
+    """
+        Check if a user has a specific permission on a dataset.
+    Args:
+        user: User whose permission is checked
+        permission_type: Type of permission to check
+        dataset_id: Id of the dataset
+
+    Returns:
+        None
+
+    """
     if user is None:
         user = await get_default_user()
 

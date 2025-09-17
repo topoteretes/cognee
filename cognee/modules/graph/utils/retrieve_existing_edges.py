@@ -23,8 +23,6 @@ async def retrieve_existing_edges(
         chunk_graphs (list[KnowledgeGraph]): List of knowledge graphs corresponding to each
             data chunk. Each graph contains nodes (entities) and edges (relationships) that
             were extracted from the chunk content.
-        graph_engine (GraphDBInterface): Interface to the graph database that will be queried
-            to check for existing edges. Must implement the has_edges() method.
 
     Returns:
         dict[str, bool]: A mapping of edge keys to boolean values indicating existence.
