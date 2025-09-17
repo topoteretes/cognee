@@ -58,7 +58,7 @@ class LexicalRetriever(BaseRetriever):
 
           try:
               graph_engine = await get_graph_engine()
-              nodes, _ = await graph_engine.get_graph_data()
+              nodes, _ = await graph_engine.get_filtered_graph_data([{"type": ["DocumentChunk"]}])
           except Exception as e:
               logger.error("Graph engine initialization failed")
               raise NoDataError("Graph engine initialization failed") from e
