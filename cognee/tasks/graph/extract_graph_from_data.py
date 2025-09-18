@@ -6,7 +6,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
-from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.graph.utils import (
     expand_with_nodes_and_edges,
@@ -26,9 +26,28 @@ async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
     graph_model: Type[BaseModel],
-    ontology_resolver: RDFLibOntologyResolver,
+    ontology_resolver: BaseOntologyResolver,
 ) -> List[DocumentChunk]:
-    """Updates DocumentChunk objects, integrates data points and edges into databases."""
+    """Integrate chunk graphs with ontology validation and store in databases.
+    
+    This function processes document chunks and their associated knowledge graphs,
+    validates entities against an ontology resolver, and stores the integrated
+    data points and edges in the configured databases.
+    
+    Args:
+        data_chunks: List of document chunks containing source data
+        chunk_graphs: List of knowledge graphs corresponding to each chunk
+        graph_model: Pydantic model class for graph data validation
+        ontology_resolver: Resolver for validating entities against ontology
+        
+    Returns:
+        List of updated DocumentChunk objects with integrated data
+        
+    Raises:
+        InvalidChunkGraphInputError: If input validation fails
+        InvalidGraphModelError: If graph model validation fails
+        InvalidOntologyAdapterError: If ontology resolver validation fails
+    """
 
     if not isinstance(data_chunks, list) or not isinstance(chunk_graphs, list):
         raise InvalidChunkGraphInputError("data_chunks and chunk_graphs must be lists.")

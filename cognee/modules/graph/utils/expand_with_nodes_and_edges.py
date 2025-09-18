@@ -298,7 +298,7 @@ def expand_with_nodes_and_edges(
         chunk_graphs (list[KnowledgeGraph]): List of knowledge graphs corresponding to each
             data chunk. Each graph contains nodes (entities) and edges (relationships) extracted
             from the chunk content.
-        ontology_resolver (RDFLibOntologyResolver, optional): Resolver for validating entities and
+        ontology_resolver (BaseOntologyResolver, optional): Resolver for validating entities and
             types against an ontology. If None, a default RDFLibOntologyResolver is created.
             Defaults to None.
         existing_edges_map (dict[str, bool], optional): Mapping of existing edge keys to prevent

@@ -3,7 +3,7 @@ from typing import List
 
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.tasks.graph.cascade_extract.utils.extract_nodes import extract_nodes
 from cognee.tasks.graph.cascade_extract.utils.extract_content_nodes_and_relationship_names import (
     extract_content_nodes_and_relationship_names,
@@ -17,9 +17,21 @@ from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     n_rounds: int = 2,
-    ontology_adapter: RDFLibOntologyResolver = None,
+    ontology_adapter: BaseOntologyResolver = None,
 ) -> List[DocumentChunk]:
-    """Extract and update graph data from document chunks in multiple steps."""
+    """Extract and update graph data from document chunks using cascade extraction.
+    
+    This function performs multi-step graph extraction from document chunks,
+    using cascade extraction techniques to build comprehensive knowledge graphs.
+    
+    Args:
+        data_chunks: List of document chunks to process
+        n_rounds: Number of extraction rounds to perform (default: 2)
+        ontology_adapter: Resolver for validating entities against ontology
+        
+    Returns:
+        List of updated DocumentChunk objects with extracted graph data
+    """
     chunk_nodes = await asyncio.gather(
         *[extract_nodes(chunk.text, n_rounds) for chunk in data_chunks]
     )

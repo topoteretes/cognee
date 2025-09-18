@@ -6,7 +6,7 @@ from cognee.modules.ontology.get_default_ontology_resolver import get_default_on
 
 
 def test_ontology_adapter_initialization_success():
-    """Test successful initialization of OntologyAdapter."""
+    """Test successful initialization of RDFLibOntologyResolver from get_default_ontology_resolver."""
 
     adapter = get_default_ontology_resolver()
     adapter.build_lookup()
@@ -104,7 +104,7 @@ def test_find_closest_match_no_match():
 
 
 def test_get_subgraph_no_match_rdflib():
-    """Test get_subgraph returns empty results for a non-existent node."""
+    """Test get_subgraph returns empty results for a non-existent node using RDFLibOntologyResolver."""
     g = Graph()
 
     resolver = get_default_ontology_resolver()
@@ -162,7 +162,7 @@ def test_get_subgraph_success_rdflib():
 
 
 def test_refresh_lookup_rdflib():
-    """Test that refresh_lookup rebuilds the lookup dict into a new object."""
+    """Test that refresh_lookup rebuilds the lookup dict into a new object using RDFLibOntologyResolver."""
     g = Graph()
 
     resolver = get_default_ontology_resolver()
@@ -283,7 +283,7 @@ def test_ontology_config_structure():
 
 
 def test_get_ontology_resolver_default():
-    """Test get_default_ontology_resolver returns default resolver."""
+    """Test get_default_ontology_resolver returns a properly configured RDFLibOntologyResolver with FuzzyMatchingStrategy."""
     from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
     from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 
@@ -294,7 +294,7 @@ def test_get_ontology_resolver_default():
 
 
 def test_get_default_ontology_resolver():
-    """Test get_default_ontology_resolver returns default resolver."""
+    """Test get_default_ontology_resolver returns a properly configured RDFLibOntologyResolver with FuzzyMatchingStrategy."""
     from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
     from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 
