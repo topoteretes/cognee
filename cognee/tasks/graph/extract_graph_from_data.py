@@ -29,20 +29,20 @@ async def integrate_chunk_graphs(
     ontology_resolver: BaseOntologyResolver,
 ) -> List[DocumentChunk]:
     """Integrate chunk graphs with ontology validation and store in databases.
-    
+
     This function processes document chunks and their associated knowledge graphs,
     validates entities against an ontology resolver, and stores the integrated
     data points and edges in the configured databases.
-    
+
     Args:
         data_chunks: List of document chunks containing source data
         chunk_graphs: List of knowledge graphs corresponding to each chunk
         graph_model: Pydantic model class for graph data validation
         ontology_resolver: Resolver for validating entities against ontology
-        
+
     Returns:
         List of updated DocumentChunk objects with integrated data
-        
+
     Raises:
         InvalidChunkGraphInputError: If input validation fails
         InvalidGraphModelError: If graph model validation fails

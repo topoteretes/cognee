@@ -20,15 +20,15 @@ async def extract_graph_from_data(
     ontology_adapter: BaseOntologyResolver = None,
 ) -> List[DocumentChunk]:
     """Extract and update graph data from document chunks using cascade extraction.
-    
+
     This function performs multi-step graph extraction from document chunks,
     using cascade extraction techniques to build comprehensive knowledge graphs.
-    
+
     Args:
         data_chunks: List of document chunks to process
         n_rounds: Number of extraction rounds to perform (default: 2)
         ontology_adapter: Resolver for validating entities against ontology
-        
+
     Returns:
         List of updated DocumentChunk objects with extracted graph data
     """
