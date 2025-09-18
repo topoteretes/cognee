@@ -164,8 +164,13 @@ class Notebook(Base):
         def replace_path(match):
             filename = match.group(1)
             if filename in data_files:
-                # Return the actual path to the cached file
-                return f'"{data_files[filename]}"'
+                file_path = data_files[filename]
+                # For local filesystem, preserve file:// prefix
+                if not file_path.startswith("s3://"):
+                    return f'"file://{file_path}"'
+                else:
+                    # For S3, return the S3 URL as-is
+                    return f'"{file_path}"'
             return match.group(0)  # Keep original if file not found
 
         # Update only code cells
