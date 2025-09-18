@@ -9,12 +9,13 @@ import hashlib
 import zipfile
 import asyncio
 from typing import Optional, Tuple
-import requests
+import aiohttp
 import logging
 from io import BytesIO
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
+from cognee.shared.utils import create_secure_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -98,12 +99,15 @@ class StorageAwareCache:
         """
         try:
             # Make a HEAD request to check headers without downloading
-            response = await asyncio.to_thread(requests.head, url, timeout=30)
-            response.raise_for_status()
+            ssl_context = create_secure_ssl_context()
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.head(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    response.raise_for_status()
 
-            # Try ETag first (most reliable)
-            etag = response.headers.get("ETag", "").strip('"')
-            last_modified = response.headers.get("Last-Modified", "")
+                    # Try ETag first (most reliable)
+                    etag = response.headers.get("ETag", "").strip('"')
+                    last_modified = response.headers.get("Last-Modified", "")
 
             # Use ETag if available, otherwise Last-Modified
             remote_identifier = etag if etag else last_modified
@@ -168,13 +172,22 @@ class StorageAwareCache:
         logger.info(f"Downloading content from {url}...")
 
         # Download the zip file
-        response = await asyncio.to_thread(requests.get, url, stream=True, timeout=60)
-        response.raise_for_status()
-
-        # Read the response content
         zip_content = BytesIO()
-        for chunk in response.iter_content(chunk_size=8192):
-            zip_content.write(chunk)
+        etag = ""
+        last_modified = ""
+        ssl_context = create_secure_ssl_context()
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as response:
+                response.raise_for_status()
+
+                # Extract headers before consuming response
+                etag = response.headers.get("ETag", "").strip('"')
+                last_modified = response.headers.get("Last-Modified", "")
+
+                # Read the response content
+                async for chunk in response.content.iter_chunked(8192):
+                    zip_content.write(chunk)
         zip_content.seek(0)
 
         # Extract the archive
@@ -198,8 +211,6 @@ class StorageAwareCache:
         await self.storage_manager.store(version_file, version_or_hash, overwrite=True)
 
         # Store content identifier from response headers for freshness checking
-        etag = response.headers.get("ETag", "").strip('"')
-        last_modified = response.headers.get("Last-Modified", "")
         content_identifier = etag if etag else last_modified
 
         if content_identifier:
