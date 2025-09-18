@@ -8,6 +8,16 @@ from cognee.modules.users.methods import get_user
 
 
 async def create_tenant(tenant_name: str, user_id: UUID):
+    """
+        Create a new tenant with the given name, for the user with the given id.
+        This user is the owner of the tenant.
+    Args:
+        tenant_name: Name of the new tenant.
+        user_id: Id of the user.
+
+    Returns:
+        None
+    """
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         try:

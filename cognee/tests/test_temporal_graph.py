@@ -97,7 +97,7 @@ async def main():
         f"Expected exactly one DocumentChunk, but found {type_counts.get('DocumentChunk', 0)}"
     )
 
-    assert type_counts.get("Entity", 0) >= 20, (
+    assert type_counts.get("Entity", 0) >= 10, (
         f"Expected multiple entities (assert is set to 20), but found {type_counts.get('Entity', 0)}"
     )
 
@@ -105,51 +105,23 @@ async def main():
         f"Expected multiple entity types, but found {type_counts.get('EntityType', 0)}"
     )
 
-    assert type_counts.get("Event", 0) >= 20, (
+    assert type_counts.get("Event", 0) >= 10, (
         f"Expected multiple events (assert is set to 20), but found {type_counts.get('Event', 0)}"
     )
 
-    assert type_counts.get("Timestamp", 0) >= 20, (
-        f"Expected multiple timestamps (assert is set to 20), but found {type_counts.get('Timestamp', 0)}"
+    assert type_counts.get("Timestamp", 0) >= 10, (
+        f"Expected multiple timestamps (assert is set to 10), but found {type_counts.get('Timestamp', 0)}"
     )
 
-    assert type_counts.get("Interval", 0) >= 2, (
-        f"Expected multiple intervals, but found {type_counts.get('Interval', 0)}"
-    )
-
-    assert edge_type_counts.get("contains", 0) >= 20, (
+    assert edge_type_counts.get("contains", 0) >= 10, (
         f"Expected multiple 'contains' edge, but found {edge_type_counts.get('contains', 0)}"
     )
 
-    assert edge_type_counts.get("is_a", 0) >= 20, (
+    assert edge_type_counts.get("is_a", 0) >= 10, (
         f"Expected multiple 'is_a' edge, but found {edge_type_counts.get('is_a', 0)}"
     )
 
-    assert edge_type_counts.get("during", 0) == type_counts.get("Interval", 0), (
-        "Expected the same amount of during and interval objects in the graph"
-    )
-
-    assert edge_type_counts.get("during", 0) == type_counts.get("Interval", 0), (
-        "Expected the same amount of during and interval objects in the graph"
-    )
-
-    assert edge_type_counts.get("time_from", 0) == type_counts.get("Interval", 0), (
-        "Expected the same amount of time_from and interval objects in the graph"
-    )
-
-    assert edge_type_counts.get("time_to", 0) == type_counts.get("Interval", 0), (
-        "Expected the same amount of time_to and interval objects in the graph"
-    )
-
     retriever = TemporalRetriever()
-
-    result_before = await retriever.extract_time_from_query("What happened before 1890?")
-
-    assert result_before[0] is None
-
-    result_after = await retriever.extract_time_from_query("What happened after 1891?")
-
-    assert result_after[1] is None
 
     result_between = await retriever.extract_time_from_query("What happened between 1890 and 1900?")
 

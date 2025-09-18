@@ -15,9 +15,9 @@ async def get_specific_user_permission_datasets(
         Return a list of datasets user has given permission for. If a list of datasets is provided,
         verify for which datasets user has appropriate permission for and return list of datasets he has permission for.
     Args:
-        user_id:
-        permission_type:
-        dataset_ids:
+        user_id: Id of the user.
+        permission_type: Type of the permission.
+        dataset_ids: Ids of the provided datasets
 
     Returns:
         list[Dataset]: List of datasets user has permission for
