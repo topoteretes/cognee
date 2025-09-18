@@ -186,6 +186,7 @@ cognee/cache/
 # Default cognee system directory, used in development
 .cognee_system/
 .data_storage/
+.cognee_cache/
 .artifacts/
 .anon_id
 
