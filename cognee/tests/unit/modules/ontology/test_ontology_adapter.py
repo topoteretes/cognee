@@ -165,8 +165,7 @@ def test_refresh_lookup_rdflib():
     """Test that refresh_lookup rebuilds the lookup dict into a new object."""
     g = Graph()
 
-    config = get_default_ontology_resolver()
-    resolver = config["resolver"]
+    resolver = get_default_ontology_resolver()
     resolver.graph = g
     resolver.build_lookup()
 
@@ -284,33 +283,25 @@ def test_ontology_config_structure():
 
 
 def test_get_ontology_resolver_default():
-    """Test get_ontology_resolver returns default configuration."""
-    from cognee.modules.ontology.get_ontology_resolver import get_default_ontology_resolver
-    from cognee.modules.ontology.ontology_config import Config
+    """Test get_default_ontology_resolver returns default resolver."""
     from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
     from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 
-    config: Config = get_default_ontology_resolver()
+    resolver = get_default_ontology_resolver()
 
-    assert isinstance(config["ontology_config"]["ontology_resolver"], RDFLibOntologyResolver)
-    assert isinstance(
-        config["ontology_config"]["ontology_resolver"].matching_strategy, FuzzyMatchingStrategy
-    )
+    assert isinstance(resolver, RDFLibOntologyResolver)
+    assert isinstance(resolver.matching_strategy, FuzzyMatchingStrategy)
 
 
 def test_get_default_ontology_resolver():
-    """Test get_default_ontology_resolver returns default configuration."""
-    from cognee.modules.ontology.get_ontology_resolver import get_default_ontology_resolver
-    from cognee.modules.ontology.ontology_config import Config
+    """Test get_default_ontology_resolver returns default resolver."""
     from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
     from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 
-    config: Config = get_default_ontology_resolver()
+    resolver = get_default_ontology_resolver()
 
-    assert isinstance(config["ontology_config"]["ontology_resolver"], RDFLibOntologyResolver)
-    assert isinstance(
-        config["ontology_config"]["ontology_resolver"].matching_strategy, FuzzyMatchingStrategy
-    )
+    assert isinstance(resolver, RDFLibOntologyResolver)
+    assert isinstance(resolver.matching_strategy, FuzzyMatchingStrategy)
 
 
 def test_rdflib_ontology_resolver_uses_matching_strategy():
