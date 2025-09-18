@@ -101,17 +101,17 @@ class Notebook(Base):
         except Exception as e:
             raise RuntimeError(f"Failed to download tutorial zip from {zip_url}") from e
 
-        # Use StorageManager to access the notebook file (works with both local and S3)
-        base_config = get_base_config()
-        storage_manager = get_file_storage(base_config.system_root_directory)
+        # Use cache system to access the notebook file
+        from cognee.shared.cache import cache_file_exists, read_cache_file
+
         notebook_file_path = f"{extracted_cache_dir}/{notebook_filename}"
 
-        # Check if the notebook file exists in storage
-        if not await storage_manager.file_exists(notebook_file_path):
+        # Check if the notebook file exists in cache
+        if not await cache_file_exists(notebook_file_path):
             raise FileNotFoundError(f"Notebook file '{notebook_filename}' not found in zip")
 
-        # Read and parse the notebook using StorageManager
-        async with storage_manager.open(notebook_file_path, encoding="utf-8") as f:
+        # Read and parse the notebook using cache system
+        async with await read_cache_file(notebook_file_path, encoding="utf-8") as f:
             notebook_content = await asyncio.to_thread(f.read)
         notebook = cls.from_ipynb_string(notebook_content, owner_id, name, deletable)
 
@@ -131,43 +131,27 @@ class Notebook(Base):
             cache_dir: Path to the cached tutorial directory containing data files
         """
         import re
-        from cognee.base_config import get_base_config
-        from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
+        from cognee.shared.cache import list_cache_files, cache_file_exists
         from cognee.shared.logging_utils import get_logger
 
         logger = get_logger()
-
-        # Get storage manager for the cache directory
-        base_config = get_base_config()
-        storage_manager = get_file_storage(base_config.system_root_directory)
 
         # Look for data files in the data subdirectory
         data_dir = f"{cache_dir}/data"
 
         try:
-            # Get all data files in the cache directory
+            # Get all data files in the cache directory using cache system
             data_files = {}
-            file_list = await storage_manager.list_files(data_dir, recursive=True)
+            if await cache_file_exists(data_dir):
+                file_list = await list_cache_files(data_dir)
+            else:
+                file_list = []
 
             for file_path in file_list:
                 # Extract just the filename
                 filename = file_path.split("/")[-1]
-
-                # For S3, use the full S3 URL; for local, use the absolute path
-                if hasattr(
-                    storage_manager.storage, "storage_path"
-                ) and storage_manager.storage.storage_path.startswith("s3://"):
-                    # S3 storage - construct full S3 URL
-                    full_s3_path = f"{storage_manager.storage.storage_path}/{file_path}"
-                    data_files[filename] = full_s3_path
-                else:
-                    # Local storage - use absolute path
-                    from cognee.infrastructure.files.storage.LocalFileStorage import get_parsed_path
-                    import os
-
-                    parsed_storage_path = get_parsed_path(storage_manager.storage.storage_path)
-                    absolute_path = os.path.join(parsed_storage_path, file_path)
-                    data_files[filename] = absolute_path
+                # Use the file path as provided by cache system
+                data_files[filename] = file_path
 
         except Exception as e:
             # If we can't list files, skip updating paths

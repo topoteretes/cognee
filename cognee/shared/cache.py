@@ -34,7 +34,8 @@ class StorageAwareCache:
             cache_subdir: Subdirectory name within the system root for caching
         """
         self.base_config = get_base_config()
-        self.cache_base_path = f"{cache_subdir}"
+        # Since we're using cache_root_directory, don't add extra cache prefix
+        self.cache_base_path = ""
         self.storage_manager: StorageManager = get_file_storage(
             self.base_config.cache_root_directory
         )
@@ -51,13 +52,16 @@ class StorageAwareCache:
 
     async def get_cache_dir(self) -> str:
         """Get the base cache directory path."""
-        cache_path = self.cache_base_path
+        cache_path = self.cache_base_path or "."  # Use "." for root when cache_base_path is empty
         await self.storage_manager.ensure_directory_exists(cache_path)
         return cache_path
 
     async def get_cache_subdir(self, name: str) -> str:
         """Get a specific cache subdirectory."""
-        cache_path = f"{self.cache_base_path}/{name}"
+        if self.cache_base_path:
+            cache_path = f"{self.cache_base_path}/{name}"
+        else:
+            cache_path = name
         await self.storage_manager.ensure_directory_exists(cache_path)
 
         # Return the absolute path based on storage system
@@ -232,6 +236,46 @@ class StorageAwareCache:
         logger.info("✓ Content downloaded and cached successfully!")
         return cache_dir
 
+    async def file_exists(self, file_path: str) -> bool:
+        """Check if a file exists in cache storage."""
+        return await self.storage_manager.file_exists(file_path)
+
+    async def read_file(self, file_path: str, encoding: str = "utf-8"):
+        """Read a file from cache storage."""
+        return self.storage_manager.open(file_path, encoding=encoding)
+
+    async def list_files(self, directory_path: str):
+        """List files in a cache directory."""
+        try:
+            file_list = await self.storage_manager.list_files(directory_path)
+
+            # For S3 storage, convert relative paths to full S3 URLs
+            if self.storage_manager.storage.storage_path.startswith("s3://"):
+                full_paths = []
+                for file_path in file_list:
+                    full_s3_path = f"{self.storage_manager.storage.storage_path}/{file_path}"
+                    full_paths.append(full_s3_path)
+                return full_paths
+            else:
+                # For local storage, return absolute paths
+                storage_path = self.storage_manager.storage.storage_path
+                if not storage_path.startswith("/"):
+                    import os
+
+                    storage_path = os.path.abspath(storage_path)
+
+                full_paths = []
+                for file_path in file_list:
+                    if file_path.startswith("/"):
+                        full_paths.append(file_path)  # Already absolute
+                    else:
+                        full_paths.append(f"{storage_path}/{file_path}")
+                return full_paths
+
+        except Exception as e:
+            logger.debug(f"Error listing files in {directory_path}: {e}")
+            return []
+
 
 # Convenience functions that maintain API compatibility
 _cache_manager = None
@@ -281,3 +325,22 @@ async def download_and_extract_zip(
 async def get_tutorial_data_dir() -> str:
     """Get the tutorial data cache directory."""
     return await get_cache_subdir("tutorial_data")
+
+
+# Cache file operations
+async def cache_file_exists(file_path: str) -> bool:
+    """Check if a file exists in cache storage."""
+    cache_manager = get_cache_manager()
+    return await cache_manager.file_exists(file_path)
+
+
+async def read_cache_file(file_path: str, encoding: str = "utf-8"):
+    """Read a file from cache storage."""
+    cache_manager = get_cache_manager()
+    return await cache_manager.read_file(file_path, encoding)
+
+
+async def list_cache_files(directory_path: str):
+    """List files in a cache directory."""
+    cache_manager = get_cache_manager()
+    return await cache_manager.list_files(directory_path)
