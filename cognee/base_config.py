@@ -21,8 +21,6 @@ class BaseConfig(BaseSettings):
         # Set monitoring tool based on available keys
         if self.langfuse_public_key and self.langfuse_secret_key:
             self.monitoring_tool = Observer.LANGFUSE
-        else:
-            self.monitoring_tool = Observer.NONE
 
         return self
 
