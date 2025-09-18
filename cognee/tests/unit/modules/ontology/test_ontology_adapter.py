@@ -8,8 +8,7 @@ from cognee.modules.ontology.get_default_ontology_resolver import get_default_on
 def test_ontology_adapter_initialization_success():
     """Test successful initialization of OntologyAdapter."""
 
-    config = get_default_ontology_resolver()
-    adapter = config["resolver"]
+    adapter = get_default_ontology_resolver()
     adapter.build_lookup()
 
     assert isinstance(adapter.lookup, dict)
@@ -108,8 +107,7 @@ def test_get_subgraph_no_match_rdflib():
     """Test get_subgraph returns empty results for a non-existent node."""
     g = Graph()
 
-    config = get_default_ontology_resolver()
-    resolver = config["resolver"]
+    resolver = get_default_ontology_resolver()
     resolver.graph = g
     resolver.build_lookup()
 
@@ -277,8 +275,8 @@ def test_ontology_config_structure():
     from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
     from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 
-    resolver = RDFLibOntologyResolver()
     matching_strategy = FuzzyMatchingStrategy()
+    resolver = RDFLibOntologyResolver(matching_strategy=matching_strategy)
 
     config: Config = {"ontology_config": {"ontology_resolver": resolver}}
 
