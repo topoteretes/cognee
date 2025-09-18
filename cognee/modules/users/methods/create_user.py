@@ -61,8 +61,6 @@ async def create_user(
                     if auto_login:
                         await session.refresh(user)
 
-                    await _create_tutorial_notebook(user.id, session)
-
                     return user
     except UserAlreadyExists as error:
         print(f"User {email} already exists")
