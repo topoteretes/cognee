@@ -44,11 +44,12 @@ class StorageAwareCache:
     async def get_cache_subdir(self, name: str) -> str:
         """Get a specific cache subdirectory."""
         cache_path = f"{self.cache_base_path}/{name}"
-        logger.info(f"DAULET Getting cache subdirectory: {cache_path}")
         await self.storage_manager.ensure_directory_exists(cache_path)
 
         # Return the absolute path based on storage system
-        if hasattr(self.storage_manager.storage, "storage_path"):
+        if self.storage_manager.storage.storage_path.startswith("s3://"):
+            return cache_path
+        elif hasattr(self.storage_manager.storage, "storage_path"):
             return f"{self.storage_manager.storage.storage_path}/{cache_path}"
         else:
             # Fallback for other storage types
@@ -148,6 +149,8 @@ class StorageAwareCache:
             Path to the cached directory
         """
         cache_dir = await self.get_cache_subdir(cache_subdir_name)
+
+        logger.info(f"DAULET Getting cache subdirectory: {cache_dir}")
 
         # Check if already cached and valid
         if not force and await self._is_cache_valid(cache_dir, version_or_hash):
