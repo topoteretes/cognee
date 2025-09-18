@@ -5,12 +5,20 @@ from cognee.modules.ontology.matching_strategies import MatchingStrategy
 
 
 class OntologyConfig(TypedDict, total=False):
-    """Configuration for ontology resolver.
+    """Configuration containing ontology resolver.
 
     Attributes:
-        resolver: The ontology resolver instance to use
-        matching_strategy: The matching strategy to use
+        ontology_resolver: The ontology resolver instance to use
     """
 
-    resolver: Optional[BaseOntologyResolver]
-    matching_strategy: Optional[MatchingStrategy]
+    ontology_resolver: Optional[BaseOntologyResolver]
+
+
+class Config(TypedDict, total=False):
+    """Top-level configuration dictionary.
+
+    Attributes:
+        ontology_config: Configuration containing ontology resolver
+    """
+
+    ontology_config: Optional[OntologyConfig]

@@ -2,13 +2,13 @@ import pytest
 from rdflib import Graph, Namespace, RDF, OWL, RDFS
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.ontology.models import AttachedOntologyNode
-from cognee.modules.ontology.get_ontology_resolver import get_ontology_resolver
+from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
 
 
 def test_ontology_adapter_initialization_success():
     """Test successful initialization of OntologyAdapter."""
 
-    config = get_ontology_resolver()
+    config = get_default_ontology_resolver()
     adapter = config["resolver"]
     adapter.build_lookup()
 
@@ -108,7 +108,7 @@ def test_get_subgraph_no_match_rdflib():
     """Test get_subgraph returns empty results for a non-existent node."""
     g = Graph()
 
-    config = get_ontology_resolver()
+    config = get_default_ontology_resolver()
     resolver = config["resolver"]
     resolver.graph = g
     resolver.build_lookup()
@@ -167,7 +167,7 @@ def test_refresh_lookup_rdflib():
     """Test that refresh_lookup rebuilds the lookup dict into a new object."""
     g = Graph()
 
-    config = get_ontology_resolver()
+    config = get_default_ontology_resolver()
     resolver = config["resolver"]
     resolver.graph = g
     resolver.build_lookup()
@@ -272,89 +272,47 @@ def test_base_ontology_resolver_custom_matching_strategy():
 
 
 def test_ontology_config_structure():
-    """Test OntologyConfig TypedDict structure."""
-    from cognee.modules.ontology.ontology_config import OntologyConfig
+    """Test TypedDict structure for ontology configuration."""
+    from cognee.modules.ontology.ontology_config import Config
     from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
     from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 
     resolver = RDFLibOntologyResolver()
     matching_strategy = FuzzyMatchingStrategy()
 
-    config: OntologyConfig = {"resolver": resolver, "matching_strategy": matching_strategy}
+    config: Config = {"ontology_config": {"ontology_resolver": resolver}}
 
-    assert config["resolver"] == resolver
-    assert config["matching_strategy"] == matching_strategy
+    assert config["ontology_config"]["ontology_resolver"] == resolver
 
 
 def test_get_ontology_resolver_default():
     """Test get_ontology_resolver returns default configuration."""
-    from cognee.modules.ontology.get_ontology_resolver import get_ontology_resolver
+    from cognee.modules.ontology.get_ontology_resolver import get_default_ontology_resolver
+    from cognee.modules.ontology.ontology_config import Config
     from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
     from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 
-    config = get_ontology_resolver()
+    config: Config = get_default_ontology_resolver()
 
-    assert isinstance(config["resolver"], RDFLibOntologyResolver)
-    assert isinstance(config["matching_strategy"], FuzzyMatchingStrategy)
-    assert config["resolver"].matching_strategy == config["matching_strategy"]
+    assert isinstance(config["ontology_config"]["ontology_resolver"], RDFLibOntologyResolver)
+    assert isinstance(
+        config["ontology_config"]["ontology_resolver"].matching_strategy, FuzzyMatchingStrategy
+    )
 
 
-def test_get_ontology_resolver_custom_resolver():
-    """Test get_ontology_resolver with custom resolver."""
-    from cognee.modules.ontology.get_ontology_resolver import get_ontology_resolver
+def test_get_default_ontology_resolver():
+    """Test get_default_ontology_resolver returns default configuration."""
+    from cognee.modules.ontology.get_ontology_resolver import get_default_ontology_resolver
+    from cognee.modules.ontology.ontology_config import Config
     from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
     from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 
-    custom_resolver = RDFLibOntologyResolver(ontology_file="test.owl")
-    config = get_ontology_resolver(resolver=custom_resolver)
+    config: Config = get_default_ontology_resolver()
 
-    assert config["resolver"] == custom_resolver
-    assert config["matching_strategy"] == custom_resolver.matching_strategy
-    assert isinstance(config["matching_strategy"], FuzzyMatchingStrategy)
-
-
-def test_get_ontology_resolver_custom_matching_strategy():
-    """Test get_ontology_resolver with custom matching strategy."""
-    from cognee.modules.ontology.get_ontology_resolver import get_ontology_resolver
-    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
-    from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
-
-    custom_strategy = FuzzyMatchingStrategy(cutoff=0.9)
-    config = get_ontology_resolver(matching_strategy=custom_strategy)
-
-    assert isinstance(config["resolver"], RDFLibOntologyResolver)
-    assert config["matching_strategy"] == custom_strategy
-    assert config["resolver"].matching_strategy == custom_strategy
-
-
-def test_get_ontology_resolver_both_custom():
-    """Test get_ontology_resolver with both custom resolver and matching strategy."""
-    from cognee.modules.ontology.get_ontology_resolver import get_ontology_resolver
-    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
-    from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
-
-    custom_resolver = RDFLibOntologyResolver(ontology_file="test.owl")
-    custom_strategy = FuzzyMatchingStrategy(cutoff=0.9)
-    config = get_ontology_resolver(resolver=custom_resolver, matching_strategy=custom_strategy)
-
-    assert config["resolver"] == custom_resolver
-    assert config["matching_strategy"] == custom_strategy
-
-
-def test_get_ontology_resolver_only_resolver_uses_resolver_strategy():
-    """Test that when only resolver is passed, it uses the resolver's matching strategy."""
-    from cognee.modules.ontology.get_ontology_resolver import get_ontology_resolver
-    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
-    from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
-
-    custom_strategy = FuzzyMatchingStrategy(cutoff=0.8)
-    custom_resolver = RDFLibOntologyResolver(matching_strategy=custom_strategy)
-
-    config = get_ontology_resolver(resolver=custom_resolver)
-
-    assert config["resolver"] == custom_resolver
-    assert config["matching_strategy"] == custom_strategy
-    assert config["matching_strategy"] == custom_resolver.matching_strategy
+    assert isinstance(config["ontology_config"]["ontology_resolver"], RDFLibOntologyResolver)
+    assert isinstance(
+        config["ontology_config"]["ontology_resolver"].matching_strategy, FuzzyMatchingStrategy
+    )
 
 
 def test_rdflib_ontology_resolver_uses_matching_strategy():

@@ -4,8 +4,8 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.tasks.storage.add_data_points import add_data_points
-from cognee.modules.ontology.ontology_config import OntologyConfig
-from cognee.modules.ontology.get_ontology_resolver import get_ontology_resolver
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.graph.utils import (
@@ -26,7 +26,7 @@ async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
     graph_model: Type[BaseModel],
-    ontology_adapter: RDFLibOntologyResolver,
+    ontology_resolver: RDFLibOntologyResolver,
 ) -> List[DocumentChunk]:
     """Updates DocumentChunk objects, integrates data points and edges into databases."""
 
@@ -38,9 +38,9 @@ async def integrate_chunk_graphs(
         )
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
-    if ontology_adapter is None or not hasattr(ontology_adapter, "get_subgraph"):
+    if ontology_resolver is None or not hasattr(ontology_resolver, "get_subgraph"):
         raise InvalidOntologyAdapterError(
-            type(ontology_adapter).__name__ if ontology_adapter else "None"
+            type(ontology_resolver).__name__ if ontology_resolver else "None"
         )
 
     graph_engine = await get_graph_engine()
@@ -57,7 +57,7 @@ async def integrate_chunk_graphs(
     )
 
     graph_nodes, graph_edges = expand_with_nodes_and_edges(
-        data_chunks, chunk_graphs, ontology_adapter, existing_edges_map
+        data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
     )
 
     if len(graph_nodes) > 0:
@@ -72,7 +72,7 @@ async def integrate_chunk_graphs(
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     graph_model: Type[BaseModel],
-    ontology_config: OntologyConfig = None,
+    config: Config = None,
     custom_prompt: Optional[str] = None,
 ) -> List[DocumentChunk]:
     """
@@ -104,9 +104,9 @@ async def extract_graph_from_data(
             ]
 
     # Extract resolver from config if provided, otherwise get default
-    if ontology_config is None:
-        ontology_config = get_ontology_resolver()
+    if config is None:
+        config: Config = {"ontology_config": {"ontology_resolver": get_default_ontology_resolver()}}
 
-    ontology_adapter = ontology_config["resolver"]
+    ontology_resolver = config["ontology_config"]["ontology_resolver"]
 
-    return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_adapter)
+    return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_resolver)

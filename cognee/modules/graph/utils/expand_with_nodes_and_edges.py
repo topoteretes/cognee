@@ -7,9 +7,10 @@ from cognee.modules.engine.utils import (
     generate_node_id,
     generate_node_name,
 )
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
-from cognee.modules.ontology.get_ontology_resolver import get_ontology_resolver
+from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
 
 
 def _create_node_key(node_id: str, category: str) -> str:
@@ -278,7 +279,7 @@ def _process_graph_edges(
 def expand_with_nodes_and_edges(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list[KnowledgeGraph],
-    ontology_resolver: RDFLibOntologyResolver = None,
+    ontology_resolver: BaseOntologyResolver = None,
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
     """
@@ -321,8 +322,7 @@ def expand_with_nodes_and_edges(
         existing_edges_map = {}
 
     if ontology_resolver is None:
-        config = get_ontology_resolver()
-        ontology_resolver = config["resolver"]
+        ontology_resolver = get_default_ontology_resolver()
 
     added_nodes_map = {}
     added_ontology_nodes_map = {}

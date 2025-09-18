@@ -5,8 +5,8 @@ import os
 import textwrap
 from cognee.api.v1.search import SearchType
 from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.modules.ontology.get_ontology_resolver import get_ontology_resolver
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.ontology_config import Config
 
 
 async def run_pipeline(ontology_path=None):
@@ -19,11 +19,13 @@ async def run_pipeline(ontology_path=None):
 
     await cognee.add(scientific_papers_dir)
 
-    ontology_config = get_ontology_resolver(
-        resolver=RDFLibOntologyResolver(ontology_file=ontology_path)
-    )
+    config: Config = {
+        "ontology_config": {
+            "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_path)
+        }
+    }
 
-    pipeline_run = await cognee.cognify(ontology_config=ontology_config)
+    pipeline_run = await cognee.cognify(config=config)
 
     return pipeline_run
 

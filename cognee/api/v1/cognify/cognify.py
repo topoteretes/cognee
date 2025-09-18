@@ -10,8 +10,8 @@ from cognee.infrastructure.llm import get_max_chunk_tokens
 from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.ontology.ontology_config import OntologyConfig
-from cognee.modules.ontology.get_ontology_resolver import get_ontology_resolver
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
 from cognee.modules.users.models import User
 
 from cognee.tasks.documents import (
@@ -40,7 +40,7 @@ async def cognify(
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
     chunk_size: int = None,
-    ontology_config: OntologyConfig = None,
+    config: Config = None,
     vector_db_config: dict = None,
     graph_db_config: dict = None,
     run_in_background: bool = False,
@@ -101,8 +101,6 @@ async def cognify(
                    Formula: min(embedding_max_completion_tokens, llm_max_completion_tokens // 2)
                    Default limits: ~512-8192 tokens depending on models.
                    Smaller chunks = more granular but potentially fragmented knowledge.
-        ontology_file_path: Path to RDF/OWL ontology file for domain-specific entity types.
-                          Useful for specialized fields like medical or legal documents.
         vector_db_config: Custom vector database configuration for embeddings storage.
         graph_db_config: Custom graph database configuration for relationship storage.
         run_in_background: If True, starts processing asynchronously and returns immediately.
@@ -189,14 +187,14 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
-    if ontology_config is None:
-        ontology_config = get_ontology_resolver()
+    if config is None:
+        config: Config = {"ontology_config": {"ontology_resolver": get_default_ontology_resolver()}}
 
     if temporal_cognify:
         tasks = await get_temporal_tasks(user, chunker, chunk_size)
     else:
         tasks = await get_default_tasks(
-            user, graph_model, chunker, chunk_size, ontology_config, custom_prompt
+            user, graph_model, chunker, chunk_size, config, custom_prompt
         )
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
@@ -220,11 +218,12 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
     chunk_size: int = None,
-    ontology_config: OntologyConfig = None,
+    config: Config = None,
     custom_prompt: Optional[str] = None,
 ) -> list[Task]:
-    if ontology_config is None:
-        ontology_config = get_ontology_resolver()
+    if config is None:
+        config: Config = {"ontology_config": {"ontology_resolver": get_default_ontology_resolver()}}
+
     default_tasks = [
         Task(classify_documents),
         Task(check_permissions_on_dataset, user=user, permissions=["write"]),
@@ -236,7 +235,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         Task(
             extract_graph_from_data,
             graph_model=graph_model,
-            ontology_config=ontology_config,
+            config=config,
             custom_prompt=custom_prompt,
             task_config={"batch_size": 10},
         ),  # Generate knowledge graphs from the document chunks.

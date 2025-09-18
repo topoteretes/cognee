@@ -28,7 +28,7 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
         self,
         ontology_file: Optional[str] = None,
         matching_strategy: Optional[MatchingStrategy] = None,
-    ):
+    ) -> None:
         super().__init__(matching_strategy)
         self.ontology_file = ontology_file
         try:
