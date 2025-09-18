@@ -155,21 +155,19 @@ class S3FileStorage(Storage):
         """
         Ensure that the specified directory exists, creating it if necessary.
 
-        If the directory already exists, no action is taken.
+        For S3 storage, this is a no-op since directories are created implicitly
+        when files are written to paths. S3 doesn't have actual directories,
+        just object keys with prefixes that appear as directories.
 
         Parameters:
         -----------
 
             - directory_path (str): The path of the directory to check or create.
         """
-        if not directory_path.strip():
-            directory_path = self.storage_path.replace("s3://", "")
-
-        def ensure_directory():
-            if not self.s3.exists(directory_path):
-                self.s3.makedirs(directory_path, exist_ok=True)
-
-        await run_async(ensure_directory)
+        # In S3, directories don't exist as separate entities - they're just prefixes
+        # When you write a file to s3://bucket/path/to/file.txt, the "directories"
+        # path/ and path/to/ are implicitly created. No explicit action needed.
+        pass
 
     async def copy_file(self, source_file_path: str, destination_file_path: str):
         """
