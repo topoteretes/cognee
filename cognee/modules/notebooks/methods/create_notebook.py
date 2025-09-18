@@ -6,6 +6,8 @@ from cognee.infrastructure.databases.relational import with_async_session
 
 from ..models.Notebook import Notebook, NotebookCell
 
+TUTORIAL_NOTEBOOK_NAME = "Python Development with Cognee Tutorial 🧠"
+
 
 async def _create_tutorial_notebook(
     user_id: UUID, session: AsyncSession, force_refresh: bool = False
@@ -24,7 +26,7 @@ async def _create_tutorial_notebook(
             zip_url=TUTORIAL_ZIP_URL,
             owner_id=user_id,
             notebook_filename="tutorial.ipynb",
-            name="Python Development with Cognee Tutorial 🧠",
+            name=TUTORIAL_NOTEBOOK_NAME,
             deletable=False,
             force=force_refresh,
         )
