@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Header } from "@/ui/Layout";
 import { SearchIcon } from "@/ui/Icons";
-import { Notebook } from "@/ui/elements";
+import { CTAButton, Notebook } from "@/ui/elements";
 import { fetch, isCloudEnvironment } from "@/utils";
 import { Notebook as NotebookType } from "@/ui/elements/Notebook/types";
 import { useAuthenticatedUser } from "@/modules/auth";
@@ -111,8 +111,8 @@ export default function Dashboard({ accessToken }: DashboardProps) {
   const isCloudEnv = isCloudEnvironment();
 
   return (
-    <div className="h-full flex flex-col bg-gray-200">
-      <video
+    <div className="h-full flex flex-col">
+      {/* <video
         autoPlay
         loop
         muted
@@ -121,12 +121,12 @@ export default function Dashboard({ accessToken }: DashboardProps) {
       >
         <source src="/videos/background-video-blur.mp4" type="video/mp4" />
         Your browser does not support the video tag.
-      </video>
+      </video> */}
 
       <Header user={user} />
 
-      <div className="relative flex-1 flex flex-row gap-2.5 items-start w-full max-w-[1920px] max-h-[calc(100% - 3.5rem)] overflow-hidden mx-auto px-2.5 py-2.5">
-        <div className="px-5 py-4 lg:w-96 bg-white rounded-xl min-h-full">
+      <div className="relative flex-1 flex flex-row gap-2.5 items-start w-full max-w-[1920px] max-h-[calc(100% - 3.5rem)] overflow-hidden mx-auto px-2.5 pb-2.5">
+        <div className="px-5 py-4 lg:w-96 bg-white rounded-xl h-[calc(100%-2.75rem)]">
           <div className="relative mb-2">
             <label htmlFor="search-input"><SearchIcon className="absolute left-3 top-[10px] cursor-text" /></label>
             <input id="search-input" className="text-xs leading-3 w-full h-8 flex flex-row items-center gap-2.5 rounded-3xl pl-9 placeholder-gray-300 border-gray-300 border-[1px] focus:outline-indigo-600" placeholder="Search datasets..." />
@@ -151,6 +151,12 @@ export default function Dashboard({ accessToken }: DashboardProps) {
                 onDatasetsChange={handleDatasetsChange}
               />
             </CogneeInstancesAccordion>
+          </div>
+
+          <div className="fixed bottom-2.5 w-[calc(min(1920px,100%)/5)] lg:w-96 ml-[-1.25rem] mx-auto">
+            <a href="/plan">
+              <CTAButton className="w-full">Select a plan</CTAButton>
+            </a>
           </div>
         </div>
 

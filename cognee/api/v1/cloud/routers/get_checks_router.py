@@ -16,7 +16,7 @@ def get_checks_router():
         api_token = request.headers.get("X-Api-Key")
 
         if api_token is None:
-            return CloudApiKeyMissingError()
+            raise CloudApiKeyMissingError()
 
         return await check_api_key(api_token)
 
