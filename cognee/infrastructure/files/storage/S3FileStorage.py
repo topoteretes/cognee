@@ -211,6 +211,55 @@ class S3FileStorage(Storage):
 
         await run_async(remove_file)
 
+    async def list_files(self, directory_path: str, recursive: bool = False) -> list[str]:
+        """
+        List all files in the specified directory.
+
+        Parameters:
+        -----------
+            - directory_path (str): The directory path to list files from
+            - recursive (bool): If True, list files recursively in subdirectories
+
+        Returns:
+        --------
+            - list[str]: List of file paths relative to the storage root
+        """
+
+        def list_files_sync():
+            if directory_path:
+                # Combine storage path with directory path
+                full_path = os.path.join(self.storage_path.replace("s3://", ""), directory_path)
+            else:
+                full_path = self.storage_path.replace("s3://", "")
+
+            if recursive:
+                # Use ** for recursive search
+                pattern = f"{full_path}/**"
+            else:
+                # Just files in the immediate directory
+                pattern = f"{full_path}/*"
+
+            # Use s3fs glob to find files
+            try:
+                all_paths = self.s3.glob(pattern)
+                # Filter to only files (not directories)
+                files = [path for path in all_paths if self.s3.isfile(path)]
+
+                # Convert back to relative paths from storage root
+                storage_prefix = self.storage_path.replace("s3://", "")
+                relative_files = []
+                for file_path in files:
+                    if file_path.startswith(storage_prefix):
+                        relative_path = file_path[len(storage_prefix) :].lstrip("/")
+                        relative_files.append(relative_path)
+
+                return relative_files
+            except Exception:
+                # If directory doesn't exist or other error, return empty list
+                return []
+
+        return await run_async(list_files_sync)
+
     async def remove_all(self, tree_path: str):
         """
         Remove an entire directory tree at the specified path, including all files and

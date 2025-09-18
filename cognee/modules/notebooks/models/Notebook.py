@@ -115,30 +115,64 @@ class Notebook(Base):
             notebook_content = await asyncio.to_thread(f.read)
         notebook = cls.from_ipynb_string(notebook_content, owner_id, name, deletable)
 
+        # Update file paths in notebook cells to point to actual cached data files
+        await cls._update_file_paths_in_cells(notebook, extracted_cache_dir)
+
         return notebook
 
     @staticmethod
-    def _update_file_paths_in_cells(notebook: "Notebook", cache_dir: Path) -> None:
+    async def _update_file_paths_in_cells(notebook: "Notebook", cache_dir: str) -> None:
         """
         Update file paths in code cells to use actual cached data files.
+        Works with both local filesystem and S3 storage.
 
         Args:
             notebook: Parsed Notebook instance with cells to update
             cache_dir: Path to the cached tutorial directory containing data files
         """
         import re
+        from cognee.base_config import get_base_config
+        from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
+        from cognee.shared.logging_utils import get_logger
 
-        # Parse the notebook to find actual data files
-        data_dir = cache_dir / "data"
-        if not data_dir.exists():
+        logger = get_logger()
+
+        # Get storage manager for the cache directory
+        base_config = get_base_config()
+        storage_manager = get_file_storage(base_config.system_root_directory)
+
+        # Look for data files in the data subdirectory
+        data_dir = f"{cache_dir}/data"
+
+        try:
+            # Get all data files in the cache directory
+            data_files = {}
+            file_list = await storage_manager.list_files(data_dir, recursive=True)
+
+            for file_path in file_list:
+                # Extract just the filename
+                filename = file_path.split("/")[-1]
+
+                # For S3, use the full S3 URL; for local, use the absolute path
+                if hasattr(
+                    storage_manager.storage, "storage_path"
+                ) and storage_manager.storage.storage_path.startswith("s3://"):
+                    # S3 storage - construct full S3 URL
+                    full_s3_path = f"{storage_manager.storage.storage_path}/{file_path}"
+                    data_files[filename] = full_s3_path
+                else:
+                    # Local storage - use absolute path
+                    from cognee.infrastructure.files.storage.LocalFileStorage import get_parsed_path
+                    import os
+
+                    parsed_storage_path = get_parsed_path(storage_manager.storage.storage_path)
+                    absolute_path = os.path.join(parsed_storage_path, file_path)
+                    data_files[filename] = absolute_path
+
+        except Exception as e:
+            # If we can't list files, skip updating paths
+            logger.error(f"Error listing data files in {data_dir}: {e}")
             return
-
-        # Get all data files in the cache directory
-        data_files = {}
-        for file_path in data_dir.rglob("*"):
-            if file_path.is_file():
-                # Map filename to actual absolute path
-                data_files[file_path.name] = str(file_path)
 
         # Pattern to match file://data/filename patterns in code cells
         file_pattern = r'"file://data/([^"]+)"'
@@ -146,15 +180,23 @@ class Notebook(Base):
         def replace_path(match):
             filename = match.group(1)
             if filename in data_files:
-                # Return the actual absolute path to the cached file
-                return f'"file://{data_files[filename]}"'
+                # Return the actual path to the cached file
+                return f'"{data_files[filename]}"'
             return match.group(0)  # Keep original if file not found
 
         # Update only code cells
+        updated_cells = 0
         for cell in notebook.cells:
             if cell.type == "code":
+                original_content = cell.content
                 # Update file paths in the cell content
                 cell.content = re.sub(file_pattern, replace_path, cell.content)
+                if original_content != cell.content:
+                    updated_cells += 1
+
+        # Log summary of updates (useful for monitoring)
+        if updated_cells > 0:
+            logger.info(f"Updated file paths in {updated_cells} notebook cells")
 
     @classmethod
     def from_ipynb_string(
