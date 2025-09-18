@@ -1061,7 +1061,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["distributed", "neo4j", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "gemini", "huggingface", "ollama", "mistral", "anthropic", "deepeval", "posthog", "falkordb", "groq", "chromadb", "docs", "codegraph", "evals", "gui", "graphiti", "aws", "dev", "debug"]
+provides-extras = ["api", "distributed", "neo4j", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "gemini", "huggingface", "ollama", "mistral", "anthropic", "deepeval", "posthog", "falkordb", "groq", "chromadb", "docs", "codegraph", "evals", "gui", "graphiti", "aws", "dev", "debug"]
 
 [[package]]
 name = "colorama"
