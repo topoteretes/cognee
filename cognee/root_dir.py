@@ -20,11 +20,11 @@ def ensure_absolute_path(path: str) -> str:
     """
     if path is None:
         raise ValueError("Path cannot be None")
-    
+
     # Check if it's an S3 URL - S3 URLs are absolute by definition
-    if path.startswith('s3://'):
+    if path.startswith("s3://"):
         return path
-    
+
     path_obj = Path(path).expanduser()
     if path_obj.is_absolute():
         return str(path_obj.resolve())
