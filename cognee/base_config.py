@@ -10,6 +10,7 @@ import pydantic
 class BaseConfig(BaseSettings):
     data_root_directory: str = get_absolute_path(".data_storage")
     system_root_directory: str = get_absolute_path(".cognee_system")
+    cache_root_directory: str = get_absolute_path(".cognee_cache")
     monitoring_tool: object = Observer.LANGFUSE
 
     @pydantic.model_validator(mode="after")
@@ -17,6 +18,7 @@ class BaseConfig(BaseSettings):
         # Require absolute paths for root directories
         self.data_root_directory = ensure_absolute_path(self.data_root_directory)
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
+        self.cache_root_directory = ensure_absolute_path(self.cache_root_directory)
         return self
 
     langfuse_public_key: Optional[str] = os.getenv("LANGFUSE_PUBLIC_KEY")
@@ -31,6 +33,7 @@ class BaseConfig(BaseSettings):
             "data_root_directory": self.data_root_directory,
             "system_root_directory": self.system_root_directory,
             "monitoring_tool": self.monitoring_tool,
+            "cache_root_directory": self.cache_root_directory,
         }
 
 

@@ -15,6 +15,7 @@ from io import BytesIO
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
+from cognee.infrastructure.files.storage.StorageManager import StorageManager
 from cognee.shared.utils import create_secure_ssl_context
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,19 @@ class StorageAwareCache:
         """
         self.base_config = get_base_config()
         self.cache_base_path = f"{cache_subdir}"
-        self.storage_manager = get_file_storage(self.base_config.system_root_directory)
+        self.storage_manager: StorageManager = get_file_storage(
+            self.base_config.cache_root_directory
+        )
+
+        # Print absolute path
+        storage_path = self.storage_manager.storage.storage_path
+        if storage_path.startswith("s3://"):
+            absolute_path = storage_path  # S3 paths are already absolute
+        else:
+            import os
+
+            absolute_path = os.path.abspath(storage_path)
+        logger.info(f"Storage manager absolute path: {absolute_path}")
 
     async def get_cache_dir(self) -> str:
         """Get the base cache directory path."""
