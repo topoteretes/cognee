@@ -167,8 +167,6 @@ class StorageAwareCache:
         """
         cache_dir = await self.get_cache_subdir(cache_subdir_name)
 
-        logger.info(f"DAULET Getting cache subdirectory: {cache_dir}")
-
         # Check if already cached and valid
         if not force and await self._is_cache_valid(cache_dir, version_or_hash):
             # Also check if remote content has changed
