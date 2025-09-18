@@ -25,7 +25,7 @@ async def resolve_authorized_user_datasets(
         datasets: Dataset names or Dataset UUID (in case Datasets already exist)
 
     Returns:
-
+        Tuple[User, List[Dataset]]: A tuple containing the user and the list of authorized datasets.
     """
     # If no user is provided use default user
     if user is None:

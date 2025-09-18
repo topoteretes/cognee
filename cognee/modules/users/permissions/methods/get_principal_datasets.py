@@ -9,6 +9,17 @@ from ...models.ACL import ACL
 
 
 async def get_principal_datasets(principal: Principal, permission_type: str) -> list[Dataset]:
+    """
+        Return a list of datasets for which the user (principal) has a certain permission.
+    Args:
+        principal: Information about the user
+        permission_type: Type of permission
+
+    Returns:
+        list[Dataset]: List of datasets for which the user (principal)
+        has the permission (permission_type).
+
+    """
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
