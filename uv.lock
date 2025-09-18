@@ -811,7 +811,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "0.3.4.dev2"
+version = "0.3.4.dev3"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -831,6 +831,7 @@ dependencies = [
     { name = "limits" },
     { name = "litellm" },
     { name = "matplotlib" },
+    { name = "nbformat" },
     { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "networkx", version = "3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "nltk" },
@@ -1012,6 +1013,7 @@ requires-dist = [
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'dev'", specifier = ">=0.26.2,<0.27" },
     { name = "modal", marker = "extra == 'distributed'", specifier = ">=1.0.5,<2.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.7.1,<2" },
+    { name = "nbformat", specifier = ">=5.7.0,<6.0.0" },
     { name = "neo4j", marker = "extra == 'neo4j'", specifier = ">=5.28.0,<6" },
     { name = "networkx", specifier = ">=3.4.2,<4" },
     { name = "nltk", specifier = ">=3.9.1,<4.0.0" },

@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.3.4.dev2"
+version = "0.3.4.dev3"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -46,6 +46,7 @@ dependencies = [
     "matplotlib>=3.8.3,<4",
     "networkx>=3.4.2,<4",
     "lancedb>=0.24.0,<1.0.0",
+    "nbformat>=5.7.0,<6.0.0",
     "alembic>=1.13.3,<2",
     "pre-commit>=4.0.1,<5",
     "scikit-learn>=1.6.1,<2",
