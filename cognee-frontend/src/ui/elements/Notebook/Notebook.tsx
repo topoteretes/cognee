@@ -193,7 +193,7 @@ export default function Notebook({ notebook, updateNotebook, runCell }: Notebook
                               output: <CellResult content={cell.result} />
                             </div>
                           )}
-                          {cell.error && (
+                          {!!cell.error?.length && (
                             <div className="px-2 py-2">
                               error: {cell.error}
                             </div>
