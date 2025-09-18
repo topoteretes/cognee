@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 
-export default function handleServerErrors(response: Response, retry?: (response: Response) => Promise<Response>): Promise<Response> {
+export default function handleServerErrors(response: Response, retry?: (response: Response) => Promise<Response>, useCloud?: boolean): Promise<Response> {
   return new Promise((resolve, reject) => {
-    if (response.status === 401) {
+    if (response.status === 401 && !useCloud) {
       if (retry) {
         return retry(response)
           .catch(() => {
@@ -13,7 +13,10 @@ export default function handleServerErrors(response: Response, retry?: (response
       }
     }
     if (!response.ok) {
-      return response.json().then(error => reject(error));
+      return response.json().then(error => {
+        error.status = response.status;
+        reject(error);
+      });
     }
 
     if (response.status >= 200 && response.status < 300) {
