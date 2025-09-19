@@ -13,7 +13,6 @@ class BaseConfig(BaseSettings):
     cache_root_directory: str = get_absolute_path(".cognee_cache")
     monitoring_tool: object = Observer.NONE
 
-
     @pydantic.model_validator(mode="after")
     def validate_paths(self):
         # Adding this here temporarily to ensure that the cache root directory is set correctly for S3 storage automatically
