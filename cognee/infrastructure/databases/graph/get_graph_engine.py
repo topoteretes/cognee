@@ -32,6 +32,7 @@ def create_graph_engine(
     graph_database_name="",
     graph_database_username="",
     graph_database_password="",
+    graph_database_port="",
 ):
     """
     Create a graph engine based on the specified provider type.
