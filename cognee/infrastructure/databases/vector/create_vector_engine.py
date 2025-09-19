@@ -19,8 +19,7 @@ def create_vector_engine(
     for each provider, raising an EnvironmentError if any are missing, or ImportError if the
     ChromaDB package is not installed.
 
-    Supported providers include: pgvector, FalkorDB, ChromaDB, and
-    LanceDB.
+    Supported providers include: pgvector, ChromaDB, and LanceDB.
 
     Parameters:
     -----------
@@ -72,18 +71,6 @@ def create_vector_engine(
             connection_string,
             vector_db_key,
             embedding_engine,
-        )
-
-    elif vector_db_provider == "falkordb":
-        if not (vector_db_url and vector_db_port):
-            raise EnvironmentError("Missing requred FalkorDB credentials!")
-
-        from ..hybrid.falkordb.FalkorDBAdapter import FalkorDBAdapter
-
-        return FalkorDBAdapter(
-            database_url=vector_db_url,
-            database_port=vector_db_port,
-            embedding_engine=embedding_engine,
         )
 
     elif vector_db_provider == "chromadb":
