@@ -11,7 +11,8 @@ class BaseConfig(BaseSettings):
     data_root_directory: str = get_absolute_path(".data_storage")
     system_root_directory: str = get_absolute_path(".cognee_system")
     cache_root_directory: str = get_absolute_path(".cognee_cache")
-    monitoring_tool: object = Observer.LANGFUSE
+    monitoring_tool: object = Observer.NONE
+
 
     @pydantic.model_validator(mode="after")
     def validate_paths(self):
@@ -30,7 +31,10 @@ class BaseConfig(BaseSettings):
         # Require absolute paths for root directories
         self.data_root_directory = ensure_absolute_path(self.data_root_directory)
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
-        self.cache_root_directory = ensure_absolute_path(self.cache_root_directory)
+        # Set monitoring tool based on available keys
+        if self.langfuse_public_key and self.langfuse_secret_key:
+            self.monitoring_tool = Observer.LANGFUSE
+
         return self
 
     langfuse_public_key: Optional[str] = os.getenv("LANGFUSE_PUBLIC_KEY")
