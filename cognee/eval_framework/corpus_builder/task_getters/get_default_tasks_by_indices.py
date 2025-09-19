@@ -5,7 +5,7 @@ from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
 
 async def get_default_tasks_by_indices(
@@ -33,7 +33,7 @@ async def get_no_summary_tasks(
     # Get base tasks (0=classify, 1=check_permissions, 2=extract_chunks)
     base_tasks = await get_default_tasks_by_indices([0, 1, 2], chunk_size, chunker)
 
-    ontology_adapter = OntologyResolver(ontology_file=ontology_file_path)
+    ontology_adapter = RDFLibOntologyResolver(ontology_file=ontology_file_path)
 
     graph_task = Task(
         extract_graph_from_data,

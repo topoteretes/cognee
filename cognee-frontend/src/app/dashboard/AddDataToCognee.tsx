@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useState } from "react";
 
 import { LoadingIndicator } from "@/ui/App";
 import { useModal } from "@/ui/elements/Modal";
-import { CloseIcon, PlusIcon } from "@/ui/Icons";
+import { CloseIcon, MinusIcon, PlusIcon } from "@/ui/Icons";
 import { CTAButton, GhostButton, IconButton, Modal, NeutralButton, Select } from "@/ui/elements";
 
 import addData from "@/modules/ingestion/addData";
@@ -16,16 +16,22 @@ interface AddDataToCogneeProps {
 }
 
 export default function AddDataToCognee({ datasets, refreshDatasets, useCloud = false }: AddDataToCogneeProps) {
-  const [filesForUpload, setFilesForUpload] = useState<FileList | null>(null);
+  const [filesForUpload, setFilesForUpload] = useState<File[]>([]);
 
-  const prepareFiles = useCallback((event: FormEvent<HTMLInputElement>) => {
+  const addFiles = useCallback((event: FormEvent<HTMLInputElement>) => {
     const formElements = event.currentTarget;
-    const files = formElements.files;
+    const newFiles = formElements.files;
 
-    setFilesForUpload(files);
+    if (newFiles?.length) {
+      setFilesForUpload((oldFiles) => [...oldFiles, ...Array.from(newFiles)]);
+    }
   }, []);
 
-  const processDataWithCognee = useCallback((state: object, event?: FormEvent<HTMLFormElement>) => {
+  const removeFile = useCallback((file: File) => {
+    setFilesForUpload((oldFiles) => oldFiles.filter((f) => f !== file));
+  }, []);
+
+  const processDataWithCognee = useCallback((state?: object, event?: FormEvent<HTMLFormElement>) => {
     event!.preventDefault();
 
     if (!filesForUpload) {
@@ -41,7 +47,7 @@ export default function AddDataToCognee({ datasets, refreshDatasets, useCloud = 
       } : {
         name: "main_dataset",
       },
-      Array.from(filesForUpload),
+      filesForUpload,
       useCloud
     )
       .then(({ dataset_id, dataset_name }) => {
@@ -57,7 +63,7 @@ export default function AddDataToCognee({ datasets, refreshDatasets, useCloud = 
           useCloud,
         )
           .then(() => {
-            setFilesForUpload(null);
+            setFilesForUpload([]);
           });
       });
   }, [filesForUpload, refreshDatasets, useCloud]);
@@ -86,24 +92,25 @@ export default function AddDataToCognee({ datasets, refreshDatasets, useCloud = 
           <div className="mt-8 mb-6">Please select a {useCloud ? "cloud" : "local"} dataset to add data in.<br/> If you don&apos;t have any, don&apos;t worry, we will create one for you.</div>
           <form onSubmit={submitDataToCognee}>
             <div className="max-w-md flex flex-col gap-4">
-              <Select name="datasetName">
+              <Select defaultValue={datasets.length ? datasets[0].id : ""} name="datasetName">
                 {!datasets.length && <option value="">main_dataset</option>}
-                {datasets.map((dataset: Dataset, index) => (
-                  <option selected={index===0} key={dataset.id} value={dataset.id}>{dataset.name}</option>
+                {datasets.map((dataset: Dataset) => (
+                  <option key={dataset.id} value={dataset.id}>{dataset.name}</option>
                 ))}
               </Select>
 
               <NeutralButton className="w-full relative justify-start pl-4">
-                <input onChange={prepareFiles} required name="files" tabIndex={-1} type="file" multiple className="absolute w-full h-full cursor-pointer opacity-0" />
+                <input onChange={addFiles} required name="files" tabIndex={-1} type="file" multiple className="absolute w-full h-full cursor-pointer opacity-0" />
                 <span>select files</span>
               </NeutralButton>
 
-              {filesForUpload?.length && (
+              {!!filesForUpload.length && (
                 <div className="pt-4 mt-4 border-t-1 border-t-gray-100">
                   <div className="mb-1.5">selected files:</div>
-                  {Array.from(filesForUpload || []).map((file) => (
-                    <div key={file.name} className="py-1.5 pl-2">
+                  {filesForUpload.map((file) => (
+                    <div key={file.name} className="py-1.5 pl-2 flex flex-row items-center justify-between w-full">
                       <span className="text-sm">{file.name}</span>
+                      <IconButton onClick={removeFile.bind(null, file)}><MinusIcon /></IconButton>
                     </div>
                   ))}
                 </div>
