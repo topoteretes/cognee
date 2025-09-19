@@ -214,5 +214,7 @@ async def migrate_relational_database(graph_db, schema, migrate_column_data=True
     await index_data_points(list(node_mapping.values()))
     await index_graph_edges()
 
-    logger.info("Data successfully migrated from relational database to desired graph database.")
+    logger.info(
+        "Data successfully migrated from relational database to desired graph database."
+    )
     return await graph_db.get_graph_data()

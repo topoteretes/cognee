@@ -5,7 +5,9 @@ from unittest.mock import patch
 
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.data.processing.document_types.ImageDocument import ImageDocument
-from cognee.tests.integration.documents.AudioDocument_test import mock_get_embedding_engine
+from cognee.tests.integration.documents.AudioDocument_test import (
+    mock_get_embedding_engine,
+)
 from cognee.tests.integration.documents.async_gen_zip import async_gen_zip
 
 chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
@@ -22,7 +24,9 @@ The commotion has attracted an audience: a murder of crows has gathered in the l
 
 
 @patch.object(
-    chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
+    chunk_by_sentence_module,
+    "get_embedding_engine",
+    side_effect=mock_get_embedding_engine,
 )
 @pytest.mark.asyncio
 async def test_ImageDocument(mock_engine):
@@ -38,12 +42,12 @@ async def test_ImageDocument(mock_engine):
             GROUND_TRUTH,
             document.read(chunker_cls=TextChunker, max_chunk_size=64),
         ):
-            assert ground_truth["word_count"] == paragraph_data.chunk_size, (
-                f'{ground_truth["word_count"] = } != {paragraph_data.chunk_size = }'
-            )
-            assert ground_truth["len_text"] == len(paragraph_data.text), (
-                f'{ground_truth["len_text"] = } != {len(paragraph_data.text) = }'
-            )
-            assert ground_truth["cut_type"] == paragraph_data.cut_type, (
-                f'{ground_truth["cut_type"] = } != {paragraph_data.cut_type = }'
-            )
+            assert (
+                ground_truth["word_count"] == paragraph_data.chunk_size
+            ), f'{ground_truth["word_count"] = } != {paragraph_data.chunk_size = }'
+            assert ground_truth["len_text"] == len(
+                paragraph_data.text
+            ), f'{ground_truth["len_text"] = } != {len(paragraph_data.text) = }'
+            assert (
+                ground_truth["cut_type"] == paragraph_data.cut_type
+            ), f'{ground_truth["cut_type"] = } != {paragraph_data.cut_type = }'

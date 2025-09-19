@@ -98,18 +98,26 @@ def downgrade() -> None:
         sa.Column("pipeline_name", sa.TEXT(), autoincrement=False, nullable=False),
         sa.Column("state", sa.TEXT(), autoincrement=False, nullable=False),
         sa.Column(
-            "created_at", postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=False
+            "created_at",
+            postgresql.TIMESTAMP(timezone=True),
+            autoincrement=False,
+            nullable=False,
         ),
         sa.Column("version_hash", sa.TEXT(), autoincrement=False, nullable=True),
         sa.Column("_dlt_load_id", sa.TEXT(), autoincrement=False, nullable=False),
-        sa.Column("_dlt_id", sa.VARCHAR(length=128), autoincrement=False, nullable=False),
+        sa.Column(
+            "_dlt_id", sa.VARCHAR(length=128), autoincrement=False, nullable=False
+        ),
     )
     op.create_table(
         "_dlt_version",
         sa.Column("version", sa.BIGINT(), autoincrement=False, nullable=False),
         sa.Column("engine_version", sa.BIGINT(), autoincrement=False, nullable=False),
         sa.Column(
-            "inserted_at", postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=False
+            "inserted_at",
+            postgresql.TIMESTAMP(timezone=True),
+            autoincrement=False,
+            nullable=False,
         ),
         sa.Column("schema_name", sa.TEXT(), autoincrement=False, nullable=False),
         sa.Column("version_hash", sa.TEXT(), autoincrement=False, nullable=False),
@@ -121,7 +129,10 @@ def downgrade() -> None:
         sa.Column("schema_name", sa.TEXT(), autoincrement=False, nullable=True),
         sa.Column("status", sa.BIGINT(), autoincrement=False, nullable=False),
         sa.Column(
-            "inserted_at", postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=False
+            "inserted_at",
+            postgresql.TIMESTAMP(timezone=True),
+            autoincrement=False,
+            nullable=False,
         ),
         sa.Column("schema_version_hash", sa.TEXT(), autoincrement=False, nullable=True),
     )
@@ -135,6 +146,8 @@ def downgrade() -> None:
         sa.Column("content_hash", sa.TEXT(), autoincrement=False, nullable=True),
         sa.Column("owner_id", sa.TEXT(), autoincrement=False, nullable=True),
         sa.Column("_dlt_load_id", sa.TEXT(), autoincrement=False, nullable=False),
-        sa.Column("_dlt_id", sa.VARCHAR(length=128), autoincrement=False, nullable=False),
+        sa.Column(
+            "_dlt_id", sa.VARCHAR(length=128), autoincrement=False, nullable=False
+        ),
         sa.Column("node_set", sa.TEXT(), autoincrement=False, nullable=True),
     )

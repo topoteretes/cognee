@@ -37,17 +37,22 @@ class TextChunker(Chunker):
                         paragraph_chunks = []
                         self.chunk_size = 0
                     else:
-                        chunk_text = " ".join(chunk["text"] for chunk in paragraph_chunks)
+                        chunk_text = " ".join(
+                            chunk["text"] for chunk in paragraph_chunks
+                        )
                         try:
                             yield DocumentChunk(
                                 id=uuid5(
-                                    NAMESPACE_OID, f"{str(self.document.id)}-{self.chunk_index}"
+                                    NAMESPACE_OID,
+                                    f"{str(self.document.id)}-{self.chunk_index}",
                                 ),
                                 text=chunk_text,
                                 chunk_size=self.chunk_size,
                                 is_part_of=self.document,
                                 chunk_index=self.chunk_index,
-                                cut_type=paragraph_chunks[len(paragraph_chunks) - 1]["cut_type"],
+                                cut_type=paragraph_chunks[len(paragraph_chunks) - 1][
+                                    "cut_type"
+                                ],
                                 contains=[],
                                 metadata={
                                     "index_fields": ["text"],
@@ -64,7 +69,9 @@ class TextChunker(Chunker):
         if len(paragraph_chunks) > 0:
             try:
                 yield DocumentChunk(
-                    id=uuid5(NAMESPACE_OID, f"{str(self.document.id)}-{self.chunk_index}"),
+                    id=uuid5(
+                        NAMESPACE_OID, f"{str(self.document.id)}-{self.chunk_index}"
+                    ),
                     text=" ".join(chunk["text"] for chunk in paragraph_chunks),
                     chunk_size=self.chunk_size,
                     is_part_of=self.document,

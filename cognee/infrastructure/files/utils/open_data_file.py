@@ -9,7 +9,9 @@ from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorag
 
 
 @asynccontextmanager
-async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None, **kwargs):
+async def open_data_file(
+    file_path: str, mode: str = "rb", encoding: str = None, **kwargs
+):
     # Check if this is a file URI BEFORE normalizing (which corrupts URIs)
     if file_path.startswith("file://"):
         # Now split the actual filesystem path
@@ -19,7 +21,9 @@ async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None,
 
         file_storage = LocalFileStorage(file_dir_path)
 
-        with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
+        with file_storage.open(
+            file_name, mode=mode, encoding=encoding, **kwargs
+        ) as file:
             yield file
 
     elif file_path.startswith("s3://"):
@@ -53,9 +57,13 @@ async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None,
 
         # Validate that we have a proper filename
         if not file_name or file_name == "." or file_name == "..":
-            raise ValueError(f"Invalid filename extracted: '{file_name}' from path: '{file_path}'")
+            raise ValueError(
+                f"Invalid filename extracted: '{file_name}' from path: '{file_path}'"
+            )
 
         file_storage = LocalFileStorage(file_dir_path)
 
-        with file_storage.open(file_name, mode=mode, encoding=encoding, **kwargs) as file:
+        with file_storage.open(
+            file_name, mode=mode, encoding=encoding, **kwargs
+        ) as file:
             yield file

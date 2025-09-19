@@ -1,7 +1,9 @@
 import asyncio
 import random
 import time
-from cognee.infrastructure.databases.graph.kuzu.remote_kuzu_adapter import RemoteKuzuAdapter
+from cognee.infrastructure.databases.graph.kuzu.remote_kuzu_adapter import (
+    RemoteKuzuAdapter,
+)
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.shared.logging_utils import get_logger
 
@@ -59,7 +61,9 @@ async def process_batch(adapter, start_id, batch_size):
     nodes_time = time.time() - nodes_start
 
     # Create relationships concurrently
-    logger.info(f"Creating relationships for batch {start_id // batch_size + 1}/{NUM_BATCHES}...")
+    logger.info(
+        f"Creating relationships for batch {start_id // batch_size + 1}/{NUM_BATCHES}..."
+    )
     rels_start = time.time()
     rel_tasks = [
         create_relationship(adapter, batch_nodes[j]["id"], batch_nodes[j + 1]["id"])
@@ -69,7 +73,9 @@ async def process_batch(adapter, start_id, batch_size):
     rels_time = time.time() - rels_start
 
     batch_time = time.time() - batch_start
-    logger.info(f"Batch {start_id // batch_size + 1}/{NUM_BATCHES} completed in {batch_time:.2f}s")
+    logger.info(
+        f"Batch {start_id // batch_size + 1}/{NUM_BATCHES} completed in {batch_time:.2f}s"
+    )
     logger.info(f"  - Nodes creation: {nodes_time:.2f}s")
     logger.info(f"  - Relationships creation: {rels_time:.2f}s")
     return batch_time
@@ -91,7 +97,9 @@ async def create_test_data(adapter, batch_size=BATCH_SIZE):
 async def main():
     config = get_graph_config()
     adapter = RemoteKuzuAdapter(
-        config.graph_database_url, config.graph_database_username, config.graph_database_password
+        config.graph_database_url,
+        config.graph_database_username,
+        config.graph_database_password,
     )
 
     try:
@@ -108,23 +116,27 @@ async def main():
 
         # Create node table
         logger.info("[2/5] Creating node table structure...")
-        await adapter.query("""
+        await adapter.query(
+            """
         CREATE NODE TABLE TestNode (
             id STRING,
             name STRING,
             value INT64,
             PRIMARY KEY (id)
         )
-        """)
+        """
+        )
 
         # Create relationship table
         logger.info("[3/5] Creating relationship table structure...")
-        await adapter.query("""
+        await adapter.query(
+            """
         CREATE REL TABLE CONNECTS_TO (
             FROM TestNode TO TestNode,
             weight DOUBLE
         )
-        """)
+        """
+        )
 
         # Clear existing test data
         logger.info("[4/5] Clearing existing test data...")
@@ -144,7 +156,9 @@ async def main():
         result = await adapter.query("MATCH (n:TestNode) RETURN COUNT(n) as count")
         logger.info(f"Total nodes created: {result}")
 
-        result = await adapter.query("MATCH ()-[r:CONNECTS_TO]->() RETURN COUNT(r) as count")
+        result = await adapter.query(
+            "MATCH ()-[r:CONNECTS_TO]->() RETURN COUNT(r) as count"
+        )
         logger.info(f"Total relationships created: {result}")
 
         logger.info("=== Test Summary ===")

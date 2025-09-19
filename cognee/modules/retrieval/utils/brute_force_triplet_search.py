@@ -27,7 +27,9 @@ def format_triplets(edges):
                 # If the value is a dict, extract relevant keys from it
                 if isinstance(value, dict):
                     nested_values = {
-                        k: v for k, v in value.items() if k in attributes and v is not None
+                        k: v
+                        for k, v in value.items()
+                        if k in attributes and v is not None
                     }
                     result[attr] = nested_values
                 else:
@@ -43,9 +45,15 @@ def format_triplets(edges):
         node2_attributes = node2.attributes
 
         # Filter only non-None properties
-        node1_info = {key: value for key, value in node1_attributes.items() if value is not None}
-        node2_info = {key: value for key, value in node2_attributes.items() if value is not None}
-        edge_info = {key: value for key, value in edge_attributes.items() if value is not None}
+        node1_info = {
+            key: value for key, value in node1_attributes.items() if value is not None
+        }
+        node2_info = {
+            key: value for key, value in node2_attributes.items() if value is not None
+        }
+        edge_info = {
+            key: value for key, value in edge_attributes.items() if value is not None
+        }
 
         # Create the formatted triplet
         triplet = f"Node1: {node1_info}\nEdge: {edge_info}\nNode2: {node2_info}\n\n\n"
@@ -165,13 +173,19 @@ async def brute_force_triplet_search(
             f"Vector collection retrieval completed: Retrieved distances from {sum(1 for res in results if res)} collections in {projection_time:.2f}s"
         )
 
-        node_distances = {collection: result for collection, result in zip(collections, results)}
+        node_distances = {
+            collection: result for collection, result in zip(collections, results)
+        }
 
         edge_distances = node_distances.get("EdgeType_relationship_name", None)
 
-        await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)
+        await memory_fragment.map_vector_distances_to_graph_nodes(
+            node_distances=node_distances
+        )
         await memory_fragment.map_vector_distances_to_graph_edges(
-            vector_engine=vector_engine, query_vector=query_vector, edge_distances=edge_distances
+            vector_engine=vector_engine,
+            query_vector=query_vector,
+            edge_distances=edge_distances,
         )
 
         results = await memory_fragment.calculate_top_triplet_importances(k=top_k)
@@ -190,6 +204,8 @@ async def brute_force_triplet_search(
             error,
         )
         send_telemetry(
-            "cognee.brute_force_triplet_search EXECUTION FAILED", user.id, {"error": str(error)}
+            "cognee.brute_force_triplet_search EXECUTION FAILED",
+            user.id,
+            {"error": str(error)},
         )
         raise error

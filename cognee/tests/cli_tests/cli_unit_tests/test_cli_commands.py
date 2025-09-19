@@ -64,7 +64,9 @@ class TestAddCommand:
 
         mock_asyncio_run.assert_called_once()
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        mock_cognee.add.assert_awaited_once_with(data="test.txt", dataset_name="test_dataset")
+        mock_cognee.add.assert_awaited_once_with(
+            data="test.txt", dataset_name="test_dataset"
+        )
 
     @patch("cognee.cli.commands.add_command.asyncio.run", side_effect=_mock_run)
     def test_execute_multiple_items(self, mock_asyncio_run):
@@ -75,7 +77,9 @@ class TestAddCommand:
 
         with patch.dict(sys.modules, {"cognee": mock_cognee}):
             command = AddCommand()
-            args = argparse.Namespace(data=["test1.txt", "test2.txt"], dataset_name="test_dataset")
+            args = argparse.Namespace(
+                data=["test1.txt", "test2.txt"], dataset_name="test_dataset"
+            )
             command.execute(args)
 
         mock_asyncio_run.assert_called_once()
@@ -284,7 +288,9 @@ class TestDeleteCommand:
 
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
-    def test_execute_delete_dataset_with_confirmation(self, mock_asyncio_run, mock_confirm):
+    def test_execute_delete_dataset_with_confirmation(
+        self, mock_asyncio_run, mock_confirm
+    ):
         """Test execute delete dataset with user confirmation"""
         # Mock the cognee module
         mock_cognee = MagicMock()
@@ -303,13 +309,17 @@ class TestDeleteCommand:
         mock_confirm.assert_called_once_with(f"Delete dataset '{args.dataset_name}'?")
         mock_asyncio_run.assert_called_once()
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        mock_cognee.delete.assert_awaited_once_with(dataset_name="test_dataset", user_id=None)
+        mock_cognee.delete.assert_awaited_once_with(
+            dataset_name="test_dataset", user_id=None
+        )
 
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     def test_execute_delete_cancelled(self, mock_confirm):
         """Test execute when user cancels deletion"""
         command = DeleteCommand()
-        args = argparse.Namespace(dataset_name="test_dataset", user_id=None, all=False, force=False)
+        args = argparse.Namespace(
+            dataset_name="test_dataset", user_id=None, all=False, force=False
+        )
 
         mock_confirm.return_value = False
 
@@ -335,12 +345,16 @@ class TestDeleteCommand:
 
         mock_asyncio_run.assert_called_once()
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        mock_cognee.delete.assert_awaited_once_with(dataset_name="test_dataset", user_id=None)
+        mock_cognee.delete.assert_awaited_once_with(
+            dataset_name="test_dataset", user_id=None
+        )
 
     def test_execute_no_delete_target(self):
         """Test execute when no delete target is specified"""
         command = DeleteCommand()
-        args = argparse.Namespace(dataset_name=None, user_id=None, all=False, force=False)
+        args = argparse.Namespace(
+            dataset_name=None, user_id=None, all=False, force=False
+        )
 
         # Should not raise exception, just return with error message
         command.execute(args)
@@ -349,7 +363,9 @@ class TestDeleteCommand:
     def test_execute_with_exception(self, mock_asyncio_run):
         """Test execute handles exceptions properly"""
         command = DeleteCommand()
-        args = argparse.Namespace(dataset_name="test_dataset", user_id=None, all=False, force=True)
+        args = argparse.Namespace(
+            dataset_name="test_dataset", user_id=None, all=False, force=True
+        )
 
         mock_asyncio_run.side_effect = Exception("Delete error")
 
@@ -376,7 +392,9 @@ class TestConfigCommand:
 
         # Check that subparsers are created
         subparsers_actions = [
-            action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
+            action
+            for action in parser._actions
+            if isinstance(action, argparse._SubParsersAction)
         ]
         assert len(subparsers_actions) == 1
 
@@ -417,7 +435,9 @@ class TestConfigCommand:
         mock_import.return_value = mock_cognee
 
         command = ConfigCommand()
-        args = argparse.Namespace(config_action="set", key="llm_provider", value="anthropic")
+        args = argparse.Namespace(
+            config_action="set", key="llm_provider", value="anthropic"
+        )
 
         command.execute(args)
 
@@ -451,7 +471,9 @@ class TestConfigCommand:
 
         with patch.dict(sys.modules, {"cognee": mock_cognee}):
             command = ConfigCommand()
-            args = argparse.Namespace(config_action="unset", key="llm_provider", force=False)
+            args = argparse.Namespace(
+                config_action="unset", key="llm_provider", force=False
+            )
 
             mock_confirm.return_value = True
 

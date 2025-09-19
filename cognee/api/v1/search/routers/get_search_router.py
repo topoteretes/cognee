@@ -73,8 +73,12 @@ def get_search_router() -> APIRouter:
         except Exception as error:
             return JSONResponse(status_code=500, content={"error": str(error)})
 
-    @router.post("", response_model=Union[List[SearchResult], CombinedSearchResult, List])
-    async def search(payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)):
+    @router.post(
+        "", response_model=Union[List[SearchResult], CombinedSearchResult, List]
+    )
+    async def search(
+        payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)
+    ):
         """
         Search for nodes in the graph database.
 
@@ -111,7 +115,9 @@ def get_search_router() -> APIRouter:
                 "endpoint": "POST /v1/search",
                 "search_type": str(payload.search_type),
                 "datasets": payload.datasets,
-                "dataset_ids": [str(dataset_id) for dataset_id in payload.dataset_ids or []],
+                "dataset_ids": [
+                    str(dataset_id) for dataset_id in payload.dataset_ids or []
+                ],
                 "query": payload.query,
                 "system_prompt": payload.system_prompt,
                 "node_name": payload.node_name,

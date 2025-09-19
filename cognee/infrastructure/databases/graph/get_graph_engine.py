@@ -90,8 +90,12 @@ def create_graph_engine(
         if not (graph_database_url and graph_database_port):
             raise EnvironmentError("Missing required FalkorDB credentials.")
 
-        from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
-        from cognee.infrastructure.databases.hybrid.falkordb.FalkorDBAdapter import FalkorDBAdapter
+        from cognee.infrastructure.databases.vector.embeddings import (
+            get_embedding_engine,
+        )
+        from cognee.infrastructure.databases.hybrid.falkordb.FalkorDBAdapter import (
+            FalkorDBAdapter,
+        )
 
         embedding_engine = get_embedding_engine()
 
@@ -171,7 +175,9 @@ def create_graph_engine(
                 f"Neptune endpoint must have the format '{NEPTUNE_ANALYTICS_ENDPOINT_URL}<GRAPH_ID>'"
             )
 
-        graph_identifier = graph_database_url.replace(NEPTUNE_ANALYTICS_ENDPOINT_URL, "")
+        graph_identifier = graph_database_url.replace(
+            NEPTUNE_ANALYTICS_ENDPOINT_URL, ""
+        )
 
         return NeptuneAnalyticsAdapter(
             graph_id=graph_identifier,

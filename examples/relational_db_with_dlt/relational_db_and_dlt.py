@@ -18,7 +18,9 @@ from cognee.infrastructure.databases.relational import (
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
-from cognee.tasks.ingestion.migrate_relational_database import migrate_relational_database
+from cognee.tasks.ingestion.migrate_relational_database import (
+    migrate_relational_database,
+)
 from cognee.modules.search.types import SearchType
 
 from cognee.root_dir import get_absolute_path
@@ -79,7 +81,9 @@ async def setup_and_process_data():
         # Example: if 'pokemon_details' is expected, we can see how many rows:
         for table_tuple in tables:
             table_name = table_tuple[0]
-            row_count = conn.execute(sa.text(f"SELECT COUNT(*) FROM {table_name}")).fetchone()[0]
+            row_count = conn.execute(
+                sa.text(f"SELECT COUNT(*) FROM {table_name}")
+            ).fetchone()[0]
             print(f"    -> Table '{table_name}' has {row_count} row(s).")
 
     print("[setup_and_process_data] Data loading step finished.\n")
@@ -94,7 +98,9 @@ async def apply_foreign_key_fixes():
     with engine.connect() as conn:
         raw_conn = conn.connection.connection
         with open(
-            "examples/relational_db_with_dlt/fix_foreign_keys.sql", "r", encoding="utf-8"
+            "examples/relational_db_with_dlt/fix_foreign_keys.sql",
+            "r",
+            encoding="utf-8",
         ) as f:
             sql_script = f.read()
         raw_conn.executescript(sql_script)  # runs multiple statements
@@ -144,7 +150,8 @@ async def search_knowledge_graph():
     Perform a search query against the knowledge graph.
     """
     search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION, query_text="What kind of data do you contain?"
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="What kind of data do you contain?",
     )
     print(search_results)
 

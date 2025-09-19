@@ -27,15 +27,23 @@ class BaseBenchmarkAdapter(ABC):
                     raise ValueError(f"Invalid JSON in filter file: {e}")
 
         if all(isinstance(fid, str) for fid in instance_filter):
-            logger.info(f"Filtering by {len(instance_filter)} string IDs using key '{id_key}'")
-            filtered = [inst for inst in instances if inst.get(id_key) in instance_filter]
+            logger.info(
+                f"Filtering by {len(instance_filter)} string IDs using key '{id_key}'"
+            )
+            filtered = [
+                inst for inst in instances if inst.get(id_key) in instance_filter
+            ]
             if not filtered:
-                logger.warning(f"No instances found with the provided IDs using key '{id_key}'")
+                logger.warning(
+                    f"No instances found with the provided IDs using key '{id_key}'"
+                )
             return filtered
 
         if all(isinstance(fid, int) for fid in instance_filter):
             logger.info(f"Filtering by {len(instance_filter)} integer indices")
-            filtered = [instances[i] for i in instance_filter if 0 <= i < len(instances)]
+            filtered = [
+                instances[i] for i in instance_filter if 0 <= i < len(instances)
+            ]
             if not filtered:
                 logger.warning("No instances found at the provided indices")
             return filtered

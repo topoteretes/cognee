@@ -48,7 +48,9 @@ class VectorDBInterface(Protocol):
     """ Data points """
 
     @abstractmethod
-    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
+    async def create_data_points(
+        self, collection_name: str, data_points: List[DataPoint]
+    ):
         """
         Insert new data points into the specified collection.
 
@@ -106,7 +108,11 @@ class VectorDBInterface(Protocol):
 
     @abstractmethod
     async def batch_search(
-        self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False
+        self,
+        collection_name: str,
+        query_texts: List[str],
+        limit: int,
+        with_vectors: bool = False,
     ):
         """
         Perform a batch search using multiple text queries against a collection.

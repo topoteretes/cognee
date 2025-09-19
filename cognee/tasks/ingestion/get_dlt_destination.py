@@ -31,7 +31,9 @@ def get_dlt_destination() -> Union[type[dlt.destinations.sqlalchemy], None]:
         # The database is found  by combining the path location and the database name
         destination = dlt.destinations.sqlalchemy(
             credentials={
-                "database": os.path.join(relational_config.db_path, relational_config.db_name),
+                "database": os.path.join(
+                    relational_config.db_path, relational_config.db_name
+                ),
                 "drivername": relational_config.db_provider,
             },
         )

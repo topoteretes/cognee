@@ -38,7 +38,8 @@ async def extract_content_nodes_and_relationship_names(
             base_directory=base_directory,
         )
         system_prompt = LLMGateway.read_query_prompt(
-            "extract_graph_relationship_names_prompt_system.txt", base_directory=base_directory
+            "extract_graph_relationship_names_prompt_system.txt",
+            base_directory=base_directory,
         )
         response = await LLMGateway.acreate_structured_output(
             text_input=text_input,

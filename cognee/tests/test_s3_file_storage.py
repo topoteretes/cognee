@@ -54,7 +54,9 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    search_results = await cognee.search(query_type=SearchType.CHUNKS, query_text=random_node_name)
+    search_results = await cognee.search(
+        query_type=SearchType.CHUNKS, query_text=random_node_name
+    )
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted chunks are:\n")
     for result in search_results:
@@ -92,9 +94,9 @@ async def main():
     file_name = os.path.basename(db_path)
     file_storage = get_file_storage(dir_path)
 
-    assert not await file_storage.file_exists(file_name), (
-        "SQLite relational database is not deleted"
-    )
+    assert not await file_storage.file_exists(
+        file_name
+    ), "SQLite relational database is not deleted"
 
     from cognee.infrastructure.databases.graph import get_graph_config
 
@@ -102,9 +104,9 @@ async def main():
     # For Kuzu v0.11.0+, check if database file doesn't exist (single-file format with .kuzu extension)
     # For older versions or other providers, check if directory is empty
     if graph_config.graph_database_provider.lower() == "kuzu":
-        assert not os.path.exists(graph_config.graph_file_path), (
-            "Kuzu graph database file still exists"
-        )
+        assert not os.path.exists(
+            graph_config.graph_file_path
+        ), "Kuzu graph database file still exists"
     else:
         assert not os.path.exists(graph_config.graph_file_path) or not os.listdir(
             graph_config.graph_file_path

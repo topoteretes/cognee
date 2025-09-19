@@ -60,20 +60,24 @@ Third paragraph is cut and is missing the dot at the end""",
 
 
 @patch.object(
-    chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
+    chunk_by_sentence_module,
+    "get_embedding_engine",
+    side_effect=mock_get_embedding_engine,
 )
 def run_chunking_test(test_text, expected_chunks, mock_engine):
     chunks = []
-    for chunk_data in chunk_by_paragraph(data=test_text, batch_paragraphs=False, max_chunk_size=12):
+    for chunk_data in chunk_by_paragraph(
+        data=test_text, batch_paragraphs=False, max_chunk_size=12
+    ):
         chunks.append(chunk_data)
 
     assert len(chunks) == 3
 
     for expected_chunks_item, chunk in zip(expected_chunks, chunks):
         for key in ["text", "chunk_size", "cut_type"]:
-            assert chunk[key] == expected_chunks_item[key], (
-                f"{key = }: {chunk[key] = } != {expected_chunks_item[key] = }"
-            )
+            assert (
+                chunk[key] == expected_chunks_item[key]
+            ), f"{key = }: {chunk[key] = } != {expected_chunks_item[key] = }"
 
 
 def test_chunking_whole_text():

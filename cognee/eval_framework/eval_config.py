@@ -14,12 +14,16 @@ class EvalConfig(BaseSettings):
 
     # Question answering params
     answering_questions: bool = True
-    qa_engine: str = "cognee_completion"  # Options: 'cognee_completion' or 'cognee_graph_completion' or 'cognee_graph_completion_cot' or 'cognee_graph_completion_context_extension'
+    qa_engine: str = (
+        "cognee_completion"  # Options: 'cognee_completion' or 'cognee_graph_completion' or 'cognee_graph_completion_cot' or 'cognee_graph_completion_context_extension'
+    )
 
     # Evaluation params
     evaluating_answers: bool = True
     evaluating_contexts: bool = True
-    evaluation_engine: str = "DeepEval"  # Options: 'DeepEval' (uses deepeval_model), 'DirectLLM' (uses default llm from .env)
+    evaluation_engine: str = (
+        "DeepEval"  # Options: 'DeepEval' (uses deepeval_model), 'DirectLLM' (uses default llm from .env)
+    )
     evaluation_metrics: List[str] = [
         "correctness",
         "EM",

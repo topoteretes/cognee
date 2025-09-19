@@ -34,7 +34,9 @@ def get_memify_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("", response_model=dict)
-    async def memify(payload: MemifyPayloadDTO, user: User = Depends(get_authenticated_user)):
+    async def memify(
+        payload: MemifyPayloadDTO, user: User = Depends(get_authenticated_user)
+    ):
         """
         Enrichment pipeline in Cognee, can work with already built graphs. If no data is provided existing knowledge graph will be used as data,
         custom data can also be provided instead which can be processed with provided extraction and enrichment tasks.
@@ -86,7 +88,9 @@ def get_memify_router() -> APIRouter:
                 extraction_tasks=payload.extraction_tasks,
                 enrichment_tasks=payload.enrichment_tasks,
                 data=payload.data,
-                dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
+                dataset=(
+                    payload.dataset_id if payload.dataset_id else payload.dataset_name
+                ),
                 node_name=payload.node_name,
                 user=user,
             )

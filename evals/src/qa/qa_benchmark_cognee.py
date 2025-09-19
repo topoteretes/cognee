@@ -9,7 +9,9 @@ from cognee.api.v1.search import SearchType
 
 from .qa_benchmark_base import QABenchmarkRAG, QABenchmarkConfig
 from cognee.eval_framework.benchmark_adapters.hotpot_qa_adapter import HotpotQAAdapter
-from cognee.eval_framework.corpus_builder.corpus_builder_executor import CorpusBuilderExecutor
+from cognee.eval_framework.corpus_builder.corpus_builder_executor import (
+    CorpusBuilderExecutor,
+)
 from cognee.eval_framework.answer_generation.answer_generation_executor import (
     retriever_options,
 )
@@ -73,14 +75,18 @@ class QABenchmarkCognee(QABenchmarkRAG):
         qa_limit = config.qa_limit
 
         corpus, qa_pairs = adapter.load_corpus(
-            limit=max(corpus_limit, qa_limit)
-            if corpus_limit and qa_limit
-            else (corpus_limit or qa_limit),
+            limit=(
+                max(corpus_limit, qa_limit)
+                if corpus_limit and qa_limit
+                else (corpus_limit or qa_limit)
+            ),
             load_golden_context=True,  # Include golden context for evaluation
             instance_filter=instance_filter,
         )
 
-        print(f"Loaded {len(corpus)} documents and {len(qa_pairs)} QA pairs from HotpotQA adapter")
+        print(
+            f"Loaded {len(corpus)} documents and {len(qa_pairs)} QA pairs from HotpotQA adapter"
+        )
 
         return cls(corpus, qa_pairs, config)
 
@@ -95,7 +101,9 @@ class QABenchmarkCognee(QABenchmarkRAG):
         try:
             task_getter = TaskGetters(self.config.task_getter_type).getter_func
         except KeyError:
-            raise ValueError(f"Invalid task getter type: {self.config.task_getter_type}")
+            raise ValueError(
+                f"Invalid task getter type: {self.config.task_getter_type}"
+            )
 
         self.corpus_builder = CorpusBuilderExecutor(
             benchmark=self.config.benchmark,
@@ -124,9 +132,13 @@ class QABenchmarkCognee(QABenchmarkRAG):
     async def load_corpus_to_rag(self) -> None:
         """Load corpus data into Cognee using eval framework's corpus builder."""
         if not self.corpus_builder:
-            raise RuntimeError("Corpus builder not initialized. Call initialize_rag() first.")
+            raise RuntimeError(
+                "Corpus builder not initialized. Call initialize_rag() first."
+            )
 
-        print(f"Building corpus using eval framework with {len(self.corpus)} documents...")
+        print(
+            f"Building corpus using eval framework with {len(self.corpus)} documents..."
+        )
 
         # Set the corpus data in the builder
         self.corpus_builder.raw_corpus = self.corpus
@@ -140,7 +152,9 @@ class QABenchmarkCognee(QABenchmarkRAG):
     async def query_rag(self, question: str) -> str:
         """Query Cognee using eval framework's retriever."""
         if not self.retriever:
-            raise RuntimeError("Retriever not initialized. Call initialize_rag() first.")
+            raise RuntimeError(
+                "Retriever not initialized. Call initialize_rag() first."
+            )
 
         try:
             # Get completion (retriever handles context internally)

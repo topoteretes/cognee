@@ -44,7 +44,9 @@ def upgrade() -> None:
 
     original_extension_column = _get_column(insp, "data", "original_extension")
     if not original_extension_column:
-        op.add_column("data", sa.Column("original_extension", sa.String(), nullable=True))
+        op.add_column(
+            "data", sa.Column("original_extension", sa.String(), nullable=True)
+        )
         if op.get_context().dialect.name == "sqlite":
             # If column doesn't exist create new original_extension column and update from values of extension column
             with op.batch_alter_table("data") as batch_op:
@@ -60,7 +62,9 @@ def upgrade() -> None:
     original_mime_type = _get_column(insp, "data", "original_mime_type")
     if not original_mime_type:
         # If column doesn't exist create new original_mime_type column and update from values of mime_type column
-        op.add_column("data", sa.Column("original_mime_type", sa.String(), nullable=True))
+        op.add_column(
+            "data", sa.Column("original_mime_type", sa.String(), nullable=True)
+        )
         if op.get_context().dialect.name == "sqlite":
             with op.batch_alter_table("data") as batch_op:
                 batch_op.execute(
@@ -79,7 +83,9 @@ def upgrade() -> None:
     original_data_location = _get_column(insp, "data", "original_data_location")
     if not original_data_location:
         # If column doesn't exist create new original data column and update from values of raw_data_location column
-        op.add_column("data", sa.Column("original_data_location", sa.String(), nullable=True))
+        op.add_column(
+            "data", sa.Column("original_data_location", sa.String(), nullable=True)
+        )
         if op.get_context().dialect.name == "sqlite":
             with op.batch_alter_table("data") as batch_op:
                 batch_op.execute(
@@ -89,7 +95,9 @@ def upgrade() -> None:
                 )
         else:
             conn = op.get_bind()
-            conn.execute(data.update().values(original_data_location=data.c.raw_data_location))
+            conn.execute(
+                data.update().values(original_data_location=data.c.raw_data_location)
+            )
 
     raw_content_hash = _get_column(insp, "data", "raw_content_hash")
     if not raw_content_hash:

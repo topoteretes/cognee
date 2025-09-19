@@ -22,7 +22,10 @@ class JSONEncoder(json.JSONEncoder):
 
 def copy_model(model: DataPoint, include_fields: dict = {}, exclude_fields: list = []):
     fields = {
-        name: (field.annotation, field.default if field.default is not None else PydanticUndefined)
+        name: (
+            field.annotation,
+            field.default if field.default is not None else PydanticUndefined,
+        )
         for name, field in model.model_fields.items()
         if name not in exclude_fields
     }

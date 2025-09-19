@@ -7,7 +7,9 @@ from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset
 from cognee.modules.users.models import User
 
 
-async def create_dataset(dataset_name: str, user: User, session: AsyncSession) -> Dataset:
+async def create_dataset(
+    dataset_name: str, user: User, session: AsyncSession
+) -> Dataset:
     owner_id = user.id
 
     dataset = (

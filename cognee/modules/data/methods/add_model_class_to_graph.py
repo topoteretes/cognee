@@ -37,7 +37,9 @@ async def add_model_class_to_graph(
         if field_type is None:
             continue
 
-        if hasattr(field_type, "model_fields"):  # Check if field type is a Pydantic model
+        if hasattr(
+            field_type, "model_fields"
+        ):  # Check if field type is a Pydantic model
             await add_model_class_to_graph(field_type, graph, model_name, field_name)
         elif isinstance(get_origin(field.annotation), list):
             list_types = get_args(field_type)

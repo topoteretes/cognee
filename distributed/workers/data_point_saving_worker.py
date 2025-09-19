@@ -1,7 +1,12 @@
 import modal
 import asyncio
 from sqlalchemy.exc import OperationalError, DBAPIError
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from distributed.app import app
 from distributed.modal_image import image
@@ -15,7 +20,9 @@ logger = get_logger("data_point_saving_worker")
 
 
 class VectorDatabaseDeadlockError(Exception):
-    message = "A deadlock occurred while trying to add data points to the vector database."
+    message = (
+        "A deadlock occurred while trying to add data points to the vector database."
+    )
 
 
 def is_deadlock_error(error):
@@ -53,19 +60,25 @@ async def data_point_saving_worker():
     while True:
         if await add_data_points_queue.len.aio() != 0:
             try:
-                add_data_points_request = await add_data_points_queue.get.aio(block=False)
+                add_data_points_request = await add_data_points_queue.get.aio(
+                    block=False
+                )
             except modal.exception.DeserializationError as error:
                 logger.error(f"Deserialization error: {str(error)}")
                 continue
 
             if len(add_data_points_request) == 0:
-                print("Finished processing all data points; stopping vector engine queue.")
+                print(
+                    "Finished processing all data points; stopping vector engine queue."
+                )
                 return True
 
             if len(add_data_points_request) == 2:
                 (collection_name, data_points) = add_data_points_request
 
-                print(f"Adding {len(data_points)} data points to '{collection_name}' collection.")
+                print(
+                    f"Adding {len(data_points)} data points to '{collection_name}' collection."
+                )
 
                 @retry(
                     retry=retry_if_exception_type(VectorDatabaseDeadlockError),

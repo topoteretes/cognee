@@ -13,7 +13,9 @@ class LLMGateway:
     def render_prompt(filename: str, context: dict, base_directory: str = None):
         from cognee.infrastructure.llm.prompts import render_prompt
 
-        return render_prompt(filename=filename, context=context, base_directory=base_directory)
+        return render_prompt(
+            filename=filename, context=context, base_directory=base_directory
+        )
 
     @staticmethod
     def acreate_structured_output(
@@ -25,7 +27,9 @@ class LLMGateway:
 
         llm_client = get_llm_client()
         return llm_client.acreate_structured_output(
-            text_input=text_input, system_prompt=system_prompt, response_model=response_model
+            text_input=text_input,
+            system_prompt=system_prompt,
+            response_model=response_model,
         )
 
     @staticmethod
@@ -38,7 +42,9 @@ class LLMGateway:
 
         llm_client = get_llm_client()
         return llm_client.create_structured_output(
-            text_input=text_input, system_prompt=system_prompt, response_model=response_model
+            text_input=text_input,
+            system_prompt=system_prompt,
+            response_model=response_model,
         )
 
     @staticmethod
@@ -66,7 +72,9 @@ class LLMGateway:
         )
 
         llm_client = get_llm_client()
-        return llm_client.show_prompt(text_input=text_input, system_prompt=system_prompt)
+        return llm_client.show_prompt(
+            text_input=text_input, system_prompt=system_prompt
+        )
 
     @staticmethod
     def read_query_prompt(prompt_file_name: str, base_directory: str = None):
@@ -74,7 +82,9 @@ class LLMGateway:
             read_query_prompt,
         )
 
-        return read_query_prompt(prompt_file_name=prompt_file_name, base_directory=base_directory)
+        return read_query_prompt(
+            prompt_file_name=prompt_file_name, base_directory=base_directory
+        )
 
     @staticmethod
     def extract_content_graph(
@@ -101,7 +111,9 @@ class LLMGateway:
             )
 
             return extract_content_graph(
-                content=content, response_model=response_model, custom_prompt=custom_prompt
+                content=content,
+                response_model=response_model,
+                custom_prompt=custom_prompt,
             )
 
     @staticmethod
@@ -155,7 +167,9 @@ class LLMGateway:
         return extract_event_graph(content=content, response_model=response_model)
 
     @staticmethod
-    def extract_event_entities(content: str, response_model: Type[BaseModel]) -> Coroutine:
+    def extract_event_entities(
+        content: str, response_model: Type[BaseModel]
+    ) -> Coroutine:
         # TODO: Add BAML version of category and extraction and update function (consulted with Igor)
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.extraction import (
             extract_event_entities,

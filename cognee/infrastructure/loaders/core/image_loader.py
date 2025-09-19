@@ -74,7 +74,10 @@ class ImageLoader(LoaderInterface):
         Returns:
             True if file can be handled, False otherwise
         """
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
+        if (
+            extension in self.supported_extensions
+            and mime_type in self.supported_mime_types
+        ):
             return True
 
         return False
@@ -109,6 +112,8 @@ class ImageLoader(LoaderInterface):
         data_root_directory = storage_config["data_root_directory"]
         storage = get_file_storage(data_root_directory)
 
-        full_file_path = await storage.store(storage_file_name, result.choices[0].message.content)
+        full_file_path = await storage.store(
+            storage_file_name, result.choices[0].message.content
+        )
 
         return full_file_path

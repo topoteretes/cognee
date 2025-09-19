@@ -3,7 +3,16 @@ from os import path
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
-from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
+from typing import (
+    Generic,
+    List,
+    Optional,
+    TypeVar,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.engine import DataPoint
@@ -65,7 +74,9 @@ class LanceDBAdapter(VectorDBInterface):
             - lancedb.AsyncConnection: An active connection to the LanceDB.
         """
         if self.connection is None:
-            self.connection = await lancedb.connect_async(self.url, api_key=self.api_key)
+            self.connection = await lancedb.connect_async(
+                self.url, api_key=self.api_key
+            )
 
         return self.connection
 
@@ -144,7 +155,9 @@ class LanceDBAdapter(VectorDBInterface):
         connection = await self.get_connection()
         return await connection.open_table(collection_name)
 
-    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
+    async def create_data_points(
+        self, collection_name: str, data_points: list[DataPoint]
+    ):
         payload_schema = type(data_points[0])
 
         if not await self.has_collection(collection_name):
@@ -178,7 +191,9 @@ class LanceDBAdapter(VectorDBInterface):
             vector: Vector(vector_size)
             payload: PayloadSchema
 
-        def create_lance_data_point(data_point: DataPoint, vector: list[float]) -> LanceDataPoint:
+        def create_lance_data_point(
+            data_point: DataPoint, vector: list[float]
+        ) -> LanceDataPoint:
             properties = get_own_properties(data_point)
             properties["id"] = str(properties["id"])
 
@@ -205,9 +220,17 @@ class LanceDBAdapter(VectorDBInterface):
         collection = await self.get_collection(collection_name)
 
         if len(data_point_ids) == 1:
-            results = await collection.query().where(f"id = '{data_point_ids[0]}'").to_pandas()
+            results = (
+                await collection.query()
+                .where(f"id = '{data_point_ids[0]}'")
+                .to_pandas()
+            )
         else:
-            results = await collection.query().where(f"id IN {tuple(data_point_ids)}").to_pandas()
+            results = (
+                await collection.query()
+                .where(f"id IN {tuple(data_point_ids)}")
+                .to_pandas()
+            )
 
         return [
             ScoredResult(
@@ -338,7 +361,9 @@ class LanceDBAdapter(VectorDBInterface):
                 models_list = get_args(field_config.annotation)
                 if any(hasattr(model, "model_fields") for model in models_list):
                     related_models_fields.append(field_name)
-                elif models_list and any(get_args(model) is DataPoint for model in models_list):
+                elif models_list and any(
+                    get_args(model) is DataPoint for model in models_list
+                ):
                     related_models_fields.append(field_name)
                 elif models_list and any(
                     submodel is DataPoint for submodel in get_args(models_list[0])

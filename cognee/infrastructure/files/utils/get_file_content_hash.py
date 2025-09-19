@@ -37,4 +37,6 @@ async def get_file_content_hash(file_obj: Union[str, BinaryIO]) -> str:
 
         return h.hexdigest()
     except IOError as e:
-        raise FileContentHashingError(message=f"Failed to hash data from {file_obj}: {e}")
+        raise FileContentHashingError(
+            message=f"Failed to hash data from {file_obj}: {e}"
+        )

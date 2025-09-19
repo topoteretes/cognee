@@ -15,7 +15,8 @@ __version__ = "0.201.0"
 try:
     from baml_py.safe_import import EnsureBamlPyImport
 except ImportError:
-    raise ImportError(f"""Update to baml-py required.
+    raise ImportError(
+        f"""Update to baml-py required.
 Version of baml_client generator (see generators.baml): {__version__}
 
 Please upgrade baml-py to version "{__version__}".
@@ -27,7 +28,8 @@ If nothing else works, please ask for help:
 
 https://github.com/boundaryml/baml/issues
 https://boundaryml.com/discord
-""") from None
+"""
+    ) from None
 
 
 with EnsureBamlPyImport(__version__) as e:

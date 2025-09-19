@@ -17,7 +17,9 @@ logger = get_logger("coding_rule_association")
 class Rule(DataPoint):
     """A single developer rule extracted from text."""
 
-    text: str = Field(..., description="The coding rule associated with the conversation")
+    text: str = Field(
+        ..., description="The coding rule associated with the conversation"
+    )
     belongs_to_set: Optional[NodeSet] = None
     metadata: dict = {"index_fields": ["rule"]}
 
@@ -99,7 +101,9 @@ async def add_rule_associations(data: str, rules_nodeset_name: str):
     user_prompt = LLMGateway.render_prompt(
         "coding_rule_association_agent_user.txt", context=user_context
     )
-    system_prompt = LLMGateway.render_prompt("coding_rule_association_agent_system.txt", context={})
+    system_prompt = LLMGateway.render_prompt(
+        "coding_rule_association_agent_system.txt", context={}
+    )
 
     rule_list = await LLMGateway.acreate_structured_output(
         text_input=user_prompt, system_prompt=system_prompt, response_model=RuleSet

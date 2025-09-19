@@ -27,7 +27,9 @@ def get_mock_summarized_code():
 async def extract_summary(content: str, response_model: Type[BaseModel]):
     system_prompt = LLMGateway.read_query_prompt("summarize_content.txt")
 
-    llm_output = await LLMGateway.acreate_structured_output(content, system_prompt, response_model)
+    llm_output = await LLMGateway.acreate_structured_output(
+        content, system_prompt, response_model
+    )
 
     return llm_output
 
@@ -45,7 +47,10 @@ async def extract_code_summary(content: str):
         try:
             result = await extract_summary(content, response_model=SummarizedCode)
         except InstructorRetryException as e:
-            logger.error("Failed to extract code summary, falling back to mock summary", exc_info=e)
+            logger.error(
+                "Failed to extract code summary, falling back to mock summary",
+                exc_info=e,
+            )
             result = get_mock_summarized_code()
 
         return result

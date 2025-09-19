@@ -41,8 +41,12 @@ class VectorConfig(BaseSettings):
             )
         elif not values.vector_db_url:
             # Default path
-            databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
-            values.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
+            databases_directory_path = os.path.join(
+                base_config.system_root_directory, "databases"
+            )
+            values.vector_db_url = os.path.join(
+                databases_directory_path, "cognee.lancedb"
+            )
 
         return values
 

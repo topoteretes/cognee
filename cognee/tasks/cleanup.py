@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 
 from __future__ import annotations
 
@@ -39,12 +40,44 @@ async def cleanup_unused_data(
         dict: Information about the cleanup operation.
     """
     if isinstance(days_threshold, bool) or not isinstance(days_threshold, int) or days_threshold < 0:
+=======
+from __future__ import annotations
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
+from uuid import UUID
+
+
+async def cleanup_unused_data(
+    days_threshold: int = 30,
+    dry_run: bool = True,
+    user_id: Optional[UUID] = None,
+) -> dict[str, Any]:
+    """
+    Cleanup unused data older than the threshold.
+
+    Args:
+        days_threshold (int): The age threshold in days for unused data. Defaults to 30.
+        dry_run (bool): If True, simulate the cleanup without deleting data.
+        user_id (Optional[UUID]): If provided, restrict cleanup to this user’s data.
+
+    Returns:
+        dict[str, Any]: Summary of the cleanup operation.
+    """
+    if not isinstance(days_threshold, int) or days_threshold < 0:
+>>>>>>> 961355726e021c124bb0793bca309a62919207f7
         raise ValueError("days_threshold must be an int >= 0")
 
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_threshold)
 
+<<<<<<< HEAD
     if dry_run:
         unused_data_count = await count_unused(cutoff_date, user_id)
+=======
+    # Here, replace with actual data fetching/deletion logic
+    unused_data_count = 42  # dummy number
+
+    if dry_run:
+>>>>>>> 961355726e021c124bb0793bca309a62919207f7
         return {
             "status": "dry-run",
             "unused_data_count": unused_data_count,
@@ -52,13 +85,19 @@ async def cleanup_unused_data(
             "user_id": str(user_id) if user_id is not None else None,
         }
 
+<<<<<<< HEAD
     deleted_count = await delete_unused(cutoff_date, user_id)
+=======
+    # delete data (dummy simulation)
+    deleted_count = unused_data_count
+>>>>>>> 961355726e021c124bb0793bca309a62919207f7
     return {
         "status": "executed",
         "deleted_count": deleted_count,
         "cutoff_date": cutoff_date.isoformat(),
         "user_id": str(user_id) if user_id is not None else None,
     }
+<<<<<<< HEAD
 
 
 # --- Supporting stubs (to be replaced with real DB/DAO logic) ---
@@ -71,3 +110,5 @@ async def count_unused(cutoff_date: datetime, user_id: Optional[UUID]) -> int:
 async def delete_unused(cutoff_date: datetime, user_id: Optional[UUID]) -> int:
     # Replace with real batched deletion logic
     return 42
+=======
+>>>>>>> 961355726e021c124bb0793bca309a62919207f7

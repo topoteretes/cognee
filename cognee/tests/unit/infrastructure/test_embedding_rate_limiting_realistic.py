@@ -37,7 +37,9 @@ async def test_embedding_rate_limiting_realistic():
 
     # Create a fresh config instance and verify settings
     config = get_llm_config()
-    logger.info(f"Embedding Rate Limiting Enabled: {config.embedding_rate_limit_enabled}")
+    logger.info(
+        f"Embedding Rate Limiting Enabled: {config.embedding_rate_limit_enabled}"
+    )
     logger.info(
         f"Embedding Rate Limit: {config.embedding_rate_limit_requests} requests per {config.embedding_rate_limit_interval} seconds"
     )
@@ -59,7 +61,9 @@ async def test_embedding_rate_limiting_realistic():
             logger.info(f"Making request #{i + 1}")
             text = f"Concurrent - Text {i}"
             embedding = await engine.embed_text([text])
-            logger.info(f"Request #{i + 1} succeeded with embedding size: {len(embedding[0])}")
+            logger.info(
+                f"Request #{i + 1} succeeded with embedding size: {len(embedding[0])}"
+            )
             return True
         except Exception as e:
             logger.info(f"Request #{i + 1} rate limited: {e}")
@@ -126,7 +130,9 @@ async def test_embedding_rate_limiting_realistic():
             logger.info(f"Making request #{i + 1}")
             text = f"Sequential - Text {i}"
             embedding = await engine.embed_text([text])
-            logger.info(f"Request #{i + 1} succeeded with embedding size: {len(embedding[0])}")
+            logger.info(
+                f"Request #{i + 1} succeeded with embedding size: {len(embedding[0])}"
+            )
             batch_successes += 1
         except Exception as e:
             logger.info(f"Request #{i + 1} rate limited: {e}")

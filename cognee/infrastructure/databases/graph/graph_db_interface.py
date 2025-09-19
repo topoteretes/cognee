@@ -7,7 +7,9 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.models.graph_relationship_ledger import GraphRelationshipLedger
-from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engine
+from cognee.infrastructure.databases.relational.get_relational_engine import (
+    get_relational_engine,
+)
 
 logger = get_logger()
 
@@ -84,7 +86,10 @@ def record_graph_changes(func):
                     node_id = UUID(str(node.id))
                     relationship_ledgers.append(
                         GraphRelationshipLedger(
-                            id=uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
+                            id=uuid5(
+                                NAMESPACE_OID,
+                                f"{datetime.now(timezone.utc).timestamp()}",
+                            ),
                             source_node_id=node_id,
                             destination_node_id=node_id,
                             creator_function=f"{creator}.node",
@@ -110,7 +115,10 @@ def record_graph_changes(func):
                     rel_type = str(edge[2])
                     relationship_ledgers.append(
                         GraphRelationshipLedger(
-                            id=uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
+                            id=uuid5(
+                                NAMESPACE_OID,
+                                f"{datetime.now(timezone.utc).timestamp()}",
+                            ),
                             source_node_id=source_id,
                             destination_node_id=target_id,
                             creator_function=f"{creator}.{rel_type}",
@@ -275,7 +283,10 @@ class GraphDBInterface(ABC):
     @abstractmethod
     @record_graph_changes
     async def add_edges(
-        self, edges: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]
+        self,
+        edges: Union[
+            List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]
+        ],
     ) -> None:
         """
         Add multiple edges to the graph in a single operation.
@@ -315,7 +326,9 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def has_edge(self, source_id: str, target_id: str, relationship_name: str) -> bool:
+    async def has_edge(
+        self, source_id: str, target_id: str, relationship_name: str
+    ) -> bool:
         """
         Verify if an edge exists between two specified nodes.
 

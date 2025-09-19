@@ -65,10 +65,16 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("id"),
         )
         op.create_index(
-            op.f("ix_sync_operations_run_id"), "sync_operations", ["run_id"], unique=True
+            op.f("ix_sync_operations_run_id"),
+            "sync_operations",
+            ["run_id"],
+            unique=True,
         )
         op.create_index(
-            op.f("ix_sync_operations_user_id"), "sync_operations", ["user_id"], unique=False
+            op.f("ix_sync_operations_user_id"),
+            "sync_operations",
+            ["user_id"],
+            unique=False,
         )
     else:
         # Table already exists, but we might need to add missing columns or indexes

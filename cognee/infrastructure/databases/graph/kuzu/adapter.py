@@ -121,7 +121,8 @@ class KuzuAdapter(GraphDBInterface):
                 logger.info(f"JSON extension already loaded or unavailable: {e}")
 
             # Create node table with essential fields and timestamp
-            self.connection.execute("""
+            self.connection.execute(
+                """
                 CREATE NODE TABLE IF NOT EXISTS Node(
                     id STRING PRIMARY KEY,
                     name STRING,
@@ -130,9 +131,11 @@ class KuzuAdapter(GraphDBInterface):
                     updated_at TIMESTAMP,
                     properties STRING
                 )
-            """)
+            """
+            )
             # Create relationship table with timestamp
-            self.connection.execute("""
+            self.connection.execute(
+                """
                 CREATE REL TABLE IF NOT EXISTS EDGE(
                     FROM Node TO Node,
                     relationship_name STRING,
@@ -140,14 +143,17 @@ class KuzuAdapter(GraphDBInterface):
                     updated_at TIMESTAMP,
                     properties STRING
                 )
-            """)
+            """
+            )
             logger.debug("Kuzu database initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Kuzu database: {e}")
             raise e
 
     async def push_to_s3(self) -> None:
-        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(self, "temp_graph_file"):
+        if os.getenv("STORAGE_BACKEND", "").lower() == "s3" and hasattr(
+            self, "temp_graph_file"
+        ):
             from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
             s3_file_storage = S3FileStorage("")
@@ -237,7 +243,9 @@ class KuzuAdapter(GraphDBInterface):
                 data.pop("properties")
                 data.update(props)
             except json.JSONDecodeError:
-                logger.warning(f"Failed to parse properties JSON for node {data.get('id')}")
+                logger.warning(
+                    f"Failed to parse properties JSON for node {data.get('id')}"
+                )
         return data
 
     def _parse_node_properties(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -254,7 +262,11 @@ class KuzuAdapter(GraphDBInterface):
     # Helper method for building edge queries
 
     def _edge_query_and_params(
-        self, from_node: str, to_node: str, relationship_name: str, properties: Dict[str, Any]
+        self,
+        from_node: str,
+        to_node: str,
+        relationship_name: str,
+        properties: Dict[str, Any],
     ) -> Tuple[str, dict]:
         """Build the edge creation query and parameters."""
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
@@ -319,7 +331,9 @@ class KuzuAdapter(GraphDBInterface):
             - node (DataPoint): The node to be added, represented as a DataPoint.
         """
         try:
-            properties = node.model_dump() if hasattr(node, "model_dump") else vars(node)
+            properties = (
+                node.model_dump() if hasattr(node, "model_dump") else vars(node)
+            )
 
             # Extract core fields with defaults if not present
             core_properties = {
@@ -346,7 +360,10 @@ class KuzuAdapter(GraphDBInterface):
 
             # Add timestamp fields
             fields.extend(
-                ["created_at: timestamp($created_at)", "updated_at: timestamp($updated_at)"]
+                [
+                    "created_at: timestamp($created_at)",
+                    "updated_at: timestamp($updated_at)",
+                ]
             )
             params.update({"created_at": now, "updated_at": now})
 
@@ -384,7 +401,9 @@ class KuzuAdapter(GraphDBInterface):
             # Prepare all nodes data
             node_params = []
             for node in nodes:
-                properties = node.model_dump() if hasattr(node, "model_dump") else vars(node)
+                properties = (
+                    node.model_dump() if hasattr(node, "model_dump") else vars(node)
+                )
 
                 core_properties = {
                     "id": str(properties.get("id", "")),
@@ -564,11 +583,14 @@ class KuzuAdapter(GraphDBInterface):
         RETURN COUNT(r) > 0
         """
         result = await self.query(
-            query_str, {"from_id": from_node, "to_id": to_node, "edge_label": edge_label}
+            query_str,
+            {"from_id": from_node, "to_id": to_node, "edge_label": edge_label},
         )
         return result[0][0] if result else False
 
-    async def has_edges(self, edges: List[Tuple[str, str, str]]) -> List[Tuple[str, str, str]]:
+    async def has_edges(
+        self, edges: List[Tuple[str, str, str]]
+    ) -> List[Tuple[str, str, str]]:
         """
         Check if multiple edges exist in a batch operation.
 
@@ -615,9 +637,13 @@ class KuzuAdapter(GraphDBInterface):
             results = await self.query(query, {"edges": edge_params})
 
             # Convert results back to tuples and ensure string types
-            existing_edges = [(str(row[0]), str(row[1]), str(row[2])) for row in results]
+            existing_edges = [
+                (str(row[0]), str(row[1]), str(row[2])) for row in results
+            ]
 
-            logger.debug(f"Found {len(existing_edges)} existing edges out of {len(edges)} checked")
+            logger.debug(
+                f"Found {len(existing_edges)} existing edges out of {len(edges)} checked"
+            )
             return existing_edges
 
         except Exception as e:
@@ -658,7 +684,9 @@ class KuzuAdapter(GraphDBInterface):
             raise
 
     @record_graph_changes
-    async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> None:
+    async def add_edges(
+        self, edges: List[Tuple[str, str, str, Dict[str, Any]]]
+    ) -> None:
         """
         Add multiple edges in a batch operation.
 
@@ -712,7 +740,9 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to add edges in batch: {e}")
             raise
 
-    async def get_edges(self, node_id: str) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
+    async def get_edges(
+        self, node_id: str
+    ) -> List[Tuple[Dict[str, Any], str, Dict[str, Any]]]:
         """
         Get all edges connected to a node.
 
@@ -1092,7 +1122,9 @@ class KuzuAdapter(GraphDBInterface):
 
     async def get_graph_data(
         self,
-    ) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
+    ) -> Tuple[
+        List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]
+    ]:
         """
         Get all nodes and edges in the graph.
 
@@ -1128,7 +1160,9 @@ class KuzuAdapter(GraphDBInterface):
                             props.update(additional_props)
                             del props["properties"]
                         except json.JSONDecodeError:
-                            logger.warning(f"Failed to parse properties JSON for node {node_id}")
+                            logger.warning(
+                                f"Failed to parse properties JSON for node {node_id}"
+                            )
                     formatted_nodes.append((node_id, props))
             if not formatted_nodes:
                 logger.warning("No nodes found in the database")
@@ -1156,7 +1190,9 @@ class KuzuAdapter(GraphDBInterface):
                     formatted_edges.append((source_id, target_id, rel_type, props))
 
             if formatted_nodes and not formatted_edges:
-                logger.debug("No edges found, creating self-referential edges for nodes")
+                logger.debug(
+                    "No edges found, creating self-referential edges for nodes"
+                )
                 for node_id, _ in formatted_nodes:
                     formatted_edges.append(
                         (
@@ -1204,7 +1240,9 @@ class KuzuAdapter(GraphDBInterface):
             WHERE n.type = $label AND n.name = wantedName
             RETURN DISTINCT n.id
         """
-        primary_rows = await self.query(primary_query, {"names": node_name, "label": label})
+        primary_rows = await self.query(
+            primary_query, {"names": node_name, "label": label}
+        )
         primary_ids = [row[0] for row in primary_rows]
         if not primary_ids:
             return [], []
@@ -1248,7 +1286,9 @@ class KuzuAdapter(GraphDBInterface):
                 try:
                     data = json.loads(props)
                 except json.JSONDecodeError:
-                    logger.warning(f"Failed to parse JSON props for edge {from_id}->{to_id}")
+                    logger.warning(
+                        f"Failed to parse JSON props for edge {from_id}->{to_id}"
+                    )
 
             edges.append((from_id, to_id, rel_type, data))
 
@@ -1330,7 +1370,9 @@ class KuzuAdapter(GraphDBInterface):
                 "num_nodes": num_nodes,
                 "num_edges": num_edges,
                 "mean_degree": (2 * num_edges) / num_nodes if num_nodes != 0 else None,
-                "edge_density": num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0,
+                "edge_density": (
+                    num_edges / (num_nodes * (num_nodes - 1)) if num_nodes > 1 else 0
+                ),
                 "num_connected_components": await self._get_num_connected_components(),
                 "sizes_of_connected_components": await self._get_size_of_connected_components(),
             }
@@ -1340,11 +1382,14 @@ class KuzuAdapter(GraphDBInterface):
                 shortest_path_lengths = await self._get_shortest_path_lengths()
                 optional_metrics = {
                     "num_selfloops": await self._count_self_loops(),
-                    "diameter": max(shortest_path_lengths) if shortest_path_lengths else -1,
-                    "avg_shortest_path_length": sum(shortest_path_lengths)
-                    / len(shortest_path_lengths)
-                    if shortest_path_lengths
-                    else -1,
+                    "diameter": (
+                        max(shortest_path_lengths) if shortest_path_lengths else -1
+                    ),
+                    "avg_shortest_path_length": (
+                        sum(shortest_path_lengths) / len(shortest_path_lengths)
+                        if shortest_path_lengths
+                        else -1
+                    ),
                     "avg_clustering": await self._get_avg_clustering(),
                 }
             else:
@@ -1469,7 +1514,9 @@ class KuzuAdapter(GraphDBInterface):
               types present in the graph.
         """
         node_labels = await self.query("MATCH (n:Node) RETURN DISTINCT labels(n)")
-        rel_types = await self.query("MATCH ()-[r:EDGE]->() RETURN DISTINCT r.relationship_name")
+        rel_types = await self.query(
+            "MATCH ()-[r:EDGE]->() RETURN DISTINCT r.relationship_name"
+        )
         return {
             "node_labels": [label[0] for label in node_labels],
             "relationship_types": [rel[0] for rel in rel_types],

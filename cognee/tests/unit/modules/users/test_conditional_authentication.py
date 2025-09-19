@@ -23,7 +23,9 @@ class TestConditionalAuthentication:
     ):
         """Test that when REQUIRE_AUTHENTICATION=false and no token, returns default user."""
         # Mock the default user
-        mock_default_user = SimpleNamespace(id=uuid4(), email="default@example.com", is_active=True)
+        mock_default_user = SimpleNamespace(
+            id=uuid4(), email="default@example.com", is_active=True
+        )
         mock_get_default.return_value = mock_default_user
 
         # Use gau_mod.get_authenticated_user instead
@@ -58,7 +60,9 @@ class TestConditionalAuthentication:
 
     @pytest.mark.asyncio
     @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-    async def test_require_authentication_true_with_user_returns_user(self, mock_get_default):
+    async def test_require_authentication_true_with_user_returns_user(
+        self, mock_get_default
+    ):
         """Test that when REQUIRE_AUTHENTICATION=true and user present, returns user."""
         mock_authenticated_user = User(
             id=uuid4(),
@@ -90,7 +94,9 @@ class TestConditionalAuthenticationIntegration:
         assert callable(optional_dependency)
 
         # Test that we can create required dependency
-        required_dependency = fastapi_users.current_user(active=True)  # optional=False by default
+        required_dependency = fastapi_users.current_user(
+            active=True
+        )  # optional=False by default
         assert callable(required_dependency)
 
     @pytest.mark.asyncio
@@ -215,7 +221,9 @@ class TestConditionalAuthenticationEdgeCases:
             is_verified=True,
         )
 
-        mock_default_user = SimpleNamespace(id=uuid4(), email="default@example.com", is_active=True)
+        mock_default_user = SimpleNamespace(
+            id=uuid4(), email="default@example.com", is_active=True
+        )
         mock_get_default.return_value = mock_default_user
 
         # Test with user

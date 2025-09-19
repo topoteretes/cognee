@@ -40,17 +40,24 @@ async def chunk_naive_llm_classifier(
         return data_chunks
 
     chunk_classifications = await asyncio.gather(
-        *[LLMGateway.extract_categories(chunk.text, classification_model) for chunk in data_chunks],
+        *[
+            LLMGateway.extract_categories(chunk.text, classification_model)
+            for chunk in data_chunks
+        ],
     )
 
     classification_data_points = []
 
     for chunk_index, chunk in enumerate(data_chunks):
         chunk_classification = chunk_classifications[chunk_index]
-        classification_data_points.append(uuid5(NAMESPACE_OID, chunk_classification.label.type))
+        classification_data_points.append(
+            uuid5(NAMESPACE_OID, chunk_classification.label.type)
+        )
 
         for classification_subclass in chunk_classification.label.subclass:
-            classification_data_points.append(uuid5(NAMESPACE_OID, classification_subclass.value))
+            classification_data_points.append(
+                uuid5(NAMESPACE_OID, classification_subclass.value)
+            )
 
     vector_engine = get_vector_engine()
 
@@ -132,7 +139,9 @@ async def chunk_naive_llm_classifier(
 
         for classification_subclass in chunk_classification.label.subclass:
             classification_subtype_label = classification_subclass.value
-            classification_subtype_id = uuid5(NAMESPACE_OID, classification_subtype_label)
+            classification_subtype_id = uuid5(
+                NAMESPACE_OID, classification_subtype_label
+            )
 
             if classification_subtype_id not in existing_points_map:
                 data_points.append(

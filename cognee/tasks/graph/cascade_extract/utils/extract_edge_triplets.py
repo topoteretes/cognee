@@ -27,13 +27,18 @@ async def extract_edge_triplets(
 
         base_directory = get_absolute_path("./tasks/graph/cascade_extract/prompts")
         text_input = LLMGateway.render_prompt(
-            "extract_graph_edge_triplets_prompt_input.txt", context, base_directory=base_directory
+            "extract_graph_edge_triplets_prompt_input.txt",
+            context,
+            base_directory=base_directory,
         )
         system_prompt = LLMGateway.read_query_prompt(
-            "extract_graph_edge_triplets_prompt_system.txt", base_directory=base_directory
+            "extract_graph_edge_triplets_prompt_system.txt",
+            base_directory=base_directory,
         )
         extracted_graph = await LLMGateway.acreate_structured_output(
-            text_input=text_input, system_prompt=system_prompt, response_model=KnowledgeGraph
+            text_input=text_input,
+            system_prompt=system_prompt,
+            response_model=KnowledgeGraph,
         )
 
         for node in extracted_graph.nodes:
@@ -43,7 +48,11 @@ async def extract_edge_triplets(
                 existing_node_ids.add(node.id)
 
         for edge in extracted_graph.edges:
-            edge_key = (edge.source_node_id, edge.target_node_id, edge.relationship_name)
+            edge_key = (
+                edge.source_node_id,
+                edge.target_node_id,
+                edge.relationship_name,
+            )
             if edge_key in existing_edge_triplets:
                 continue
 

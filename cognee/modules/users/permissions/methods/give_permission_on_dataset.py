@@ -1,7 +1,12 @@
 from uuid import UUID
 from sqlalchemy.future import select
 from sqlalchemy.exc import IntegrityError
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.permissions import PERMISSION_TYPES
@@ -28,7 +33,11 @@ async def give_permission_on_dataset(
 
     async with db_engine.get_async_session() as session:
         permission = (
-            (await session.execute(select(Permission).filter(Permission.name == permission_name)))
+            (
+                await session.execute(
+                    select(Permission).filter(Permission.name == permission_name)
+                )
+            )
             .scalars()
             .first()
         )
@@ -55,7 +64,11 @@ async def give_permission_on_dataset(
         # If no existing ACL entry is found, proceed to add a new one
         if existing_acl is None:
             try:
-                acl = ACL(principal_id=principal.id, dataset_id=dataset_id, permission=permission)
+                acl = ACL(
+                    principal_id=principal.id,
+                    dataset_id=dataset_id,
+                    permission=permission,
+                )
                 session.add(acl)
                 await session.commit()
             except IntegrityError:

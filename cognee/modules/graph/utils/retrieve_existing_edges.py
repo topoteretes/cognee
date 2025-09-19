@@ -59,7 +59,9 @@ async def retrieve_existing_edges(
                 processed_nodes[str(type_node_id)] = True
 
             if str(entity_node_id) not in processed_nodes:
-                entity_node_edges.append((data_chunk.id, entity_node_id, "mentioned_in"))
+                entity_node_edges.append(
+                    (data_chunk.id, entity_node_id, "mentioned_in")
+                )
                 type_entity_edges.append((entity_node_id, type_node_id, "is_a"))
                 processed_nodes[str(entity_node_id)] = True
 

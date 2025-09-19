@@ -15,7 +15,9 @@ async def get_notebook(
     session: AsyncSession,
 ) -> Optional[Notebook]:
     result = await session.execute(
-        select(Notebook).where(and_(Notebook.owner_id == user_id, Notebook.id == notebook_id))
+        select(Notebook).where(
+            and_(Notebook.owner_id == user_id, Notebook.id == notebook_id)
+        )
     )
 
     return result.scalar()

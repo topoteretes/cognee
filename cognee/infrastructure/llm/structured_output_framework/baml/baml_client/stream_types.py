@@ -37,7 +37,9 @@ class AudioContent(BaseModel):
 
 
 class ContentLabel(BaseModel):
-    content_type: typing.Optional[typing.Union[str, str, str, str, str, str, str]] = None
+    content_type: typing.Optional[typing.Union[str, str, str, str, str, str, str]] = (
+        None
+    )
     type: typing.Optional[str] = None
     subclass: typing.List[str]
 

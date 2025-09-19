@@ -4,7 +4,9 @@ from typing import List, Optional
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
 from cognee.modules.engine.models import Entity
 from cognee.root_dir import get_absolute_path
-from cognee.tasks.entity_completion.entity_extractors.regex_entity_config import RegexEntityConfig
+from cognee.tasks.entity_completion.entity_extractors.regex_entity_config import (
+    RegexEntityConfig,
+)
 
 logger = get_logger("regex_entity_extractor")
 
@@ -24,7 +26,9 @@ class RegexEntityExtractor(BaseEntityExtractor):
             f"Initialized RegexEntityExtractor with {len(self.config.get_entity_names())} entity types"
         )
 
-    def _create_entity(self, match_text: str, entity_type_obj, description_template: str) -> Entity:
+    def _create_entity(
+        self, match_text: str, entity_type_obj, description_template: str
+    ) -> Entity:
         """Create an entity from a regex match."""
         return Entity(
             name=match_text,
@@ -40,7 +44,9 @@ class RegexEntityExtractor(BaseEntityExtractor):
             entity_type_obj = self.config.get_entity_type(entity_type)
 
             return [
-                self._create_entity(match.group(0), entity_type_obj, description_template)
+                self._create_entity(
+                    match.group(0), entity_type_obj, description_template
+                )
                 for match in pattern.finditer(text)
             ]
         except KeyError:

@@ -73,7 +73,9 @@ class CodeRetriever(BaseRetriever):
             logger.debug("Successfully initialized vector and graph engines")
         except Exception as e:
             logger.error(f"Database initialization error: {str(e)}")
-            raise RuntimeError("Database initialization error in code_graph_retriever, ") from e
+            raise RuntimeError(
+                "Database initialization error in code_graph_retriever, "
+            ) from e
 
         files_and_codeparts = await self._process_query(query)
 
@@ -81,14 +83,18 @@ class CodeRetriever(BaseRetriever):
         similar_codepieces = []
 
         if not files_and_codeparts.filenames or not files_and_codeparts.sourcecode:
-            logger.info("No specific files/code extracted from query, performing general search")
+            logger.info(
+                "No specific files/code extracted from query, performing general search"
+            )
 
             for collection in self.file_name_collections:
                 logger.debug(f"Searching {collection} collection with general query")
                 search_results_file = await vector_engine.search(
                     collection, query, limit=self.top_k
                 )
-                logger.debug(f"Found {len(search_results_file)} results in {collection}")
+                logger.debug(
+                    f"Found {len(search_results_file)} results in {collection}"
+                )
                 for res in search_results_file:
                     similar_filenames.append(
                         {"id": res.id, "score": res.score, "payload": res.payload}
@@ -107,7 +113,9 @@ class CodeRetriever(BaseRetriever):
                 search_results_code = await vector_engine.search(
                     collection, query, limit=self.top_k
                 )
-                logger.debug(f"Found {len(search_results_code)} results in {collection}")
+                logger.debug(
+                    f"Found {len(search_results_code)} results in {collection}"
+                )
                 for res in search_results_code:
                     similar_codepieces.append(
                         {"id": res.id, "score": res.score, "payload": res.payload}
@@ -119,7 +127,9 @@ class CodeRetriever(BaseRetriever):
 
             for collection in self.file_name_collections:
                 for file_from_query in files_and_codeparts.filenames:
-                    logger.debug(f"Searching {collection} for specific file: {file_from_query}")
+                    logger.debug(
+                        f"Searching {collection} for specific file: {file_from_query}"
+                    )
                     search_results_file = await vector_engine.search(
                         collection, file_from_query, limit=self.top_k
                     )
@@ -136,7 +146,9 @@ class CodeRetriever(BaseRetriever):
                 search_results_code = await vector_engine.search(
                     collection, files_and_codeparts.sourcecode, limit=self.top_k
                 )
-                logger.debug(f"Found {len(search_results_code)} results for source code search")
+                logger.debug(
+                    f"Found {len(search_results_code)} results for source code search"
+                )
                 for res in search_results_code:
                     similar_codepieces.append(
                         {"id": res.id, "score": res.score, "payload": res.payload}
@@ -162,7 +174,9 @@ class CodeRetriever(BaseRetriever):
 
         paths = set()
         for i, sublist in enumerate(relevant_triplets):
-            logger.debug(f"Processing connections for item {i}: {len(sublist)} connections")
+            logger.debug(
+                f"Processing connections for item {i}: {len(sublist)} connections"
+            )
             for tpl in sublist:
                 if isinstance(tpl, tuple) and len(tpl) >= 3:
                     if "file_path" in tpl[0]:
@@ -182,7 +196,9 @@ class CodeRetriever(BaseRetriever):
                     async with aiofiles.open(fp, "r", encoding="utf-8") as f:
                         content = await f.read()
                         retrieved_files[fp] = content
-                        logger.debug(f"Successfully read {len(content)} characters from {fp}")
+                        logger.debug(
+                            f"Successfully read {len(content)} characters from {fp}"
+                        )
                 except Exception as e:
                     logger.error(f"Error reading {fp}: {e}")
                     retrieved_files[fp] = ""

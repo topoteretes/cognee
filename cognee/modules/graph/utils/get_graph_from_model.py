@@ -4,7 +4,9 @@ from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.modules.storage.utils import copy_model
 
 
-def _extract_field_data(field_value: Any) -> List[Tuple[Optional[Edge], List[DataPoint]]]:
+def _extract_field_data(
+    field_value: Any,
+) -> List[Tuple[Optional[Edge], List[DataPoint]]]:
     """Extract edge metadata and datapoints from a field value."""
     # Handle single DataPoint
     if isinstance(field_value, DataPoint):
@@ -51,7 +53,10 @@ def _extract_field_data(field_value: Any) -> List[Tuple[Optional[Edge], List[Dat
 
 
 def _create_edge_properties(
-    source_id: str, target_id: str, relationship_name: str, edge_metadata: Optional[Edge]
+    source_id: str,
+    target_id: str,
+    relationship_name: str,
+    edge_metadata: Optional[Edge],
 ) -> Dict[str, Any]:
     """Create edge properties dictionary with metadata if present."""
     properties = {
@@ -85,7 +90,9 @@ def _get_relationship_key(field_name: str, edge_metadata: Optional[Edge]) -> str
     return field_name
 
 
-def _generate_property_key(data_point_id: str, relationship_key: str, target_id: str) -> str:
+def _generate_property_key(
+    data_point_id: str, relationship_key: str, target_id: str
+) -> str:
     """Generate a unique property key for visited_properties tracking."""
     return f"{data_point_id}_{relationship_key}_{target_id}"
 
@@ -205,7 +212,9 @@ async def get_graph_from_model(
             edge_properties = _create_edge_properties(
                 data_point.id, target_datapoint.id, relationship_name, edge_metadata
             )
-            edges.append((data_point.id, target_datapoint.id, relationship_name, edge_properties))
+            edges.append(
+                (data_point.id, target_datapoint.id, relationship_name, edge_properties)
+            )
             added_edges[edge_key] = True
 
         # Mark property as visited - CRITICAL for preventing infinite loops
@@ -232,7 +241,8 @@ async def get_graph_from_model(
 
 
 def get_own_property_nodes(
-    property_nodes: List[DataPoint], property_edges: List[Tuple[str, str, str, Dict[str, Any]]]
+    property_nodes: List[DataPoint],
+    property_edges: List[Tuple[str, str, str, Dict[str, Any]]],
 ) -> List[DataPoint]:
     """
     Filter nodes to return only those that are not destinations of any edges.

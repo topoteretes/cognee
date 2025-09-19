@@ -155,7 +155,9 @@ class AudioContentViewer(AudioContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -201,7 +203,9 @@ class ContentLabelViewer(ContentLabelAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -249,7 +253,9 @@ class DefaultContentPredictionViewer(DefaultContentPredictionAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -285,12 +291,16 @@ class DynamicKnowledgeGraphBuilder(DynamicKnowledgeGraphAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def add_property(self, name: str, type: baml_py.FieldType) -> baml_py.ClassPropertyBuilder:
+    def add_property(
+        self, name: str, type: baml_py.FieldType
+    ) -> baml_py.ClassPropertyBuilder:
         if name in self._properties:
             raise ValueError(f"Property {name} already exists.")
         return self._bldr.property(name).type(type)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
         return [(name, self._bldr.property(name)) for name in self._properties]
 
 
@@ -330,7 +340,9 @@ class EdgeViewer(EdgeAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -352,7 +364,9 @@ class EdgeProperties:
 
     @property
     def relationship_name(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("relationship_name"))
+        return type_builder.ClassPropertyViewer(
+            self.__bldr.property("relationship_name")
+        )
 
 
 class ImageContentAst:
@@ -379,7 +393,9 @@ class ImageContentViewer(ImageContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -424,7 +440,9 @@ class KnowledgeGraphViewer(KnowledgeGraphAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -469,7 +487,9 @@ class Model3DContentViewer(Model3DContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -514,7 +534,9 @@ class MultimediaContentViewer(MultimediaContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -561,12 +583,16 @@ class NodeBuilder(NodeAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def add_property(self, name: str, type: baml_py.FieldType) -> baml_py.ClassPropertyBuilder:
+    def add_property(
+        self, name: str, type: baml_py.FieldType
+    ) -> baml_py.ClassPropertyBuilder:
         if name in self._properties:
             raise ValueError(f"Property {name} already exists.")
         return self._bldr.property(name).type(type)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, baml_py.ClassPropertyBuilder]]:
         return [(name, self._bldr.property(name)) for name in self._properties]
 
 
@@ -621,7 +647,9 @@ class ProceduralContentViewer(ProceduralContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -668,7 +696,9 @@ class SummarizedClassViewer(SummarizedClassAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -726,7 +756,9 @@ class SummarizedCodeViewer(SummarizedCodeAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -740,7 +772,9 @@ class SummarizedCodeProperties:
 
     @property
     def high_level_summary(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("high_level_summary"))
+        return type_builder.ClassPropertyViewer(
+            self.__bldr.property("high_level_summary")
+        )
 
     @property
     def key_features(self) -> type_builder.ClassPropertyViewer:
@@ -764,7 +798,9 @@ class SummarizedCodeProperties:
 
     @property
     def workflow_description(self) -> type_builder.ClassPropertyViewer:
-        return type_builder.ClassPropertyViewer(self.__bldr.property("workflow_description"))
+        return type_builder.ClassPropertyViewer(
+            self.__bldr.property("workflow_description")
+        )
 
 
 class SummarizedContentAst:
@@ -791,7 +827,9 @@ class SummarizedContentViewer(SummarizedContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -839,7 +877,9 @@ class SummarizedFunctionViewer(SummarizedFunctionAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -896,7 +936,9 @@ class TextContentViewer(TextContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties
@@ -941,7 +983,9 @@ class VideoContentViewer(VideoContentAst):
     def __init__(self, tb: type_builder.TypeBuilder):
         super().__init__(tb)
 
-    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+    def list_properties(
+        self,
+    ) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
         return [
             (name, type_builder.ClassPropertyViewer(self._bldr.property(name)))
             for name in self._properties

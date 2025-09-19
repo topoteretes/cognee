@@ -54,7 +54,9 @@ def upgrade() -> None:
         graph_config = get_graph_config()
         if graph_config.graph_database_provider.lower() == "kuzu":
             if os.path.exists(graph_config.graph_file_path):
-                kuzu_db_version = read_kuzu_storage_version(graph_config.graph_file_path)
+                kuzu_db_version = read_kuzu_storage_version(
+                    graph_config.graph_file_path
+                )
                 if (
                     kuzu_db_version == "0.9.0" or kuzu_db_version == "0.8.2"
                 ) and kuzu_db_version != kuzu.__version__:

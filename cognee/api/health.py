@@ -46,7 +46,9 @@ class HealthChecker:
             from cognee.infrastructure.databases.relational.get_relational_engine import (
                 get_relational_engine,
             )
-            from cognee.infrastructure.databases.relational.config import get_relational_config
+            from cognee.infrastructure.databases.relational.config import (
+                get_relational_config,
+            )
 
             config = get_relational_config()
             engine = get_relational_engine()
@@ -77,8 +79,12 @@ class HealthChecker:
         """Check vector database health."""
         start_time = time.time()
         try:
-            from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
-            from cognee.infrastructure.databases.vector.config import get_vectordb_config
+            from cognee.infrastructure.databases.vector.get_vector_engine import (
+                get_vector_engine,
+            )
+            from cognee.infrastructure.databases.vector.config import (
+                get_vectordb_config,
+            )
 
             config = get_vectordb_config()
             engine = get_vector_engine()
@@ -111,7 +117,9 @@ class HealthChecker:
         """Check graph database health."""
         start_time = time.time()
         try:
-            from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+            from cognee.infrastructure.databases.graph.get_graph_engine import (
+                get_graph_engine,
+            )
             from cognee.infrastructure.databases.graph.config import get_graph_config
 
             config = get_graph_config()
@@ -145,20 +153,26 @@ class HealthChecker:
         start_time = time.time()
         try:
             import os
-            from cognee.infrastructure.files.storage.get_file_storage import get_file_storage
+            from cognee.infrastructure.files.storage.get_file_storage import (
+                get_file_storage,
+            )
             from cognee.base_config import get_base_config
 
             base_config = get_base_config()
             storage = get_file_storage(base_config.data_root_directory)
 
             # Determine provider
-            provider = "s3" if base_config.data_root_directory.startswith("s3://") else "local"
+            provider = (
+                "s3" if base_config.data_root_directory.startswith("s3://") else "local"
+            )
 
             # Test storage accessibility - for local storage, just check directory exists
             if provider == "local":
                 os.makedirs(base_config.data_root_directory, exist_ok=True)
                 # Simple write/read test
-                test_file = os.path.join(base_config.data_root_directory, "health_check_test")
+                test_file = os.path.join(
+                    base_config.data_root_directory, "health_check_test"
+                )
                 with open(test_file, "w") as f:
                     f.write("test")
                 os.remove(test_file)
@@ -307,7 +321,9 @@ class HealthChecker:
             if name in critical_components
         )
 
-        has_degraded = any(comp.status == HealthStatus.DEGRADED for comp in components.values())
+        has_degraded = any(
+            comp.status == HealthStatus.DEGRADED for comp in components.values()
+        )
 
         if critical_unhealthy:
             overall_status = HealthStatus.UNHEALTHY

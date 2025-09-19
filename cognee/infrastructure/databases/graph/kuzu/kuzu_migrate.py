@@ -119,11 +119,16 @@ conn.execute(r\"\"\"{cypher}\"\"\")
         sys.exit(proc.returncode)
 
 
-def kuzu_migration(new_db, old_db, new_version, old_version=None, overwrite=None, delete_old=None):
+def kuzu_migration(
+    new_db, old_db, new_version, old_version=None, overwrite=None, delete_old=None
+):
     """
     Main migration function that handles the complete migration process.
     """
-    print(f"🔄 Migrating Kuzu database from {old_version} to {new_version}", file=sys.stderr)
+    print(
+        f"🔄 Migrating Kuzu database from {old_version} to {new_version}",
+        file=sys.stderr,
+    )
     print(f"📂 Source: {old_db}", file=sys.stderr)
     print("", file=sys.stderr)
 
@@ -212,7 +217,10 @@ def rename_databases(old_db: str, old_version: str, new_db: str, delete_old: boo
             os.rename(old_db, backup_dir)
             print(f"Renamed directory '{old_db}' to '{backup_dir}'", file=sys.stderr)
     else:
-        print(f"Original database path '{old_db}' not found for renaming.", file=sys.stderr)
+        print(
+            f"Original database path '{old_db}' not found for renaming.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # Now move new files into place
@@ -243,7 +251,9 @@ to isolate different Kuzu versions.
         default=None,
         help="Source Kuzu version (e.g., 0.9.0). If not provided automatic kuzu version detection will be attempted.",
     )
-    p.add_argument("--new-version", required=True, help="Target Kuzu version (e.g., 0.11.0)")
+    p.add_argument(
+        "--new-version", required=True, help="Target Kuzu version (e.g., 0.11.0)"
+    )
     p.add_argument("--old-db", required=True, help="Path to source database directory")
     p.add_argument(
         "--new-db",

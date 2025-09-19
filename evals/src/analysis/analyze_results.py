@@ -26,9 +26,13 @@ def create_aggregate_metrics_df(
     if not save_folder:
         return aggregate_df
     if not os.path.exists(save_folder):
-        print(f"Save folder '{save_folder}' does not exist, skipping save for aggregate metrics")
+        print(
+            f"Save folder '{save_folder}' does not exist, skipping save for aggregate metrics"
+        )
         return aggregate_df
-    filename = f"{save_prefix}_aggregate.csv" if save_prefix else "aggregate_metrics.csv"
+    filename = (
+        f"{save_prefix}_aggregate.csv" if save_prefix else "aggregate_metrics.csv"
+    )
     csv_path = os.path.join(save_folder, filename)
     aggregate_df.to_csv(csv_path)
     print(f"Saved aggregate metrics dataframe to {csv_path}")
@@ -37,7 +41,10 @@ def create_aggregate_metrics_df(
 
 
 def cumulative_single_metric_analysis(
-    metric: str, aggregate_df: pd.DataFrame, save_folder: str = None, save_prefix: str = None
+    metric: str,
+    aggregate_df: pd.DataFrame,
+    save_folder: str = None,
+    save_prefix: str = None,
 ) -> pd.DataFrame:
     """Create cumulative analysis for a single metric, ordered by best results first."""
     # Get the mean column for the specified metric
@@ -61,7 +68,9 @@ def cumulative_single_metric_analysis(
         )
         return analysis_df
     filename = (
-        f"{save_prefix}_{metric}_cumulative.csv" if save_prefix else f"{metric}_cumulative.csv"
+        f"{save_prefix}_{metric}_cumulative.csv"
+        if save_prefix
+        else f"{metric}_cumulative.csv"
     )
     csv_path = os.path.join(save_folder, filename)
     analysis_df.to_csv(csv_path)

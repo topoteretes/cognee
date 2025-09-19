@@ -1,6 +1,9 @@
 import numpy as np
 from typing import List, Dict, Optional, Any, Union
-from cognee.modules.graph.exceptions import InvalidDimensionsError, DimensionOutOfRangeError
+from cognee.modules.graph.exceptions import (
+    InvalidDimensionsError,
+    DimensionOutOfRangeError,
+)
 
 
 class Node:
@@ -20,7 +23,10 @@ class Node:
     status: np.ndarray
 
     def __init__(
-        self, node_id: str, attributes: Optional[Dict[str, Any]] = None, dimension: int = 1
+        self,
+        node_id: str,
+        attributes: Optional[Dict[str, Any]] = None,
+        dimension: int = 1,
     ):
         if dimension <= 0:
             raise InvalidDimensionsError()
@@ -52,12 +58,16 @@ class Node:
             self.skeleton_edges.remove(edge)
             # Remove neighbor if no other edge connects them
             neighbor = edge.node2 if edge.node1 == self else edge.node1
-            if all(e.node1 != neighbor and e.node2 != neighbor for e in self.skeleton_edges):
+            if all(
+                e.node1 != neighbor and e.node2 != neighbor for e in self.skeleton_edges
+            ):
                 self.remove_skeleton_neighbor(neighbor)
 
     def is_node_alive_in_dimension(self, dimension: int) -> bool:
         if dimension < 0 or dimension >= len(self.status):
-            raise DimensionOutOfRangeError(dimension=dimension, max_index=len(self.status) - 1)
+            raise DimensionOutOfRangeError(
+                dimension=dimension, max_index=len(self.status) - 1
+            )
         return self.status[dimension] == 1
 
     def add_attribute(self, key: str, value: Any) -> None:
@@ -117,7 +127,9 @@ class Edge:
 
     def is_edge_alive_in_dimension(self, dimension: int) -> bool:
         if dimension < 0 or dimension >= len(self.status):
-            raise DimensionOutOfRangeError(dimension=dimension, max_index=len(self.status) - 1)
+            raise DimensionOutOfRangeError(
+                dimension=dimension, max_index=len(self.status) - 1
+            )
         return self.status[dimension] == 1
 
     def add_attribute(self, key: str, value: Any) -> None:

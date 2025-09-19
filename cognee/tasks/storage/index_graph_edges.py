@@ -51,7 +51,9 @@ async def index_graph_edges(batch_size: int = 1024):
 
     for text, count in edge_types.items():
         edge = EdgeType(
-            id=generate_edge_id(edge_id=text), relationship_name=text, number_of_edges=count
+            id=generate_edge_id(edge_id=text),
+            relationship_name=text,
+            number_of_edges=count,
         )
         data_point_type = type(edge)
 
@@ -59,7 +61,9 @@ async def index_graph_edges(batch_size: int = 1024):
             index_name = f"{data_point_type.__name__}.{field_name}"
 
             if index_name not in created_indexes:
-                await vector_engine.create_vector_index(data_point_type.__name__, field_name)
+                await vector_engine.create_vector_index(
+                    data_point_type.__name__, field_name
+                )
                 created_indexes[index_name] = True
 
             if index_name not in index_points:

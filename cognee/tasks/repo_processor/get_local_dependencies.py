@@ -192,7 +192,9 @@ async def get_local_script_dependencies(
         language="python",
     )
 
-    async for part in extract_code_parts(source_code_tree.root_node, script_path=script_path):
+    async for part in extract_code_parts(
+        source_code_tree.root_node, script_path=script_path
+    ):
         part.file_path = script_path
 
         if isinstance(part, FunctionDefinition):
@@ -259,7 +261,10 @@ async def extract_code_parts(
         Yields DataPoint nodes representing imported modules, functions, and classes.
     """
     for child_node in tree_root.children:
-        if child_node.type == "import_statement" or child_node.type == "import_from_statement":
+        if (
+            child_node.type == "import_statement"
+            or child_node.type == "import_from_statement"
+        ):
             parts = child_node.text.decode("utf-8").split()
 
             if parts[0] == "import":
@@ -303,7 +308,9 @@ async def extract_code_parts(
             yield existing_nodes[module_name]
 
         if child_node.type == "function_definition":
-            function_node = find_node(child_node.children, lambda node: node.type == "identifier")
+            function_node = find_node(
+                child_node.children, lambda node: node.type == "identifier"
+            )
             function_node_name = function_node.text
 
             if function_node_name not in existing_nodes:
@@ -319,7 +326,9 @@ async def extract_code_parts(
             yield existing_nodes[function_node_name]
 
         if child_node.type == "class_definition":
-            class_name_node = find_node(child_node.children, lambda node: node.type == "identifier")
+            class_name_node = find_node(
+                child_node.children, lambda node: node.type == "identifier"
+            )
             class_name_node_name = class_name_node.text
 
             if class_name_node_name not in existing_nodes:

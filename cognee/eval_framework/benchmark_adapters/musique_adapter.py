@@ -6,7 +6,9 @@ import zipfile
 
 import gdown
 
-from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import BaseBenchmarkAdapter
+from cognee.eval_framework.benchmark_adapters.base_benchmark_adapter import (
+    BaseBenchmarkAdapter,
+)
 
 
 class MusiqueQAAdapter(BaseBenchmarkAdapter):
@@ -69,9 +71,11 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
         qa_pair = {
             "id": item.get("id", ""),
             "question": item.get("question", ""),
-            "answer": item.get("answer", "").lower()
-            if isinstance(item.get("answer"), str)
-            else item.get("answer"),
+            "answer": (
+                item.get("answer", "").lower()
+                if isinstance(item.get("answer"), str)
+                else item.get("answer")
+            ),
         }
 
         if load_golden_context:
@@ -91,7 +95,9 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
         raw_corpus = self._get_raw_corpus(auto_download)
 
         if instance_filter is not None:
-            raw_corpus = self._filter_instances(raw_corpus, instance_filter, id_key="id")
+            raw_corpus = self._filter_instances(
+                raw_corpus, instance_filter, id_key="id"
+            )
 
         if limit is not None and 0 < limit < len(raw_corpus):
             random.seed(seed)
@@ -102,7 +108,9 @@ class MusiqueQAAdapter(BaseBenchmarkAdapter):
 
         for item in raw_corpus:
             corpus_list.extend(self._get_corpus_entries(item))
-            question_answer_pairs.append(self._get_question_answer_pair(item, load_golden_context))
+            question_answer_pairs.append(
+                self._get_question_answer_pair(item, load_golden_context)
+            )
 
         return corpus_list, question_answer_pairs
 

@@ -7,7 +7,9 @@ from cognee.modules.data.models import Dataset, DatasetData
 from ...models import ACL, Permission
 
 
-async def get_document_ids_for_user(user_id: UUID, datasets: list[str] = None) -> list[str]:
+async def get_document_ids_for_user(
+    user_id: UUID, datasets: list[str] = None
+) -> list[str]:
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:

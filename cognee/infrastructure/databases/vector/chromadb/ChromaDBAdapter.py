@@ -157,7 +157,10 @@ class ChromaDBAdapter(VectorDBInterface):
     connection: AsyncHttpClient = None
 
     def __init__(
-        self, url: Optional[str], api_key: Optional[str], embedding_engine: EmbeddingEngine
+        self,
+        url: Optional[str],
+        api_key: Optional[str],
+        embedding_engine: EmbeddingEngine,
     ):
         self.embedding_engine = embedding_engine
         self.url = url
@@ -176,7 +179,8 @@ class ChromaDBAdapter(VectorDBInterface):
         """
         if self.connection is None:
             settings = Settings(
-                chroma_client_auth_provider="token", chroma_client_auth_credentials=self.api_key
+                chroma_client_auth_provider="token",
+                chroma_client_auth_credentials=self.api_key,
             )
             self.connection = await AsyncHttpClient(host=self.url, settings=settings)
 
@@ -254,7 +258,9 @@ class ChromaDBAdapter(VectorDBInterface):
         client = await self.get_connection()
         return await client.get_collection(collection_name)
 
-    async def create_data_points(self, collection_name: str, data_points: list[DataPoint]):
+    async def create_data_points(
+        self, collection_name: str, data_points: list[DataPoint]
+    ):
         """
         Create and upsert data points into the specified collection in ChromaDB.
 
@@ -269,7 +275,9 @@ class ChromaDBAdapter(VectorDBInterface):
 
         collection = await self.get_collection(collection_name)
 
-        texts = [DataPoint.get_embeddable_data(data_point) for data_point in data_points]
+        texts = [
+            DataPoint.get_embeddable_data(data_point) for data_point in data_points
+        ]
         embeddings = await self.embed_data(texts)
         ids = [str(data_point.id) for data_point in data_points]
 
@@ -391,9 +399,11 @@ class ChromaDBAdapter(VectorDBInterface):
 
             results = await collection.query(
                 query_embeddings=[query_vector],
-                include=["metadatas", "distances", "embeddings"]
-                if with_vector
-                else ["metadatas", "distances"],
+                include=(
+                    ["metadatas", "distances", "embeddings"]
+                    if with_vector
+                    else ["metadatas", "distances"]
+                ),
                 n_results=limit,
             )
 
@@ -464,9 +474,11 @@ class ChromaDBAdapter(VectorDBInterface):
 
         results = await collection.query(
             query_embeddings=query_vectors,
-            include=["metadatas", "distances", "embeddings"]
-            if with_vectors
-            else ["metadatas", "distances"],
+            include=(
+                ["metadatas", "distances", "embeddings"]
+                if with_vectors
+                else ["metadatas", "distances"]
+            ),
             n_results=limit,
         )
 

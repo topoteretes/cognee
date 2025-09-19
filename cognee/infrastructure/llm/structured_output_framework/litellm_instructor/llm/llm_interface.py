@@ -59,6 +59,8 @@ class LLMInterface(Protocol):
             raise ValueError("No system prompt path provided.")
         system_prompt = LLMGateway.read_query_prompt(system_prompt)
 
-        formatted_prompt = f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
+        formatted_prompt = (
+            f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
+        )
 
         return formatted_prompt

@@ -125,7 +125,10 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
         if self.save_interaction and context_text and triplets and completion:
             await self.save_qa(
-                question=query, answer=completion, context=context_text, triplets=triplets
+                question=query,
+                answer=completion,
+                context=context_text,
+                triplets=triplets,
             )
 
         return [completion]

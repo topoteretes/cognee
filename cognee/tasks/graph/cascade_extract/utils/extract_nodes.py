@@ -25,13 +25,17 @@ async def extract_nodes(text: str, n_rounds: int = 2) -> List[str]:
         }
         base_directory = get_absolute_path("./tasks/graph/cascade_extract/prompts")
         text_input = LLMGateway.render_prompt(
-            "extract_graph_nodes_prompt_input.txt", context, base_directory=base_directory
+            "extract_graph_nodes_prompt_input.txt",
+            context,
+            base_directory=base_directory,
         )
         system_prompt = LLMGateway.read_query_prompt(
             "extract_graph_nodes_prompt_system.txt", base_directory=base_directory
         )
         response = await LLMGateway.acreate_structured_output(
-            text_input=text_input, system_prompt=system_prompt, response_model=PotentialNodes
+            text_input=text_input,
+            system_prompt=system_prompt,
+            response_model=PotentialNodes,
         )
 
         for node in response.nodes:

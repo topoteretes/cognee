@@ -36,19 +36,27 @@ class SyncOperation(Base):
     __tablename__ = "sync_operations"
 
     # Primary identifiers
-    id = Column(SQLAlchemy_UUID, primary_key=True, default=uuid4, doc="Database primary key")
-    run_id = Column(Text, unique=True, index=True, doc="Public run ID returned to users")
+    id = Column(
+        SQLAlchemy_UUID, primary_key=True, default=uuid4, doc="Database primary key"
+    )
+    run_id = Column(
+        Text, unique=True, index=True, doc="Public run ID returned to users"
+    )
 
     # Status and progress tracking
     status = Column(
-        SQLEnum(SyncStatus), default=SyncStatus.STARTED, doc="Current status of the sync operation"
+        SQLEnum(SyncStatus),
+        default=SyncStatus.STARTED,
+        doc="Current status of the sync operation",
     )
     progress_percentage = Column(Integer, default=0, doc="Progress percentage (0-100)")
 
     # Operation metadata
     dataset_ids = Column(JSON, doc="Array of dataset IDs being synced")
     dataset_names = Column(JSON, doc="Array of dataset names being synced")
-    user_id = Column(SQLAlchemy_UUID, index=True, doc="ID of the user who initiated the sync")
+    user_id = Column(
+        SQLAlchemy_UUID, index=True, doc="ID of the user who initiated the sync"
+    )
 
     # Timing information
     created_at = Column(
@@ -56,19 +64,29 @@ class SyncOperation(Base):
         default=lambda: datetime.now(timezone.utc),
         doc="When the sync was initiated",
     )
-    started_at = Column(DateTime(timezone=True), doc="When the actual sync processing began")
+    started_at = Column(
+        DateTime(timezone=True), doc="When the actual sync processing began"
+    )
     completed_at = Column(
         DateTime(timezone=True), doc="When the sync finished (success or failure)"
     )
 
     # Operation details
     total_records_to_sync = Column(Integer, doc="Total number of records to sync")
-    total_records_to_download = Column(Integer, doc="Total number of records to download")
+    total_records_to_download = Column(
+        Integer, doc="Total number of records to download"
+    )
     total_records_to_upload = Column(Integer, doc="Total number of records to upload")
 
-    records_downloaded = Column(Integer, default=0, doc="Number of records successfully downloaded")
-    records_uploaded = Column(Integer, default=0, doc="Number of records successfully uploaded")
-    bytes_downloaded = Column(Integer, default=0, doc="Total bytes downloaded from cloud")
+    records_downloaded = Column(
+        Integer, default=0, doc="Number of records successfully downloaded"
+    )
+    records_uploaded = Column(
+        Integer, default=0, doc="Number of records successfully uploaded"
+    )
+    bytes_downloaded = Column(
+        Integer, default=0, doc="Total bytes downloaded from cloud"
+    )
     bytes_uploaded = Column(Integer, default=0, doc="Total bytes uploaded to cloud")
 
     # Data lineage tracking per dataset
@@ -90,8 +108,12 @@ class SyncOperation(Base):
 
     def get_progress_info(self) -> dict:
         """Get comprehensive progress information."""
-        total_records_processed = (self.records_downloaded or 0) + (self.records_uploaded or 0)
-        total_bytes_transferred = (self.bytes_downloaded or 0) + (self.bytes_uploaded or 0)
+        total_records_processed = (self.records_downloaded or 0) + (
+            self.records_uploaded or 0
+        )
+        total_bytes_transferred = (self.bytes_downloaded or 0) + (
+            self.bytes_uploaded or 0
+        )
 
         return {
             "status": self.status.value,

@@ -11,7 +11,9 @@ class TaskRun(Base):
 
     task_name = Column(String)
 
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
     status = Column(String)
 

@@ -36,7 +36,9 @@ class CorpusBuilderExecutor:
         instance_filter: Optional[Union[str, List[str], List[int]]] = None,
     ) -> Tuple[List[Dict], List[str]]:
         self.raw_corpus, self.questions = self.adapter.load_corpus(
-            limit=limit, load_golden_context=load_golden_context, instance_filter=instance_filter
+            limit=limit,
+            load_golden_context=load_golden_context,
+            instance_filter=instance_filter,
         )
         return self.raw_corpus, self.questions
 
@@ -49,7 +51,9 @@ class CorpusBuilderExecutor:
         instance_filter: Optional[Union[str, List[str], List[int]]] = None,
     ) -> List[str]:
         self.load_corpus(
-            limit=limit, load_golden_context=load_golden_context, instance_filter=instance_filter
+            limit=limit,
+            load_golden_context=load_golden_context,
+            instance_filter=instance_filter,
         )
         await self.run_cognee(chunk_size=chunk_size, chunker=chunker)
         return self.questions

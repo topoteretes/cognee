@@ -3,7 +3,9 @@ from typing import List, Optional
 from fastembed import TextEmbedding
 import litellm
 import os
-from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
+from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import (
+    EmbeddingEngine,
+)
 from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.llm.tokenizer.TikToken import (
     TikTokenTokenizer,
@@ -88,7 +90,9 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
 
         except Exception as error:
             logger.error(f"Embedding error in FastembedEmbeddingEngine: {str(error)}")
-            raise EmbeddingException(f"Failed to index data points using model {self.model}")
+            raise EmbeddingException(
+                f"Failed to index data points using model {self.model}"
+            )
 
     def get_vector_size(self) -> int:
         """

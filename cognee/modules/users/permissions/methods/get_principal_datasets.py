@@ -8,7 +8,9 @@ from cognee.modules.data.models.Dataset import Dataset
 from ...models.ACL import ACL
 
 
-async def get_principal_datasets(principal: Principal, permission_type: str) -> list[Dataset]:
+async def get_principal_datasets(
+    principal: Principal, permission_type: str
+) -> list[Dataset]:
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:

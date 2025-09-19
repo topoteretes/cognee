@@ -130,7 +130,9 @@ app.openapi = custom_openapi
 
 
 @app.exception_handler(RequestValidationError)
-async def request_validation_exception_handler(request: Request, exc: RequestValidationError):
+async def request_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+):
     if request.url.path == "/api/v1/auth/login":
         return JSONResponse(
             status_code=400,
@@ -211,7 +213,10 @@ async def detailed_health_check():
     except Exception as e:
         return JSONResponse(
             status_code=503,
-            content={"status": "unhealthy", "error": f"Health check system failure: {str(e)}"},
+            content={
+                "status": "unhealthy",
+                "error": f"Health check system failure: {str(e)}",
+            },
         )
 
 
@@ -253,17 +258,23 @@ app.include_router(get_datasets_router(), prefix="/api/v1/datasets", tags=["data
 
 app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["settings"])
 
-app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
+app.include_router(
+    get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"]
+)
 
 app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
 
-app.include_router(get_responses_router(), prefix="/api/v1/responses", tags=["responses"])
+app.include_router(
+    get_responses_router(), prefix="/api/v1/responses", tags=["responses"]
+)
 
 app.include_router(get_sync_router(), prefix="/api/v1/sync", tags=["sync"])
 
 codegraph_routes = get_code_pipeline_router()
 if codegraph_routes:
-    app.include_router(codegraph_routes, prefix="/api/v1/code-pipeline", tags=["code-pipeline"])
+    app.include_router(
+        codegraph_routes, prefix="/api/v1/code-pipeline", tags=["code-pipeline"]
+    )
 
 app.include_router(
     get_users_router(),
@@ -305,5 +316,6 @@ if __name__ == "__main__":
     logger = setup_logging()
 
     start_api_server(
-        host=os.getenv("HTTP_API_HOST", "0.0.0.0"), port=int(os.getenv("HTTP_API_PORT", 8000))
+        host=os.getenv("HTTP_API_HOST", "0.0.0.0"),
+        port=int(os.getenv("HTTP_API_PORT", 8000)),
     )

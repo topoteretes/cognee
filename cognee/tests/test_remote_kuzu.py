@@ -15,12 +15,16 @@ async def main():
     # Clean up test directories before starting
     data_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_remote_kuzu")
+            os.path.join(
+                pathlib.Path(__file__).parent, ".data_storage/test_remote_kuzu"
+            )
         ).resolve()
     )
     cognee_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_remote_kuzu")
+            os.path.join(
+                pathlib.Path(__file__).parent, ".cognee_system/test_remote_kuzu"
+            )
         ).resolve()
     )
 
@@ -94,14 +98,18 @@ async def main():
 
         await cognee.prune.prune_data()
         data_root_directory = get_storage_config()["data_root_directory"]
-        assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
+        assert not os.path.isdir(
+            data_root_directory
+        ), "Local data files are not deleted"
 
         await cognee.prune.prune_system(metadata=True)
         from cognee.infrastructure.databases.graph import get_graph_engine
 
         graph_engine = await get_graph_engine()
         nodes, edges = await graph_engine.get_graph_data()
-        assert len(nodes) == 0 and len(edges) == 0, "Remote Kuzu graph database is not empty"
+        assert (
+            len(nodes) == 0 and len(edges) == 0
+        ), "Remote Kuzu graph database is not empty"
 
     finally:
         # Ensure cleanup even if tests fail

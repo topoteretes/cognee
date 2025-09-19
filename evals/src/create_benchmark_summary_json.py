@@ -30,7 +30,9 @@ def read_summary_dataframe(csv_path: str) -> pd.DataFrame:
     """Read the cross-benchmark summary CSV into a DataFrame."""
     try:
         df = pd.read_csv(csv_path)
-        print(f"✅ Successfully loaded CSV with {len(df)} rows and {len(df.columns)} columns")
+        print(
+            f"✅ Successfully loaded CSV with {len(df)} rows and {len(df.columns)} columns"
+        )
         return df
     except Exception as e:
         print(f"❌ Error reading CSV: {e}")
@@ -88,7 +90,9 @@ def load_aggregate_metrics(benchmark_name: str, temp_dir: str) -> pd.DataFrame:
     aggregate_csv_path = os.path.join(analysis_path, "metrics_aggregate.csv")
 
     if not os.path.exists(aggregate_csv_path):
-        raise FileNotFoundError(f"Aggregate metrics file not found: {aggregate_csv_path}")
+        raise FileNotFoundError(
+            f"Aggregate metrics file not found: {aggregate_csv_path}"
+        )
 
     try:
         df = pd.read_csv(aggregate_csv_path, index_col=0)
@@ -169,7 +173,9 @@ def process_single_metric_with_bootstrap(
     # Round confidence interval to 3 decimal places
     confidence_interval = [round(ci, 3) for ci in confidence_interval]
 
-    print(f"  📊 {metric}: run scores range=[{min(all_run_scores):.3f}, {max(all_run_scores):.3f}]")
+    print(
+        f"  📊 {metric}: run scores range=[{min(all_run_scores):.3f}, {max(all_run_scores):.3f}]"
+    )
     print(
         f"  ✅ {metric}: mean={final_mean:.3f}, CI=[{confidence_interval[0]:.3f}, {confidence_interval[1]:.3f}]"
     )
@@ -197,12 +203,17 @@ def process_single_benchmark(
             mean, confidence_interval = process_single_metric_with_bootstrap(
                 benchmark_name, temp_dir, metric, cross_benchmark_mean
             )
-            metric_values[metric] = {"mean": mean, "confidence_interval": confidence_interval}
+            metric_values[metric] = {
+                "mean": mean,
+                "confidence_interval": confidence_interval,
+            }
         except Exception as e:
             print(f"❌ Error processing {metric} for {benchmark_name}: {e}")
             return None
 
-    print(f"✅ Successfully processed {benchmark_name} with {len(metric_values)} metrics")
+    print(
+        f"✅ Successfully processed {benchmark_name} with {len(metric_values)} metrics"
+    )
     return metric_values
 
 
@@ -247,7 +258,9 @@ def create_metric_entry(
 
 
 def format_benchmark_entry(
-    benchmark_name: str, means: Dict[str, float], confidence_intervals: Dict[str, List[float]]
+    benchmark_name: str,
+    means: Dict[str, float],
+    confidence_intervals: Dict[str, List[float]],
 ) -> Dict[str, Any]:
     """Format benchmark data into required JSON structure."""
     print(f"📝 Formatting benchmark entry for {benchmark_name}")
@@ -266,7 +279,9 @@ def format_benchmark_entry(
             # Add error interval (already rounded to 3 decimal places)
             formatted_entry[error_name] = ci
 
-            print(f"  ✅ {mapped_name}: {mean_value:.3f}, Error: [{ci[0]:.3f}, {ci[1]:.3f}]")
+            print(
+                f"  ✅ {mapped_name}: {mean_value:.3f}, Error: [{ci[0]:.3f}, {ci[1]:.3f}]"
+            )
         else:
             print(f"  ❌ {metric}: No confidence interval found")
 
@@ -309,7 +324,9 @@ def handle_processing_errors(benchmark_name: str, error: Exception) -> None:
     print(f"  📝 Skipping {benchmark_name} and continuing with next benchmark")
 
 
-def process_all_benchmarks(temp_dir: str, max_benchmarks: int = 3) -> List[Dict[str, Any]]:
+def process_all_benchmarks(
+    temp_dir: str, max_benchmarks: int = 3
+) -> List[Dict[str, Any]]:
     """Process all benchmarks with optional limit for testing."""
     print(f"Processing benchmarks from {temp_dir} (max: {max_benchmarks})")
 
@@ -333,7 +350,9 @@ def process_all_benchmarks(temp_dir: str, max_benchmarks: int = 3) -> List[Dict[
         benchmark_name = row["benchmark"]
         total_benchmarks = len(summary_df)
         current_progress = processed_count + 1
-        print(f"\n📊 Processing benchmark {current_progress}/{total_benchmarks}: {benchmark_name}")
+        print(
+            f"\n📊 Processing benchmark {current_progress}/{total_benchmarks}: {benchmark_name}"
+        )
 
         # Validate benchmark folder (PHASE 6 - IMPLEMENTED)
         if not validate_benchmark_folder(benchmark_name, temp_dir):
@@ -438,7 +457,9 @@ def create_output_directory(output_path: str) -> None:
         print(f"📁 Created output directory: {output_dir}")
 
 
-def save_benchmark_summary_json(results: List[Dict[str, Any]], output_path: str) -> None:
+def save_benchmark_summary_json(
+    results: List[Dict[str, Any]], output_path: str
+) -> None:
     """Save benchmark summary to JSON file."""
     print(f"💾 Saving {len(results)} benchmark results to {output_path}")
 
@@ -508,7 +529,9 @@ def main():
         if len(summary_df) > 0:
             print("📋 All benchmarks found:")
             for i, row in summary_df.iterrows():
-                print(f"  {i + 1}. {row['benchmark']}: {row.get('overall_avg', 'N/A'):.4f}")
+                print(
+                    f"  {i + 1}. {row['benchmark']}: {row.get('overall_avg', 'N/A'):.4f}"
+                )
         else:
             print("⚠️  No benchmarks found in CSV")
 

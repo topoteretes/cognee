@@ -47,7 +47,10 @@ async def check_pipeline_run_qualification(
                 dataset_name=dataset.name,
                 payload=data,
             )
-        elif task_status[str(dataset.id)] == PipelineRunStatus.DATASET_PROCESSING_COMPLETED:
+        elif (
+            task_status[str(dataset.id)]
+            == PipelineRunStatus.DATASET_PROCESSING_COMPLETED
+        ):
             logger.info("Dataset %s is already processed.", dataset.id)
             pipeline_run = await get_pipeline_run_by_dataset(dataset.id, pipeline_name)
             return PipelineRunCompleted(

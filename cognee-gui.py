@@ -49,7 +49,9 @@ class FileSearchApp(QWidget):
 
         # Button to visualize data
         self.visualize_button = QPushButton("Visualize Data", parent=self)
-        self.visualize_button.clicked.connect(lambda: asyncio.ensure_future(self.visualize_data()))
+        self.visualize_button.clicked.connect(
+            lambda: asyncio.ensure_future(self.visualize_data())
+        )
         button_layout.addWidget(self.visualize_button)
 
         # Label to display selected file path
@@ -61,7 +63,9 @@ class FileSearchApp(QWidget):
 
         # Button to perform search; schedule the async search on click
         self.search_button = QPushButton("Cognee Search", parent=self)
-        self.search_button.clicked.connect(lambda: asyncio.ensure_future(self._cognee_search()))
+        self.search_button.clicked.connect(
+            lambda: asyncio.ensure_future(self._cognee_search())
+        )
 
         # Text output area for search results
         self.result_output = QTextEdit(parent=self)
@@ -135,7 +139,9 @@ class FileSearchApp(QWidget):
         import os
         import pathlib
 
-        html_file = os.path.join(pathlib.Path(__file__).parent, ".data", "graph_visualization.html")
+        html_file = os.path.join(
+            pathlib.Path(__file__).parent, ".data", "graph_visualization.html"
+        )
         await visualize_graph(html_file)
         webbrowser.open(f"file://{html_file}")
 

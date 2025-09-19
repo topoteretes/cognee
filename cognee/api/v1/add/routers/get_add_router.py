@@ -77,7 +77,9 @@ def get_add_router() -> APIRouter:
             )
 
             if isinstance(add_run, PipelineRunErrored):
-                return JSONResponse(status_code=420, content=add_run.model_dump(mode="json"))
+                return JSONResponse(
+                    status_code=420, content=add_run.model_dump(mode="json")
+                )
             return add_run.model_dump()
         except Exception as error:
             return JSONResponse(status_code=409, content={"error": str(error)})

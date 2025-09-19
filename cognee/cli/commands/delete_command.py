@@ -29,7 +29,9 @@ Be careful with deletion operations as they are irreversible.
         parser.add_argument(
             "--all", action="store_true", help="Delete all data (requires confirmation)"
         )
-        parser.add_argument("--force", "-f", action="store_true", help="Skip confirmation prompts")
+        parser.add_argument(
+            "--force", "-f", action="store_true", help="Skip confirmation prompts"
+        )
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -38,7 +40,9 @@ Be careful with deletion operations as they are irreversible.
 
             # Validate arguments
             if not any([args.dataset_name, args.user_id, args.all]):
-                fmt.error("Please specify what to delete: --dataset-name, --user-id, or --all")
+                fmt.error(
+                    "Please specify what to delete: --dataset-name, --user-id, or --all"
+                )
                 return
 
             # Build confirmation message
@@ -67,7 +71,9 @@ Be careful with deletion operations as they are irreversible.
                     if args.all:
                         await cognee.delete(dataset_name=None, user_id=args.user_id)
                     else:
-                        await cognee.delete(dataset_name=args.dataset_name, user_id=args.user_id)
+                        await cognee.delete(
+                            dataset_name=args.dataset_name, user_id=args.user_id
+                        )
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to delete: {str(e)}")
 

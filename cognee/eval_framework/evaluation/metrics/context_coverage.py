@@ -24,7 +24,9 @@ class ContextCoverageMetric(SummarizationMetric):
                     self.a_measure(mapped_test_case, _show_indicator=False)
                 )
             else:
-                self.coverage_verdicts = self._generate_coverage_verdicts(mapped_test_case)
+                self.coverage_verdicts = self._generate_coverage_verdicts(
+                    mapped_test_case
+                )
                 self.alignment_verdicts = []
                 self.score = self._calculate_score(ScoreType.COVERAGE)
                 self.reason = self._generate_reason()

@@ -15,7 +15,9 @@ from cognee.modules.users.get_user_db import get_user_db_context
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.authentication.default.default_jwt_strategy import DefaultJWTStrategy
+from cognee.modules.users.authentication.default.default_jwt_strategy import (
+    DefaultJWTStrategy,
+)
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunInfo,
@@ -38,7 +40,8 @@ class CognifyPayloadDTO(InDTO):
     dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
     custom_prompt: Optional[str] = Field(
-        default="", description="Custom prompt for entity extraction and graph generation"
+        default="",
+        description="Custom prompt for entity extraction and graph generation",
     )
 
 
@@ -46,7 +49,9 @@ def get_cognify_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("", response_model=dict)
-    async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
+    async def cognify(
+        payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)
+    ):
         """
         Transform datasets into structured knowledge graphs through cognitive processing.
 
@@ -102,7 +107,8 @@ def get_cognify_router() -> APIRouter:
 
         if not payload.datasets and not payload.dataset_ids:
             return JSONResponse(
-                status_code=400, content={"error": "No datasets or dataset_ids provided"}
+                status_code=400,
+                content={"error": "No datasets or dataset_ids provided"},
             )
 
         from cognee.api.v1.cognify import cognify as cognee_cognify
@@ -128,7 +134,9 @@ def get_cognify_router() -> APIRouter:
     async def subscribe_to_cognify_info(websocket: WebSocket, pipeline_run_id: str):
         await websocket.accept()
 
-        access_token = websocket.cookies.get(os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token"))
+        access_token = websocket.cookies.get(
+            os.getenv("AUTH_TOKEN_COOKIE_NAME", "auth_token")
+        )
 
         try:
             secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
@@ -172,7 +180,9 @@ def get_cognify_router() -> APIRouter:
                     {
                         "pipeline_run_id": str(pipeline_run_info.pipeline_run_id),
                         "status": pipeline_run_info.status,
-                        "payload": await get_formatted_graph_data(pipeline_run.dataset_id, user),
+                        "payload": await get_formatted_graph_data(
+                            pipeline_run.dataset_id, user
+                        ),
                     }
                 )
 

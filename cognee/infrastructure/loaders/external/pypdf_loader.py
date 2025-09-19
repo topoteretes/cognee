@@ -30,7 +30,10 @@ class PyPdfLoader(LoaderInterface):
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """Check if file can be handled by this loader."""
         # Check file extension
-        if extension in self.supported_extensions and mime_type in self.supported_mime_types:
+        if (
+            extension in self.supported_extensions
+            and mime_type in self.supported_mime_types
+        ):
             return True
 
         return False
@@ -77,7 +80,9 @@ class PyPdfLoader(LoaderInterface):
                             page_texts.append(page_text)
                             content_parts.append(f"Page {page_num}:\n{page_text}\n")
                     except Exception as e:
-                        logger.warning(f"Failed to extract text from page {page_num}: {e}")
+                        logger.warning(
+                            f"Failed to extract text from page {page_num}: {e}"
+                        )
                         continue
 
                 # Combine all content
