@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Union, Optional
 from uuid import UUID
 
+from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm import get_max_chunk_tokens
@@ -11,7 +12,10 @@ from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.ontology_config import Config
-from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_default_ontology_resolver,
+    get_ontology_resolver_from_env,
+)
 from cognee.modules.users.models import User
 
 from cognee.tasks.documents import (
@@ -188,7 +192,21 @@ async def cognify(
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
     if config is None:
-        config: Config = {"ontology_config": {"ontology_resolver": get_default_ontology_resolver()}}
+        ontology_config = get_ontology_env_config()
+        if (
+            ontology_config.ontology_file_path
+            and ontology_config.ontology_resolver
+            and ontology_config.matching_strategy
+        ):
+            config: Config = {
+                "ontology_config": {
+                    "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
+                }
+            }
+        else:
+            config: Config = {
+                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
+            }
 
     if temporal_cognify:
         tasks = await get_temporal_tasks(user, chunker, chunk_size)
@@ -222,7 +240,21 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     custom_prompt: Optional[str] = None,
 ) -> list[Task]:
     if config is None:
-        config: Config = {"ontology_config": {"ontology_resolver": get_default_ontology_resolver()}}
+        ontology_config = get_ontology_env_config()
+        if (
+            ontology_config.ontology_file_path
+            and ontology_config.ontology_resolver
+            and ontology_config.matching_strategy
+        ):
+            config: Config = {
+                "ontology_config": {
+                    "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
+                }
+            }
+        else:
+            config: Config = {
+                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
+            }
 
     default_tasks = [
         Task(classify_documents),
