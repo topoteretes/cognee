@@ -63,14 +63,13 @@ dependencies = [
     "pylance>=0.22.0,<1.0.0",
     "kuzu (==0.11.0)",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
-]
-
-[project.optional-dependencies]
-api = [
     "uvicorn>=0.34.0,<1.0.0",
     "gunicorn>=20.1.0,<24",
     "websockets>=15.0.1,<16.0.0"
 ]
+
+[project.optional-dependencies]
+api=[]
 distributed = [
     "modal>=1.0.5,<2.0.0",
 ]

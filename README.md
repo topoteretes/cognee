@@ -176,16 +176,6 @@ You can also cognify your files and query using cognee UI.
 
 <img src="assets/cognee-new-ui.webp" width="100%" alt="Cognee UI 2"></a>
 
-### Installation for UI
-
-To use the cognee UI with full functionality, you need to install cognee with API dependencies:
-
-```bash
-pip install 'cognee[api]'
-```
-
-The UI requires backend server functionality (uvicorn and other API dependencies) which are not included in the default cognee installation to keep it lightweight.
-
 ### Running the UI
 
 Try cognee UI by running ``` cognee-cli -ui ``` command on your terminal.
