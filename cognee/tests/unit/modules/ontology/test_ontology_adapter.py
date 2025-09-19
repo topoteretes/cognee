@@ -340,9 +340,7 @@ def test_get_ontology_resolver_from_env_success():
     from cognee.modules.ontology.matching_strategies import FuzzyMatchingStrategy
 
     resolver = get_ontology_resolver_from_env(
-        ontology_resolver="rdflib",
-        matching_strategy="fuzzy",
-        ontology_file_path="/test/path.owl"
+        ontology_resolver="rdflib", matching_strategy="fuzzy", ontology_file_path="/test/path.owl"
     )
 
     assert isinstance(resolver, RDFLibOntologyResolver)
@@ -358,7 +356,7 @@ def test_get_ontology_resolver_from_env_unsupported_resolver():
         get_ontology_resolver_from_env(
             ontology_resolver="unsupported",
             matching_strategy="fuzzy",
-            ontology_file_path="/test/path.owl"
+            ontology_file_path="/test/path.owl",
         )
 
     assert "Unsupported ontology resolver: unsupported" in str(exc_info.value)
@@ -373,7 +371,7 @@ def test_get_ontology_resolver_from_env_unsupported_strategy():
         get_ontology_resolver_from_env(
             ontology_resolver="rdflib",
             matching_strategy="unsupported",
-            ontology_file_path="/test/path.owl"
+            ontology_file_path="/test/path.owl",
         )
 
     assert "Unsupported ontology resolver: rdflib" in str(exc_info.value)
@@ -385,9 +383,7 @@ def test_get_ontology_resolver_from_env_empty_file_path():
 
     with pytest.raises(EnvironmentError) as exc_info:
         get_ontology_resolver_from_env(
-            ontology_resolver="rdflib",
-            matching_strategy="fuzzy",
-            ontology_file_path=""
+            ontology_resolver="rdflib", matching_strategy="fuzzy", ontology_file_path=""
         )
 
     assert "Unsupported ontology resolver: rdflib" in str(exc_info.value)
@@ -399,9 +395,7 @@ def test_get_ontology_resolver_from_env_none_file_path():
 
     with pytest.raises(EnvironmentError) as exc_info:
         get_ontology_resolver_from_env(
-            ontology_resolver="rdflib",
-            matching_strategy="fuzzy",
-            ontology_file_path=None
+            ontology_resolver="rdflib", matching_strategy="fuzzy", ontology_file_path=None
         )
 
     assert "Unsupported ontology resolver: rdflib" in str(exc_info.value)
@@ -413,9 +407,7 @@ def test_get_ontology_resolver_from_env_empty_resolver():
 
     with pytest.raises(EnvironmentError) as exc_info:
         get_ontology_resolver_from_env(
-            ontology_resolver="",
-            matching_strategy="fuzzy",
-            ontology_file_path="/test/path.owl"
+            ontology_resolver="", matching_strategy="fuzzy", ontology_file_path="/test/path.owl"
         )
 
     assert "Unsupported ontology resolver:" in str(exc_info.value)
@@ -427,9 +419,7 @@ def test_get_ontology_resolver_from_env_empty_strategy():
 
     with pytest.raises(EnvironmentError) as exc_info:
         get_ontology_resolver_from_env(
-            ontology_resolver="rdflib",
-            matching_strategy="",
-            ontology_file_path="/test/path.owl"
+            ontology_resolver="rdflib", matching_strategy="", ontology_file_path="/test/path.owl"
         )
 
     assert "Unsupported ontology resolver: rdflib" in str(exc_info.value)
@@ -453,14 +443,14 @@ def test_get_ontology_resolver_from_env_case_sensitivity():
         get_ontology_resolver_from_env(
             ontology_resolver="RDFLIB",
             matching_strategy="fuzzy",
-            ontology_file_path="/test/path.owl"
+            ontology_file_path="/test/path.owl",
         )
 
     with pytest.raises(EnvironmentError):
         get_ontology_resolver_from_env(
             ontology_resolver="RdfLib",
             matching_strategy="fuzzy",
-            ontology_file_path="/test/path.owl"
+            ontology_file_path="/test/path.owl",
         )
 
 
@@ -473,7 +463,7 @@ def test_get_ontology_resolver_from_env_with_actual_file():
     resolver = get_ontology_resolver_from_env(
         ontology_resolver="rdflib",
         matching_strategy="fuzzy",
-        ontology_file_path="/path/to/ontology.owl"
+        ontology_file_path="/path/to/ontology.owl",
     )
 
     assert isinstance(resolver, RDFLibOntologyResolver)
@@ -486,9 +476,7 @@ def test_get_ontology_resolver_from_env_resolver_functionality():
     from cognee.modules.ontology.get_default_ontology_resolver import get_ontology_resolver_from_env
 
     resolver = get_ontology_resolver_from_env(
-        ontology_resolver="rdflib",
-        matching_strategy="fuzzy",
-        ontology_file_path="/test/path.owl"
+        ontology_resolver="rdflib", matching_strategy="fuzzy", ontology_file_path="/test/path.owl"
     )
 
     resolver.build_lookup()
