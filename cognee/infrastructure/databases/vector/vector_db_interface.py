@@ -83,7 +83,7 @@ class VectorDBInterface(Protocol):
         collection_name: str,
         query_text: Optional[str],
         query_vector: Optional[List[float]],
-        limit: int,
+        limit: Optional[int],
         with_vector: bool = False,
     ):
         """
@@ -98,7 +98,7 @@ class VectorDBInterface(Protocol):
               collection.
             - query_vector (Optional[List[float]]): An optional vector representation for
               searching the collection.
-            - limit (int): The maximum number of results to return from the search.
+            - limit (Optional[int]): The maximum number of results to return from the search.
             - with_vector (bool): Whether to return the vector representations with search
               results. (default False)
         """
@@ -106,7 +106,7 @@ class VectorDBInterface(Protocol):
 
     @abstractmethod
     async def batch_search(
-        self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False
+        self, collection_name: str, query_texts: List[str], limit: Optional[int], with_vectors: bool = False
     ):
         """
         Perform a batch search using multiple text queries against a collection.
@@ -116,7 +116,7 @@ class VectorDBInterface(Protocol):
 
             - collection_name (str): The name of the collection to conduct the batch search in.
             - query_texts (List[str]): A list of text queries to use for the search.
-            - limit (int): The maximum number of results to return for each query.
+            - limit (Optional[int]): The maximum number of results to return for each query.
             - with_vectors (bool): Whether to include vector representations with search
               results. (default False)
         """

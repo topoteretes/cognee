@@ -352,7 +352,7 @@ class ChromaDBAdapter(VectorDBInterface):
         collection_name: str,
         query_text: str = None,
         query_vector: List[float] = None,
-        limit: int = 15,
+        limit: Optional[int] = 15,
         with_vector: bool = False,
         normalized: bool = True,
     ):
@@ -386,8 +386,12 @@ class ChromaDBAdapter(VectorDBInterface):
         try:
             collection = await self.get_collection(collection_name)
 
-            if limit == 0:
+            if not limit:
                 limit = await collection.count()
+
+            # If limit is still 0, no need to do the search, just return empty results
+            if limit <= 0:
+                return []
 
             results = await collection.query(
                 query_embeddings=[query_vector],
@@ -428,7 +432,7 @@ class ChromaDBAdapter(VectorDBInterface):
                 for row in vector_list
             ]
         except Exception as e:
-            logger.error(f"Error in search: {str(e)}")
+            logger.warning(f"Error in search: {str(e)}")
             return []
 
     async def batch_search(
