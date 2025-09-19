@@ -1,5 +1,5 @@
 from cognee.infrastructure.loaders.external import PyPdfLoader
-from cognee.infrastructure.loaders.core import TextLoader, AudioLoader, ImageLoader
+from cognee.infrastructure.loaders.core import TextLoader, AudioLoader, ImageLoader, CsvLoader
 
 # Registry for loader implementations
 supported_loaders = {
@@ -7,6 +7,7 @@ supported_loaders = {
     TextLoader.loader_name: TextLoader,
     ImageLoader.loader_name: ImageLoader,
     AudioLoader.loader_name: AudioLoader,
+    CsvLoader.loader_name: CsvLoader,
 }
 
 # Try adding optional loaders
