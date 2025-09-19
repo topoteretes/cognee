@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.3.4.dev1"
+version = "0.3.4"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -46,6 +46,7 @@ dependencies = [
     "matplotlib>=3.8.3,<4",
     "networkx>=3.4.2,<4",
     "lancedb>=0.24.0,<1.0.0",
+    "nbformat>=5.7.0,<6.0.0",
     "alembic>=1.13.3,<2",
     "pre-commit>=4.0.1,<5",
     "scikit-learn>=1.6.1,<2",
@@ -62,14 +63,13 @@ dependencies = [
     "pylance>=0.22.0,<1.0.0",
     "kuzu (==0.11.0)",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
-]
-
-[project.optional-dependencies]
-api = [
     "uvicorn>=0.34.0,<1.0.0",
     "gunicorn>=20.1.0,<24",
     "websockets>=15.0.1,<16.0.0"
 ]
+
+[project.optional-dependencies]
+api=[]
 distributed = [
     "modal>=1.0.5,<2.0.0",
 ]

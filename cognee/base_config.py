@@ -10,14 +10,27 @@ import pydantic
 class BaseConfig(BaseSettings):
     data_root_directory: str = get_absolute_path(".data_storage")
     system_root_directory: str = get_absolute_path(".cognee_system")
+    cache_root_directory: str = get_absolute_path(".cognee_cache")
     monitoring_tool: object = Observer.NONE
+
 
     @pydantic.model_validator(mode="after")
     def validate_paths(self):
+        # Adding this here temporarily to ensure that the cache root directory is set correctly for S3 storage automatically
+        # I'll remove this after we update documentation for S3 storage
+        # Auto-configure cache root directory for S3 storage if not explicitly set
+        storage_backend = os.getenv("STORAGE_BACKEND", "").lower()
+        cache_root_env = os.getenv("CACHE_ROOT_DIRECTORY")
+
+        if storage_backend == "s3" and not cache_root_env:
+            # Auto-generate S3 cache path when using S3 storage
+            bucket_name = os.getenv("STORAGE_BUCKET_NAME")
+            if bucket_name:
+                self.cache_root_directory = f"s3://{bucket_name}/cognee/cache"
+
         # Require absolute paths for root directories
         self.data_root_directory = ensure_absolute_path(self.data_root_directory)
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
-
         # Set monitoring tool based on available keys
         if self.langfuse_public_key and self.langfuse_secret_key:
             self.monitoring_tool = Observer.LANGFUSE
@@ -36,6 +49,7 @@ class BaseConfig(BaseSettings):
             "data_root_directory": self.data_root_directory,
             "system_root_directory": self.system_root_directory,
             "monitoring_tool": self.monitoring_tool,
+            "cache_root_directory": self.cache_root_directory,
         }
 
 
