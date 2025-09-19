@@ -7,8 +7,14 @@ from cognee.modules.engine.utils import (
     generate_node_id,
     generate_node_name,
 )
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_default_ontology_resolver,
+    get_ontology_resolver_from_env,
+)
 
 
 def _create_node_key(node_id: str, category: str) -> str:
@@ -83,7 +89,7 @@ def _process_ontology_edges(
 
 def _create_type_node(
     node_type: str,
-    ontology_resolver: OntologyResolver,
+    ontology_resolver: RDFLibOntologyResolver,
     added_nodes_map: dict,
     added_ontology_nodes_map: dict,
     name_mapping: dict,
@@ -141,7 +147,7 @@ def _create_entity_node(
     node_name: str,
     node_description: str,
     type_node: EntityType,
-    ontology_resolver: OntologyResolver,
+    ontology_resolver: RDFLibOntologyResolver,
     added_nodes_map: dict,
     added_ontology_nodes_map: dict,
     name_mapping: dict,
@@ -198,7 +204,7 @@ def _create_entity_node(
 def _process_graph_nodes(
     data_chunk: DocumentChunk,
     graph: KnowledgeGraph,
-    ontology_resolver: OntologyResolver,
+    ontology_resolver: RDFLibOntologyResolver,
     added_nodes_map: dict,
     added_ontology_nodes_map: dict,
     name_mapping: dict,
@@ -277,7 +283,7 @@ def _process_graph_edges(
 def expand_with_nodes_and_edges(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list[KnowledgeGraph],
-    ontology_resolver: OntologyResolver = None,
+    ontology_resolver: BaseOntologyResolver = None,
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
     """
@@ -296,8 +302,8 @@ def expand_with_nodes_and_edges(
         chunk_graphs (list[KnowledgeGraph]): List of knowledge graphs corresponding to each
             data chunk. Each graph contains nodes (entities) and edges (relationships) extracted
             from the chunk content.
-        ontology_resolver (OntologyResolver, optional): Resolver for validating entities and
-            types against an ontology. If None, a default OntologyResolver is created.
+        ontology_resolver (BaseOntologyResolver, optional): Resolver for validating entities and
+            types against an ontology. If None, a default RDFLibOntologyResolver is created.
             Defaults to None.
         existing_edges_map (dict[str, bool], optional): Mapping of existing edge keys to prevent
             duplicate edge creation. Keys are formatted as "{source_id}_{target_id}_{relation}".
@@ -320,7 +326,15 @@ def expand_with_nodes_and_edges(
         existing_edges_map = {}
 
     if ontology_resolver is None:
-        ontology_resolver = OntologyResolver()
+        ontology_config = get_ontology_env_config()
+        if (
+            ontology_config.ontology_file_path
+            and ontology_config.ontology_resolver
+            and ontology_config.matching_strategy
+        ):
+            ontology_resolver = get_ontology_resolver_from_env(**ontology_config.to_dict())
+        else:
+            ontology_resolver = get_default_ontology_resolver()
 
     added_nodes_map = {}
     added_ontology_nodes_map = {}
