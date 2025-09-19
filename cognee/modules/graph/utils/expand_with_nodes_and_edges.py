@@ -11,8 +11,10 @@ from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
-from cognee.modules.ontology.get_default_ontology_resolver import get_default_ontology_resolver, \
-    get_ontology_resolver_from_env
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_default_ontology_resolver,
+    get_ontology_resolver_from_env,
+)
 
 
 def _create_node_key(node_id: str, category: str) -> str:
@@ -326,9 +328,9 @@ def expand_with_nodes_and_edges(
     if ontology_resolver is None:
         ontology_config = get_ontology_env_config()
         if (
-                ontology_config.ontology_file_path
-                and ontology_config.ontology_resolver
-                and ontology_config.matching_strategy
+            ontology_config.ontology_file_path
+            and ontology_config.ontology_resolver
+            and ontology_config.matching_strategy
         ):
             ontology_resolver = get_ontology_resolver_from_env(**ontology_config.to_dict())
         else:
