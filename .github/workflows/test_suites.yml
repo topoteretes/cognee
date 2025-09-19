@@ -115,16 +115,10 @@ jobs:
     secrets: inherit
 
   # Additional LLM tests
-  gemini-tests:
-    name: Gemini Tests
-    needs: [basic-tests, e2e-tests]
-    uses: ./.github/workflows/test_gemini.yml
-    secrets: inherit
-
-  openrouter-tests:
-    name: OpenRouter Tests
-    needs: [basic-tests, e2e-tests]
-    uses: ./.github/workflows/test_openrouter.yml
+  llm-tests:
+    name: LLM Test Suite
+    needs: [ basic-tests, e2e-tests ]
+    uses: ./.github/workflows/test_llms.yml
     secrets: inherit
 
   # Ollama tests moved to the end
@@ -138,8 +132,7 @@ jobs:
       different-operating-systems-tests,
       vector-db-tests,
       example-tests,
-      gemini-tests,
-      openrouter-tests,
+      llm-tests,
       mcp-test,
       relational-db-migration-tests,
       docker-compose-test,
@@ -161,8 +154,7 @@ jobs:
       example-tests,
       db-examples-tests,
       mcp-test,
-      gemini-tests,
-      openrouter-tests,
+      llm-tests,
       ollama-tests,
       relational-db-migration-tests,
       docker-compose-test,
@@ -183,8 +175,7 @@ jobs:
                 "${{ needs.example-tests.result }}" == "success" &&
                 "${{ needs.db-examples-tests.result }}" == "success" &&
                 "${{ needs.relational-db-migration-tests.result }}" == "success" &&
-                "${{ needs.gemini-tests.result }}" == "success" &&
-                "${{ needs.openrouter-tests.result }}" == "success" &&
+                "${{ needs.llm-tests.result }}" == "success" &&
                 "${{ needs.docker-compose-test.result }}" == "success" &&
                 "${{ needs.docker-ci-test.result }}" == "success" &&
                 "${{ needs.ollama-tests.result }}" == "success" ]]; then
