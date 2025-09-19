@@ -253,6 +253,56 @@ class LocalFileStorage(Storage):
         if os.path.exists(full_file_path):
             os.remove(full_file_path)
 
+    def list_files(self, directory_path: str, recursive: bool = False) -> list[str]:
+        """
+        List all files in the specified directory.
+
+        Parameters:
+        -----------
+            - directory_path (str): The directory path to list files from
+            - recursive (bool): If True, list files recursively in subdirectories
+
+        Returns:
+        --------
+            - list[str]: List of file paths relative to the storage root
+        """
+        from pathlib import Path
+
+        parsed_storage_path = get_parsed_path(self.storage_path)
+
+        if directory_path:
+            full_directory_path = os.path.join(parsed_storage_path, directory_path)
+        else:
+            full_directory_path = parsed_storage_path
+
+        directory_pathlib = Path(full_directory_path)
+
+        if not directory_pathlib.exists() or not directory_pathlib.is_dir():
+            return []
+
+        files = []
+
+        if recursive:
+            # Use rglob for recursive search
+            for file_path in directory_pathlib.rglob("*"):
+                if file_path.is_file():
+                    # Get relative path from storage root
+                    relative_path = os.path.relpath(str(file_path), parsed_storage_path)
+                    # Normalize path separators for consistency
+                    relative_path = relative_path.replace(os.sep, "/")
+                    files.append(relative_path)
+        else:
+            # Use iterdir for just immediate directory
+            for file_path in directory_pathlib.iterdir():
+                if file_path.is_file():
+                    # Get relative path from storage root
+                    relative_path = os.path.relpath(str(file_path), parsed_storage_path)
+                    # Normalize path separators for consistency
+                    relative_path = relative_path.replace(os.sep, "/")
+                    files.append(relative_path)
+
+        return files
+
     def remove_all(self, tree_path: str = None):
         """
         Remove an entire directory tree at the specified path, including all files and

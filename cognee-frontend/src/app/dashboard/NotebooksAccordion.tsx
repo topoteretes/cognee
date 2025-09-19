@@ -5,8 +5,8 @@ import { useBoolean } from "@/utils";
 import { Accordion, CTAButton, GhostButton, IconButton, Input, Modal } from "@/ui/elements";
 import { CloseIcon, MinusIcon, NotebookIcon, PlusIcon } from "@/ui/Icons";
 import { Notebook } from "@/ui/elements/Notebook/types";
-import { LoadingIndicator } from "@/ui/App";
 import { useModal } from "@/ui/elements/Modal";
+import { LoadingIndicator } from "@/ui/App";
 
 interface NotebooksAccordionProps {
   notebooks: Notebook[];
@@ -60,7 +60,7 @@ export default function NotebooksAccordion({
       .finally(() => setNotebookToRemove(null));
   };
 
-  const handleNotebookAdd = useCallback((_: object, formEvent?: FormEvent<HTMLFormElement>) => {
+  const handleNotebookAdd = useCallback((_: Notebook, formEvent?: FormEvent<HTMLFormElement>) => {
     if (!formEvent) {
       return;
     }
@@ -71,6 +71,7 @@ export default function NotebooksAccordion({
     const notebookName = formElements.notebookName.value.trim();
 
     return addNotebook(notebookName)
+      .then(() => {});
   }, [addNotebook]);
 
   const {
@@ -79,7 +80,7 @@ export default function NotebooksAccordion({
     closeModal: closeNewNotebookModal,
     confirmAction: handleNewNotebookSubmit,
     isActionLoading: isNewDatasetLoading,
-  } = useModal<Notebook | void>(false, handleNotebookAdd);
+  } = useModal<Notebook>(false, handleNotebookAdd);
 
   return (
     <>
@@ -91,7 +92,7 @@ export default function NotebooksAccordion({
         tools={isNewDatasetLoading ? (
           <LoadingIndicator />
         ) : (
-          <IconButton onClick={openNewNotebookModal}><PlusIcon /></IconButton>
+          <IconButton onClick={() => openNewNotebookModal()}><PlusIcon /></IconButton>
         )}
       >
         {notebooks.length === 0 && (

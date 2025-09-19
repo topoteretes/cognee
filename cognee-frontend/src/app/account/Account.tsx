@@ -13,8 +13,8 @@ export default function Account() {
   };
 
   return (
-    <div className="bg-gray-200 h-full max-w-[1920px] mx-auto">
-      <video
+    <div className="h-full max-w-[1920px] mx-auto">
+      {/* <video
         autoPlay
         loop
         muted
@@ -23,9 +23,9 @@ export default function Account() {
       >
         <source src="/videos/background-video-blur.mp4" type="video/mp4" />
         Your browser does not support the video tag.
-      </video>
+      </video> */}
 
-      <Header />
+      <Header user={user} />
 
       <div className="relative flex flex-row items-start gap-2.5">
         <Link href="/dashboard" className="flex-1/5 py-4 px-5 flex flex-row items-center gap-5">
@@ -42,7 +42,7 @@ export default function Account() {
             <div>Plan</div>
             <div className="text-sm text-gray-400 mb-8">You are using open-source version. Subscribe to get access to hosted cognee with your data!</div>
             <Link href="/plan">
-              <CTAButton><span className="">Select a plan</span></CTAButton>
+              <CTAButton className="w-full"><span className="">Select a plan</span></CTAButton>
             </Link>
           </div>
         </div>

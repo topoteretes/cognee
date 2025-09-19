@@ -41,6 +41,7 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
             abs_path.is_file()
         except (OSError, ValueError):
             # In case file path is too long it's most likely not a relative path
+            abs_path = data_item
             logger.debug(f"Data item was too long to be a possible file path: {abs_path}")
             abs_path = Path("")
 
