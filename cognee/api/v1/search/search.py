@@ -22,7 +22,7 @@ async def search(
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: bool = False,
-    last_k: Optional[int] = None,
+    last_k: Optional[int] = 1,
     only_context: bool = False,
     use_combined_context: bool = False,
 ) -> Union[List[SearchResult], CombinedSearchResult]:
@@ -82,6 +82,9 @@ async def search(
             Best for: General-purpose queries or when you're unsure which search type is best.
             Returns: The results from the automatically selected search type.
 
+        **CHUNKS_LEXICAL**:
+            Token-based lexical chunk search (e.g., Jaccard). Best for: exact-term matching, stopword-aware lookups.
+            Returns: Ranked text chunks (optionally with scores).
 
     Args:
         query_text: Your question or search query in natural language.

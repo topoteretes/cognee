@@ -9,6 +9,16 @@ from ...models.Role import Role
 
 
 async def get_role(tenant_id: UUID, role_name: str):
+    """
+        Return the role with the name role_name of the given tenant.
+    Args:
+        tenant_id: Id of the given tenant
+        role_name: Name of the role
+
+    Returns
+        The role for the given tenant.
+
+    """
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:

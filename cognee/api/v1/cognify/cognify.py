@@ -4,6 +4,11 @@ from uuid import UUID
 import os
 
 
+
+
+from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
+from cognee.shared.logging_utils import get_logger
+
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.utils import get_max_chunk_tokens
 from cognee.shared.logging_utils import get_logger
@@ -11,7 +16,11 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.pipelines.operations.pipeline import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
-from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_default_ontology_resolver,
+    get_ontology_resolver_from_env,
+)
 from cognee.modules.users.models import User
 
 logger = get_logger()
@@ -76,10 +85,17 @@ async def cognify(  # pylint: disable=too-many-arguments,too-many-positional-arg
     user: Optional[User] = None,
     graph_model: Type[BaseModel] = KnowledgeGraph,
     chunker=TextChunker,
+
     chunk_size: Optional[int] = None,
     ontology_file_path: Optional[str] = None,
     vector_db_config: Optional[dict] = None,
     graph_db_config: Optional[dict] = None,
+
+    chunk_size: int = None,
+    config: Config = None,
+    vector_db_config: dict = None,
+    graph_db_config: dict = None,
+
     run_in_background: bool = False,
     incremental_loading: bool = True,
     custom_prompt: Optional[str] = None,
@@ -140,8 +156,6 @@ async def cognify(  # pylint: disable=too-many-arguments,too-many-positional-arg
                    Formula: min(embedding_max_completion_tokens, llm_max_completion_tokens // 2)
                    Default limits: ~512-8192 tokens depending on models.
                    Smaller chunks = more granular but potentially fragmented knowledge.
-        ontology_file_path: Path to RDF/OWL ontology file for domain-specific entity types.
-                          Useful for specialized fields like medical or legal documents.
         vector_db_config: Custom vector database configuration for embeddings storage.
         graph_db_config: Custom graph database configuration for relationship storage.
         run_in_background: If True, starts processing asynchronously and returns immediately.
@@ -232,9 +246,35 @@ async def cognify(  # pylint: disable=too-many-arguments,too-many-positional-arg
         New in this version:
         - COGNEE_DEFAULT_BATCH_SIZE: Default batch size for processing (default: 10)
     """
+
     tasks = get_default_tasks(
         user, graph_model, chunker, chunk_size, ontology_file_path, custom_prompt
     )
+
+    if config is None:
+        ontology_config = get_ontology_env_config()
+        if (
+            ontology_config.ontology_file_path
+            and ontology_config.ontology_resolver
+            and ontology_config.matching_strategy
+        ):
+            config: Config = {
+                "ontology_config": {
+                    "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
+                }
+            }
+        else:
+            config: Config = {
+                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
+            }
+
+    if temporal_cognify:
+        tasks = await get_temporal_tasks(user, chunker, chunk_size)
+    else:
+        tasks = await get_default_tasks(
+            user, graph_model, chunker, chunk_size, config, custom_prompt
+        )
+
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
@@ -256,6 +296,7 @@ def get_default_tasks(  # pylint: disable=too-many-arguments,too-many-positional
     user: Optional[User] = None,
     graph_model: Type[BaseModel] = KnowledgeGraph,
     chunker=TextChunker,
+
     chunk_size: Optional[int] = None,
     ontology_file_path: Optional[str] = None,
     custom_prompt: Optional[str] = None,
@@ -289,6 +330,29 @@ def get_default_tasks(  # pylint: disable=too-many-arguments,too-many-positional
     """
     # Precompute max_chunk_size for stability
     max_chunk = chunk_size or get_max_chunk_tokens()
+
+    chunk_size: int = None,
+    config: Config = None,
+    custom_prompt: Optional[str] = None,
+) -> list[Task]:
+    if config is None:
+        ontology_config = get_ontology_env_config()
+        if (
+            ontology_config.ontology_file_path
+            and ontology_config.ontology_resolver
+            and ontology_config.matching_strategy
+        ):
+            config: Config = {
+                "ontology_config": {
+                    "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
+                }
+            }
+        else:
+            config: Config = {
+                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
+            }
+
+
     default_tasks = [
         Task(classify_documents),
         Task(check_permissions_on_dataset, user=user, permissions=["write"]),
@@ -300,7 +364,7 @@ def get_default_tasks(  # pylint: disable=too-many-arguments,too-many-positional
         Task(
             extract_graph_from_data,
             graph_model=graph_model,
-            ontology_adapter=OntologyResolver(ontology_file=ontology_file_path),
+            config=config,
             custom_prompt=custom_prompt,
             task_config={"batch_size": DEFAULT_BATCH_SIZE},
         ),  # Generate knowledge graphs from the document chunks.
