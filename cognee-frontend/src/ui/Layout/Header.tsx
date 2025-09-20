@@ -32,20 +32,21 @@ export default function Header({ user }: HeaderProps) {
 
   return (
     <>
-      <header className="relative bg-[rgba(244,244,244,0.3)] flex flex-row h-14 min-h-14 px-5 items-center justify-between w-full max-w-[1920px] mx-auto">
+      <header className="relative flex flex-row h-14 min-h-14 px-5 items-center justify-between w-full max-w-[1920px] mx-auto">
         <div className="flex flex-row gap-4 items-center">
           <CogneeIcon />
           <div className="text-lg">Cognee Local</div>
         </div>
 
         <div className="flex flex-row items-center gap-2.5">
-          <GhostButton onClick={openSyncModal} className="text-indigo-700 gap-3 pl-4 pr-4">
+          <GhostButton onClick={openSyncModal} className="text-indigo-600 gap-3 pl-4 pr-4">
             <CloudIcon />
             <div>Sync</div>
           </GhostButton>
-          <a href="/plan">
-            <GhostButton className="text-indigo-700 pl-4 pr-4">Premium</GhostButton>
+          <a href="/plan" className="!text-indigo-600 pl-4 pr-4">
+            Premium
           </a>
+          <a href="https://platform.cognee.ai" className="!text-indigo-600 pl-4 pr-4">API keys</a>
           {/* <div className="px-2 py-2 mr-3">
             <SettingsIcon />
           </div> */}
