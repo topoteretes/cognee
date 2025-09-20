@@ -1,0 +1,76 @@
+name: Label PRs from core team
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, edited]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  label-core-team:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out base repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Determine if PR author is a core team member
+        id: check_core
+        shell: bash
+        run: |
+          AUTHOR="${{ github.event.pull_request.user.login }}"
+          LIST_FILE=".github/core-team.txt"
+
+          if [ ! -f "$LIST_FILE" ]; then
+            echo "core=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Normalize author to lowercase and strip leading '@'
+          AUTHOR_NORM="$(echo "$AUTHOR" | tr '[:upper:]' '[:lower:]' | sed 's/^@//')"
+
+          # Compare against normalized list values (ignore comments/blank lines)
+          if awk -v author="$AUTHOR_NORM" '
+            BEGIN { found=0 }
+            {
+              line=$0
+              sub(/^[ \t]+|[ \t]+$/, "", line)
+              if (line ~ /^#/ || line == "") next
+              sub(/^@/, "", line)
+              line=tolower(line)
+              if (line == author) { found=1; exit }
+            }
+            END { exit(found ? 0 : 1) }
+          ' "$LIST_FILE"; then
+            echo "core=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "core=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Add core-team label
+        if: steps.check_core.outputs.core == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const label = 'core-team';
+            const { owner, repo } = context.repo;
+            const prNumber = context.payload.pull_request.number;
+            try {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: prNumber,
+                labels: [label],
+              });
+              core.info(`Label '${label}' added to PR #${prNumber}`);
+            } catch (error) {
+              core.warning(`Failed to add label: ${error.message}`);
+            }
+
+
