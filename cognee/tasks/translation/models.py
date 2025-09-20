@@ -1,10 +1,17 @@
+
 from __future__ import annotations
+# Translation response model for structured output
+from pydantic import BaseModel
+
+class TranslationResponse(BaseModel):
+    """Response model for LLM-based translation."""
+    translated_text: str
 
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from pydantic import Field
 
-from cognee.infrastructure.engine.models import DataPoint
+from cognee.infrastructure.engine import DataPoint
 
 
 class TranslatedContent(DataPoint):

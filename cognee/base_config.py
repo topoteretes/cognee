@@ -10,7 +10,7 @@ import pydantic
 class BaseConfig(BaseSettings):
     data_root_directory: str = get_absolute_path(".data_storage")
     system_root_directory: str = get_absolute_path(".cognee_system")
-    monitoring_tool: object = Observer.LANGFUSE
+    monitoring_tool: object = Observer.LLMLITE
 
     @pydantic.model_validator(mode="after")
     def validate_paths(self):
