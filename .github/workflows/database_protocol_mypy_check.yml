@@ -1,0 +1,77 @@
+permissions:
+  contents: read
+name: Database Adapter MyPy Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, dev ]
+    paths:
+      - 'cognee/infrastructure/databases/**'
+      - 'tools/check_*_adapters.sh'
+      - 'mypy.ini'
+      - '.github/workflows/database_protocol_mypy_check.yml'
+  pull_request:
+    branches: [ main, dev ]
+    paths:
+      - 'cognee/infrastructure/databases/**'
+      - 'tools/check_*_adapters.sh'
+      - 'mypy.ini'
+      - '.github/workflows/database_protocol_mypy_check.yml'
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+
+jobs:
+  mypy-database-adapters:
+    name: MyPy Database Adapter Type Check
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Discover and Check Vector Database Adapters
+        run: ./tools/check_vector_adapters.sh
+      
+      # Commeting out graph and hybrid adapters for now as we're currently focusing on vector adapters
+      # - name: Discover and Check Graph Database Adapters
+      #   run: ./tools/check_graph_adapters.sh
+
+      # - name: Discover and Check Hybrid Database Adapters
+      #   run: ./tools/check_hybrid_adapters.sh
+
+      - name: Protocol Compliance Summary
+        run: |
+          echo "✅ Database Adapter MyPy Check Passed!"
+          echo ""
+          echo "🔍 Auto-Discovery Approach:"
+          echo "  • Vector Adapters: cognee/infrastructure/databases/vector/**/*Adapter.py"
+          # echo "  • Graph Adapters: cognee/infrastructure/databases/graph/**/*adapter.py"
+          # echo "  • Hybrid Adapters: cognee/infrastructure/databases/hybrid/**/*Adapter.py"
+          echo ""
+          echo "🚀 Using Dedicated Scripts:"
+          echo "  • Vector: ./tools/check_vector_adapters.sh"
+          # echo "  • Graph: ./tools/check_graph_adapters.sh"
+          # echo "  • Hybrid: ./tools/check_hybrid_adapters.sh"
+          echo "  • All: ./tools/check_all_adapters.sh"
+          echo ""
+          echo "🎯 Purpose: Enforce that database adapters are properly typed"
+          echo "🔧 MyPy Configuration: mypy.ini (strict mode enabled)"
+          echo "🚀 Maintenance-Free: Automatically discovers new adapters"
+          echo ""
+          echo "⚠️  This workflow FAILS on any type errors to ensure adapter quality."
+          echo "   All database adapters must be properly typed."
+          echo ""
+          echo "🛠️  To fix type issues locally, run:"
+          echo "   ./tools/check_all_adapters.sh  # Check all adapters"
+          echo "   ./tools/check_vector_adapters.sh  # Check vector adapters only"
+          echo "   mypy <adapter_file_path> --config-file mypy.ini  # Check specific file"
