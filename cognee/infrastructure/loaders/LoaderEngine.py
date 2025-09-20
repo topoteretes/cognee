@@ -27,6 +27,7 @@ class LoaderEngine:
 
         self.default_loader_priority = [
             "text_loader",
+            "advanced_pdf_loader",
             "pypdf_loader",
             "image_loader",
             "audio_loader",

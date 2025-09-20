@@ -9,9 +9,10 @@ This module contains loaders that depend on external libraries:
 These loaders are optional and only available if their dependencies are installed.
 """
 
+from .advanced_pdf_loader import AdvancedPdfLoader
 from .pypdf_loader import PyPdfLoader
 
-__all__ = ["PyPdfLoader"]
+__all__ = ["AdvancedPdfLoader", "PyPdfLoader"]
 
 # Conditional imports based on dependency availability
 try:
