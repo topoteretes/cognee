@@ -58,9 +58,6 @@ The following charts visualize the benchmark results and performance comparisons
 
 A comprehensive comparison of all evaluated systems across multiple metrics, showing Cognee's performance relative to Mem0, Graphiti, and LightRAG.
 
-
-
-
 #### Optimized Cognee Configurations
 ![Optimized Cognee Configurations](optimized_cognee_configurations.png)
 
