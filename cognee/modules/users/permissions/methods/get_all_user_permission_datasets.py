@@ -11,6 +11,16 @@ logger = get_logger()
 
 
 async def get_all_user_permission_datasets(user: User, permission_type: str) -> list[Dataset]:
+    """
+        Return a list of datasets the user has permission for.
+        If the user is part of a tenant, return datasets his roles have permission for.
+    Args:
+        user
+        permission_type
+
+    Returns:
+        list[Dataset]: List of datasets user has permission for
+    """
     datasets = list()
     # Get all datasets User has explicit access to
     datasets.extend(await get_principal_datasets(user, permission_type))
