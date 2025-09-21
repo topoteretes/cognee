@@ -32,6 +32,7 @@ logger = get_logger()
 # litellm to drop unsupported params, e.g., reasoning_effort when not supported by the model.
 litellm.drop_params = True
 
+
 class OpenAIAdapter(LLMInterface):
     """
     Adapter for OpenAI's GPT-3, GPT-4 API.
@@ -140,7 +141,7 @@ class OpenAIAdapter(LLMInterface):
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
             InstructorRetryException,
-        ) as error:
+        ):
             if not (self.fallback_model and self.fallback_api_key):
                 raise ContentPolicyFilterError(
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
