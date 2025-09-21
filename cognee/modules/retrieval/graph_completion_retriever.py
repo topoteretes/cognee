@@ -135,7 +135,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         self,
         query: str,
         context: Optional[List[Edge]] = None,
-    ) -> Any:
+    ) -> List[str]:
         """
         Generates a completion using graph connections context based on a query.
 
@@ -171,7 +171,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                 question=query, answer=completion, context=context_text, triplets=triplets
             )
 
-        return completion
+        return [completion]
 
     async def save_qa(self, question: str, answer: str, context: str, triplets: List) -> None:
         """

@@ -24,6 +24,16 @@ async def give_permission_on_dataset(
     dataset_id: UUID,
     permission_name: str,
 ):
+    """
+        Give a specific permission on a dataset to a user.
+    Args:
+        principal: User who is being given the permission on the dataset
+        dataset_id: Id of the dataset
+        permission_name: Name of permission to give
+
+    Returns:
+        None
+    """
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:

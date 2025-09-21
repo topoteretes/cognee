@@ -7,6 +7,7 @@ import aiohttp
 from uuid import UUID
 
 from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
+from cognee.shared.utils import create_secure_ssl_context
 
 logger = get_logger()
 
@@ -42,7 +43,9 @@ class RemoteKuzuAdapter(KuzuAdapter):
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create an aiohttp session."""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            ssl_context = create_secure_ssl_context()
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            self._session = aiohttp.ClientSession(connector=connector)
         return self._session
 
     async def close(self):

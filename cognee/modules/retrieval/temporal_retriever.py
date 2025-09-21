@@ -113,7 +113,7 @@ class TemporalRetriever(GraphCompletionRetriever):
             logger.info(
                 "No timestamps identified based on the query, performing retrieval using triplet search on events and entities."
             )
-            triplets = await self.get_context(query)
+            triplets = await self.get_triplets(query)
             return await self.resolve_edges_to_text(triplets)
 
         if ids:
@@ -122,7 +122,7 @@ class TemporalRetriever(GraphCompletionRetriever):
             logger.info(
                 "No events identified based on timestamp filtering, performing retrieval using triplet search on events and entities."
             )
-            triplets = await self.get_context(query)
+            triplets = await self.get_triplets(query)
             return await self.resolve_edges_to_text(triplets)
 
         vector_engine = get_vector_engine()
@@ -136,7 +136,7 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         return self.descriptions_to_string(top_k_events)
 
-    async def get_completion(self, query: str, context: Optional[str] = None) -> str:
+    async def get_completion(self, query: str, context: Optional[str] = None) -> List[str]:
         """Generates a response using the query and optional context."""
         if not context:
             context = await self.get_context(query=query)
@@ -149,4 +149,4 @@ class TemporalRetriever(GraphCompletionRetriever):
                 system_prompt_path=self.system_prompt_path,
             )
 
-        return completion
+        return [completion]

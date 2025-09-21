@@ -11,7 +11,7 @@
   --global-color-primary-active: #500cc5 !important;
   --global-color-primary-text: white !important;
   --global-color-secondary: #0DFF00 !important;
-  --global-background-default: #0D051C;
+  --global-background-default: #F4F4F4;
   --textarea-default-color: #0D051C !important;
 }
 
@@ -20,6 +20,7 @@ body {
   height: 100%;
   max-width: 100vw;
   overflow-x: hidden;
+  background-color: var(--global-background-default);
 }
 
 a {

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 
 from cognee.api.DTO import InDTO
 from cognee.infrastructure.databases.relational import get_async_session
+from cognee.infrastructure.utils.run_async import run_async
 from cognee.modules.notebooks.models import Notebook, NotebookCell
 from cognee.modules.notebooks.operations import run_in_local_sandbox
 from cognee.modules.users.models import User
@@ -30,7 +31,8 @@ def get_notebooks_router():
 
     @router.get("")
     async def get_notebooks_endpoint(user: User = Depends(get_authenticated_user)):
-        return await get_notebooks(user.id)
+        async with get_async_session() as session:
+            return await get_notebooks(user.id, session)
 
     @router.post("")
     async def create_notebook_endpoint(
@@ -74,7 +76,7 @@ def get_notebooks_router():
             if notebook is None:
                 return JSONResponse(status_code=404, content={"error": "Notebook not found"})
 
-            result, error = run_in_local_sandbox(run_code.content)
+            result, error = await run_async(run_in_local_sandbox, run_code.content)
 
             return JSONResponse(
                 status_code=200, content={"result": jsonable_encoder(result), "error": error}

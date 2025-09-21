@@ -3,9 +3,9 @@
   width: 1rem;
   height: 1rem;
   border-radius: 50%;
-  border: 0.18rem solid var(--color-indigo-600);;
-  border-top-color: transparent;
-  border-bottom-color: transparent;
+  border: 0.18rem solid var(--color-indigo-600);
+  border-top-color: transparent !important;
+  border-bottom-color: transparent !important;
   animation: spin 2s linear infinite;
 }
 

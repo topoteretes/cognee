@@ -1,3 +1,4 @@
+import os
 from typing import Callable, List, Optional, Type
 
 from cognee.modules.engine.models.node_set import NodeSet
@@ -14,6 +15,7 @@ from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.modules.retrieval.coding_rules_retriever import CodingRulesRetriever
+from cognee.modules.retrieval.jaccard_retrival import JaccardChunksRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
@@ -151,6 +153,10 @@ async def get_search_type_tools(
             TemporalRetriever(top_k=top_k).get_completion,
             TemporalRetriever(top_k=top_k).get_context,
         ],
+        SearchType.CHUNKS_LEXICAL: (lambda _r=JaccardChunksRetriever(top_k=top_k): [
+          _r.get_completion,
+          _r.get_context,
+        ])(),
         SearchType.CODING_RULES: [
             CodingRulesRetriever(rules_nodeset_name=node_name).get_existing_rules,
         ],
@@ -159,6 +165,12 @@ async def get_search_type_tools(
     # If the query type is FEELING_LUCKY, select the search type intelligently
     if query_type is SearchType.FEELING_LUCKY:
         query_type = await select_search_type(query_text)
+
+    if (
+        query_type in [SearchType.CYPHER, SearchType.NATURAL_LANGUAGE]
+        and os.getenv("ALLOW_CYPHER_QUERY", "true").lower() == "false"
+    ):
+        raise UnsupportedSearchTypeError("Cypher query search types are disabled.")
 
     search_type_tools = search_tasks.get(query_type)
 

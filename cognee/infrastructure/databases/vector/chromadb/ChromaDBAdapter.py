@@ -83,7 +83,7 @@ def process_data_for_chroma(data):
         elif isinstance(value, list):
             # Store lists as JSON strings with special prefix
             processed_data[f"{key}__list"] = json.dumps(value)
-        elif isinstance(value, (str, int, float, bool)) or value is None:
+        elif isinstance(value, (str, int, float, bool)):
             processed_data[key] = value
         else:
             processed_data[key] = str(value)
@@ -538,7 +538,7 @@ class ChromaDBAdapter(VectorDBInterface):
             Returns True upon successful deletion of all collections.
         """
         client = await self.get_connection()
-        collections = await self.list_collections()
+        collections = await client.list_collections()
         for collection_name in collections:
             await client.delete_collection(collection_name)
         return True
@@ -553,8 +553,4 @@ class ChromaDBAdapter(VectorDBInterface):
             Returns a list of collection names.
         """
         client = await self.get_connection()
-        collections = await client.list_collections()
-        return [
-            collection.name if hasattr(collection, "name") else collection["name"]
-            for collection in collections
-        ]
+        return await client.list_collections()

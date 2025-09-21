@@ -8,6 +8,15 @@ from ...models.Tenant import Tenant
 
 
 async def get_tenant(tenant_id: UUID):
+    """
+        Return information about the tenant based on the given id.
+    Args:
+        tenant_id: Id of the given tenant
+
+    Returns
+        Information about the given tenant.
+
+    """
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:

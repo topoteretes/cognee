@@ -1,6 +1,7 @@
+import classNames from "classnames";
 import { useCallback, useEffect } from "react";
 
-import { fetch, useBoolean } from "@/utils";
+import { fetch, isCloudEnvironment, useBoolean } from "@/utils";
 import { checkCloudConnection } from "@/modules/cloud";
 import { CaretIcon, CloseIcon, CloudIcon, LocalCogneeIcon } from "@/ui/Icons";
 import { CTAButton, GhostButton, IconButton, Input, Modal } from "@/ui/elements";
@@ -18,11 +19,13 @@ export default function InstanceDatasetsAccordion({ onDatasetsChange }: Instance
   const {
     value: isCloudCogneeConnected,
     setTrue: setCloudCogneeConnected,
-  } = useBoolean(false);
+  } = useBoolean(isCloudEnvironment());
 
-  const checkConnectionToCloudCognee = useCallback((apiKey: string) => {
-      fetch.setApiKey(apiKey);
-      return checkCloudConnection(apiKey)
+  const checkConnectionToCloudCognee = useCallback((apiKey?: string) => {
+      if (apiKey) {
+        fetch.setApiKey(apiKey);
+      }
+      return checkCloudConnection()
         .then(setCloudCogneeConnected)
     }, [setCloudCogneeConnected]);
 
@@ -33,8 +36,7 @@ export default function InstanceDatasetsAccordion({ onDatasetsChange }: Instance
     };
 
     checkConnectionToLocalCognee();
-
-    checkConnectionToCloudCognee("");
+    checkConnectionToCloudCognee();
   }, [checkConnectionToCloudCognee, setCloudCogneeConnected, setLocalCogneeConnected]);
 
   const {
@@ -54,8 +56,12 @@ export default function InstanceDatasetsAccordion({ onDatasetsChange }: Instance
       });
   };
 
+  const isCloudEnv = isCloudEnvironment();
+
   return (
-    <>
+    <div className={classNames("flex flex-col", {
+      "flex-col-reverse": isCloudEnv,
+    })}>
       <DatasetsAccordion
         title={(
           <div className="flex flex-row items-center justify-between">
@@ -69,7 +75,7 @@ export default function InstanceDatasetsAccordion({ onDatasetsChange }: Instance
         switchCaretPosition={true}
         className="pt-3 pb-1.5"
         contentClassName="pl-4"
-        onDatasetsChange={onDatasetsChange}
+        onDatasetsChange={!isCloudEnv ? onDatasetsChange : () => {}}
       />
 
       {isCloudCogneeConnected ? (
@@ -86,11 +92,11 @@ export default function InstanceDatasetsAccordion({ onDatasetsChange }: Instance
           switchCaretPosition={true}
           className="pt-3 pb-1.5"
           contentClassName="pl-4"
-          onDatasetsChange={onDatasetsChange}
+          onDatasetsChange={isCloudEnv ? onDatasetsChange : () => {}}
           useCloud={true}
         />
       ) : (
-        <button className="w-full flex flex-row items-center justify-between py-1.5 cursor-pointer" onClick={!isCloudCogneeConnected ? openCloudConnectionModal : () => {}}>
+        <button className="w-full flex flex-row items-center justify-between py-1.5 cursor-pointer pt-3" onClick={!isCloudCogneeConnected ? openCloudConnectionModal : () => {}}>
           <div className="flex flex-row items-center gap-1.5">
             <CaretIcon className="rotate-[-90deg]" />
             <div className="flex flex-row items-center gap-2">
@@ -120,6 +126,6 @@ export default function InstanceDatasetsAccordion({ onDatasetsChange }: Instance
           </form>
         </div>
       </Modal>
-    </>
+    </div>
   );
 }
