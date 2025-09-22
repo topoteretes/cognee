@@ -2,13 +2,20 @@ from cognee.modules.retrieval.lexical_retriever import LexicalRetriever
 import re
 from collections import Counter
 from typing import Optional
+
+
 class JaccardChunksRetriever(LexicalRetriever):
     """
     Retriever that specializes LexicalRetriever to use Jaccard similarity.
     """
 
-    def __init__(self, top_k: int = 10, with_scores: bool = False,
-                 stop_words: Optional[list[str]] = None, multiset_jaccard: bool = False):
+    def __init__(
+        self,
+        top_k: int = 10,
+        with_scores: bool = False,
+        stop_words: Optional[list[str]] = None,
+        multiset_jaccard: bool = False,
+    ):
         """
         Parameters
         ----------
@@ -25,10 +32,7 @@ class JaccardChunksRetriever(LexicalRetriever):
         self.multiset_jaccard = multiset_jaccard
 
         super().__init__(
-            tokenizer=self._tokenizer,
-            scorer=self._scorer,
-            top_k=top_k,
-            with_scores=with_scores
+            tokenizer=self._tokenizer, scorer=self._scorer, top_k=top_k, with_scores=with_scores
         )
 
     def _tokenizer(self, text: str) -> list[str]:

@@ -1,8 +1,9 @@
 import os
 from pydantic import BaseModel
 from typing import Type
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
+from cognee.infrastructure.llm.prompts import render_prompt
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
@@ -37,7 +38,7 @@ async def extract_event_graph(content: str, response_model: Type[BaseModel]):
     else:
         base_directory = None
 
-    system_prompt = LLMGateway.render_prompt(prompt_path, {}, base_directory=base_directory)
+    system_prompt = render_prompt(prompt_path, {}, base_directory=base_directory)
 
     content_graph = await LLMGateway.acreate_structured_output(
         content, system_prompt, response_model

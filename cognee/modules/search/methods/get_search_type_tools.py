@@ -153,10 +153,12 @@ async def get_search_type_tools(
             TemporalRetriever(top_k=top_k).get_completion,
             TemporalRetriever(top_k=top_k).get_context,
         ],
-        SearchType.CHUNKS_LEXICAL: (lambda _r=JaccardChunksRetriever(top_k=top_k): [
-          _r.get_completion,
-          _r.get_context,
-        ])(),
+        SearchType.CHUNKS_LEXICAL: (
+            lambda _r=JaccardChunksRetriever(top_k=top_k): [
+                _r.get_completion,
+                _r.get_context,
+            ]
+        )(),
         SearchType.CODING_RULES: [
             CodingRulesRetriever(rules_nodeset_name=node_name).get_existing_rules,
         ],
