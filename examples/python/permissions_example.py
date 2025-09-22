@@ -8,6 +8,7 @@ from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
 from cognee.modules.engine.operations.setup import setup
+from cognee.shared.logging_utils import setup_logging, ERROR
 
 logger = get_logger()
 
@@ -71,6 +72,7 @@ async def main():
         user=user_1,
         datasets=[ai_dataset_id],
     )
+    print("Search results of dataset owned by user")
     for result in search_results:
         print(f"{result}\n")
 
@@ -122,4 +124,5 @@ async def main():
 if __name__ == "__main__":
     import asyncio
 
+    logger = setup_logging(log_level=ERROR)
     asyncio.run(main())
