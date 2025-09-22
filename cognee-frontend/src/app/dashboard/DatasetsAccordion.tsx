@@ -18,6 +18,7 @@ interface DatasetsChangePayload {
 
 export interface DatasetsAccordionProps extends Omit<AccordionProps, "isOpen" | "openAccordion" | "closeAccordion" | "children"> {
   onDatasetsChange?: (payload: DatasetsChangePayload) => void;
+  useCloud?: boolean;
 }
 
 export default function DatasetsAccordion({
@@ -27,6 +28,7 @@ export default function DatasetsAccordion({
   className,
   contentClassName,
   onDatasetsChange,
+  useCloud = false,
 }: DatasetsAccordionProps) {
   const {
     value: isDatasetsPanelOpen,
@@ -41,7 +43,7 @@ export default function DatasetsAccordion({
     removeDataset,
     getDatasetData,
     removeDatasetData,
-  } = useDatasets();
+  } = useDatasets(useCloud);
 
   useEffect(() => {
     if (datasets.length === 0) {
@@ -177,11 +179,11 @@ export default function DatasetsAccordion({
       return;
     }
 
-    return addData(dataset, files)
+    return addData(dataset, files, useCloud)
       .then(async () => {
         await getDatasetData(dataset.id);
 
-        return cognifyDataset(dataset)
+        return cognifyDataset(dataset, useCloud)
           .finally(() => {
             setProcessingDataset(null);
           });
@@ -255,7 +257,6 @@ export default function DatasetsAccordion({
                 closeAccordion={() => toggleDataset(dataset.id)}
                 tools={(
                   <IconButton className="relative">
-                    <input tabIndex={-1} type="file" multiple onChange={handleAddFiles.bind(null, dataset)} className="absolute w-full h-full cursor-pointer opacity-0" />
                     <PopupMenu>
                       <div className="flex flex-col gap-0.5">
                         <div className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer relative">

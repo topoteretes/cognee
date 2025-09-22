@@ -3,7 +3,7 @@ from typing import Union, Optional, List, Type
 
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
-from cognee.modules.search.types import SearchType
+from cognee.modules.search.types import SearchResult, SearchType, CombinedSearchResult
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -13,7 +13,7 @@ from cognee.modules.data.exceptions import DatasetNotFoundError
 async def search(
     query_text: str,
     query_type: SearchType = SearchType.GRAPH_COMPLETION,
-    user: User = None,
+    user: Optional[User] = None,
     datasets: Optional[Union[list[str], str]] = None,
     dataset_ids: Optional[Union[list[UUID], UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
@@ -22,9 +22,10 @@ async def search(
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: bool = False,
-    last_k: Optional[int] = None,
+    last_k: Optional[int] = 1,
     only_context: bool = False,
-) -> list:
+    use_combined_context: bool = False,
+) -> Union[List[SearchResult], CombinedSearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -81,6 +82,9 @@ async def search(
             Best for: General-purpose queries or when you're unsure which search type is best.
             Returns: The results from the automatically selected search type.
 
+        **CHUNKS_LEXICAL**:
+            Token-based lexical chunk search (e.g., Jaccard). Best for: exact-term matching, stopword-aware lookups.
+            Returns: Ranked text chunks (optionally with scores).
 
     Args:
         query_text: Your question or search query in natural language.
@@ -193,6 +197,7 @@ async def search(
         save_interaction=save_interaction,
         last_k=last_k,
         only_context=only_context,
+        use_combined_context=use_combined_context,
     )
 
     return filtered_search_results

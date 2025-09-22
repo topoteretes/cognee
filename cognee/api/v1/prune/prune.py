@@ -7,8 +7,8 @@ class prune:
         await _prune_data()
 
     @staticmethod
-    async def prune_system(graph=True, vector=True, metadata=False):
-        await _prune_system(graph, vector, metadata)
+    async def prune_system(graph=True, vector=True, metadata=False, cache=True):
+        await _prune_system(graph, vector, metadata, cache)
 
 
 if __name__ == "__main__":

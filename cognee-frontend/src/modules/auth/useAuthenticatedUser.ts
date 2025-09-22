@@ -3,7 +3,7 @@ import { fetch } from "@/utils";
 import { User } from "./types";
 
 export default function useAuthenticatedUser() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User>();
 
   useEffect(() => {
     if (!user) {

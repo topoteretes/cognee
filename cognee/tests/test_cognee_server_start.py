@@ -48,7 +48,7 @@ class TestCogneeServerStart(unittest.TestCase):
         """Test that the server is running and can accept connections."""
         # Test health endpoint
         health_response = requests.get("http://localhost:8000/health", timeout=15)
-        self.assertIn(health_response.status_code, [200, 503])
+        self.assertIn(health_response.status_code, [200])
 
         # Test root endpoint
         root_response = requests.get("http://localhost:8000/", timeout=15)
@@ -88,7 +88,7 @@ class TestCogneeServerStart(unittest.TestCase):
         payload = {"datasets": [dataset_name]}
 
         add_response = requests.post(url, headers=headers, data=form_data, files=file, timeout=50)
-        if add_response.status_code not in [200, 201, 409]:
+        if add_response.status_code not in [200, 201]:
             add_response.raise_for_status()
 
         # Cognify request
@@ -99,7 +99,7 @@ class TestCogneeServerStart(unittest.TestCase):
         }
 
         cognify_response = requests.post(url, headers=headers, json=payload, timeout=150)
-        if cognify_response.status_code not in [200, 201, 409]:
+        if cognify_response.status_code not in [200, 201]:
             cognify_response.raise_for_status()
 
         # TODO: Add test to verify cognify pipeline is complete before testing search
@@ -115,7 +115,7 @@ class TestCogneeServerStart(unittest.TestCase):
         payload = {"searchType": "GRAPH_COMPLETION", "query": "What's in the document?"}
 
         search_response = requests.post(url, headers=headers, json=payload, timeout=50)
-        if search_response.status_code not in [200, 201, 409]:
+        if search_response.status_code not in [200, 201]:
             search_response.raise_for_status()
 
 

@@ -12,6 +12,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
 )
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.config import get_llm_config
 
 
 class AnthropicAdapter(LLMInterface):
@@ -27,7 +28,8 @@ class AnthropicAdapter(LLMInterface):
         import anthropic
 
         self.aclient = instructor.patch(
-            create=anthropic.AsyncAnthropic().messages.create, mode=instructor.Mode.ANTHROPIC_TOOLS
+            create=anthropic.AsyncAnthropic(api_key=get_llm_config().llm_api_key).messages.create,
+            mode=instructor.Mode.ANTHROPIC_TOOLS,
         )
 
         self.model = model
@@ -57,7 +59,7 @@ class AnthropicAdapter(LLMInterface):
 
         return await self.aclient(
             model=self.model,
-            max_completion_tokens=4096,
+            max_tokens=4096,
             max_retries=5,
             messages=[
                 {

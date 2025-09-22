@@ -1,6 +1,6 @@
-import json
 import pathlib
 import os
+from typing import List
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import (
     get_migration_relational_engine,
@@ -10,7 +10,7 @@ from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
 from cognee.tasks.ingestion import migrate_relational_database
-from cognee.modules.search.types import SearchType
+from cognee.modules.search.types import SearchResult, SearchType
 import cognee
 
 

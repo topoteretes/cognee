@@ -1,16 +1,16 @@
+import { useState } from "react";
 import classNames from "classnames";
 
-import { useBoolean } from "@/utils";
-import { LocalCogneeIcon, PlayIcon } from "@/ui/Icons";
-import { PopupMenu } from "@/ui/elements";
+import { isCloudEnvironment, useBoolean } from "@/utils";
+import { PlayIcon } from "@/ui/Icons";
+import { PopupMenu, IconButton } from "@/ui/elements";
 import { LoadingIndicator } from "@/ui/App";
 
 import { Cell } from "./types";
-import IconButton from "../IconButton";
 
 interface NotebookCellHeaderProps {
   cell: Cell;
-  runCell: (cell: Cell) => Promise<void>;
+  runCell?: (cell: Cell, cogneeInstance: string) => Promise<void>;
   renameCell: (cell: Cell) => void;
   removeCell: (cell: Cell) => void;
   moveCellUp: (cell: Cell) => void;
@@ -33,25 +33,48 @@ export default function NotebookCellHeader({
     setFalse: setIsNotRunningCell,
   } = useBoolean(false);
 
+  const [runInstance, setRunInstance] = useState<string>(isCloudEnvironment() ? "cloud" : "local");
+
   const handleCellRun = () => {
-    setIsRunningCell();
-    runCell(cell)
-      .then(() => {
-        setIsNotRunningCell();
-      });
+    if (runCell) {
+      setIsRunningCell();
+      runCell(cell, runInstance)
+        .then(() => {
+          setIsNotRunningCell();
+        });
+    }
   };
 
   return (
     <div className={classNames("flex flex-row justify-between items-center h-9 bg-gray-100", className)}>
       <div className="flex flex-row items-center px-3.5">
-        {isRunningCell ? <LoadingIndicator /> : <IconButton onClick={handleCellRun}><PlayIcon /></IconButton>}
+        {runCell && (
+          <>
+            {isRunningCell ? <LoadingIndicator /> : <IconButton onClick={handleCellRun}><PlayIcon /></IconButton>}
+          </>
+        )}
         <span className="ml-4">{cell.name}</span>
       </div>
       <div className="pr-4 flex flex-row items-center gap-8">
-        <div className="flex flex-row items-center gap-2">
-          <LocalCogneeIcon className="text-indigo-700" />
-          <span className="text-xs">local cognee</span>
-        </div>
+          {runCell && (
+            isCloudEnvironment() ? (
+              <div>
+                cloud cognee
+              </div>
+            ) : (
+              <div>
+                local cognee
+              </div>
+            )
+          )}
+        {/* <Select name="cogneeInstance" onChange={(event) => setRunInstance(event.currentTarget.value)} className="!bg-transparent outline-none cursor-pointer !hover:bg-gray-50">
+          <option value="local" className="flex flex-row items-center gap-2">
+            local cognee
+          </option>
+          <option value="cloud" className="flex flex-row items-center gap-2">
+            cloud cognee
+          </option>
+        </Select> */}
         <PopupMenu>
           <div className="flex flex-col gap-0.5">
             <button onClick={() => moveCellUp(cell)} className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer">move cell up</button>
