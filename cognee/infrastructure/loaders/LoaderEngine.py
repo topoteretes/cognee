@@ -87,7 +87,7 @@ class LoaderEngine:
                     if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
                         return loader
                 else:
-                    raise ValueError(f"Loader does not exist: {loader_name}")
+                    logger.info(f"Skipping {loader_name}: Preferred Loader not registered")
 
         # Try default priority order
         for loader_name in self.default_loader_priority:
@@ -96,7 +96,9 @@ class LoaderEngine:
                 if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
                     return loader
             else:
-                raise ValueError(f"Loader does not exist: {loader_name}")
+                logger.info(
+                    f"Skipping {loader_name}: Loader not registered (in default priority list)."
+                )
 
         return None
 

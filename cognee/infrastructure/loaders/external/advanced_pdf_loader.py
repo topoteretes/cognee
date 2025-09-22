@@ -14,6 +14,14 @@ from cognee.infrastructure.loaders.external.pypdf_loader import PyPdfLoader
 
 logger = get_logger(__name__)
 
+try:
+    from unstructured.partition.pdf import partition_pdf
+except ImportError as e:
+    logger.info(
+        "unstructured[pdf] not installed, can't use AdvancedPdfLoader, will use PyPdfLoader instead."
+    )
+    raise ImportError from e
+
 
 @dataclass
 class _PageBuffer:
@@ -61,16 +69,6 @@ class AdvancedPdfLoader(LoaderInterface):
             LoaderResult with extracted text content and metadata
 
         """
-        try:
-            from unstructured.partition.pdf import partition_pdf
-
-        except ImportError:
-            logger.warning(
-                "unstructured[pdf] not installed, can't use AdvancedPdfLoader, using PyPDF fallback."
-            )
-
-            return await self._fallback(file_path, **kwargs)
-
         try:
             logger.info(f"Processing PDF: {file_path}")
 

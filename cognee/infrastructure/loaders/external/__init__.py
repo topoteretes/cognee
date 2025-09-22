@@ -9,15 +9,21 @@ This module contains loaders that depend on external libraries:
 These loaders are optional and only available if their dependencies are installed.
 """
 
-from .advanced_pdf_loader import AdvancedPdfLoader
 from .pypdf_loader import PyPdfLoader
 
-__all__ = ["AdvancedPdfLoader", "PyPdfLoader"]
+__all__ = ["PyPdfLoader"]
 
 # Conditional imports based on dependency availability
 try:
     from .unstructured_loader import UnstructuredLoader
 
     __all__.append("UnstructuredLoader")
+except ImportError:
+    pass
+
+try:
+    from .advanced_pdf_loader import AdvancedPdfLoader
+
+    __all__.append("AdvancedPdfLoader")
 except ImportError:
     pass

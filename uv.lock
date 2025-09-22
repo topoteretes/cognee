@@ -899,7 +899,6 @@ dependencies = [
     { name = "structlog" },
     { name = "tiktoken" },
     { name = "typing-extensions" },
-    { name = "unstructured", extra = ["pdf"] },
     { name = "uvicorn" },
     { name = "websockets" },
 ]
@@ -947,7 +946,7 @@ distributed = [
     { name = "modal" },
 ]
 docs = [
-    { name = "unstructured", extra = ["csv", "doc", "docx", "epub", "md", "odt", "org", "ppt", "pptx", "rst", "rtf", "tsv", "xlsx"] },
+    { name = "unstructured", extra = ["csv", "doc", "docx", "epub", "md", "odt", "org", "pdf", "ppt", "pptx", "rst", "rtf", "tsv", "xlsx"] },
 ]
 evals = [
     { name = "gdown" },
@@ -1101,8 +1100,7 @@ requires-dist = [
     { name = "tree-sitter-python", marker = "extra == 'codegraph'", specifier = ">=0.23.6,<0.24" },
     { name = "tweepy", marker = "extra == 'dev'", specifier = ">=4.14.0,<5.0.0" },
     { name = "typing-extensions", specifier = ">=4.12.2,<5.0.0" },
-    { name = "unstructured", extras = ["csv", "doc", "docx", "epub", "md", "odt", "org", "ppt", "pptx", "rst", "rtf", "tsv", "xlsx"], marker = "extra == 'docs'", specifier = ">=0.18.1,<19" },
-    { name = "unstructured", extras = ["pdf"], specifier = ">=0.18.1,<19" },
+    { name = "unstructured", extras = ["csv", "doc", "docx", "epub", "md", "odt", "org", "ppt", "pptx", "rst", "rtf", "tsv", "xlsx", "pdf"], marker = "extra == 'docs'", specifier = ">=0.18.1,<19" },
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]

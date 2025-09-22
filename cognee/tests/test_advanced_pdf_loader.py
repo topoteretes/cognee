@@ -43,29 +43,6 @@ def test_can_handle(loader, extension, mime_type, expected):
 
 
 @pytest.mark.asyncio
-@patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.PyPdfLoader")
-@patch(
-    "unstructured.partition.pdf.partition_pdf",
-    side_effect=ImportError("unstructured not installed"),
-)
-async def test_load_fallback_on_import_error(mock_partition_pdf, mock_pypdf_loader, loader):
-    """Test fallback to PyPdfLoader when unstructured is not installed"""
-    # Prepare Mock
-    mock_fallback_instance = MagicMock()
-    mock_fallback_instance.load = AsyncMock(return_value="/fake/path/fallback.txt")
-    mock_pypdf_loader.return_value = mock_fallback_instance
-    test_file_path = "/fake/path/to/document.pdf"
-
-    # Run
-    result_path = await loader.load(test_file_path)
-
-    # Assert
-    assert result_path == "/fake/path/fallback.txt"
-    mock_partition_pdf.assert_not_called()  # partition_pdf should not be called
-    mock_fallback_instance.load.assert_awaited_once_with(test_file_path)
-
-
-@pytest.mark.asyncio
 @patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.open", new_callable=mock_open)
 @patch(
     "cognee.infrastructure.loaders.external.advanced_pdf_loader.get_file_metadata",
@@ -74,7 +51,7 @@ async def test_load_fallback_on_import_error(mock_partition_pdf, mock_pypdf_load
 @patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.get_storage_config")
 @patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.get_file_storage")
 @patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.PyPdfLoader")
-@patch("unstructured.partition.pdf.partition_pdf")
+@patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.partition_pdf")
 async def test_load_success_with_unstructured(
     mock_partition_pdf,
     mock_pypdf_loader,
@@ -141,7 +118,7 @@ async def test_load_success_with_unstructured(
 )
 @patch("cognee.infrastructure.loaders.external.advanced_pdf_loader.PyPdfLoader")
 @patch(
-    "unstructured.partition.pdf.partition_pdf",
+    "cognee.infrastructure.loaders.external.advanced_pdf_loader.partition_pdf",
     side_effect=Exception("Unstructured failed!"),
 )
 async def test_load_fallback_on_unstructured_exception(
