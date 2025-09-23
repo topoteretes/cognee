@@ -59,7 +59,6 @@ async def data_point_saving_worker():
                 continue
 
             if add_data_points_request:
-
                 if add_data_points_request == QueueSignal.STOP:
                     await add_data_points_queue.put.aio(QueueSignal.STOP)
                     print("Finished processing all data points; stopping vector engine queue.")
@@ -68,7 +67,9 @@ async def data_point_saving_worker():
                 if len(add_data_points_request) == 2:
                     (collection_name, data_points) = add_data_points_request
 
-                    print(f"Adding {len(data_points)} data points to '{collection_name}' collection.")
+                    print(
+                        f"Adding {len(data_points)} data points to '{collection_name}' collection."
+                    )
 
                     @retry(
                         retry=retry_if_exception_type(VectorDatabaseDeadlockError),

@@ -10,11 +10,14 @@ from distributed.app import app
 from distributed.queues import add_nodes_and_edges_queue, add_data_points_queue
 from distributed.workers.graph_saving_worker import graph_saving_worker
 from distributed.workers.data_point_saving_worker import data_point_saving_worker
+from cognee.api.v1.search import SearchType
 from distributed.signal import QueueSignal
+
 logger = get_logger()
 
 
 os.environ["COGNEE_DISTRIBUTED"] = "True"
+
 
 @app.local_entrypoint()
 async def main():
@@ -49,7 +52,10 @@ async def main():
 
     # await cognee.add(s3_data_path, dataset_name="s3-files")
 
-    await cognee.add(['Audi is a german car manufacturer', 'Netherlands is next to Germany'], dataset_name="s3-files")
+    await cognee.add(
+        ["Audi is a german car manufacturer", "Netherlands is next to Germany"],
+        dataset_name="s3-files",
+    )
 
     await cognee.cognify(datasets=["s3-files"])
 
@@ -65,6 +71,11 @@ async def main():
             logger.error(e)
 
     print(results)
+
+    search_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION, query_text="What is in the context?"
+    )
+    print(search_results)
 
 
 if __name__ == "__main__":
