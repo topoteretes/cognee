@@ -5,11 +5,11 @@ let numberOfRetries = 0;
 
 const isAuth0Enabled = process.env.USE_AUTH0_AUTHORIZATION?.toLowerCase() === "true";
 
-const backendApiUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:8000/api";
+const backendApiUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:8000";
 
-const cloudApiUrl = process.env.NEXT_PUBLIC_CLOUD_API_URL || "http://localhost:8001/api";
+const cloudApiUrl = process.env.NEXT_PUBLIC_CLOUD_API_URL || "http://localhost:8001";
 
-let apiKey: string | null = null;
+let apiKey: string | null = process.env.NEXT_PUBLIC_COGWIT_API_KEY || null;
 let accessToken: string | null = null;
 
 export default async function fetch(url: string, options: RequestInit = {}, useCloud = false): Promise<Response> {
@@ -30,26 +30,24 @@ export default async function fetch(url: string, options: RequestInit = {}, useC
       });
   }
 
+  const authHeaders = useCloud && (!isCloudEnvironment() || !accessToken) ? {
+    "X-Api-Key": apiKey,
+  } : {
+    "Authorization": `Bearer ${accessToken}`,
+  }
+
   return global.fetch(
-    (useCloud ? cloudApiUrl : backendApiUrl) + (useCloud ? url.replace("/v1", "") : url),
+    (useCloud ? cloudApiUrl : backendApiUrl) + "/api" + (useCloud ? url.replace("/v1", "") : url),
     {
       ...options,
       headers: {
         ...options.headers,
-        ...(useCloud && !isCloudEnvironment()
-          ? {"X-Api-Key": apiKey!}
-          : {"Authorization": `Bearer ${accessToken}`}
-        ),
-      },
+        ...authHeaders,
+      } as HeadersInit,
       credentials: "include",
     },
   )
-    .then((response) => handleServerErrors(response, retry))
-    .then((response) => {
-      numberOfRetries = 0;
-
-      return response;
-    })
+    .then((response) => handleServerErrors(response, retry, useCloud))
     .catch((error) => {
       if (error.detail === undefined) {
         return Promise.reject(
@@ -57,10 +55,10 @@ export default async function fetch(url: string, options: RequestInit = {}, useC
         );
       }
 
-      if (error.status === 401) {
-        return retry(error);
-      }
       return Promise.reject(error);
+    })
+    .finally(() => {
+      numberOfRetries = 0;
     });
 }
 

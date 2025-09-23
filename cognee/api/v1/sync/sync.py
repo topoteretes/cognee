@@ -23,6 +23,7 @@ from cognee.modules.sync.methods import (
     mark_sync_completed,
     mark_sync_failed,
 )
+from cognee.shared.utils import create_secure_ssl_context
 
 logger = get_logger("sync")
 
@@ -583,7 +584,9 @@ async def _check_hashes_diff(
     logger.info(f"Checking missing hashes on cloud for dataset {dataset.id}")
 
     try:
-        async with aiohttp.ClientSession() as session:
+        ssl_context = create_secure_ssl_context()
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.post(url, json=payload.dict(), headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -630,7 +633,9 @@ async def _download_missing_files(
 
     headers = {"X-Api-Key": auth_token}
 
-    async with aiohttp.ClientSession() as session:
+    ssl_context = create_secure_ssl_context()
+    connector = aiohttp.TCPConnector(ssl=ssl_context)
+    async with aiohttp.ClientSession(connector=connector) as session:
         for file_hash in hashes_missing_on_local:
             try:
                 # Download file from cloud by hash
@@ -749,7 +754,9 @@ async def _upload_missing_files(
 
     headers = {"X-Api-Key": auth_token}
 
-    async with aiohttp.ClientSession() as session:
+    ssl_context = create_secure_ssl_context()
+    connector = aiohttp.TCPConnector(ssl=ssl_context)
+    async with aiohttp.ClientSession(connector=connector) as session:
         for file_info in files_to_upload:
             try:
                 file_dir = os.path.dirname(file_info.raw_data_location)
@@ -809,7 +816,9 @@ async def _prune_cloud_dataset(
     logger.info("Pruning cloud dataset to match local state")
 
     try:
-        async with aiohttp.ClientSession() as session:
+        ssl_context = create_secure_ssl_context()
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.put(url, json=payload.dict(), headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
@@ -852,7 +861,9 @@ async def _trigger_remote_cognify(
     logger.info(f"Triggering cognify processing for dataset {dataset_id}")
 
     try:
-        async with aiohttp.ClientSession() as session:
+        ssl_context = create_secure_ssl_context()
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.post(url, json=payload, headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()

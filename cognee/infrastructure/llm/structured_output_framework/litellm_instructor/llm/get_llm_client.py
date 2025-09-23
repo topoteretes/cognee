@@ -32,7 +32,7 @@ class LLMProvider(Enum):
     GEMINI = "gemini"
 
 
-def get_llm_client():
+def get_llm_client(raise_api_key_error: bool = True):
     """
     Get the LLM client based on the configuration using Enums.
 
@@ -65,7 +65,7 @@ def get_llm_client():
     )
 
     if provider == LLMProvider.OPENAI:
-        if llm_config.llm_api_key is None:
+        if llm_config.llm_api_key is None and raise_api_key_error:
             raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
@@ -86,7 +86,7 @@ def get_llm_client():
         )
 
     elif provider == LLMProvider.OLLAMA:
-        if llm_config.llm_api_key is None:
+        if llm_config.llm_api_key is None and raise_api_key_error:
             raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
@@ -111,7 +111,7 @@ def get_llm_client():
         )
 
     elif provider == LLMProvider.CUSTOM:
-        if llm_config.llm_api_key is None:
+        if llm_config.llm_api_key is None and raise_api_key_error:
             raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
@@ -130,7 +130,7 @@ def get_llm_client():
         )
 
     elif provider == LLMProvider.GEMINI:
-        if llm_config.llm_api_key is None:
+        if llm_config.llm_api_key is None and raise_api_key_error:
             raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter import (

@@ -10,31 +10,26 @@ from cognee.modules.ontology.exceptions import (
     FindClosestMatchError,
     GetSubgraphError,
 )
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.ontology.models import AttachedOntologyNode
+from cognee.modules.ontology.matching_strategies import MatchingStrategy, FuzzyMatchingStrategy
 
 logger = get_logger("OntologyAdapter")
 
 
-class AttachedOntologyNode:
-    """Lightweight wrapper to be able to parse any ontology solution and generalize cognee interface."""
+class RDFLibOntologyResolver(BaseOntologyResolver):
+    """RDFLib-based ontology resolver implementation.
 
-    def __init__(self, uri: URIRef, category: str):
-        self.uri = uri
-        self.name = self._extract_name(uri)
-        self.category = category
+    This implementation uses RDFLib to parse and work with RDF/OWL ontology files.
+    It provides fuzzy matching and subgraph extraction capabilities for ontology entities.
+    """
 
-    @staticmethod
-    def _extract_name(uri: URIRef) -> str:
-        uri_str = str(uri)
-        if "#" in uri_str:
-            return uri_str.split("#")[-1]
-        return uri_str.rstrip("/").split("/")[-1]
-
-    def __repr__(self):
-        return f"AttachedOntologyNode(name={self.name}, category={self.category})"
-
-
-class OntologyResolver:
-    def __init__(self, ontology_file: Optional[str] = None):
+    def __init__(
+        self,
+        ontology_file: Optional[str] = None,
+        matching_strategy: Optional[MatchingStrategy] = None,
+    ) -> None:
+        super().__init__(matching_strategy)
         self.ontology_file = ontology_file
         try:
             if ontology_file and os.path.exists(ontology_file):
@@ -60,7 +55,7 @@ class OntologyResolver:
             name = uri_str.rstrip("/").split("/")[-1]
         return name.lower().replace(" ", "_").strip()
 
-    def build_lookup(self):
+    def build_lookup(self) -> None:
         try:
             classes: Dict[str, URIRef] = {}
             individuals: Dict[str, URIRef] = {}
@@ -97,7 +92,7 @@ class OntologyResolver:
             logger.error("Failed to build lookup dictionary: %s", str(e))
             raise RuntimeError("Lookup build failed") from e
 
-    def refresh_lookup(self):
+    def refresh_lookup(self) -> None:
         self.build_lookup()
         logger.info("Ontology lookup refreshed.")
 
@@ -105,13 +100,8 @@ class OntologyResolver:
         try:
             normalized_name = name.lower().replace(" ", "_").strip()
             possible_matches = list(self.lookup.get(category, {}).keys())
-            if normalized_name in possible_matches:
-                return normalized_name
 
-            best_match = difflib.get_close_matches(
-                normalized_name, possible_matches, n=1, cutoff=0.8
-            )
-            return best_match[0] if best_match else None
+            return self.matching_strategy.find_match(normalized_name, possible_matches)
         except Exception as e:
             logger.error("Error in find_closest_match: %s", str(e))
             raise FindClosestMatchError() from e
@@ -125,7 +115,9 @@ class OntologyResolver:
 
     def get_subgraph(
         self, node_name: str, node_type: str = "individuals", directed: bool = True
-    ) -> Tuple[List[Any], List[Tuple[str, str, str]], Optional[Any]]:
+    ) -> Tuple[
+        List[AttachedOntologyNode], List[Tuple[str, str, str]], Optional[AttachedOntologyNode]
+    ]:
         nodes_set = set()
         edges: List[Tuple[str, str, str]] = []
         visited = set()
