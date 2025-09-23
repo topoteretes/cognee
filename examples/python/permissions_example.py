@@ -8,7 +8,7 @@ from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
 from cognee.modules.engine.operations.setup import setup
-from cognee.shared.logging_utils import setup_logging, ERROR
+from cognee.shared.logging_utils import setup_logging, CRITICAL
 
 logger = get_logger()
 
@@ -34,6 +34,8 @@ async def main():
     explanation_file_path = os.path.join(
         pathlib.Path(__file__).parent, "../data/artificial_intelligence.pdf"
     )
+
+    print("Creating user_1: user_1@example.com")
     user_1 = await create_user("user_1@example.com", "example")
     await cognee.add([explanation_file_path], dataset_name="AI", user=user_1)
 
@@ -45,10 +47,12 @@ async def main():
     Physically engineering high-quality qubits has proven challenging. If a physical qubit is not sufficiently isolated from its environment, it suffers from quantum decoherence, introducing noise into calculations. Paradoxically, perfectly isolating qubits is also undesirable because quantum computations typically need to initialize qubits, perform controlled qubit interactions, and measure the resulting quantum states. Each of those operations introduces errors and suffers from noise, and such inaccuracies accumulate.
     In principle, a non-quantum (classical) computer can solve the same computational problems as a quantum computer, given enough time. Quantum advantage comes in the form of time complexity rather than computability, and quantum complexity theory shows that some quantum algorithms for carefully selected tasks require exponentially fewer computational steps than the best known non-quantum algorithms. Such tasks can in theory be solved on a large-scale quantum computer whereas classical computers would not finish computations in any reasonable amount of time. However, quantum speedup is not universal or even typical across computational tasks, since basic tasks such as sorting are proven to not allow any asymptotic quantum speedup. Claims of quantum supremacy have drawn significant attention to the discipline, but are demonstrated on contrived tasks, while near-term practical use cases remain limited.
     """
+    print("\nCreating user_2: user_2@example.com")
     user_2 = await create_user("user_2@example.com", "example")
     await cognee.add([text], dataset_name="QUANTUM", user=user_2)
 
     # Run cognify for both datasets as the appropriate user/owner
+    print("\nCreating different datasets for user_1 (AI dataset) and user_2 (QUANTUM dataset)")
     ai_cognify_result = await cognee.cognify(["AI"], user=user_1)
     quantum_cognify_result = await cognee.cognify(["QUANTUM"], user=user_2)
 
@@ -72,11 +76,12 @@ async def main():
         user=user_1,
         datasets=[ai_dataset_id],
     )
-    print("Search results of dataset owned by user")
+    print("\nSearch results as user_1 on dataset owned by user_1:")
     for result in search_results:
         print(f"{result}\n")
 
     # But user_1 cant read the dataset owned by user_2 (QUANTUM dataset)
+    print("\nSearch result as user_1 on the dataset owned by user_2:")
     try:
         search_results = await cognee.search(
             query_type=SearchType.GRAPH_COMPLETION,
@@ -88,6 +93,7 @@ async def main():
         print(f"User: {user_1} does not have permission to read from dataset: QUANTUM")
 
     # user_1 currently also cant add a document to user_2's dataset (QUANTUM dataset)
+    print("\nAttempting to add new data as user_1 to dataset owned by user_2:")
     try:
         await cognee.add(
             [explanation_file_path],
@@ -100,6 +106,9 @@ async def main():
     # We've shown that user_1 can't interact with the dataset from user_2
     # Now have user_2 give proper permission to user_1 to read QUANTUM dataset
     # Note: supported permission types are "read", "write", "delete" and "share"
+    print(
+        "\nOperation started as user_2 to give read permission to user_1 for the dataset owned by user_2"
+    )
     await authorized_give_permission_on_datasets(
         user_1.id,
         [quantum_dataset_id],
@@ -108,6 +117,7 @@ async def main():
     )
 
     # Now user_1 can read from quantum dataset after proper permissions have been assigned by the Quantum dataset owner.
+    print("\nSearch result as user_1 on the dataset owned by user_2:")
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What is in the document?",
@@ -124,5 +134,5 @@ async def main():
 if __name__ == "__main__":
     import asyncio
 
-    logger = setup_logging(log_level=ERROR)
+    logger = setup_logging(log_level=CRITICAL)
     asyncio.run(main())
