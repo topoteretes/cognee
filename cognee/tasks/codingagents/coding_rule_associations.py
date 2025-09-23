@@ -4,6 +4,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 
 from cognee.low_level import DataPoint
+from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.engine.models import NodeSet
@@ -104,8 +105,8 @@ async def add_rule_associations(
 
     user_context = {"chat": data, "rules": existing_rules}
 
-    user_prompt = LLMGateway.render_prompt(user_prompt_location, context=user_context)
-    system_prompt = LLMGateway.render_prompt(system_prompt_location, context={})
+    user_prompt = render_prompt(user_prompt_location, context=user_context)
+    system_prompt = render_prompt(system_prompt_location, context={})
 
     rule_list = await LLMGateway.acreate_structured_output(
         text_input=user_prompt, system_prompt=system_prompt, response_model=RuleSet
