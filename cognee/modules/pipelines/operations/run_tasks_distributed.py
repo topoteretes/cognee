@@ -3,6 +3,10 @@ try:
 except ModuleNotFoundError:
     modal = None
 
+
+from typing import Any, List
+from uuid import UUID
+from cognee.modules.pipelines.tasks.task import Task
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.pipelines.models import (
     PipelineRunStarted,
@@ -13,7 +17,7 @@ from cognee.modules.pipelines.operations import log_pipeline_run_start, log_pipe
 from cognee.modules.pipelines.utils.generate_pipeline_id import generate_pipeline_id
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
-
+from cognee.modules.users.models import User
 from .run_tasks_with_telemetry import run_tasks_with_telemetry
 
 
@@ -42,7 +46,15 @@ if modal:
         return run_info
 
 
-async def run_tasks_distributed(tasks, dataset_id, data, user, pipeline_name, context):
+async def run_tasks_distributed(
+    tasks: List[Task],
+    dataset_id: UUID,
+    data: List[Any] = None,
+    user: User = None,
+    pipeline_name: str = "unknown_pipeline",
+    context: dict = None,
+    incremental_loading: bool = False,
+):
     if not user:
         user = await get_default_user()
 
