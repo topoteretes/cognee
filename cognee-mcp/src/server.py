@@ -936,7 +936,7 @@ async def main():
 
     parser.add_argument(
         "--no-migration",
-        default=False,
+        default=True,
         action="store_true",
         help="Argument stops database migration from being attempted",
     )
