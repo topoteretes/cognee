@@ -311,11 +311,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
 
-        if not limit:
+        if limit is None:
             async with self.get_async_session() as session:
                 query = select(func.count()).select_from(PGVectorDataPoint)
                 result = await session.execute(query)
-                limit = result.rowcount
+                limit = result.scalar_one()
 
         # If limit is still 0, no need to do the search, just return empty results
         if limit <= 0:

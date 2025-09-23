@@ -3,12 +3,11 @@ import pathlib
 import pytest
 
 import cognee
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 
 
 class TestVectorEngine:
     # Test that vector engine search works well with limit=None.
-    # Search should return all triplets that exist. Used Alice for a bit larger test.
+    # Search should return all entities that exist in a collection. Used Alice for a bit larger test.
     @pytest.mark.asyncio
     async def test_vector_engine_search_none_limit(self):
         system_directory_path = os.path.join(
@@ -31,10 +30,17 @@ class TestVectorEngine:
 
         query_text = "List me all the important characters in Alice in Wonderland."
 
-        # Use high value to make sure we get everything that the vector search returns
-        retriever = GraphCompletionRetriever(top_k=1000)
+        from cognee.infrastructure.databases.vector import get_vector_engine
 
-        result = await retriever.get_triplets(query_text)
+        vector_engine = get_vector_engine()
+
+        collection_name = "Entity_name"
+
+        query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
+
+        result = await vector_engine.search(
+            collection_name=collection_name, query_vector=query_vector, limit=None
+        )
 
         # Check that we did not accidentally use any default value for limit in vector search along the way (like 5, 10, or 15)
         assert len(result) > 15

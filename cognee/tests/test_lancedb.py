@@ -1,12 +1,13 @@
 import os
 import pathlib
+
 import cognee
-from cognee.infrastructure.files.storage import get_storage_config
-from cognee.modules.search.operations import get_history
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.files.storage import get_storage_config
 from cognee.modules.data.models import Data
-from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
+from cognee.modules.search.types import SearchType
+from cognee.modules.search.operations import get_history
 
 logger = get_logger()
 
@@ -36,17 +37,15 @@ async def test_local_file_deletion(data_text, file_location):
     async with engine.get_async_session() as session:
         # Get data entry from database based on file path
         data = (
-            await session.scalars(
-                select(Data).where(Data.original_data_location == "file://" + file_location)
-            )
+            await session.scalars(select(Data).where(Data.raw_data_location == file_location))
         ).one()
-        assert os.path.isfile(data.original_data_location.replace("file://", "")), (
-            f"Data location doesn't exist: {data.original_data_location}"
+        assert os.path.isfile(data.raw_data_location.replace("file://", "")), (
+            f"Data location doesn't exist: {data.raw_data_location}"
         )
         # Test local files not created by cognee won't get deleted
         await engine.delete_data_entity(data.id)
-        assert os.path.exists(data.original_data_location.replace("file://", "")), (
-            f"Data location doesn't exists: {data.original_data_location}"
+        assert os.path.exists(data.raw_data_location.replace("file://", "")), (
+            f"Data location doesn't exists: {data.raw_data_location}"
         )
 
 
@@ -94,32 +93,22 @@ async def test_vector_engine_search_none_limit():
     # Check that we did not accidentally use any default value for limit in vector search along the way (like 5, 10, or 15)
     assert len(result) > 15
 
-
 async def main():
     cognee.config.set_vector_db_config(
-        {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "pgvector"}
-    )
-    cognee.config.set_relational_db_config(
         {
-            "db_path": "",
-            "db_name": "cognee_db",
-            "db_host": "127.0.0.1",
-            "db_port": "5432",
-            "db_username": "cognee",
-            "db_password": "cognee",
-            "db_provider": "postgres",
+            "vector_db_provider": "lancedb",
         }
     )
 
     data_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_pgvector")
+            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_lancedb")
         ).resolve()
     )
     cognee.config.data_root_directory(data_directory_path)
     cognee_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_pgvector")
+            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_lancedb")
         ).resolve()
     )
     cognee.config.system_root_directory(cognee_directory_path)
@@ -174,6 +163,7 @@ async def main():
     graph_completion = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text=random_node_name,
+        datasets=[dataset_name_2],
     )
     assert len(graph_completion) != 0, "Completion result is empty."
     print("Completion result is:")
@@ -191,15 +181,14 @@ async def main():
     history = await get_history(user.id)
     assert len(history) == 8, "Search history is not correct."
 
-    await test_local_file_deletion(text, explanation_file_path)
-
     await cognee.prune.prune_data()
     data_root_directory = get_storage_config()["data_root_directory"]
     assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
     await cognee.prune.prune_system(metadata=True)
-    tables_in_database = await vector_engine.get_table_names()
-    assert len(tables_in_database) == 0, "PostgreSQL database is not empty"
+    connection = await vector_engine.get_connection()
+    tables_in_database = await connection.table_names()
+    assert len(tables_in_database) == 0, "LanceDB database is not empty"
 
     await test_vector_engine_search_none_limit()
 

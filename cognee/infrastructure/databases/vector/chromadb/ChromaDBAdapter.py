@@ -386,7 +386,7 @@ class ChromaDBAdapter(VectorDBInterface):
         try:
             collection = await self.get_collection(collection_name)
 
-            if not limit:
+            if limit is None:
                 limit = await collection.count()
 
             # If limit is still 0, no need to do the search, just return empty results

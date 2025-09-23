@@ -235,7 +235,7 @@ class LanceDBAdapter(VectorDBInterface):
 
         collection = await self.get_collection(collection_name)
 
-        if not limit:
+        if limit is None:
             limit = await collection.count_rows()
 
         # LanceDB search will break if limit is 0 so we must return
