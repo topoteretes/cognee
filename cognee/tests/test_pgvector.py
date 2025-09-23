@@ -67,8 +67,14 @@ async def test_getting_of_documents(dataset_name_1):
         f"Number of expected documents doesn't match {len(document_ids)} != 2"
     )
 
+
 async def test_vector_engine_search_none_limit():
-    file_path = os.path.join(pathlib.Path(__file__).resolve().parent.parent.parent, "examples", "data", "alice_in_wonderland.txt")
+    file_path = os.path.join(
+        pathlib.Path(__file__).resolve().parent.parent.parent,
+        "examples",
+        "data",
+        "alice_in_wonderland.txt",
+    )
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)

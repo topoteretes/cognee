@@ -106,7 +106,11 @@ class VectorDBInterface(Protocol):
 
     @abstractmethod
     async def batch_search(
-        self, collection_name: str, query_texts: List[str], limit: Optional[int], with_vectors: bool = False
+        self,
+        collection_name: str,
+        query_texts: List[str],
+        limit: Optional[int],
+        with_vectors: bool = False,
     ):
         """
         Perform a batch search using multiple text queries against a collection.
