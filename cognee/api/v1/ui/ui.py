@@ -1,4 +1,5 @@
 import os
+import platform
 import signal
 import subprocess
 import threading
@@ -214,6 +215,7 @@ def check_node_npm() -> tuple[bool, str]:
     Check if Node.js and npm are available.
     Returns (is_available, error_message)
     """
+
     try:
         # Check Node.js
         result = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=10)
@@ -223,8 +225,17 @@ def check_node_npm() -> tuple[bool, str]:
         node_version = result.stdout.strip()
         logger.debug(f"Found Node.js version: {node_version}")
 
-        # Check npm
-        result = subprocess.run(["npm", "--version"], capture_output=True, text=True, timeout=10)
+        # Check npm - handle Windows PowerShell scripts
+        if platform.system() == "Windows":
+            # On Windows, npm might be a PowerShell script, so we need to use shell=True
+            result = subprocess.run(
+                ["npm", "--version"], capture_output=True, text=True, timeout=10, shell=True
+            )
+        else:
+            result = subprocess.run(
+                ["npm", "--version"], capture_output=True, text=True, timeout=10
+            )
+
         if result.returncode != 0:
             return False, "npm is not installed or not in PATH"
 
@@ -246,6 +257,7 @@ def install_frontend_dependencies(frontend_path: Path) -> bool:
     Install frontend dependencies if node_modules doesn't exist.
     This is needed for both development and downloaded frontends since both use npm run dev.
     """
+
     node_modules = frontend_path / "node_modules"
     if node_modules.exists():
         logger.debug("Frontend dependencies already installed")
@@ -254,13 +266,24 @@ def install_frontend_dependencies(frontend_path: Path) -> bool:
     logger.info("Installing frontend dependencies (this may take a few minutes)...")
 
     try:
-        result = subprocess.run(
-            ["npm", "install"],
-            cwd=frontend_path,
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 minutes timeout
-        )
+        # Use shell=True on Windows for npm commands
+        if platform.system() == "Windows":
+            result = subprocess.run(
+                ["npm", "install"],
+                cwd=frontend_path,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minutes timeout
+                shell=True,
+            )
+        else:
+            result = subprocess.run(
+                ["npm", "install"],
+                cwd=frontend_path,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minutes timeout
+            )
 
         if result.returncode == 0:
             logger.info("Frontend dependencies installed successfully")
@@ -462,15 +485,27 @@ def start_ui(
 
     try:
         # Create frontend in its own process group for clean termination
-        process = subprocess.Popen(
-            ["npm", "run", "dev"],
-            cwd=frontend_path,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            preexec_fn=os.setsid if hasattr(os, "setsid") else None,
-        )
+        # Use shell=True on Windows for npm commands
+        if platform.system() == "Windows":
+            process = subprocess.Popen(
+                ["npm", "run", "dev"],
+                cwd=frontend_path,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                shell=True,
+            )
+        else:
+            process = subprocess.Popen(
+                ["npm", "run", "dev"],
+                cwd=frontend_path,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+            )
 
         pid_callback(process.pid)
 
