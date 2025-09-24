@@ -89,8 +89,15 @@ Your contributions are at the core of making this a true open source project. An
 
 ## Using cognee
 
-Start with our self-hosted package and UI. 
-Deploy your data to our hosted solution with one click once you want to move to production.
+Start with our self-hosted package:
+ - UI and embedded Python notebooks
+ - Custom memory components you can add yourself
+ - Distributed cognee to process a TBs of your data
+
+Ready for production:
+ - Sync your local data to our [hosted solution](www.cognee.ai)
+ - Get your API endpoint
+ - Secure and protected, and multi-tenant
 
 
 ## Self-Hosted (Open Source)
