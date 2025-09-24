@@ -87,17 +87,22 @@ Get started quickly with a Google Colab  <a href="https://colab.research.google.
 ## Contributing
 Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
 
+## Using cognee
+
+Start with our self-hosted package and UI and deploy it to our hosted solution with one click once you want to move to production.
 
 
 
+## Self-Hosted (Open Source)
 
-## 📦 Installation
+
+### 📦 Installation
 
 You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager.
 
 Cognee supports Python 3.10 to 3.12
 
-### With uv
+#### With uv
 
 ```bash
 uv pip install cognee
@@ -105,9 +110,9 @@ uv pip install cognee
 
 Detailed instructions can be found in our [docs](https://docs.cognee.ai/getting-started/installation#environment-configuration)
 
-## 💻 Basic Usage
+### 💻 Basic Usage
 
-### Setup
+#### Setup
 
 ```
 import os
@@ -119,10 +124,10 @@ You can also set the variables by creating .env file, using our <a href="https:/
 To use different LLM providers, for more info check out our <a href="https://docs.cognee.ai/setup-configuration/llm-providers">documentation</a>
 
 
-### Simple example
+#### Simple example
 
 
-#### Via CLI
+##### Via CLI
 
 These commands will show you the basics of cognee CLI
 
@@ -135,8 +140,12 @@ cognee-cli search "What does cognee do?"
 cognee-cli delete --all
 
 ```
+or run
+```
+cognee-cli -ui
+```
 
-#### Python
+##### Python
 
 This script will run the default pipeline:
 
@@ -173,29 +182,18 @@ Example output:
 
 ```
 
-## Our paper is out! <a href="https://arxiv.org/abs/2505.24478" target="_blank" rel="noopener noreferrer">Read here</a>
 
-<div style="text-align: center">
-  <img src="assets/cognee-paper.png" alt="cognee paper" width="100%" />
-</div>
 
 </div>
 
-## Cognee UI
 
-You can also cognify your files and query using cognee UI.
+### Hosted Platform
 
-<img src="assets/cognee-new-ui.webp" width="100%" alt="Cognee UI 2"></a>
+Get up and running in minutes with automatic updates, analytics, and enterprise security.
 
-### Running the UI
+1. Sign up on [cogwit](https://www.cognee.ai)
+2. Add your API key to local UI and sync your data or send your data to Cogwit API
 
-Try cognee UI by setting your LLM_API_KEY and running ``` cognee-cli -ui ``` command on your terminal.
-
-## Understand our architecture
-
-<div style="text-align: center">
-  <img src="assets/cognee_diagram.png" alt="cognee concept diagram" width="100%" />
-</div>
 
 
 
@@ -224,12 +222,18 @@ We are committed to making open source an enjoyable and respectful experience fo
   <img alt="contributors" src="https://contrib.rocks/image?repo=topoteretes/cognee"/>
 </a>
 
-## Sponsors
+## Citation
 
-Thanks to the following companies for sponsoring the ongoing development of cognee.
+We now have a paper you can cite:
 
-- [GitHub's Secure Open Source Fund](https://resources.github.com/github-secure-open-source-fund/)
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
+```bibtex
+@misc{markovic2025optimizinginterfaceknowledgegraphs,
+      title={Optimizing the Interface Between Knowledge Graphs and LLMs for Complex Reasoning}, 
+      author={Vasilije Markovic and Lazar Obradovic and Laszlo Hajdu and Jovan Pavlovic},
+      year={2025},
+      eprint={2505.24478},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2505.24478}, 
+}
+```
