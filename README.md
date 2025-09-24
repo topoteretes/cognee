@@ -130,23 +130,6 @@ To use different LLM providers, for more info check out our <a href="https://doc
 #### Simple example
 
 
-##### Via CLI
-
-These commands will show you the basics of cognee CLI
-
-```
-cognee-cli add "Cognee turns documents into AI memory."
-
-cognee-cli cognify
-
-cognee-cli search "What does cognee do?"
-cognee-cli delete --all
-
-```
-or run
-```
-cognee-cli -ui
-```
 
 ##### Python
 
@@ -184,7 +167,23 @@ Example output:
   Cognee turns documents into AI memory.
 
 ```
+##### Via CLI
 
+Let's get the basics covered
+
+```
+cognee-cli add "Cognee turns documents into AI memory."
+
+cognee-cli cognify
+
+cognee-cli search "What does cognee do?"
+cognee-cli delete --all
+
+```
+or run
+```
+cognee-cli -ui
+```
 
 
 </div>
