@@ -43,7 +43,7 @@ def is_deadlock_error(error):
     retries=3,
     image=image,
     timeout=86400,
-    max_containers=5,
+    max_containers=20,
     secrets=[modal.Secret.from_name("distributed_cognee")],
 )
 async def data_point_saving_worker():
@@ -53,6 +53,8 @@ async def data_point_saving_worker():
     while True:
         if await add_data_points_queue.len.aio() != 0:
             try:
+                print("Remaining elements in queue:")
+                print(await add_data_points_queue.len.aio())
                 add_data_points_request = await add_data_points_queue.get.aio(block=False)
             except modal.exception.DeserializationError as error:
                 logger.error(f"Deserialization error: {str(error)}")

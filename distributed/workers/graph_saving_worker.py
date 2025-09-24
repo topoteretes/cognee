@@ -41,7 +41,7 @@ def is_deadlock_error(error):
     retries=3,
     image=image,
     timeout=86400,
-    max_containers=5,
+    max_containers=20,
     secrets=[modal.Secret.from_name("distributed_cognee")],
 )
 async def graph_saving_worker():
@@ -51,6 +51,8 @@ async def graph_saving_worker():
     while True:
         if await add_nodes_and_edges_queue.len.aio() != 0:
             try:
+                print("Remaining elements in queue:")
+                print(await add_nodes_and_edges_queue.len.aio())
                 nodes_and_edges = await add_nodes_and_edges_queue.get.aio(block=False)
             except modal.exception.DeserializationError as error:
                 logger.error(f"Deserialization error: {str(error)}")
