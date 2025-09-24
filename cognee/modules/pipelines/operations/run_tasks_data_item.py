@@ -41,11 +41,11 @@ async def run_tasks_data_item_incremental(
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Process a single data item with incremental loading support.
-    
+
     This function handles incremental processing by checking if the data item
     has already been processed for the given pipeline and dataset. If it has,
     it skips processing and returns a completion status.
-    
+
     Args:
         data_item: The data item to process
         dataset: The dataset containing the data item
@@ -55,12 +55,12 @@ async def run_tasks_data_item_incremental(
         pipeline_run_id: Unique identifier for this pipeline run
         context: Optional context dictionary
         user: User performing the operation
-        
+
     Yields:
         Dict containing run_info and data_id for each processing step
     """
     db_engine = get_relational_engine()
-    
+
     # If incremental_loading of data is set to True don't process documents already processed by pipeline
     # If data is being added to Cognee for the first time calculate the id of the data
     if not isinstance(data_item, Data):
@@ -160,10 +160,10 @@ async def run_tasks_data_item_regular(
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Process a single data item in regular (non-incremental) mode.
-    
+
     This function processes a data item without checking for previous processing
     status, executing all tasks on the data item.
-    
+
     Args:
         data_item: The data item to process
         dataset: The dataset containing the data item
@@ -172,7 +172,7 @@ async def run_tasks_data_item_regular(
         pipeline_run_id: Unique identifier for this pipeline run
         context: Optional context dictionary
         user: User performing the operation
-        
+
     Yields:
         Dict containing run_info for each processing step
     """
@@ -213,10 +213,10 @@ async def run_tasks_data_item(
 ) -> Optional[Dict[str, Any]]:
     """
     Process a single data item, choosing between incremental and regular processing.
-    
+
     This is the main entry point for data item processing that delegates to either
     incremental or regular processing based on the incremental_loading flag.
-    
+
     Args:
         data_item: The data item to process
         dataset: The dataset containing the data item
@@ -227,7 +227,7 @@ async def run_tasks_data_item(
         context: Optional context dictionary
         user: User performing the operation
         incremental_loading: Whether to use incremental processing
-        
+
     Returns:
         Dict containing the final processing result, or None if processing was skipped
     """

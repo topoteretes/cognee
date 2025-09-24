@@ -61,7 +61,6 @@ async def run_tasks(
     context: dict = None,
     incremental_loading: bool = False,
 ):
-
     if not user:
         user = await get_default_user()
 
