@@ -206,7 +206,7 @@ class Neo4jAdapter(GraphDBInterface):
             {
                 "node_id": str(node.id),
                 "label": type(node).__name__,
-                "properties": self.serialize_properties(node.model_dump()),
+                "properties": self.serialize_properties(dict(node)),
             }
             for node in nodes
         ]
