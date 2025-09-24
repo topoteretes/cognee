@@ -84,13 +84,13 @@ Get started quickly with a Google Colab  <a href="https://colab.research.google.
 
 ## Using cognee
 
-Start with our self-hosted package:
+Self-hosted package:
  - Get self-serve UI with embedded Python notebooks
  - Add custom tasks and pipelines
  - Docker images and MCP servers you can deploy
  - Use distributed cognee to process a TBs of your data
 
-Ready for production:
+Hosted platform:
  - Sync your local data to our [hosted solution](www.cognee.ai)
  - Get a secure API endpoint
  - We manage the UI for you
