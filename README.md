@@ -195,7 +195,7 @@ Example output:
 Get up and running in minutes with automatic updates, analytics, and enterprise security.
 
 1. Sign up on [cogwit](https://www.cognee.ai)
-2. Add your API key to local UI and sync your data or send your data to Cogwit API
+2. Add your API key to local UI and sync your data to Cogwit
 
 
 
