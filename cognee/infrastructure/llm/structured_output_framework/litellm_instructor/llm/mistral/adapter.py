@@ -66,23 +66,39 @@ class MistralAdapter(LLMInterface):
         --------
             - BaseModel: An instance of BaseModel containing the structured response.
         """
-        return await self.aclient.chat.completions.create(
-            model=self.model,
-            max_tokens=self.max_completion_tokens,
-            max_retries=5,
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": f"""Use the given format to extract information
-            from the following input: {text_input}""",
-                },
-            ],
-            response_model=response_model,
-        )
+        try:
+            messages = [
+                    {
+                        "role": "system",
+                        "content": system_prompt,
+                    },
+                    {
+                        "role": "user",
+                        "content": f"""Use the given format to extract information
+                from the following input: {text_input}""",
+                    },
+                ]
+            try:
+                response = await self.aclient.chat.completions.create(
+                    model=self.model,
+                    max_tokens=self.max_completion_tokens,
+                    max_retries=5,
+                    messages=messages,
+                    response_model=response_model,
+                )
+                if response.choices and response.choices[0].message.content:
+                    content = response.choices[0].message.content
+                    return response_model.model_validate_json(content)
+                else:
+                    raise ValueError("Failed to get valid response after retries")
+            except litellm.exceptions.BadRequestError as e:
+                logger.error(f"Bad request error: {str(e)}")
+                raise ValueError(f"Invalid request: {str(e)}")
+            
+        except JSONSchemaValidationError as e:
+            logger.error(f"Schema validation failed: {str(e)}")
+            logger.debug(f"Raw response: {e.raw_response}")
+            raise ValueError(f"Response failed schema validation: {str(e)}")
 
     def show_prompt(self, text_input: str, system_prompt: str) -> str:
         """
