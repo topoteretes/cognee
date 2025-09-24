@@ -90,14 +90,15 @@ Your contributions are at the core of making this a true open source project. An
 ## Using cognee
 
 Start with our self-hosted package:
- - UI and embedded Python notebooks
- - Custom memory components you can add yourself
- - Distributed cognee to process a TBs of your data
+ - Get self-serve UI with embedded Python notebooks
+ - Add custom tasks and pipelines
+ - Docker images and MCP servers you can deploy
+ - Use distributed cognee to process a TBs of your data
 
 Ready for production:
  - Sync your local data to our [hosted solution](www.cognee.ai)
- - Get your API endpoint
- - Secure and protected, and multi-tenant
+ - Get a secure API endpoint
+ - We manage the UI for you
 
 
 ## Self-Hosted (Open Source)
