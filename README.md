@@ -89,8 +89,8 @@ Your contributions are at the core of making this a true open source project. An
 
 ## Using cognee
 
-Start with our self-hosted package and UI and deploy it to our hosted solution with one click once you want to move to production.
-
+Start with our self-hosted package and UI. 
+Deploy your data to our hosted solution with one click once you want to move to production.
 
 
 ## Self-Hosted (Open Source)
