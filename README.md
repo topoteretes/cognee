@@ -87,7 +87,7 @@ Get started quickly with a Google Colab  <a href="https://colab.research.google.
 Self-hosted package:
  - Get self-serve UI with embedded Python notebooks
  - Add custom tasks and pipelines
- - Docker images and MCP servers you can deploy
+ - Get Docker images and MCP servers you can deploy
  - Use distributed cognee to process a TBs of your data
 
 Hosted platform:
