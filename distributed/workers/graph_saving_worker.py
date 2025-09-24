@@ -67,12 +67,7 @@ async def graph_saving_worker():
                         f"Adding {len(nodes_and_edges[0])} nodes and {len(nodes_and_edges[1])} edges."
                     )
                     nodes = nodes_and_edges[0]
-                    print("NODES:")
-                    print(nodes)
-
                     edges = nodes_and_edges[1]
-                    print("EDGES:")
-                    print(edges)
 
                     @retry(
                         retry=retry_if_exception_type(GraphDatabaseDeadlockError),
