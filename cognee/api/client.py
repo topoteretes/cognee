@@ -81,7 +81,7 @@ if CORS_ALLOWED_ORIGINS:
     ]
 else:
     allowed_origins = [
-        "http://localhost:3000",
+        os.getenv("UI_APP_URL", "http://localhost:3000"),
     ]  # Block all except explicitly set origins
 
 app.add_middleware(
