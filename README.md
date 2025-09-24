@@ -47,8 +47,6 @@
 
 Build dynamic memory for Agents and replace RAG using scalable, modular ECL (Extract, Cognify, Load) pipelines.
 
-More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github.com/topoteretes/cognee/tree/main/evals)
-
   <p align="center">
   🌐 Available Languages
   :
@@ -86,9 +84,10 @@ Get started quickly with a Google Colab  <a href="https://colab.research.google.
 
 Self-hosted package:
  - Get self-serve UI with embedded Python notebooks
- - Add custom tasks and pipelines
+ - Add custom tasks and pipelines via Python SDK
  - Get Docker images and MCP servers you can deploy
- - Use distributed cognee to process a TBs of your data
+ - Use distributed cognee SDK to process a TBs of your data
+ - Use community adapters to connect to Redis, Azure, Falkor and others
 
 Hosted platform:
  - Sync your local data to our [hosted solution](www.cognee.ai)
