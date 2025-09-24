@@ -216,12 +216,6 @@ Get up and running in minutes with automatic updates, analytics, and enterprise 
 
 We are committed to making open source an enjoyable and respectful experience for our community. See <a href="https://github.com/topoteretes/cognee/blob/main/CODE_OF_CONDUCT.md"><code>CODE_OF_CONDUCT</code></a> for more information.
 
-## 💫 Contributors
-
-<a href="https://github.com/topoteretes/cognee/graphs/contributors">
-  <img alt="contributors" src="https://contrib.rocks/image?repo=topoteretes/cognee"/>
-</a>
-
 ## Citation
 
 We now have a paper you can cite:
