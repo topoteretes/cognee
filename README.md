@@ -122,7 +122,7 @@ To use different LLM providers, for more info check out our <a href="https://doc
 ### Simple example
 
 
-## Via CLI
+#### Via CLI
 
 These commands will show you the basics of cognee CLI
 
@@ -136,7 +136,7 @@ cognee-cli delete --all
 
 ```
 
-## Python
+#### Python
 
 This script will run the default pipeline:
 
