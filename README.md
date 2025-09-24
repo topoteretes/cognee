@@ -95,24 +95,15 @@ Your contributions are at the core of making this a true open source project. An
 
 You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager.
 
-Cognee supports Python 3.10 to 3.13
+Cognee supports Python 3.10 to 3.12
 
-### With pip
-
-```bash
-pip install cognee
-```
-
-## Local Cognee installation
-
-You can install the local Cognee repo using **uv**, **pip** and **poetry**.
-For local pip installation please make sure your pip version is above version 21.3.
-
-### with UV with all optional dependencies
+### With uv
 
 ```bash
-uv sync --all-extras
+uv pip install cognee
 ```
+
+Detailed instructions can be found in our [docs](https://docs.cognee.ai/getting-started/installation#environment-configuration)
 
 ## 💻 Basic Usage
 
@@ -125,10 +116,27 @@ os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 ```
 
 You can also set the variables by creating .env file, using our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
-To use different LLM providers, for more info check out our <a href="https://docs.cognee.ai">documentation</a>
+To use different LLM providers, for more info check out our <a href="https://docs.cognee.ai/setup-configuration/llm-providers">documentation</a>
 
 
 ### Simple example
+
+
+## Via CLI
+
+These commands will show you the basics of cognee CLI
+
+```
+cognee-cli add "Cognee turns documents into AI memory."
+
+cognee-cli cognify
+
+cognee-cli search "What does cognee do?"
+cognee-cli delete --all
+
+```
+
+## Python
 
 This script will run the default pipeline:
 
@@ -139,13 +147,16 @@ import asyncio
 
 async def main():
     # Add text to cognee
-    await cognee.add("Natural language processing (NLP) is an interdisciplinary subfield of computer science and information retrieval.")
+    await cognee.add("Cognee turns documents into AI memory.")
 
     # Generate the knowledge graph
     await cognee.cognify()
 
+    # Add memory algorithms to the graph
+    await cognee.memify()
+
     # Query the knowledge graph
-    results = await cognee.search("Tell me about NLP")
+    results = await cognee.search("What does cognee do?")
 
     # Display the results
     for result in results:
@@ -158,7 +169,7 @@ if __name__ == '__main__':
 ```
 Example output:
 ```
-  Natural Language Processing (NLP) is a cross-disciplinary and interdisciplinary field that involves computer science and information retrieval. It focuses on the interaction between computers and human language, enabling machines to understand and process natural language.
+  Cognee turns documents into AI memory.
 
 ```
 
@@ -178,7 +189,7 @@ You can also cognify your files and query using cognee UI.
 
 ### Running the UI
 
-Try cognee UI by setting LLM_API_KEY and running ``` cognee-cli -ui ``` command on your terminal.
+Try cognee UI by setting your LLM_API_KEY and running ``` cognee-cli -ui ``` command on your terminal.
 
 ## Understand our architecture
 
