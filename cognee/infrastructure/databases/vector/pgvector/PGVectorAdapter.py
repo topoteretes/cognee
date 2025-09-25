@@ -7,20 +7,7 @@ from sqlalchemy import JSON, Column, Table, select, delete, MetaData
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.exc import ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
-
-try:
-    from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
-except ImportError:
-    # PostgreSQL dependencies not installed, define dummy exceptions
-    class DeadlockDetectedError(Exception):
-        pass
-
-    class DuplicateTableError(Exception):
-        pass
-
-    class UniqueViolationError(Exception):
-        pass
-
+from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
@@ -82,14 +69,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Has to be imported at class level
         # Functions reading tables from database need to know what a Vector column type is
-        try:
-            from pgvector.sqlalchemy import Vector
+        from pgvector.sqlalchemy import Vector
 
-            self.Vector = Vector
-        except ImportError:
-            raise ImportError(
-                "PostgreSQL dependencies are not installed. Please install with 'pip install cognee[postgres]' or 'pip install cognee[postgres-binary]' to use PGVector functionality."
-            )
+        self.Vector = Vector
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         """
