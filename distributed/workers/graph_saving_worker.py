@@ -65,7 +65,9 @@ async def graph_saving_worker():
 
                     if nodes_and_edges == QueueSignal.STOP:
                         await add_nodes_and_edges_queue.put.aio(QueueSignal.STOP)
-                        print("Finished processing all nodes and edges; stopping graph engine queue.")
+                        print(
+                            "Finished processing all nodes and edges; stopping graph engine queue."
+                        )
                         return True
 
                     if len(nodes_and_edges) == 2:
