@@ -4,6 +4,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 
 from cognee.low_level import DataPoint
+from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.engine.models import NodeSet
@@ -31,7 +32,7 @@ class RuleSet(DataPoint):
     )
 
 
-async def get_existing_rules(rules_nodeset_name: str, return_list: bool = False) -> str:
+async def get_existing_rules(rules_nodeset_name: str) -> List[str]:
     graph_engine = await get_graph_engine()
     nodes_data, _ = await graph_engine.get_nodeset_subgraph(
         node_type=NodeSet, node_name=[rules_nodeset_name]
@@ -45,9 +46,6 @@ async def get_existing_rules(rules_nodeset_name: str, return_list: bool = False)
         and isinstance(item[1], dict)
         and "text" in item[1]
     ]
-
-    if not return_list:
-        existing_rules = "\n".join(f"- {rule}" for rule in existing_rules)
 
     return existing_rules
 
@@ -103,11 +101,12 @@ async def add_rule_associations(
 
     graph_engine = await get_graph_engine()
     existing_rules = await get_existing_rules(rules_nodeset_name=rules_nodeset_name)
+    existing_rules = "\n".join(f"- {rule}" for rule in existing_rules)
 
     user_context = {"chat": data, "rules": existing_rules}
 
-    user_prompt = LLMGateway.render_prompt(user_prompt_location, context=user_context)
-    system_prompt = LLMGateway.render_prompt(system_prompt_location, context={})
+    user_prompt = render_prompt(user_prompt_location, context=user_context)
+    system_prompt = render_prompt(system_prompt_location, context={})
 
     rule_list = await LLMGateway.acreate_structured_output(
         text_input=user_prompt, system_prompt=system_prompt, response_model=RuleSet

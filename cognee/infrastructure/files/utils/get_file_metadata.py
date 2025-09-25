@@ -56,7 +56,12 @@ async def get_file_metadata(file: BinaryIO) -> FileMetadata:
     file_type = guess_file_type(file)
 
     file_path = getattr(file, "name", None) or getattr(file, "full_name", None)
-    file_name = Path(file_path).stem if file_path else None
+
+    if isinstance(file_path, str):
+        file_name = Path(file_path).stem if file_path else None
+    else:
+        # In case file_path does not exist or is a integer return None
+        file_name = None
 
     # Get file size
     pos = file.tell()  # remember current pointer

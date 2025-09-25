@@ -15,7 +15,7 @@ async def get_authorized_dataset(
     Get a specific dataset with permissions for a user.
 
     Args:
-        user_id (UUID): user id
+        user: User object
         dataset_id (UUID): dataset id
         permission_type (str): permission type(read, write, delete, share), default is read
 

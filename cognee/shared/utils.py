@@ -1,6 +1,7 @@
 """This module contains utility functions for the cognee."""
 
 import os
+import ssl
 import requests
 from datetime import datetime, timezone
 import http.server
@@ -15,6 +16,17 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
+
+
+def create_secure_ssl_context() -> ssl.SSLContext:
+    """
+    Create a secure SSL context.
+
+    By default, use the system's certificate store.
+    If users report SSL issues, I'm keeping this open in case we need to switch to:
+        ssl.create_default_context(cafile=certifi.where())
+    """
+    return ssl.create_default_context()
 
 
 def get_anonymous_id():

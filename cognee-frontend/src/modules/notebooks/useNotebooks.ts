@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { fetch } from "@/utils";
+import { fetch, isCloudEnvironment } from "@/utils";
 import { Cell, Notebook } from "@/ui/elements/Notebook/types";
 
 function useNotebooks() {
@@ -12,7 +12,7 @@ function useNotebooks() {
         headers: {
           "Content-Type": "application/json",
         },
-      })
+      }, isCloudEnvironment())
       .then((response) => response.json())
       .then((notebook) => {
         setNotebooks((notebooks) => [
@@ -26,30 +26,31 @@ function useNotebooks() {
 
   const removeNotebook = useCallback((notebookId: string) => {
     return fetch(`/v1/notebooks/${notebookId}`, {
-        method: "DELETE",
-      })
-      .then(() => {
-        setNotebooks((notebooks) =>
-          notebooks.filter((notebook) => notebook.id !== notebookId)
-        );
-      });
+      method: "DELETE",
+    }, isCloudEnvironment())
+    .then(() => {
+      setNotebooks((notebooks) =>
+        notebooks.filter((notebook) => notebook.id !== notebookId)
+      );
+    });
   }, []);
 
   const fetchNotebooks = useCallback(() => {
     return fetch("/v1/notebooks", {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      })
-      .then((response) => response.json())
-      .then((notebooks) => {
-        setNotebooks(notebooks);
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }, isCloudEnvironment())
+    .then((response) => response.json())
+    .then((notebooks) => {
+      setNotebooks(notebooks);
 
-        return notebooks;
-      })
-      .catch((error) => {
-        console.error("Error fetching notebooks:", error);
-      });
+      return notebooks;
+    })
+    .catch((error) => {
+      console.error("Error fetching notebooks:", error);
+      throw error
+    });
   }, []);
 
   const updateNotebook = useCallback((updatedNotebook: Notebook) => {
@@ -64,19 +65,19 @@ function useNotebooks() {
 
   const saveNotebook = useCallback((notebook: Notebook) => {
     return fetch(`/v1/notebooks/${notebook.id}`, {
-        body: JSON.stringify({
-          name: notebook.name,
-          cells: notebook.cells,
-        }),
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      })
-      .then((response) => response.json())
+      body: JSON.stringify({
+        name: notebook.name,
+        cells: notebook.cells,
+      }),
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    }, isCloudEnvironment())
+    .then((response) => response.json())
   }, []);
 
-  const runCell = useCallback((notebook: Notebook, cell: Cell) => {
+  const runCell = useCallback((notebook: Notebook, cell: Cell, cogneeInstance: string) => {
     setNotebooks((existingNotebooks) =>
       existingNotebooks.map((existingNotebook) =>
         existingNotebook.id === notebook.id ? {
@@ -100,7 +101,7 @@ function useNotebooks() {
         headers: {
           "Content-Type": "application/json",
         },
-      })
+      }, cogneeInstance === "cloud")
       .then((response) => response.json())
       .then((response) => {
         setNotebooks((existingNotebooks) =>

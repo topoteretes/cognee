@@ -1,4 +1,8 @@
-async def resolve_edges_to_text(retrieved_edges: list) -> str:
+from typing import List
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+
+
+async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
     """
     Converts retrieved graph edges into a human-readable string format.
 
@@ -13,7 +17,7 @@ async def resolve_edges_to_text(retrieved_edges: list) -> str:
         - str: A formatted string representation of the nodes and their connections.
     """
 
-    def _get_nodes(retrieved_edges: list) -> dict:
+    def _get_nodes(retrieved_edges: List[Edge]) -> dict:
         def _get_title(text: str, first_n_words: int = 7, top_n_words: int = 3) -> str:
             def _top_n_words(text, stop_words=None, top_n=3, separator=", "):
                 """Concatenates the top N frequent words in text."""
@@ -36,9 +40,9 @@ async def resolve_edges_to_text(retrieved_edges: list) -> str:
                 return separator.join(top_words)
 
             """Creates a title, by combining first words with most frequent words from the text."""
-            first_n_words = text.split()[:first_n_words]
-            top_n_words = _top_n_words(text, top_n=top_n_words)
-            return f"{' '.join(first_n_words)}... [{top_n_words}]"
+            first_words = text.split()[:first_n_words]
+            top_words = _top_n_words(text, top_n=first_n_words)
+            return f"{' '.join(first_words)}... [{top_words}]"
 
         """Creates a dictionary of nodes with their names and content."""
         nodes = {}

@@ -8,8 +8,8 @@ import { CloseIcon, DatasetIcon, MinusIcon, PlusIcon } from "@/ui/Icons";
 import useDatasets, { Dataset } from "@/modules/ingestion/useDatasets";
 import addData from "@/modules/ingestion/addData";
 import cognifyDataset from "@/modules/datasets/cognifyDataset";
-import { DataFile } from '@/modules/ingestion/useData';
-import { LoadingIndicator } from '@/ui/App';
+import { DataFile } from "@/modules/ingestion/useData";
+import { LoadingIndicator } from "@/ui/App";
 
 interface DatasetsChangePayload {
   datasets: Dataset[]
@@ -18,6 +18,7 @@ interface DatasetsChangePayload {
 
 export interface DatasetsAccordionProps extends Omit<AccordionProps, "isOpen" | "openAccordion" | "closeAccordion" | "children"> {
   onDatasetsChange?: (payload: DatasetsChangePayload) => void;
+  useCloud?: boolean;
 }
 
 export default function DatasetsAccordion({
@@ -27,6 +28,7 @@ export default function DatasetsAccordion({
   className,
   contentClassName,
   onDatasetsChange,
+  useCloud = false,
 }: DatasetsAccordionProps) {
   const {
     value: isDatasetsPanelOpen,
@@ -41,7 +43,7 @@ export default function DatasetsAccordion({
     removeDataset,
     getDatasetData,
     removeDatasetData,
-  } = useDatasets();
+  } = useDatasets(useCloud);
 
   useEffect(() => {
     if (datasets.length === 0) {
@@ -156,20 +158,16 @@ export default function DatasetsAccordion({
     }
   };
 
-  const {
-    value: isProcessingFiles,
-    setTrue: setProcessingFilesInProgress,
-    setFalse: setProcessingFilesDone,
-  } = useBoolean(false);
+  const [datasetInProcessing, setProcessingDataset] = useState<Dataset | null>(null);
 
   const handleAddFiles = (dataset: Dataset, event: ChangeEvent<HTMLInputElement>) => {
     event.stopPropagation();
 
-    if (isProcessingFiles) {
+    if (datasetInProcessing) {
       return;
     }
 
-    setProcessingFilesInProgress();
+    setProcessingDataset(dataset);
 
     if (!event.target.files) {
       return;
@@ -181,15 +179,13 @@ export default function DatasetsAccordion({
       return;
     }
 
-    return addData(dataset, files)
+    return addData(dataset, files, useCloud)
       .then(async () => {
         await getDatasetData(dataset.id);
-        
-        const onUpdate = () => {};
 
-        return cognifyDataset(dataset, onUpdate)
+        return cognifyDataset(dataset, useCloud)
           .finally(() => {
-            setProcessingFilesDone();
+            setProcessingDataset(null);
           });
       });
   };
@@ -230,7 +226,12 @@ export default function DatasetsAccordion({
         isOpen={isDatasetsPanelOpen}
         openAccordion={openDatasetsPanel}
         closeAccordion={closeDatasetsPanel}
-        tools={tools || <IconButton onClick={handleDatasetAdd}><PlusIcon /></IconButton>}
+        tools={(
+          <div className="flex flex-row gap-4 items-center">
+            {tools}
+            <IconButton onClick={handleDatasetAdd}><PlusIcon /></IconButton>
+          </div>
+        )}
         switchCaretPosition={switchCaretPosition}
         className={className}
         contentClassName={contentClassName}
@@ -247,7 +248,7 @@ export default function DatasetsAccordion({
                 key={dataset.id}
                 title={(
                   <div className="flex flex-row gap-2 items-center py-1.5 cursor-pointer">
-                    {isProcessingFiles ? <LoadingIndicator /> : <DatasetIcon />}
+                    {datasetInProcessing?.id == dataset.id ? <LoadingIndicator /> : <DatasetIcon />}
                     <span className="text-xs">{dataset.name}</span>
                   </div>
                 )}
@@ -256,7 +257,6 @@ export default function DatasetsAccordion({
                 closeAccordion={() => toggleDataset(dataset.id)}
                 tools={(
                   <IconButton className="relative">
-                    <input tabIndex={-1} type="file" multiple onChange={handleAddFiles.bind(null, dataset)} className="absolute w-full h-full cursor-pointer opacity-0" />
                     <PopupMenu>
                       <div className="flex flex-col gap-0.5">
                         <div className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer relative">

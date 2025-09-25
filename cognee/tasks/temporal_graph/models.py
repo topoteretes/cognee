@@ -3,12 +3,17 @@ from pydantic import BaseModel, Field
 
 
 class Timestamp(BaseModel):
-    year: int = Field(..., ge=1, le=9999)
-    month: int = Field(..., ge=1, le=12)
-    day: int = Field(..., ge=1, le=31)
-    hour: int = Field(..., ge=0, le=23)
-    minute: int = Field(..., ge=0, le=59)
-    second: int = Field(..., ge=0, le=59)
+    year: int = Field(
+        ...,
+        ge=1,
+        le=9999,
+        description="Always required. If only a year is known, use it.",
+    )
+    month: int = Field(1, ge=1, le=12, description="If unknown, default to 1")
+    day: int = Field(1, ge=1, le=31, description="If unknown, default to 1")
+    hour: int = Field(0, ge=0, le=23, description="If unknown, default to 0")
+    minute: int = Field(0, ge=0, le=59, description="If unknown, default to 0")
+    second: int = Field(0, ge=0, le=59, description="If unknown, default to 0")
 
 
 class Interval(BaseModel):

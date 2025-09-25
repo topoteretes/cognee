@@ -1,0 +1,74 @@
+name: 📚 Documentation Issue
+description: Report an issue with documentation or suggest documentation improvements
+title: "[Docs]: "
+labels: ["documentation", "needs-triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve our documentation! Please provide details about the documentation issue or improvement.
+        
+  - type: dropdown
+    id: doc-type
+    attributes:
+      label: Documentation Type
+      description: What type of documentation issue is this?
+      options:
+        - Missing documentation
+        - Incorrect documentation
+        - Unclear documentation
+        - Documentation improvement
+        - New documentation request
+    validations:
+      required: true
+      
+  - type: textarea
+    id: location
+    attributes:
+      label: Documentation Location
+      description: Where is the documentation issue located? (URL, file path, section, etc.)
+      placeholder: https://cognee.ai/docs/... or specific file/section
+    validations:
+      required: true
+      
+  - type: textarea
+    id: issue
+    attributes:
+      label: Issue Description
+      description: Please describe the documentation issue or improvement needed
+      placeholder: The documentation is unclear about...
+    validations:
+      required: true
+      
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested Improvement
+      description: How would you improve this documentation?
+      placeholder: I suggest changing this to...
+    validations:
+      required: false
+      
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add any other context about the documentation issue
+      placeholder: Additional context...
+    validations:
+      required: false
+      
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please confirm the following before submitting
+      options:
+        - label: I have searched existing issues to ensure this documentation issue hasn't been reported already
+          required: true
+        - label: I have provided a clear description of the documentation issue
+          required: true
+        - label: I have specified the location of the documentation issue
+          required: true
+

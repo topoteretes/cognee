@@ -1,10 +1,6 @@
 import os
 import json
 
-try:
-    import pandas as pd
-except ImportError:
-    pd = None
 import subprocess
 import modal
 import streamlit as st
@@ -82,7 +78,9 @@ def main():
             }
         )
 
-    if pd is None:
+    try:
+        import pandas as pd
+    except ImportError:
         st.error(
             "Pandas is required for the evaluation dashboard. Install with 'pip install cognee[evals]' to use this feature."
         )

@@ -1,11 +1,12 @@
 import os
-from typing import Any, Optional, List, Tuple, Type
+from typing import Any, Optional, List, Type
 
 
 from operator import itemgetter
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.shared.logging_utils import get_logger
@@ -72,7 +73,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         else:
             base_directory = None
 
-        system_prompt = LLMGateway.render_prompt(prompt_path, {}, base_directory=base_directory)
+        system_prompt = render_prompt(prompt_path, {}, base_directory=base_directory)
 
         interval = await LLMGateway.acreate_structured_output(query, system_prompt, QueryInterval)
 
@@ -114,7 +115,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                 "No timestamps identified based on the query, performing retrieval using triplet search on events and entities."
             )
             triplets = await self.get_triplets(query)
-            return await self.resolve_edges_to_text(triplets), triplets
+            return await self.resolve_edges_to_text(triplets)
 
         if ids:
             relevant_events = await graph_engine.collect_events(ids=ids)
@@ -123,7 +124,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                 "No events identified based on timestamp filtering, performing retrieval using triplet search on events and entities."
             )
             triplets = await self.get_triplets(query)
-            return await self.resolve_edges_to_text(triplets), triplets
+            return await self.resolve_edges_to_text(triplets)
 
         vector_engine = get_vector_engine()
         query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
@@ -134,18 +135,19 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         top_k_events = await self.filter_top_k_events(relevant_events, vector_search_results)
 
-        return self.descriptions_to_string(top_k_events), triplets
+        return self.descriptions_to_string(top_k_events)
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> List[str]:
+    async def get_completion(self, query: str, context: Optional[str] = None) -> List[str]:
         """Generates a response using the query and optional context."""
+        if not context:
+            context = await self.get_context(query=query)
 
-        context, triplets = await self.get_context(query=query)
-
-        completion = await generate_completion(
-            query=query,
-            context=context,
-            user_prompt_path=self.user_prompt_path,
-            system_prompt_path=self.system_prompt_path,
-        )
+        if context:
+            completion = await generate_completion(
+                query=query,
+                context=context,
+                user_prompt_path=self.user_prompt_path,
+                system_prompt_path=self.system_prompt_path,
+            )
 
         return [completion]

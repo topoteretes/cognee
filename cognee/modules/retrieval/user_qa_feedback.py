@@ -1,4 +1,4 @@
-from typing import Any, Optional, List
+from typing import Optional, List
 
 from uuid import NAMESPACE_OID, uuid5, UUID
 from cognee.infrastructure.databases.graph import get_graph_engine

@@ -12,6 +12,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
 )
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.config import get_llm_config
 
 
 class AnthropicAdapter(LLMInterface):
@@ -27,7 +28,8 @@ class AnthropicAdapter(LLMInterface):
         import anthropic
 
         self.aclient = instructor.patch(
-            create=anthropic.AsyncAnthropic().messages.create, mode=instructor.Mode.ANTHROPIC_TOOLS
+            create=anthropic.AsyncAnthropic(api_key=get_llm_config().llm_api_key).messages.create,
+            mode=instructor.Mode.ANTHROPIC_TOOLS,
         )
 
         self.model = model
@@ -57,7 +59,7 @@ class AnthropicAdapter(LLMInterface):
 
         return await self.aclient(
             model=self.model,
-            max_completion_tokens=4096,
+            max_tokens=4096,
             max_retries=5,
             messages=[
                 {
@@ -68,35 +70,3 @@ class AnthropicAdapter(LLMInterface):
             ],
             response_model=response_model,
         )
-
-    def show_prompt(self, text_input: str, system_prompt: str) -> str:
-        """
-        Format and display the prompt for a user query.
-
-        Parameters:
-        -----------
-
-            - text_input (str): The input text from the user, defaults to a placeholder if
-              empty.
-            - system_prompt (str): The path to the system prompt to be read and formatted.
-
-        Returns:
-        --------
-
-            - str: A formatted string displaying the system prompt and user input.
-        """
-
-        if not text_input:
-            text_input = "No user input provided."
-        if not system_prompt:
-            raise MissingSystemPromptPathError()
-
-        system_prompt = LLMGateway.read_query_prompt(system_prompt)
-
-        formatted_prompt = (
-            f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
-            if system_prompt
-            else None
-        )
-
-        return formatted_prompt

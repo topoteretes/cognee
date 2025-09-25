@@ -6,15 +6,20 @@ def get_observe():
     monitoring = get_base_config().monitoring_tool
 
     if monitoring == Observer.LANGFUSE:
-        try:
-            from langfuse.decorators import observe
+        from langfuse.decorators import observe
 
-            return observe
-        except ImportError:
-            # Return a no-op decorator if Langfuse is not available
-            def noop_observe(func=None, **kwargs):
-                if func is None:
-                    return lambda f: f
-                return func
+        return observe
+    elif monitoring == Observer.NONE:
+        # Return a no-op decorator that handles keyword arguments
+        def no_op_decorator(*args, **kwargs):
+            if len(args) == 1 and callable(args[0]) and not kwargs:
+                # Direct decoration: @observe
+                return args[0]
+            else:
+                # Parameterized decoration: @observe(as_type="generation")
+                def decorator(func):
+                    return func
 
-            return noop_observe
+                return decorator
+
+        return no_op_decorator

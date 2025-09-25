@@ -1,8 +1,8 @@
 import { FormEvent, useCallback, useState } from "react";
 import { useBoolean } from "@/utils";
 
-export default function useModal<ConfirmActionReturnType = void>(initiallyOpen?: boolean, confirmCallback?: (state: object, event?: FormEvent<HTMLFormElement>) => Promise<ConfirmActionReturnType> | ConfirmActionReturnType) {
-  const [modalState, setModalState] = useState<object>({});
+export default function useModal<ModalState extends object, ConfirmActionEvent = FormEvent<HTMLFormElement>>(initiallyOpen?: boolean, confirmCallback?: (state: ModalState, event?: ConfirmActionEvent) => Promise<void> | void) {
+  const [modalState, setModalState] = useState<ModalState>();
   const [isActionLoading, setLoading] = useState(false);
 
   const {
@@ -11,7 +11,7 @@ export default function useModal<ConfirmActionReturnType = void>(initiallyOpen?:
     setFalse: closeModalInternal,
   } = useBoolean(initiallyOpen || false);
 
-  const openModal = useCallback((state?: object) => {
+  const openModal = useCallback((state?: ModalState) => {
     if (state) {
       setModalState(state);
     }
@@ -20,20 +20,21 @@ export default function useModal<ConfirmActionReturnType = void>(initiallyOpen?:
 
   const closeModal = useCallback(() => {
     closeModalInternal();
-    setModalState({});
+    setModalState({} as ModalState);
   }, [closeModalInternal]);
 
-  const confirmAction = useCallback((event?: FormEvent<HTMLFormElement>) => {
+  const confirmAction = useCallback((event?: ConfirmActionEvent) => {
     if (confirmCallback) {
       setLoading(true);
 
-      const maybePromise = confirmCallback(modalState, event);
+      const maybePromise = confirmCallback(modalState as ModalState, event);
 
       if (maybePromise instanceof Promise) {
         return maybePromise
           .finally(closeModal)
           .finally(() => setLoading(false));
       } else {
+        closeModal();
         return maybePromise; // Not a promise.
       }
     }

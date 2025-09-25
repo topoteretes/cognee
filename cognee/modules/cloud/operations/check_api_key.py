@@ -1,6 +1,7 @@
 import aiohttp
 
 from cognee.modules.cloud.exceptions import CloudConnectionError
+from cognee.shared.utils import create_secure_ssl_context
 
 
 async def check_api_key(auth_token: str):
@@ -10,7 +11,9 @@ async def check_api_key(auth_token: str):
     headers = {"X-Api-Key": auth_token}
 
     try:
-        async with aiohttp.ClientSession() as session:
+        ssl_context = create_secure_ssl_context()
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.post(url, headers=headers) as response:
                 if response.status == 200:
                     return

@@ -39,7 +39,7 @@ class LLMConfig(BaseSettings):
 
     structured_output_framework: str = "instructor"
     llm_provider: str = "openai"
-    llm_model: str = "gpt-5-mini"
+    llm_model: str = "openai/gpt-4o-mini"
     llm_endpoint: str = ""
     llm_api_key: Optional[str] = None
     llm_api_version: Optional[str] = None
@@ -48,7 +48,7 @@ class LLMConfig(BaseSettings):
     llm_max_completion_tokens: int = 16384
 
     baml_llm_provider: str = "openai"
-    baml_llm_model: str = "gpt-5-mini"
+    baml_llm_model: str = "gpt-4o-mini"
     baml_llm_endpoint: str = ""
     baml_llm_api_key: Optional[str] = None
     baml_llm_temperature: float = 0.0
@@ -83,17 +83,19 @@ class LLMConfig(BaseSettings):
             )
 
         if ClientRegistry is not None:
-            self.baml_registry = ClientRegistry()
+            LLMConfig.baml_registry = ClientRegistry()
+            raw_options = {
+                "model": self.baml_llm_model,
+                "temperature": self.baml_llm_temperature,
+                "api_key": self.baml_llm_api_key,
+                "base_url": self.baml_llm_endpoint,
+                "api_version": self.baml_llm_api_version,
+            }
+
+            # Note: keep the item only when the value is not None or an empty string (they would override baml default values)
+            options = {k: v for k, v in raw_options.items() if v not in (None, "")}
             self.baml_registry.add_llm_client(
-                name=self.baml_llm_provider,
-                provider=self.baml_llm_provider,
-                options={
-                    "model": self.baml_llm_model,
-                    "temperature": self.baml_llm_temperature,
-                    "api_key": self.baml_llm_api_key,
-                    "base_url": self.baml_llm_endpoint,
-                    "api_version": self.baml_llm_api_version,
-                },
+                name=self.baml_llm_provider, provider=self.baml_llm_provider, options=options
             )
             # Sets the primary client
             self.baml_registry.set_primary(self.baml_llm_provider)

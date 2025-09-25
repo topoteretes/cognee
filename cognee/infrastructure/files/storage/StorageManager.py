@@ -135,6 +135,24 @@ class StorageManager:
         else:
             return self.storage.remove(file_path)
 
+    async def list_files(self, directory_path: str, recursive: bool = False) -> list[str]:
+        """
+        List all files in the specified directory.
+
+        Parameters:
+        -----------
+            - directory_path (str): The directory path to list files from
+            - recursive (bool): If True, list files recursively in subdirectories
+
+        Returns:
+        --------
+            - list[str]: List of file paths relative to the storage root
+        """
+        if inspect.iscoroutinefunction(self.storage.list_files):
+            return await self.storage.list_files(directory_path, recursive)
+        else:
+            return self.storage.list_files(directory_path, recursive)
+
     async def remove_all(self, tree_path: str = None):
         """
         Remove an entire directory tree at the specified path, including all files and

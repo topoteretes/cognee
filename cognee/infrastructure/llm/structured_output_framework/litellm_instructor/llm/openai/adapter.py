@@ -29,6 +29,9 @@ observe = get_observe()
 
 logger = get_logger()
 
+# litellm to drop unsupported params, e.g., reasoning_effort when not supported by the model.
+litellm.drop_params = True
+
 
 class OpenAIAdapter(LLMInterface):
     """
@@ -132,39 +135,13 @@ class OpenAIAdapter(LLMInterface):
                 api_version=self.api_version,
                 response_model=response_model,
                 max_retries=self.MAX_RETRIES,
-                extra_body={"reasoning_effort": "minimal"},
+                reasoning_effort="minimal",
             )
         except (
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
             InstructorRetryException,
-        ) as error:
-            if (
-                isinstance(error, InstructorRetryException)
-                and "content management policy" not in str(error).lower()
-            ):
-                logger.debug(
-                    "LLM Model does not support reasoning_effort parameter, trying call without the parameter."
-                )
-                return await self.aclient.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": f"""{text_input}""",
-                        },
-                        {
-                            "role": "system",
-                            "content": system_prompt,
-                        },
-                    ],
-                    api_key=self.api_key,
-                    api_base=self.endpoint,
-                    api_version=self.api_version,
-                    response_model=response_model,
-                    max_retries=self.MAX_RETRIES,
-                )
-
+        ):
             if not (self.fallback_model and self.fallback_api_key):
                 raise ContentPolicyFilterError(
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
@@ -246,6 +223,7 @@ class OpenAIAdapter(LLMInterface):
             api_base=self.endpoint,
             api_version=self.api_version,
             response_model=response_model,
+            reasoning_effort="minimal",
             max_retries=self.MAX_RETRIES,
         )
 
@@ -328,35 +306,3 @@ class OpenAIAdapter(LLMInterface):
             max_completion_tokens=300,
             max_retries=self.MAX_RETRIES,
         )
-
-    def show_prompt(self, text_input: str, system_prompt: str) -> str:
-        """
-        Format and display the prompt for a user query.
-
-        This method formats the prompt using the provided user input and system prompt,
-        returning a string representation. Raises MissingSystemPromptPathError if the system prompt is not
-        provided.
-
-        Parameters:
-        -----------
-
-            - text_input (str): The input text provided by the user.
-            - system_prompt (str): The system's prompt to guide the model's response.
-
-        Returns:
-        --------
-
-            - str: A formatted string representing the user input and system prompt.
-        """
-        if not text_input:
-            text_input = "No user input provided."
-        if not system_prompt:
-            raise MissingSystemPromptPathError()
-        system_prompt = LLMGateway.read_query_prompt(system_prompt)
-
-        formatted_prompt = (
-            f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
-            if system_prompt
-            else None
-        )
-        return formatted_prompt
