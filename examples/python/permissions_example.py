@@ -7,6 +7,10 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import create_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
+from cognee.modules.users.roles.methods import add_user_to_role
+from cognee.modules.users.roles.methods import create_role
+from cognee.modules.users.tenants.methods import create_tenant
+from cognee.modules.users.tenants.methods import add_user_to_tenant
 from cognee.modules.engine.operations.setup import setup
 from cognee.shared.logging_utils import setup_logging, CRITICAL
 
@@ -18,6 +22,11 @@ async def main():
     # Note: When ENABLE_BACKEND_ACCESS_CONTROL is enabled vector provider is automatically set to use LanceDB
     # and graph provider is set to use Kuzu.
     os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "True"
+
+    # Set the rest of your environment variables as needed. By default OpenAI is used as the LLM provider
+    # Reference the .env.tempalte file for available option and how to change LLM provider: https://github.com/topoteretes/cognee/blob/main/.env.template
+    # For example to set your OpenAI LLM API key use:
+    # os.environ["LLM_API_KEY""] = "your-api-key"
 
     # Create a clean slate for cognee -- reset data and system state
     print("Resetting cognee data...")
@@ -129,6 +138,45 @@ async def main():
 
     # If we'd like for user_1 to add new documents to the quantum dataset from user_2 he'd have to get "write" access permission,
     # which he currently does not have
+
+    # Users can also be added to Roles and Tenants and then permission can be assigned on a Role/Tenant level as well
+    # To create a Role a user first must be the owner of a Tenant
+    print("User 2 is creating CogneeLab tenant/organization")
+    tenant_id = await create_tenant("CogneeLab", user_2.id)
+
+    print("\nUser 2 is creating Reasercher role")
+    role_id = await create_role(role_name="Reasercher", owner_id=user_2.id)
+
+    print("\nCreating user_3: user_3@example.com")
+    user_3 = await create_user("user_3@example.com", "example")
+
+    # To add a user to a role he must be part of the same tenant/organization
+    print("\nOperation started as user_2 to add user_3 to CogneeLab tenant/organization")
+    await add_user_to_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
+
+    print("\nOperation started as user_2 to add user_3 to Reasercher role")
+    await add_user_to_role(user_id=user_3.id, role_id=role_id, owner_id=user_2.id)
+
+    print(
+        "\nOperation started as user_2 to give read permission to Reasercher role for the dataset owned by user_2"
+    )
+    await authorized_give_permission_on_datasets(
+        role_id,
+        [quantum_dataset_id],
+        "read",
+        user_2.id,
+    )
+
+    # Now user_3 can read from quantum dataset as part of the Reasercher role after proper permissions have been assigned by the Quantum dataset owner.
+    print("\nSearch result as  on the dataset owned by user_2:")
+    search_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="What is in the document?",
+        user=user_1,
+        dataset_ids=[quantum_dataset_id],
+    )
+    for result in search_results:
+        print(f"{result}\n")
 
 
 if __name__ == "__main__":
