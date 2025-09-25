@@ -26,7 +26,7 @@ async def open_data_file(file_path: str, mode: str = "rb", encoding: str = None,
             from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
         except ImportError:
             raise ImportError(
-                "S3 dependencies are not installed. Please install with 'pip install cognee[aws]' to use S3 functionality."
+                "S3 dependencies are not installed. Please install with 'pip install cognee\"[aws]\"' to use S3 functionality."
             )
 
         normalized_url = get_data_file_path(file_path)

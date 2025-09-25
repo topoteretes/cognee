@@ -82,7 +82,7 @@ def main():
         import pandas as pd
     except ImportError:
         st.error(
-            "Pandas is required for the evaluation dashboard. Install with 'pip install cognee[evals]' to use this feature."
+            "Pandas is required for the evaluation dashboard. Install with 'pip install cognee\"[evals]\"' to use this feature."
         )
         return
 

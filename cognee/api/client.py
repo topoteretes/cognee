@@ -51,7 +51,7 @@ if os.getenv("ENV", "prod") == "prod":
         )
     except ImportError:
         logger.info(
-            "Sentry SDK not available. Install with 'pip install cognee[monitoring]' to enable error monitoring."
+            "Sentry SDK not available. Install with 'pip install cognee\"[monitoring]\"' to enable error monitoring."
         )
 
 

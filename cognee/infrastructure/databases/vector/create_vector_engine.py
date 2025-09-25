@@ -70,7 +70,7 @@ def create_vector_engine(
             from .pgvector.PGVectorAdapter import PGVectorAdapter
         except ImportError:
             raise ImportError(
-                "PostgreSQL dependencies are not installed. Please install with 'pip install cognee[postgres]' or 'pip install cognee[postgres-binary]' to use PGVector functionality."
+                "PostgreSQL dependencies are not installed. Please install with 'pip install cognee\"[postgres]\"' or 'pip install cognee\"[postgres-binary]\"' to use PGVector functionality."
             )
 
         return PGVectorAdapter(

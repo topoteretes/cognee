@@ -25,7 +25,7 @@ class S3FileStorage(Storage):
             import s3fs
         except ImportError:
             raise ImportError(
-                "s3fs is required for S3FileStorage. Install it with: pip install cognee[aws]"
+                's3fs is required for S3FileStorage. Install it with: pip install cognee"[aws]"'
             )
 
         self.storage_path = storage_path
