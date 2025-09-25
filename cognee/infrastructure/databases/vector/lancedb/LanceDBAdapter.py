@@ -247,8 +247,6 @@ class LanceDBAdapter(VectorDBInterface):
 
         result_values = await collection.vector_search(query_vector).limit(limit).to_list()
 
-        # result_values = list(results.to_dict("index").values())
-
         if not result_values:
             return []
 
