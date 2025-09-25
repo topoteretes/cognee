@@ -1,6 +1,5 @@
 import os
-import s3fs
-from typing import BinaryIO, Union
+from typing import BinaryIO, Union, TYPE_CHECKING
 from contextlib import asynccontextmanager
 
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
@@ -8,17 +7,27 @@ from cognee.infrastructure.utils.run_async import run_async
 from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
 from .storage import Storage
 
+if TYPE_CHECKING:
+    import s3fs
+
 
 class S3FileStorage(Storage):
     """
-    Manage local file storage operations such as storing, retrieving, and managing files on
-    the filesystem.
+    Manage S3 file storage operations such as storing, retrieving, and managing files on
+    S3-compatible storage.
     """
 
     storage_path: str
-    s3: s3fs.S3FileSystem
+    s3: "s3fs.S3FileSystem"
 
     def __init__(self, storage_path: str):
+        try:
+            import s3fs
+        except ImportError:
+            raise ImportError(
+                's3fs is required for S3FileStorage. Install it with: pip install cognee"[aws]"'
+            )
+
         self.storage_path = storage_path
         s3_config = get_s3_config()
         if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
