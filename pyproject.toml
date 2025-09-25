@@ -107,6 +107,7 @@ evals = [
     "gdown>=5.2.0,<6",
     "pandas>=2.2.2,<3.0.0",
     "matplotlib>=3.8.3,<4",
+    "scikit-learn>=1.6.1,<2",
 ]
 
 graphiti = ["graphiti-core>=0.7.0,<0.8"]
