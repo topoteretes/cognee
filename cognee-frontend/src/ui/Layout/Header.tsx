@@ -5,7 +5,7 @@ import Image from "next/image";
 import { useBoolean } from "@/utils";
 
 import { CloseIcon, CloudIcon, CogneeIcon } from "../Icons";
-import { CTAButton, GhostButton, IconButton, Modal } from "../elements";
+import { CTAButton, GhostButton, IconButton, Modal, StatusDot } from "../elements";
 import syncData from "@/modules/cloud/syncData";
 
 interface HeaderProps {
@@ -21,6 +21,11 @@ export default function Header({ user }: HeaderProps) {
     value: isSyncModalOpen,
     setTrue: openSyncModal,
     setFalse: closeSyncModal,
+  } = useBoolean(false);
+
+  const {
+    value: isMCPStatusOpen,
+    setTrue: setMCPStatusOpen,
   } = useBoolean(false);
 
   const handleDataSyncConfirm = () => {
@@ -39,6 +44,10 @@ export default function Header({ user }: HeaderProps) {
         </div>
 
         <div className="flex flex-row items-center gap-2.5">
+          <Link href="/mcp-status" className="!text-indigo-600 pl-4 pr-4">
+            <StatusDot className="mr-2" isActive={isMCPStatusOpen} />
+            MCP status
+          </Link>
           <GhostButton onClick={openSyncModal} className="text-indigo-600 gap-3 pl-4 pr-4">
             <CloudIcon />
             <div>Sync</div>
