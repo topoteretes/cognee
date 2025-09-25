@@ -48,7 +48,7 @@ def create_relational_engine(
             )
         except ImportError:
             raise ImportError(
-                "PostgreSQL dependencies are not installed. Please install with 'pip install cognee[postgres]' or 'pip install cognee[postgres-binary]' to use PostgreSQL functionality."
+                "PostgreSQL dependencies are not installed. Please install with 'pip install cognee\"[postgres]\"' or 'pip install cognee\"[postgres-binary]\"' to use PostgreSQL functionality."
             )
 
     return SQLAlchemyAdapter(connection_string)

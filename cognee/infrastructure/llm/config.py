@@ -79,7 +79,7 @@ class LLMConfig(BaseSettings):
         if self.structured_output_framework.lower() == "baml" and ClientRegistry is None:
             raise ImportError(
                 "BAML is selected as structured output framework but not available. "
-                "Please install with 'pip install cognee[baml]' to use BAML extraction features."
+                "Please install with 'pip install cognee\"[baml]\"' to use BAML extraction features."
             )
         elif self.structured_output_framework.lower() == "baml" and ClientRegistry is not None:
             self.baml_registry = ClientRegistry()
