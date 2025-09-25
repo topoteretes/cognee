@@ -361,7 +361,7 @@ def start_ui(
 
     Returns:
         subprocess.Popen object representing the running frontend server, or None if failed
-        Note: If backend and/or MCP server are started, they run in separate processes 
+        Note: If backend and/or MCP server are started, they run in separate processes
         that will be cleaned up when the frontend process is terminated.
 
     Example:
@@ -391,12 +391,16 @@ def start_ui(
         try:
             mcp_process = subprocess.Popen(
                 [
-                    "docker", "run",
-                    "-p", "8001:8000",
+                    "docker",
+                    "run",
+                    "-p",
+                    "8001:8000",
                     "--rm",
-                    "--env-file", env_file,
-                    "-e", "TRANSPORT_MODE=sse",
-                    "cognee/cognee-mcp:daulet-dev"
+                    "--env-file",
+                    env_file,
+                    "-e",
+                    "TRANSPORT_MODE=sse",
+                    "cognee/cognee-mcp:daulet-dev",
                 ],
                 preexec_fn=os.setsid if hasattr(os, "setsid") else None,
             )
