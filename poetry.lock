@@ -4,9 +4,10 @@
 name = "aiobotocore"
 version = "2.24.2"
 description = "Async client for aws services using botocore and aiohttp"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"aws\""
 files = [
     {file = "aiobotocore-2.24.2-py3-none-any.whl", hash = "sha256:808c63b2bd344b91e2f2acb874831118a9f53342d248acd16a68455a226e283a"},
     {file = "aiobotocore-2.24.2.tar.gz", hash = "sha256:dfb21bdb2610e8de4d22f401e91a24d50f1330a302d03c62c485757becd439a9"},
@@ -164,9 +165,10 @@ speedups = ["Brotli ; platform_python_implementation == \"CPython\"", "aiodns (>
 name = "aioitertools"
 version = "0.12.0"
 description = "itertools and builtins for AsyncIO and mixed iterables"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
+markers = "extra == \"aws\""
 files = [
     {file = "aioitertools-0.12.0-py3-none-any.whl", hash = "sha256:fc1f5fac3d737354de8831cbba3eb04f79dd649d8f3afb4c5b114925e662a796"},
     {file = "aioitertools-0.12.0.tar.gz", hash = "sha256:c2a9055b4fbb7705f561b9d86053e8af5d10cc845d22c32008c43490b2d8dd6b"},
@@ -576,9 +578,10 @@ dev = ["backports.zoneinfo ; python_version < \"3.9\"", "freezegun (>=1.0,<2.0)"
 name = "backoff"
 version = "2.2.1"
 description = "Function decoration for backoff and retry"
-optional = false
+optional = true
 python-versions = ">=3.7,<4.0"
 groups = ["main"]
+markers = "extra == \"deepeval\" or extra == \"posthog\" or extra == \"chromadb\" or extra == \"docs\" or extra == \"monitoring\""
 files = [
     {file = "backoff-2.2.1-py3-none-any.whl", hash = "sha256:63579f9a0628e06278f7e47b7d7d5b6ce20dc65c5e96a6f3ca99a6adca0396e8"},
     {file = "backoff-2.2.1.tar.gz", hash = "sha256:03f829f5bb1923180821643f8753b0502c3b682293992485b0eef2807afa5cba"},
@@ -609,9 +612,10 @@ extras = ["regex"]
 name = "baml-py"
 version = "0.206.0"
 description = "BAML python bindings (pyproject.toml)"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
+markers = "extra == \"baml\""
 files = [
     {file = "baml_py-0.206.0-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:d9e95f0b481a18ae6936d720b8fc609baec4ea1eabbdde48f1536ffc94ebf39f"},
     {file = "baml_py-0.206.0-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:0f698127da030b728c7aa2641c3164a3ab19779594019234361dd48f0784f195"},
@@ -759,9 +763,10 @@ css = ["tinycss2 (>=1.1.0,<1.5)"]
 name = "boto3"
 version = "1.40.18"
 description = "The AWS SDK for Python"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"neptune\" or extra == \"aws\""
 files = [
     {file = "boto3-1.40.18-py3-none-any.whl", hash = "sha256:daa776ba1251a7458c9d6c7627873d0c2460c8e8272d35759065580e9193700a"},
     {file = "boto3-1.40.18.tar.gz", hash = "sha256:64301d39adecc154e3e595eaf0d4f28998ef0a5551f1d033aeac51a9e1a688e5"},
@@ -779,9 +784,10 @@ crt = ["botocore[crt] (>=1.21.0,<2.0a0)"]
 name = "botocore"
 version = "1.40.18"
 description = "Low-level, data-driven core of boto 3."
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"neptune\" or extra == \"aws\""
 files = [
     {file = "botocore-1.40.18-py3-none-any.whl", hash = "sha256:57025c46ca00cf8cec25de07a759521bfbfb3036a0f69b272654a354615dc45f"},
     {file = "botocore-1.40.18.tar.gz", hash = "sha256:afd69bdadd8c55cc89d69de0799829e555193a352d87867f746e19020271cc0f"},
@@ -1151,7 +1157,7 @@ description = "Cross-platform colored terminal text."
 optional = false
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,!=3.6.*,>=2.7"
 groups = ["main"]
-markers = "(platform_system == \"Windows\" or sys_platform == \"win32\" or os_name == \"nt\" or extra == \"llama-index\" or extra == \"dev\") and (platform_system == \"Windows\" or sys_platform == \"win32\" or extra == \"llama-index\" or extra == \"dev\" or extra == \"chromadb\") and (platform_system == \"Windows\" or python_version <= \"3.12\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\") and (platform_system == \"Windows\" or extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"chromadb\" or extra == \"codegraph\")"
+markers = "(platform_system == \"Windows\" or sys_platform == \"win32\" or extra == \"llama-index\" or extra == \"dev\" or os_name == \"nt\") and (platform_system == \"Windows\" or sys_platform == \"win32\" or extra == \"llama-index\" or extra == \"dev\" or extra == \"chromadb\")"
 files = [
     {file = "colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6"},
     {file = "colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44"},
@@ -1195,10 +1201,10 @@ test = ["pytest"]
 name = "contourpy"
 version = "1.3.2"
 description = "Python library for calculating contours of 2D quadrilateral grids"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "python_version == \"3.10\""
+markers = "python_version == \"3.10\" and extra == \"evals\""
 files = [
     {file = "contourpy-1.3.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:ba38e3f9f330af820c4b27ceb4b9c7feee5fe0493ea53a8720f4792667465934"},
     {file = "contourpy-1.3.2-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:dc41ba0714aa2968d1f8674ec97504a8f7e334f48eeacebcaa6256213acb0989"},
@@ -1273,10 +1279,10 @@ test-no-images = ["pytest", "pytest-cov", "pytest-rerunfailures", "pytest-xdist"
 name = "contourpy"
 version = "1.3.3"
 description = "Python library for calculating contours of 2D quadrilateral grids"
-optional = false
+optional = true
 python-versions = ">=3.11"
 groups = ["main"]
-markers = "python_version >= \"3.11\""
+markers = "python_version >= \"3.11\" and extra == \"evals\""
 files = [
     {file = "contourpy-1.3.3-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:709a48ef9a690e1343202916450bc48b9e51c049b089c7f79a267b46cffcdaa1"},
     {file = "contourpy-1.3.3-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:23416f38bfd74d5d28ab8429cc4d63fa67d5068bd711a85edb1c3fb0c3e2f381"},
@@ -1577,9 +1583,10 @@ files = [
 name = "cycler"
 version = "0.12.1"
 description = "Composable style cycles"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
+markers = "extra == \"evals\""
 files = [
     {file = "cycler-0.12.1-py3-none-any.whl", hash = "sha256:85cef7cff222d8644161529808465972e51340599459b8ac3ccbac5a854e0d30"},
     {file = "cycler-0.12.1.tar.gz", hash = "sha256:88bb128f02ba341da8ef447245a9e138fae777f6a23943da4540077d3601eb1c"},
@@ -1873,9 +1880,10 @@ files = [
 name = "dlt"
 version = "1.16.0"
 description = "dlt is an open-source python-first scalable data loading library that does not require any backend to run."
-optional = false
+optional = true
 python-versions = "<3.15,>=3.9.2"
 groups = ["main"]
+markers = "extra == \"dlt\""
 files = [
     {file = "dlt-1.16.0-py3-none-any.whl", hash = "sha256:882ef281bbdc32eaba3b5ced984a8ed7014d8978fd7ab4a58b198023c8938c9f"},
     {file = "dlt-1.16.0.tar.gz", hash = "sha256:113d17a3f27aa4f41c3438b0b032a68d30db195d8415a471ba43a9502e971a21"},
@@ -2180,10 +2188,9 @@ sqlalchemy = {version = ">=2.0.0,<2.1.0", extras = ["asyncio"]}
 name = "fastembed"
 version = "0.6.0"
 description = "Fast, light, accurate library built for retrieval embedding generation"
-optional = true
+optional = false
 python-versions = ">=3.9.0"
 groups = ["main"]
-markers = "extra == \"codegraph\" and python_version <= \"3.12\""
 files = [
     {file = "fastembed-0.6.0-py3-none-any.whl", hash = "sha256:a08385e9388adea0529a586004f2d588c9787880a510e4e5d167127a11e75328"},
     {file = "fastembed-0.6.0.tar.gz", hash = "sha256:5c9ead25f23449535b07243bbe1f370b820dcc77ec2931e61674e3fe7ff24733"},
@@ -2196,8 +2203,12 @@ mmh3 = ">=4.1.0,<6.0.0"
 numpy = [
     {version = ">=1.21", markers = "python_version >= \"3.10\" and python_version < \"3.12\""},
     {version = ">=1.26", markers = "python_version == \"3.12\""},
+    {version = ">=2.1.0", markers = "python_version >= \"3.13\""},
 ]
-onnxruntime = {version = ">=1.17.0,<1.20.0 || >1.20.0", markers = "python_version >= \"3.10\" and python_version < \"3.13\""}
+onnxruntime = [
+    {version = ">=1.17.0,<1.20.0 || >1.20.0", markers = "python_version >= \"3.10\" and python_version < \"3.13\""},
+    {version = ">1.20.0", markers = "python_version >= \"3.13\""},
+]
 pillow = ">=10.3.0,<12.0.0"
 py-rust-stemmers = ">=0.1.0,<0.2.0"
 requests = ">=2.31,<3.0"
@@ -2294,9 +2305,10 @@ files = [
 name = "fonttools"
 version = "4.60.0"
 description = "Tools to manipulate font files"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"evals\""
 files = [
     {file = "fonttools-4.60.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:151282a235c36024168c21c02193e939e8b28c73d5fa0b36ae1072671d8fa134"},
     {file = "fonttools-4.60.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:3f32cc42d485d9b1546463b9a7a92bdbde8aef90bac3602503e04c2ddb27e164"},
@@ -2583,9 +2595,10 @@ dev = ["flake8", "markdown", "twine", "wheel"]
 name = "gitdb"
 version = "4.0.12"
 description = "Git Object Database"
-optional = false
+optional = true
 python-versions = ">=3.7"
 groups = ["main"]
+markers = "extra == \"dlt\" or extra == \"dev\""
 files = [
     {file = "gitdb-4.0.12-py3-none-any.whl", hash = "sha256:67073e15955400952c6565cc3e707c554a4eea2e428946f7a4c162fab9bd9bcf"},
     {file = "gitdb-4.0.12.tar.gz", hash = "sha256:5ef71f855d191a3326fcfbc0d5da835f26b13fbcba60c32c21091c349ffdb571"},
@@ -2598,9 +2611,10 @@ smmap = ">=3.0.1,<6"
 name = "gitpython"
 version = "3.1.45"
 description = "GitPython is a Python library used to interact with Git repositories"
-optional = false
+optional = true
 python-versions = ">=3.7"
 groups = ["main"]
+markers = "extra == \"dlt\" or extra == \"dev\""
 files = [
     {file = "gitpython-3.1.45-py3-none-any.whl", hash = "sha256:8908cb2e02fb3b93b7eb0f2827125cb699869470432cc885f019b8fd0fccff77"},
     {file = "gitpython-3.1.45.tar.gz", hash = "sha256:85b0ee964ceddf211c41b9f27a49086010a190fd8132a24e21f362a4b36a791c"},
@@ -2617,9 +2631,10 @@ test = ["coverage[toml]", "ddt (>=1.1.1,!=1.4.3)", "mock ; python_version < \"3.
 name = "giturlparse"
 version = "0.12.0"
 description = "A Git URL parsing module (supports parsing and rewriting)"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
+markers = "extra == \"dlt\""
 files = [
     {file = "giturlparse-0.12.0-py2.py3-none-any.whl", hash = "sha256:412b74f2855f1da2fefa89fd8dde62df48476077a72fc19b62039554d27360eb"},
     {file = "giturlparse-0.12.0.tar.gz", hash = "sha256:c0fff7c21acc435491b1779566e038757a205c1ffdcb47e4f81ea52ad8c3859a"},
@@ -3112,9 +3127,10 @@ hyperframe = ">=6.1,<7"
 name = "hexbytes"
 version = "1.3.1"
 description = "hexbytes: Python `bytes` subclass that decodes hex, with a readable console output"
-optional = false
+optional = true
 python-versions = "<4,>=3.8"
 groups = ["main"]
+markers = "extra == \"dlt\""
 files = [
     {file = "hexbytes-1.3.1-py3-none-any.whl", hash = "sha256:da01ff24a1a9a2b1881c4b85f0e9f9b0f51b526b379ffa23832ae7899d29c2c7"},
     {file = "hexbytes-1.3.1.tar.gz", hash = "sha256:a657eebebdfe27254336f98d8af6e2236f3f83aed164b87466b6cf6c5f5a4765"},
@@ -3373,9 +3389,10 @@ pyreadline3 = {version = "*", markers = "sys_platform == \"win32\" and python_ve
 name = "humanize"
 version = "4.13.0"
 description = "Python humanize utilities"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"dlt\""
 files = [
     {file = "humanize-4.13.0-py3-none-any.whl", hash = "sha256:b810820b31891813b1673e8fec7f1ed3312061eab2f26e3fa192c393d11ed25f"},
     {file = "humanize-4.13.0.tar.gz", hash = "sha256:78f79e68f76f0b04d711c4e55d32bebef5be387148862cb1ef83d2b58e7935a0"},
@@ -3837,9 +3854,10 @@ files = [
 name = "jmespath"
 version = "1.0.1"
 description = "JSON Matching Expressions"
-optional = false
+optional = true
 python-versions = ">=3.7"
 groups = ["main"]
+markers = "extra == \"neptune\" or extra == \"aws\""
 files = [
     {file = "jmespath-1.0.1-py3-none-any.whl", hash = "sha256:02e2e4cc71b5bcab88332eebf907519190dd9e6e82107fa7f83b1003a6252980"},
     {file = "jmespath-1.0.1.tar.gz", hash = "sha256:90261b206d6defd58fdd5e85f478bf633a2901798906be2ad389150c5c60edbe"},
@@ -3905,9 +3923,10 @@ jsonpointer = ">=1.9"
 name = "jsonpath-ng"
 version = "1.7.0"
 description = "A final implementation of JSONPath for Python that aims to be standard compliant, including arithmetic and binary comparison operators and providing clear AST for metaprogramming."
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
+markers = "extra == \"dlt\""
 files = [
     {file = "jsonpath-ng-1.7.0.tar.gz", hash = "sha256:f6f5f7fd4e5ff79c785f1573b394043b39849fb2bb47bcead935d12b00beab3c"},
 ]
@@ -4215,9 +4234,10 @@ test = ["hatch", "ipykernel", "openapi-core (>=0.18.0,<0.19.0)", "openapi-spec-v
 name = "kiwisolver"
 version = "1.4.9"
 description = "A fast implementation of the Cassowary constraint solver"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "extra == \"evals\""
 files = [
     {file = "kiwisolver-1.4.9-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:b4b4d74bda2b8ebf4da5bd42af11d02d04428b2c32846e4c2c93219df8a7987b"},
     {file = "kiwisolver-1.4.9-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:fb3b8132019ea572f4611d770991000d7f58127560c4889729248eb5852a102f"},
@@ -4558,9 +4578,10 @@ six = "*"
 name = "langfuse"
 version = "2.60.10"
 description = "A client library for accessing langfuse"
-optional = false
+optional = true
 python-versions = "<4.0,>=3.9"
 groups = ["main"]
+markers = "extra == \"monitoring\""
 files = [
     {file = "langfuse-2.60.10-py3-none-any.whl", hash = "sha256:815c6369194aa5b2a24f88eb9952f7c3fc863272c41e90642a71f3bc76f4a11f"},
     {file = "langfuse-2.60.10.tar.gz", hash = "sha256:a26d0d927a28ee01b2d12bb5b862590b643cc4e60a28de6e2b0c2cfff5dbfc6a"},
@@ -4779,10 +4800,9 @@ server = ["starlette (>=0.39.0)", "uvicorn (>=0.32.0)"]
 name = "loguru"
 version = "0.7.3"
 description = "Python logging made (stupidly) simple"
-optional = true
+optional = false
 python-versions = "<4.0,>=3.5"
 groups = ["main"]
-markers = "extra == \"codegraph\" and python_version <= \"3.12\""
 files = [
     {file = "loguru-0.7.3-py3-none-any.whl", hash = "sha256:31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c"},
     {file = "loguru-0.7.3.tar.gz", hash = "sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6"},
@@ -5133,9 +5153,10 @@ tests = ["pytest", "simplejson"]
 name = "matplotlib"
 version = "3.10.6"
 description = "Python plotting package"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "extra == \"evals\""
 files = [
     {file = "matplotlib-3.10.6-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:bc7316c306d97463a9866b89d5cc217824e799fa0de346c8f68f4f3d27c8693d"},
     {file = "matplotlib-3.10.6-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:d00932b0d160ef03f59f9c0e16d1e3ac89646f7785165ce6ad40c842db16cc2e"},
@@ -5494,10 +5515,9 @@ mkdocstrings = ">=0.26"
 name = "mmh3"
 version = "5.2.0"
 description = "Python extension for MurmurHash (MurmurHash3), a set of fast and robust hash functions."
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(extra == \"codegraph\" or extra == \"chromadb\") and (python_version <= \"3.12\" or extra == \"chromadb\")"
 files = [
     {file = "mmh3-5.2.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:81c504ad11c588c8629536b032940f2a359dda3b6cbfd4ad8f74cb24dcd1b0bc"},
     {file = "mmh3-5.2.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:0b898cecff57442724a0f52bf42c2de42de63083a91008fb452887e372f9c328"},
@@ -6095,9 +6115,10 @@ test-extras = ["pytest-mpl", "pytest-randomly"]
 name = "nltk"
 version = "3.9.1"
 description = "Natural Language Toolkit"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
+markers = "extra == \"llama-index\" or extra == \"docs\""
 files = [
     {file = "nltk-3.9.1-py3-none-any.whl", hash = "sha256:4fa26829c5b00715afe3061398a8989dc643b92ce7dd93fb4585a70930d168a1"},
     {file = "nltk-3.9.1.tar.gz", hash = "sha256:87d127bd3de4bd89a4f81265e5fa59cb1b199b27440175370f7417d2bc7ae868"},
@@ -6648,10 +6669,10 @@ test = ["pytest (>=8.3.0,<8.4.0)", "pytest-benchmark (>=5.1.0,<5.2.0)", "pytest-
 name = "orjson"
 version = "3.11.3"
 description = "Fast, correct Python JSON library supporting dataclasses, datetimes, and numpy"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(sys_platform != \"emscripten\" or platform_python_implementation != \"PyPy\" or extra == \"chromadb\") and (sys_platform != \"emscripten\" or extra == \"neptune\" or extra == \"langchain\" or extra == \"chromadb\")"
+markers = "(sys_platform != \"emscripten\" or platform_python_implementation != \"PyPy\" or extra == \"chromadb\") and (sys_platform != \"emscripten\" or extra == \"neptune\" or extra == \"langchain\" or extra == \"chromadb\") and (platform_python_implementation != \"PyPy\" or extra == \"chromadb\" or extra == \"dlt\") and (extra == \"neptune\" or extra == \"langchain\" or extra == \"chromadb\" or extra == \"dlt\")"
 files = [
     {file = "orjson-3.11.3-cp310-cp310-macosx_10_15_x86_64.macosx_11_0_arm64.macosx_10_15_universal2.whl", hash = "sha256:29cb1f1b008d936803e2da3d7cba726fc47232c45df531b29edf0b232dd737e7"},
     {file = "orjson-3.11.3-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:97dceed87ed9139884a55db8722428e27bd8452817fbf1869c58b49fecab1120"},
@@ -6783,9 +6804,10 @@ lint = ["black"]
 name = "pandas"
 version = "2.3.2"
 description = "Powerful data structures for data analysis, time series, and statistics"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"docs\" or extra == \"evals\""
 files = [
     {file = "pandas-2.3.2-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:52bc29a946304c360561974c6542d1dd628ddafa69134a7131fdfd6a5d7a1a35"},
     {file = "pandas-2.3.2-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:220cc5c35ffaa764dd5bb17cf42df283b5cb7fdf49e10a7b053a06c9cb48ee2b"},
@@ -6913,9 +6935,10 @@ files = [
 name = "pathvalidate"
 version = "3.3.1"
 description = "pathvalidate is a Python library to sanitize/validate a string such as filenames/file-paths/etc."
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"dlt\""
 files = [
     {file = "pathvalidate-3.3.1-py3-none-any.whl", hash = "sha256:5263baab691f8e1af96092fa5137ee17df5bdfbd6cff1fcac4d6ef4bc2e1735f"},
     {file = "pathvalidate-3.3.1.tar.gz", hash = "sha256:b18c07212bfead624345bb8e1d6141cdcf15a39736994ea0b94035ad2b1ba177"},
@@ -6930,9 +6953,10 @@ test = ["Faker (>=1.0.8)", "allpairspy (>=2)", "click (>=6.2)", "pytest (>=6.0.1
 name = "pendulum"
 version = "3.1.0"
 description = "Python datetimes made easy"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"dlt\""
 files = [
     {file = "pendulum-3.1.0-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:aa545a59e6517cf43597455a6fb44daa4a6e08473d67a7ad34e4fa951efb9620"},
     {file = "pendulum-3.1.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:299df2da6c490ede86bb8d58c65e33d7a2a42479d21475a54b467b03ccb88531"},
@@ -7210,9 +7234,10 @@ kaleido = ["kaleido (>=1.0.0)"]
 name = "pluggy"
 version = "1.6.0"
 description = "plugin and hook calling mechanisms for python"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"deepeval\" or extra == \"dev\" or extra == \"dlt\""
 files = [
     {file = "pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746"},
     {file = "pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3"},
@@ -7226,9 +7251,10 @@ testing = ["coverage", "pytest", "pytest-benchmark"]
 name = "ply"
 version = "3.11"
 description = "Python Lex & Yacc"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
+markers = "extra == \"dlt\""
 files = [
     {file = "ply-3.11-py2.py3-none-any.whl", hash = "sha256:096f9b8350b65ebd2fd1346b12452efe5b9607f7482813ffca50c22722a807ce"},
     {file = "ply-3.11.tar.gz", hash = "sha256:00c7c1aaa88358b9c765b6d3000c6eec0ba42abca5351b095321aef446081da3"},
@@ -7672,10 +7698,9 @@ bcrypt = ["bcrypt (>=4.1.2,<5)"]
 name = "py-rust-stemmers"
 version = "0.1.5"
 description = "Fast and parallel snowball stemmer"
-optional = true
+optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"codegraph\" and python_version <= \"3.12\""
 files = [
     {file = "py_rust_stemmers-0.1.5-cp310-cp310-macosx_10_12_x86_64.whl", hash = "sha256:bfbd9034ae00419ff2154e33b8f5b4c4d99d1f9271f31ed059e5c7e9fa005844"},
     {file = "py_rust_stemmers-0.1.5-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:c7162ae66df2bb0fc39b350c24a049f5f5151c03c046092ba095c2141ec223a2"},
@@ -8274,66 +8299,6 @@ files = [
 dev = ["build", "flake8", "mypy", "pytest", "twine"]
 
 [[package]]
-name = "pyside6"
-version = "6.9.2"
-description = "Python bindings for the Qt cross-platform application and UI framework"
-optional = true
-python-versions = "<3.14,>=3.9"
-groups = ["main"]
-markers = "extra == \"gui\""
-files = [
-    {file = "pyside6-6.9.2-cp39-abi3-macosx_12_0_universal2.whl", hash = "sha256:71245c76bfbe5c41794ffd8546730ec7cc869d4bbe68535639e026e4ef8a7714"},
-    {file = "pyside6-6.9.2-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:64a9e2146e207d858e00226f68d7c1b4ab332954742a00dcabb721bb9e4aa0cd"},
-    {file = "pyside6-6.9.2-cp39-abi3-manylinux_2_39_aarch64.whl", hash = "sha256:a78fad16241a1f2ed0fa0098cf3d621f591fc75b4badb7f3fa3959c9d861c806"},
-    {file = "pyside6-6.9.2-cp39-abi3-win_amd64.whl", hash = "sha256:d1afbf48f9a5612b9ee2dc7c384c1a65c08b5830ba5e7d01f66d82678e5459df"},
-    {file = "pyside6-6.9.2-cp39-abi3-win_arm64.whl", hash = "sha256:1499b1d7629ab92119118e2636b4ace836b25e457ddf01003fdca560560b8c0a"},
-]
-
-[package.dependencies]
-PySide6_Addons = "6.9.2"
-PySide6_Essentials = "6.9.2"
-shiboken6 = "6.9.2"
-
-[[package]]
-name = "pyside6-addons"
-version = "6.9.2"
-description = "Python bindings for the Qt cross-platform application and UI framework (Addons)"
-optional = true
-python-versions = "<3.14,>=3.9"
-groups = ["main"]
-markers = "extra == \"gui\""
-files = [
-    {file = "pyside6_addons-6.9.2-cp39-abi3-macosx_12_0_universal2.whl", hash = "sha256:7019fdcc0059626eb1608b361371f4dc8cb7f2d02f066908fd460739ff5a07cd"},
-    {file = "pyside6_addons-6.9.2-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:24350e5415317f269e743d1f7b4933fe5f59d90894aa067676c9ce6bfe9e7988"},
-    {file = "pyside6_addons-6.9.2-cp39-abi3-manylinux_2_39_aarch64.whl", hash = "sha256:af8dee517de8d336735a6543f7dd496eb580e852c14b4d2304b890e2a29de499"},
-    {file = "pyside6_addons-6.9.2-cp39-abi3-win_amd64.whl", hash = "sha256:98d2413904ee4b2b754b077af7875fa6ec08468c01a6628a2c9c3d2cece4874f"},
-    {file = "pyside6_addons-6.9.2-cp39-abi3-win_arm64.whl", hash = "sha256:b430cae782ff1a99fb95868043557f22c31b30c94afb9cf73278584e220a2ab6"},
-]
-
-[package.dependencies]
-PySide6_Essentials = "6.9.2"
-shiboken6 = "6.9.2"
-
-[[package]]
-name = "pyside6-essentials"
-version = "6.9.2"
-description = "Python bindings for the Qt cross-platform application and UI framework (Essentials)"
-optional = true
-python-versions = "<3.14,>=3.9"
-groups = ["main"]
-markers = "extra == \"gui\""
-files = [
-    {file = "pyside6_essentials-6.9.2-cp39-abi3-macosx_12_0_universal2.whl", hash = "sha256:713eb8dcbb016ff10e6fca129c1bf2a0fd8cfac979e689264e0be3b332f9398e"},
-    {file = "pyside6_essentials-6.9.2-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:84b8ca4fa56506e2848bdb4c7a0851a5e7adcb916bef9bce25ce2eeb6c7002cc"},
-    {file = "pyside6_essentials-6.9.2-cp39-abi3-manylinux_2_39_aarch64.whl", hash = "sha256:d0f701503974bd51b408966539aa6956f3d8536e547ea8002fbfb3d77796bbc3"},
-    {file = "pyside6_essentials-6.9.2-cp39-abi3-win_amd64.whl", hash = "sha256:b2f746f795138ac63eb173f9850a6db293461a1b6ce22cf6dafac7d194a38951"},
-    {file = "pyside6_essentials-6.9.2-cp39-abi3-win_arm64.whl", hash = "sha256:ecd7b5cd9e271f397fb89a6357f4ec301d8163e50869c6c557f9ccc6bed42789"},
-]
-
-[package.dependencies]
-shiboken6 = "6.9.2"
-
-[[package]]
 name = "pysocks"
 version = "1.7.1"
 description = "A Python SOCKS client module. See https://github.com/Anorov/PySocks for more information."
@@ -8626,9 +8591,10 @@ XlsxWriter = ">=0.5.7"
 name = "pytz"
 version = "2025.2"
 description = "World timezone definitions, modern and historical"
-optional = false
+optional = true
 python-versions = "*"
 groups = ["main"]
+markers = "extra == \"neo4j\" or extra == \"graphiti\" or extra == \"docs\" or extra == \"evals\" or extra == \"dlt\""
 files = [
     {file = "pytz-2025.2-py2.py3-none-any.whl", hash = "sha256:5ddf76296dd8c44c26eb8f4b6f35488f3ccbf6fbbd7adee0b7262d43f0ec2f00"},
     {file = "pytz-2025.2.tar.gz", hash = "sha256:360b9e3dbb49a209c21ad61809c7fb453643e048b38924c765813546746e81c3"},
@@ -8641,7 +8607,7 @@ description = "Python for Window Extensions"
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "sys_platform == \"win32\" or platform_system == \"Windows\""
+markers = "(sys_platform == \"win32\" or platform_system == \"Windows\") and (platform_python_implementation != \"PyPy\" or platform_system == \"Windows\" or extra == \"dlt\")"
 files = [
     {file = "pywin32-311-cp310-cp310-win32.whl", hash = "sha256:d03ff496d2a0cd4a5893504789d4a15399133fe82517455e78bad62efbb7f0a3"},
     {file = "pywin32-311-cp310-cp310-win_amd64.whl", hash = "sha256:797c2772017851984b97180b0bebe4b620bb86328e8a884bb626156295a63b3b"},
@@ -8867,19 +8833,6 @@ files = [
 
 [package.dependencies]
 cffi = {version = "*", markers = "implementation_name == \"pypy\""}
-
-[[package]]
-name = "qasync"
-version = "0.27.1"
-description = "Python library for using asyncio in Qt-based applications"
-optional = true
-python-versions = ">=3.8,<4.0"
-groups = ["main"]
-markers = "extra == \"gui\""
-files = [
-    {file = "qasync-0.27.1-py3-none-any.whl", hash = "sha256:5d57335723bc7d9b328dadd8cb2ed7978640e4bf2da184889ce50ee3ad2602c7"},
-    {file = "qasync-0.27.1.tar.gz", hash = "sha256:8dc768fd1ee5de1044c7c305eccf2d39d24d87803ea71189d4024fb475f4985f"},
-]
 
 [[package]]
 name = "rapidfuzz"
@@ -9236,9 +9189,10 @@ requests = ">=2.0.1,<3.0.0"
 name = "requirements-parser"
 version = "0.13.0"
 description = "This is a small Python module for parsing Pip requirement files."
-optional = false
+optional = true
 python-versions = "<4.0,>=3.8"
 groups = ["main"]
+markers = "extra == \"dlt\""
 files = [
     {file = "requirements_parser-0.13.0-py3-none-any.whl", hash = "sha256:2b3173faecf19ec5501971b7222d38f04cb45bb9d87d0ad629ca71e2e62ded14"},
     {file = "requirements_parser-0.13.0.tar.gz", hash = "sha256:0843119ca2cb2331de4eb31b10d70462e39ace698fd660a915c247d2301a4418"},
@@ -9318,9 +9272,10 @@ jupyter = ["ipywidgets (>=7.5.1,<9)"]
 name = "rich-argparse"
 version = "1.7.1"
 description = "Rich help formatters for argparse and optparse"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
+markers = "extra == \"dlt\""
 files = [
     {file = "rich_argparse-1.7.1-py3-none-any.whl", hash = "sha256:a8650b42e4a4ff72127837632fba6b7da40784842f08d7395eb67a9cbd7b4bf9"},
     {file = "rich_argparse-1.7.1.tar.gz", hash = "sha256:d7a493cde94043e41ea68fb43a74405fa178de981bf7b800f7a3bd02ac5c27be"},
@@ -9544,9 +9499,10 @@ files = [
 name = "s3fs"
 version = "2025.3.2"
 description = "Convenient Filesystem interface over S3"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"aws\""
 files = [
     {file = "s3fs-2025.3.2-py3-none-any.whl", hash = "sha256:81eae3f37b4b04bcc08845d7bcc607c6ca45878813ef7e6a28d77b2688417130"},
     {file = "s3fs-2025.3.2.tar.gz", hash = "sha256:6798f896ec76dd3bfd8beb89f0bb7c5263cb2760e038bae0978505cd172a307c"},
@@ -9568,9 +9524,10 @@ boto3 = ["aiobotocore[boto3] (>=2.5.4,<3.0.0)"]
 name = "s3transfer"
 version = "0.13.1"
 description = "An Amazon S3 Transfer Manager"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"neptune\" or extra == \"aws\""
 files = [
     {file = "s3transfer-0.13.1-py3-none-any.whl", hash = "sha256:a981aa7429be23fe6dfc13e80e4020057cbab622b08c0315288758d67cabc724"},
     {file = "s3transfer-0.13.1.tar.gz", hash = "sha256:c3fdba22ba1bd367922f27ec8032d6a1cf5f10c934fb5d68cf60fd5a23d936cf"},
@@ -9827,9 +9784,10 @@ test = ["Cython", "array-api-strict (>=2.3.1)", "asv", "gmpy2", "hypothesis (>=6
 name = "semver"
 version = "3.0.4"
 description = "Python helper for Semantic Versioning (https://semver.org)"
-optional = false
+optional = true
 python-versions = ">=3.7"
 groups = ["main"]
+markers = "extra == \"dlt\""
 files = [
     {file = "semver-3.0.4-py3-none-any.whl", hash = "sha256:9c824d87ba7f7ab4a1890799cec8596f15c1241cb473404ea1cb0c55e4b04746"},
     {file = "semver-3.0.4.tar.gz", hash = "sha256:afc7d8c584a5ed0a11033af086e8af226a9c0b206f313e0301f8dd7b6b589602"},
@@ -9857,9 +9815,10 @@ win32 = ["pywin32 ; sys_platform == \"win32\""]
 name = "sentry-sdk"
 version = "2.38.0"
 description = "Python client for Sentry (https://sentry.io)"
-optional = false
+optional = true
 python-versions = ">=3.6"
 groups = ["main"]
+markers = "extra == \"deepeval\" or extra == \"monitoring\""
 files = [
     {file = "sentry_sdk-2.38.0-py2.py3-none-any.whl", hash = "sha256:2324aea8573a3fa1576df7fb4d65c4eb8d9929c8fa5939647397a07179eef8d0"},
     {file = "sentry_sdk-2.38.0.tar.gz", hash = "sha256:792d2af45e167e2f8a3347143f525b9b6bac6f058fb2014720b40b84ccbeb985"},
@@ -9916,9 +9875,10 @@ unleash = ["UnleashClient (>=6.0.1)"]
 name = "setuptools"
 version = "80.9.0"
 description = "Easily download, build, install, upgrade, and uninstall Python packages"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"notebook\" or extra == \"dev\" or extra == \"llama-index\" or extra == \"deepeval\" or extra == \"dlt\""
 files = [
     {file = "setuptools-80.9.0-py3-none-any.whl", hash = "sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922"},
     {file = "setuptools-80.9.0.tar.gz", hash = "sha256:f36b47402ecde768dbfafc46e8e4207b4360c654f1f3bb84475f0a28628fb19c"},
@@ -9946,22 +9906,6 @@ files = [
 ]
 
 [[package]]
-name = "shiboken6"
-version = "6.9.2"
-description = "Python/C++ bindings helper module"
-optional = true
-python-versions = "<3.14,>=3.9"
-groups = ["main"]
-markers = "extra == \"gui\""
-files = [
-    {file = "shiboken6-6.9.2-cp39-abi3-macosx_12_0_universal2.whl", hash = "sha256:8bb1c4326330e53adeac98bfd9dcf57f5173a50318a180938dcc4825d9ca38da"},
-    {file = "shiboken6-6.9.2-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:3b54c0a12ea1b03b9dc5dcfb603c366e957dc75341bf7cb1cc436d0d848308ee"},
-    {file = "shiboken6-6.9.2-cp39-abi3-manylinux_2_39_aarch64.whl", hash = "sha256:a5f5985938f5acb604c23536a0ff2efb3cccb77d23da91fbaff8fd8ded3dceb4"},
-    {file = "shiboken6-6.9.2-cp39-abi3-win_amd64.whl", hash = "sha256:68c33d565cd4732be762d19ff67dfc53763256bac413d392aa8598b524980bc4"},
-    {file = "shiboken6-6.9.2-cp39-abi3-win_arm64.whl", hash = "sha256:c5b827797b3d89d9b9a3753371ff533fcd4afc4531ca51a7c696952132098054"},
-]
-
-[[package]]
 name = "sigtools"
 version = "4.0.1"
 description = "Utilities for working with inspect.Signature objects."
@@ -9985,9 +9929,10 @@ tests = ["coverage", "mock", "repeated-test (>=2.2.1)", "sphinx"]
 name = "simplejson"
 version = "3.20.1"
 description = "Simple, fast, extensible JSON encoder/decoder for Python"
-optional = false
+optional = true
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,>=2.5"
 groups = ["main"]
+markers = "extra == \"dlt\""
 files = [
     {file = "simplejson-3.20.1-cp27-cp27m-manylinux1_i686.whl", hash = "sha256:f5272b5866b259fe6c33c4a8c5073bf8b359c3c97b70c298a2f09a69b52c7c41"},
     {file = "simplejson-3.20.1-cp27-cp27m-manylinux1_x86_64.whl", hash = "sha256:5c0de368f3052a59a1acf21f8b2dd28686a9e4eba2da7efae7ed9554cb31e7bc"},
@@ -10117,9 +10062,10 @@ files = [
 name = "smmap"
 version = "5.0.2"
 description = "A pure Python implementation of a sliding window memory map manager"
-optional = false
+optional = true
 python-versions = ">=3.7"
 groups = ["main"]
+markers = "extra == \"dlt\" or extra == \"dev\""
 files = [
     {file = "smmap-5.0.2-py3-none-any.whl", hash = "sha256:b30115f0def7d7531d22a0fb6502488d879e75b260a9db4d0819cfb25403af5e"},
     {file = "smmap-5.0.2.tar.gz", hash = "sha256:26ea65a03958fa0c8a1c7e8c7a58fdc77221b8910f6be2131affade476898ad5"},
@@ -10250,9 +10196,10 @@ sqlcipher = ["sqlcipher3_binary"]
 name = "sqlglot"
 version = "27.16.3"
 description = "An easily customizable SQL parser and transpiler"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"dlt\""
 files = [
     {file = "sqlglot-27.16.3-py3-none-any.whl", hash = "sha256:3765ef1da6c9a04dd9e9ab4bcf24ca54daae72d86d693954aed84dbbbff2ff3b"},
     {file = "sqlglot-27.16.3.tar.gz", hash = "sha256:bf5cc3b7c90c3682365353a318089e69e859939943d7882562ba39be650a6202"},
@@ -10580,9 +10527,10 @@ files = [
 name = "tomlkit"
 version = "0.13.3"
 description = "Style preserving TOML library"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
+markers = "extra == \"dlt\" or extra == \"dev\""
 files = [
     {file = "tomlkit-0.13.3-py3-none-any.whl", hash = "sha256:c89c649d79ee40629a9fda55f8ace8c6a1b42deb912b2a8fd8d942ddadb606b0"},
     {file = "tomlkit-0.13.3.tar.gz", hash = "sha256:430cf247ee57df2b94ee3fbe588e71d362a941ebb545dec29b53961d61add2a1"},
@@ -10919,9 +10867,10 @@ typing-extensions = ">=4.12.0"
 name = "tzdata"
 version = "2025.2"
 description = "Provider of IANA time zone data"
-optional = false
+optional = true
 python-versions = ">=2"
 groups = ["main"]
+markers = "extra == \"docs\" or extra == \"evals\" or extra == \"dlt\""
 files = [
     {file = "tzdata-2025.2-py2.py3-none-any.whl", hash = "sha256:1a403fada01ff9221ca8044d701868fa132215d84beb92242d9acd2147f667a8"},
     {file = "tzdata-2025.2.tar.gz", hash = "sha256:b60a638fcc0daffadf82fe0f57e53d06bdec2f36c4df66280ae79bce6bd6f2b9"},
@@ -11501,10 +11450,10 @@ test = ["pytest (>=6.0.0)", "setuptools (>=65)"]
 name = "win-precise-time"
 version = "1.4.2"
 description = ""
-optional = false
+optional = true
 python-versions = ">=3.7"
 groups = ["main"]
-markers = "os_name == \"nt\" and python_version <= \"3.12\""
+markers = "extra == \"dlt\" and os_name == \"nt\" and python_version <= \"3.12\""
 files = [
     {file = "win-precise-time-1.4.2.tar.gz", hash = "sha256:89274785cbc5f2997e01675206da3203835a442c60fd97798415c6b3c179c0b9"},
     {file = "win_precise_time-1.4.2-cp310-cp310-win32.whl", hash = "sha256:7fa13a2247c2ef41cd5e9b930f40716eacc7fc1f079ea72853bd5613fe087a1a"},
@@ -11525,10 +11474,10 @@ files = [
 name = "win32-setctime"
 version = "1.2.0"
 description = "A small Python utility to set file creation time on Windows"
-optional = true
+optional = false
 python-versions = ">=3.5"
 groups = ["main"]
-markers = "sys_platform == \"win32\" and extra == \"codegraph\" and python_version <= \"3.12\""
+markers = "sys_platform == \"win32\""
 files = [
     {file = "win32_setctime-1.2.0-py3-none-any.whl", hash = "sha256:95d644c4e708aba81dc3704a116d8cbc974d70b3bdb8be1d150e36be6e9d1390"},
     {file = "win32_setctime-1.2.0.tar.gz", hash = "sha256:ae1fdf948f5640aae05c511ade119313fb6a30d7eabe25fef9764dca5873c4c0"},
@@ -11915,23 +11864,25 @@ cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and pyt
 anthropic = ["anthropic"]
 api = []
 aws = ["s3fs"]
+baml = ["baml-py"]
 chromadb = ["chromadb", "pypika"]
 codegraph = ["fastembed", "transformers", "tree-sitter", "tree-sitter-python"]
 debug = ["debugpy"]
 deepeval = ["deepeval"]
 dev = ["coverage", "deptry", "gitpython", "mkdocs-material", "mkdocs-minify-plugin", "mkdocstrings", "mypy", "notebook", "pre-commit", "pylint", "pytest", "pytest-asyncio", "pytest-cov", "ruff", "tweepy"]
 distributed = ["modal"]
+dlt = ["dlt"]
 docs = ["unstructured"]
-evals = ["gdown", "plotly"]
+evals = ["gdown", "matplotlib", "pandas", "plotly"]
 falkordb = ["falkordb"]
 gemini = ["google-generativeai"]
 graphiti = ["graphiti-core"]
 groq = ["groq"]
-gui = ["pyside6", "qasync"]
 huggingface = ["transformers"]
 langchain = ["langchain_text_splitters", "langsmith"]
 llama-index = ["llama-index-core"]
 mistral = ["mistral-common"]
+monitoring = ["langfuse", "sentry-sdk"]
 neo4j = ["neo4j"]
 neptune = ["langchain_aws"]
 notebook = ["notebook"]
@@ -11943,4 +11894,4 @@ posthog = ["posthog"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "3c5f1fbbd1ec57adbc83d1a1d99ed39a4566c518661940fa43c06906c98221de"
+content-hash = "c43bb5150980f3e5867b14f16ffdc13567df6fe516f991e4e31ca0bb456979d8"
