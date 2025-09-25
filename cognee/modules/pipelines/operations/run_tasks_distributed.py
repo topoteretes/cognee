@@ -111,7 +111,7 @@ async def run_tasks_distributed(
         if not isinstance(data, list):
             data = [data]
 
-        await resolve_data_directories(data)
+        data = await resolve_data_directories(data)
 
         number_of_data_items = len(data) if isinstance(data, list) else 1
 
