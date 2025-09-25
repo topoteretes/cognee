@@ -209,6 +209,7 @@ def main() -> int:
                 port=3000,
                 open_browser=True,
                 start_backend=True,
+                start_mcp=True,
                 auto_download=True,
                 pid_callback=pid_callback,
             )
