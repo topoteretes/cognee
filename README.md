@@ -5,7 +5,7 @@
 
   <br />
 
-  cognee - Memory for AI Agents in 5 lines of code
+  cognee - Memory for AI Agents in 6 lines of code
 
   <p align="center">
   <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
@@ -43,11 +43,9 @@
 
 
 
-**🚀 We launched Cogwit beta (Fully-hosted AI Memory): Sign up [here](https://platform.cognee.ai/)! 🚀**
+
 
 Build dynamic memory for Agents and replace RAG using scalable, modular ECL (Extract, Cognify, Load) pipelines.
-
-More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github.com/topoteretes/cognee/tree/main/evals)
 
   <p align="center">
   🌐 Available Languages
@@ -82,41 +80,41 @@ More on [use-cases](https://docs.cognee.ai/use-cases) and [evals](https://github
 Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1jHbWVypDgCLwjE71GSXhRL3YxYhCZzG1?usp=sharing">notebook</a> , <a href="https://deepnote.com/workspace/cognee-382213d0-0444-4c89-8265-13770e333c02/project/cognee-demo-78ffacb9-5832-4611-bb1a-560386068b30/notebook/Notebook-1-75b24cda566d4c24ab348f7150792601?utm_source=share-modal&utm_medium=product-shared-content&utm_campaign=notebook&utm_content=78ffacb9-5832-4611-bb1a-560386068b30">Deepnote notebook</a> or  <a href="https://github.com/topoteretes/cognee/tree/main/cognee-starter-kit">starter repo</a>
 
 
+## Using cognee
+
+Self-hosted package:
+ - Get self-serve UI with embedded Python notebooks
+ - Add custom tasks and pipelines via Python SDK
+ - Get Docker images and MCP servers you can deploy
+ - Use distributed cognee SDK to process a TBs of your data
+ - Use community adapters to connect to Redis, Azure, Falkor and others
+
+Hosted platform:
+ - Sync your local data to our [hosted solution](www.cognee.ai)
+ - Get a secure API endpoint
+ - We manage the UI for you
 
 
-## Contributing
-Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
+## Self-Hosted (Open Source)
 
 
-
-
-
-## 📦 Installation
+### 📦 Installation
 
 You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager.
 
-Cognee supports Python 3.10 to 3.13
+Cognee supports Python 3.10 to 3.12
 
-### With pip
-
-```bash
-pip install cognee
-```
-
-## Local Cognee installation
-
-You can install the local Cognee repo using **uv**, **pip** and **poetry**.
-For local pip installation please make sure your pip version is above version 21.3.
-
-### with UV with all optional dependencies
+#### With uv
 
 ```bash
-uv sync --all-extras
+uv pip install cognee
 ```
 
-## 💻 Basic Usage
+Detailed instructions can be found in our [docs](https://docs.cognee.ai/getting-started/installation#environment-configuration)
 
-### Setup
+### 💻 Basic Usage
+
+#### Setup
 
 ```
 import os
@@ -125,10 +123,14 @@ os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 ```
 
 You can also set the variables by creating .env file, using our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
-To use different LLM providers, for more info check out our <a href="https://docs.cognee.ai">documentation</a>
+To use different LLM providers, for more info check out our <a href="https://docs.cognee.ai/setup-configuration/llm-providers">documentation</a>
 
 
-### Simple example
+#### Simple example
+
+
+
+##### Python
 
 This script will run the default pipeline:
 
@@ -139,13 +141,16 @@ import asyncio
 
 async def main():
     # Add text to cognee
-    await cognee.add("Natural language processing (NLP) is an interdisciplinary subfield of computer science and information retrieval.")
+    await cognee.add("Cognee turns documents into AI memory.")
 
     # Generate the knowledge graph
     await cognee.cognify()
 
+    # Add memory algorithms to the graph
+    await cognee.memify()
+
     # Query the knowledge graph
-    results = await cognee.search("Tell me about NLP")
+    results = await cognee.search("What does cognee do?")
 
     # Display the results
     for result in results:
@@ -158,33 +163,38 @@ if __name__ == '__main__':
 ```
 Example output:
 ```
-  Natural Language Processing (NLP) is a cross-disciplinary and interdisciplinary field that involves computer science and information retrieval. It focuses on the interaction between computers and human language, enabling machines to understand and process natural language.
+  Cognee turns documents into AI memory.
 
 ```
+##### Via CLI
 
-## Our paper is out! <a href="https://arxiv.org/abs/2505.24478" target="_blank" rel="noopener noreferrer">Read here</a>
+Let's get the basics covered
 
-<div style="text-align: center">
-  <img src="assets/cognee-paper.png" alt="cognee paper" width="100%" />
+```
+cognee-cli add "Cognee turns documents into AI memory."
+
+cognee-cli cognify
+
+cognee-cli search "What does cognee do?"
+cognee-cli delete --all
+
+```
+or run
+```
+cognee-cli -ui
+```
+
+
 </div>
 
-</div>
 
-## Cognee UI
+### Hosted Platform
 
-You can also cognify your files and query using cognee UI.
+Get up and running in minutes with automatic updates, analytics, and enterprise security.
 
-<img src="assets/cognee-new-ui.webp" width="100%" alt="Cognee UI 2"></a>
+1. Sign up on [cogwit](https://www.cognee.ai)
+2. Add your API key to local UI and sync your data to Cogwit
 
-### Running the UI
-
-Try cognee UI by setting LLM_API_KEY and running ``` cognee-cli -ui ``` command on your terminal.
-
-## Understand our architecture
-
-<div style="text-align: center">
-  <img src="assets/cognee_diagram.png" alt="cognee concept diagram" width="100%" />
-</div>
 
 
 
@@ -203,22 +213,26 @@ Try cognee UI by setting LLM_API_KEY and running ``` cognee-cli -ui ``` command 
 [cognee with local models](https://github.com/user-attachments/assets/8621d3e8-ecb8-4860-afb2-5594f2ee17db)
 
 
+## Contributing
+Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
+
+
 ## Code of Conduct
 
 We are committed to making open source an enjoyable and respectful experience for our community. See <a href="https://github.com/topoteretes/cognee/blob/main/CODE_OF_CONDUCT.md"><code>CODE_OF_CONDUCT</code></a> for more information.
 
-## 💫 Contributors
+## Citation
 
-<a href="https://github.com/topoteretes/cognee/graphs/contributors">
-  <img alt="contributors" src="https://contrib.rocks/image?repo=topoteretes/cognee"/>
-</a>
+We now have a paper you can cite:
 
-## Sponsors
-
-Thanks to the following companies for sponsoring the ongoing development of cognee.
-
-- [GitHub's Secure Open Source Fund](https://resources.github.com/github-secure-open-source-fund/)
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=topoteretes/cognee&type=Date)](https://star-history.com/#topoteretes/cognee&Date)
+```bibtex
+@misc{markovic2025optimizinginterfaceknowledgegraphs,
+      title={Optimizing the Interface Between Knowledge Graphs and LLMs for Complex Reasoning}, 
+      author={Vasilije Markovic and Lazar Obradovic and Laszlo Hajdu and Jovan Pavlovic},
+      year={2025},
+      eprint={2505.24478},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2505.24478}, 
+}
+```
