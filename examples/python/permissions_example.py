@@ -176,6 +176,8 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
+    # Note: All of these function calls and permission system is available through our backend endpoints as well
+
 
 if __name__ == "__main__":
     import asyncio
