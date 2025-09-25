@@ -9,7 +9,6 @@ from sqlalchemy.exc import ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
 
-
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
