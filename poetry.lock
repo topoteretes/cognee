@@ -11937,4 +11937,4 @@ posthog = ["posthog"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "fc32c4e05914cf364d4feb0c3baec9771d149eb65626e5337fa2eb55e7130499"
+content-hash = "a3e4b759a594833ee435a0ece818896eedcaa5b6cd20f9098a46ad4422f62ef1"
