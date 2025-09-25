@@ -41,35 +41,42 @@ def is_deadlock_error(error):
     retries=3,
     image=image,
     timeout=86400,
-    max_containers=20,
+    max_containers=1,
     secrets=[modal.Secret.from_name("distributed_cognee")],
 )
 async def graph_saving_worker():
     print("Started processing of nodes and edges; starting graph engine queue.")
     graph_engine = await get_graph_engine()
 
+    BATCH_SIZE = 20
+
     while True:
         if await add_nodes_and_edges_queue.len.aio() != 0:
             try:
                 print("Remaining elements in queue:")
                 print(await add_nodes_and_edges_queue.len.aio())
-                nodes_and_edges = await add_nodes_and_edges_queue.get.aio(block=False)
-            except modal.exception.DeserializationError as error:
-                logger.error(f"Deserialization error: {str(error)}")
-                continue
-            if nodes_and_edges:
-                if nodes_and_edges == QueueSignal.STOP:
-                    # re-broadcast for other workers still waiting
-                    await add_nodes_and_edges_queue.put.aio(QueueSignal.STOP)
-                    print("Finished processing all nodes and edges; stopping graph engine queue.")
-                    return True
 
-                if len(nodes_and_edges) == 2:
-                    print(
-                        f"Adding {len(nodes_and_edges[0])} nodes and {len(nodes_and_edges[1])} edges."
-                    )
-                    nodes = nodes_and_edges[0]
-                    edges = nodes_and_edges[1]
+                all_nodes, all_edges = [], []
+                for _ in range(min(BATCH_SIZE, await add_nodes_and_edges_queue.len.aio())):
+                    nodes_and_edges = await add_nodes_and_edges_queue.get.aio(block=False)
+
+                    if not nodes_and_edges:
+                        continue
+
+                    if nodes_and_edges == QueueSignal.STOP:
+                        await add_nodes_and_edges_queue.put.aio(QueueSignal.STOP)
+                        print("Finished processing all nodes and edges; stopping graph engine queue.")
+                        return True
+
+                    if len(nodes_and_edges) == 2:
+                        nodes, edges = nodes_and_edges
+                        all_nodes.extend(nodes)
+                        all_edges.extend(edges)
+                    else:
+                        print("None Type detected.")
+
+                if all_nodes or all_edges:
+                    print(f"Adding {len(all_nodes)} nodes and {len(all_edges)} edges.")
 
                     @retry(
                         retry=retry_if_exception_type(GraphDatabaseDeadlockError),
@@ -95,15 +102,17 @@ async def graph_saving_worker():
                             if is_deadlock_error(error):
                                 raise GraphDatabaseDeadlockError()
 
-                    if nodes:
-                        await save_graph_nodes(nodes)
+                    if all_nodes:
+                        await save_graph_nodes(all_nodes)
 
-                    if edges:
-                        await save_graph_edges(edges)
+                    if all_edges:
+                        await save_graph_edges(all_edges)
 
                     print("Finished adding nodes and edges.")
-                else:
-                    print("None Type detected.")
+
+            except modal.exception.DeserializationError as error:
+                logger.error(f"Deserialization error: {str(error)}")
+                continue
 
         else:
             print("No jobs, go to sleep.")
