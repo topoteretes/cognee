@@ -182,5 +182,4 @@ async def brute_force_triplet_search(
             query,
             error,
         )
-        send_telemetry("cognee.brute_force_triplet_search EXECUTION FAILED", {"error": str(error)})
         raise error
