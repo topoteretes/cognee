@@ -24,7 +24,7 @@ runs:
       uses: astral-sh/setup-uv@v4
       with:
         enable-cache: true
-    
+
     - name: Rebuild uv lockfile
       shell: bash
       run: |
