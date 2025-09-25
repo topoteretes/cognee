@@ -5,7 +5,7 @@
 
   <br />
 
-  cognee - Memory for AI Agents in 5 lines of code
+  cognee - Memory for AI Agents in 6 lines of code
 
   <p align="center">
   <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
