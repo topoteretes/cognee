@@ -81,7 +81,6 @@ async def schema_only_ingestion(schema):
     # Calling the ingest_database_schema function to return DataPoint subclasses
     result = await ingest_database_schema(
         schema=schema,
-        schema_name="migrated_schema",
         max_sample_rows=5,
     )
     database_schema = result["database_schema"]
@@ -105,7 +104,7 @@ async def schema_only_ingestion(schema):
                 ),
             )
         )
-    table_name_to_id = {t.table_name: t.id for t in schema_tables}
+    table_name_to_id = {t.name: t.id for t in schema_tables}
     for rel in schema_relationships:
         source_table_id = table_name_to_id.get(rel.source_table)
         target_table_id = table_name_to_id.get(rel.target_table)
