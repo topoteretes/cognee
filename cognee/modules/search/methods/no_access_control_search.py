@@ -35,7 +35,7 @@ async def no_access_control_search(
         [get_completion, get_context] = search_tools
 
         if only_context:
-            return await get_context(query_text)
+            return None, await get_context(query_text), []
 
         context = await get_context(query_text)
         result = await get_completion(query_text, context)
