@@ -99,7 +99,7 @@ async def main():
     except PermissionDeniedError:
         print(f"User: {user_1} does not have permission to read from dataset: QUANTUM")
 
-    # user_1 currently also cant add a document to user_2's dataset (QUANTUM dataset)
+    # user_1 currently also can't add a document to user_2's dataset (QUANTUM dataset)
     print("\nAttempting to add new data as user_1 to dataset owned by user_2:")
     try:
         await cognee.add(
