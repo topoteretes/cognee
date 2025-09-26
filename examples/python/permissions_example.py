@@ -71,8 +71,8 @@ async def main():
         return None
 
     # Get dataset IDs from cognify results
-    # Note: When we want to use datasets from other users we must supply dataset information through dataset_id
-    # Using dataset name only looks for datasets owned by current user
+    # Note: When we want to work with datasets from other users (search, add, cognify and etc.) we must supply dataset
+    # information through dataset_id using dataset name only looks for datasets owned by current user
     ai_dataset_id = extract_dataset_id_from_cognify(ai_cognify_result)
     quantum_dataset_id = extract_dataset_id_from_cognify(quantum_cognify_result)
 
@@ -134,16 +134,16 @@ async def main():
     for result in search_results:
         print(f"{result}\n")
 
-    # If we'd like for user_1 to add new documents to the QUANTUM dataset owned by user_2, user_1 would have to get "write" access permission,
-    # which user_1 currently does not have
+    # If we'd like for user_1 to add new documents to the QUANTUM dataset owned by user_2, user_1 would have to get
+    # "write" access permission, which user_1 currently does not have
 
     # Users can also be added to Roles and Tenants and then permission can be assigned on a Role/Tenant level as well
-    # To create a Role a user first must be the owner of a Tenant
+    # To create a Role a user first must be an owner of a Tenant
     print("User 2 is creating CogneeLab tenant/organization")
     tenant_id = await create_tenant("CogneeLab", user_2.id)
 
-    print("\nUser 2 is creating Reasercher role")
-    role_id = await create_role(role_name="Reasercher", owner_id=user_2.id)
+    print("\nUser 2 is creating Researcher role")
+    role_id = await create_role(role_name="Researcher", owner_id=user_2.id)
 
     print("\nCreating user_3: user_3@example.com")
     user_3 = await create_user("user_3@example.com", "example")
@@ -152,11 +152,13 @@ async def main():
     print("\nOperation started as user_2 to add user_3 to CogneeLab tenant/organization")
     await add_user_to_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
 
-    print("\nOperation started as user_2 to add user_3 to Researcher role")
+    print(
+        "\nOperation started by user_2, as tenant owner, to add user_3 to Researcher role inside the tenant/organization"
+    )
     await add_user_to_role(user_id=user_3.id, role_id=role_id, owner_id=user_2.id)
 
     print(
-        "\nOperation started as user_2 to give read permission to Reasercher role for the dataset owned by user_2"
+        "\nOperation started as user_2 to give read permission to Researcher role for the dataset owned by user_2"
     )
     await authorized_give_permission_on_datasets(
         role_id,
@@ -166,7 +168,7 @@ async def main():
     )
 
     # Now user_3 can read from QUANTUM dataset as part of the Researcher role after proper permissions have been assigned by the QUANTUM dataset owner, user_2.
-    print("\nSearch result as  on the dataset owned by user_2:")
+    print("\nSearch result as user_3 on the dataset owned by user_2:")
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What is in the document?",
