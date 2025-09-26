@@ -212,6 +212,7 @@ async def test_schema_only_migration():
     search_results = await cognee.search(
         query_text="How many tables are there in this database",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
+        top_k=30,
     )
     assert any("11" in r for r in search_results), (
         "Number of tables in the database reported in search_results is either None or not equal to 11"

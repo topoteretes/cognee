@@ -32,7 +32,7 @@ async def migrate_relational_database(
     """
     # Create a mapping of node_id to node objects for referencing in edge creation
     if schema_only:
-        node_mapping, edge_mapping = await schema_only_ingestion()
+        node_mapping, edge_mapping = await schema_only_ingestion(schema)
 
     else:
         node_mapping, edge_mapping = await complete_database_ingestion(schema, migrate_column_data)
@@ -74,13 +74,13 @@ async def migrate_relational_database(
     return await graph_db.get_graph_data()
 
 
-async def schema_only_ingestion():
+async def schema_only_ingestion(schema):
     node_mapping = {}
     edge_mapping = []
-    database_config = get_migration_config().to_dict()
+
     # Calling the ingest_database_schema function to return DataPoint subclasses
     result = await ingest_database_schema(
-        database_config=database_config,
+        schema=schema,
         schema_name="migrated_schema",
         max_sample_rows=5,
     )
