@@ -46,7 +46,7 @@ export default function Header({ user }: HeaderProps) {
         <div className="flex flex-row items-center gap-2.5">
           <Link href="/mcp-status" className="!text-indigo-600 pl-4 pr-4">
             <StatusDot className="mr-2" isActive={isMCPStatusOpen} />
-            MCP status
+            { isMCPStatusOpen ? "MCP connected" : "MCP disconnected" }
           </Link>
           <GhostButton onClick={openSyncModal} className="text-indigo-600 gap-3 pl-4 pr-4">
             <CloudIcon />
