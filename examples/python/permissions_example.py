@@ -165,7 +165,7 @@ async def main():
         user_2.id,
     )
 
-    # Now user_3 can read from quantum dataset as part of the Reasercher role after proper permissions have been assigned by the Quantum dataset owner.
+    # Now user_3 can read from QUANTUM dataset as part of the Researcher role after proper permissions have been assigned by the QUANTUM dataset owner, user_2.
     print("\nSearch result as  on the dataset owned by user_2:")
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
