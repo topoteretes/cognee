@@ -4,16 +4,20 @@ from sqlalchemy import text
 from cognee.infrastructure.databases.relational.get_migration_relational_engine import (
     get_migration_relational_engine,
 )
+from cognee.infrastructure.databases.relational.config import get_migration_config
 
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
+from cognee.tasks.schema.ingest_database_schema import ingest_database_schema
 
 from cognee.modules.engine.models import TableRow, TableType, ColumnValue
 
 logger = logging.getLogger(__name__)
 
 
-async def migrate_relational_database(graph_db, schema, migrate_column_data=True):
+async def migrate_relational_database(
+    graph_db, schema, migrate_column_data=True, schema_only=False
+):
     """
     Migrates data from a relational database into a graph database.
 
@@ -26,11 +30,133 @@ async def migrate_relational_database(graph_db, schema, migrate_column_data=True
 
     Both TableType and TableRow inherit from DataPoint to maintain consistency with Cognee data model.
     """
+    # Create a mapping of node_id to node objects for referencing in edge creation
+    if schema_only:
+        node_mapping, edge_mapping = await schema_only_ingestion(schema)
+
+    else:
+        node_mapping, edge_mapping = await complete_database_ingestion(schema, migrate_column_data)
+
+    def _remove_duplicate_edges(edge_mapping):
+        seen = set()
+        unique_original_shape = []
+
+        for tup in edge_mapping:
+            # We go through all the tuples in the edge_mapping and we only add unique tuples to the list
+            # To eliminate duplicate edges.
+            source_id, target_id, rel_name, rel_dict = tup
+            # We need to convert the dictionary to a frozenset to be able to compare values for it
+            rel_dict_hashable = frozenset(sorted(rel_dict.items()))
+            hashable_tup = (source_id, target_id, rel_name, rel_dict_hashable)
+
+            # We use the seen set to keep track of unique edges
+            if hashable_tup not in seen:
+                # A list that has frozensets elements instead of dictionaries is needed to be able to compare values
+                seen.add(hashable_tup)
+                # append the original tuple shape (with the dictionary) if it's the first time we see it
+                unique_original_shape.append(tup)
+
+        return unique_original_shape
+
+    # Add all nodes and edges to the graph
+    # NOTE: Nodes and edges have to be added in batch for speed optimization, Especially for NetworkX.
+    #       If we'd create nodes and add them to graph in real time the process would take too long.
+    #       Every node and edge added to NetworkX is saved to file which is very slow when not done in batches.
+    await graph_db.add_nodes(list(node_mapping.values()))
+    await graph_db.add_edges(_remove_duplicate_edges(edge_mapping))
+
+    # In these steps we calculate the vector embeddings of our nodes and edges and save them to vector database
+    # Cognee uses this information to perform searches on the knowledge graph.
+    await index_data_points(list(node_mapping.values()))
+    await index_graph_edges()
+
+    logger.info("Data successfully migrated from relational database to desired graph database.")
+    return await graph_db.get_graph_data()
+
+
+async def schema_only_ingestion(schema):
+    node_mapping = {}
+    edge_mapping = []
+
+    # Calling the ingest_database_schema function to return DataPoint subclasses
+    result = await ingest_database_schema(
+        schema=schema,
+        max_sample_rows=5,
+    )
+    database_schema = result["database_schema"]
+    schema_tables = result["schema_tables"]
+    schema_relationships = result["relationships"]
+    database_node_id = database_schema.id
+    node_mapping[database_node_id] = database_schema
+    for table in schema_tables:
+        table_node_id = table.id
+        # Add TableSchema Datapoint as a node.
+        node_mapping[table_node_id] = table
+        edge_mapping.append(
+            (
+                table_node_id,
+                database_node_id,
+                "is_part_of",
+                dict(
+                    source_node_id=table_node_id,
+                    target_node_id=database_node_id,
+                    relationship_name="is_part_of",
+                ),
+            )
+        )
+    table_name_to_id = {t.name: t.id for t in schema_tables}
+    for rel in schema_relationships:
+        source_table_id = table_name_to_id.get(rel.source_table)
+        target_table_id = table_name_to_id.get(rel.target_table)
+
+        relationship_id = rel.id
+
+        # Add RelationshipTable DataPoint as a node.
+        node_mapping[relationship_id] = rel
+        edge_mapping.append(
+            (
+                source_table_id,
+                relationship_id,
+                "has_relationship",
+                dict(
+                    source_node_id=source_table_id,
+                    target_node_id=relationship_id,
+                    relationship_name=rel.relationship_type,
+                ),
+            )
+        )
+        edge_mapping.append(
+            (
+                relationship_id,
+                target_table_id,
+                "has_relationship",
+                dict(
+                    source_node_id=relationship_id,
+                    target_node_id=target_table_id,
+                    relationship_name=rel.relationship_type,
+                ),
+            )
+        )
+        edge_mapping.append(
+            (
+                source_table_id,
+                target_table_id,
+                rel.relationship_type,
+                dict(
+                    source_node_id=source_table_id,
+                    target_node_id=target_table_id,
+                    relationship_name=rel.relationship_type,
+                ),
+            )
+        )
+    return node_mapping, edge_mapping
+
+
+async def complete_database_ingestion(schema, migrate_column_data):
     engine = get_migration_relational_engine()
     # Create a mapping of node_id to node objects for referencing in edge creation
     node_mapping = {}
     edge_mapping = []
-
     async with engine.engine.begin() as cursor:
         # First, create table type nodes for all tables
         for table_name, details in schema.items():
@@ -38,7 +164,7 @@ async def migrate_relational_database(graph_db, schema, migrate_column_data=True
             table_node = TableType(
                 id=uuid5(NAMESPACE_OID, name=table_name),
                 name=table_name,
-                description=f"Table: {table_name}",
+                description=f'Relational database table with the following name: "{table_name}".',
             )
 
             # Add TableType node to mapping ( node will be added to the graph later based on this mapping )
@@ -75,7 +201,7 @@ async def migrate_relational_database(graph_db, schema, migrate_column_data=True
                     name=node_id,
                     is_a=table_node,
                     properties=str(row_properties),
-                    description=f"Row in {table_name} with {primary_key_col}={primary_key_value}",
+                    description=f'Row in relational database table from the table with the name: "{table_name}" with the following row data {str(row_properties)} where the dictionary key value is the column name and the value is the column value. This row has the id of: {node_id}',
                 )
 
                 # Store the node object in our mapping
@@ -113,7 +239,7 @@ async def migrate_relational_database(graph_db, schema, migrate_column_data=True
                             id=uuid5(NAMESPACE_OID, name=column_node_id),
                             name=column_node_id,
                             properties=f"{key} {value} {table_name}",
-                            description=f"Column name={key} and value={value} from column from table={table_name}",
+                            description=f"column from relational database table={table_name}. Column name={key} and value={value}. The value of the column is related to the following row with this id: {row_node.id}. This column has the following ID: {column_node_id}",
                         )
                         node_mapping[column_node_id] = column_node
 
@@ -180,39 +306,4 @@ async def migrate_relational_database(graph_db, schema, migrate_column_data=True
                             ),
                         )
                     )
-
-    def _remove_duplicate_edges(edge_mapping):
-        seen = set()
-        unique_original_shape = []
-
-        for tup in edge_mapping:
-            # We go through all the tuples in the edge_mapping and we only add unique tuples to the list
-            # To eliminate duplicate edges.
-            source_id, target_id, rel_name, rel_dict = tup
-            # We need to convert the dictionary to a frozenset to be able to compare values for it
-            rel_dict_hashable = frozenset(sorted(rel_dict.items()))
-            hashable_tup = (source_id, target_id, rel_name, rel_dict_hashable)
-
-            # We use the seen set to keep track of unique edges
-            if hashable_tup not in seen:
-                # A list that has frozensets elements instead of dictionaries is needed to be able to compare values
-                seen.add(hashable_tup)
-                # append the original tuple shape (with the dictionary) if it's the first time we see it
-                unique_original_shape.append(tup)
-
-        return unique_original_shape
-
-    # Add all nodes and edges to the graph
-    # NOTE: Nodes and edges have to be added in batch for speed optimization, Especially for NetworkX.
-    #       If we'd create nodes and add them to graph in real time the process would take too long.
-    #       Every node and edge added to NetworkX is saved to file which is very slow when not done in batches.
-    await graph_db.add_nodes(list(node_mapping.values()))
-    await graph_db.add_edges(_remove_duplicate_edges(edge_mapping))
-
-    # In these steps we calculate the vector embeddings of our nodes and edges and save them to vector database
-    # Cognee uses this information to perform searches on the knowledge graph.
-    await index_data_points(list(node_mapping.values()))
-    await index_graph_edges()
-
-    logger.info("Data successfully migrated from relational database to desired graph database.")
-    return await graph_db.get_graph_data()
+        return node_mapping, edge_mapping
