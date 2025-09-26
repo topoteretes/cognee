@@ -1,5 +1,8 @@
 name: Reusable Examples Tests
 
+permissions:
+  contents: read
+
 on:
   workflow_call:
 
