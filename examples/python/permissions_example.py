@@ -38,7 +38,7 @@ async def main():
     await setup()
 
     # NOTE: When a document is added in Cognee with permissions enabled only the owner of the document has permissions
-    # for work with the document initially.
+    # to work with the document initially.
     # Add document for user_1, add it under dataset name AI
     explanation_file_path = os.path.join(
         pathlib.Path(__file__).parent, "../data/artificial_intelligence.pdf"
