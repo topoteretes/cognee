@@ -94,9 +94,11 @@ def get_permissions_router() -> APIRouter:
 
         from cognee.modules.users.roles.methods import create_role as create_role_method
 
-        await create_role_method(role_name=role_name, owner_id=user.id)
+        role_id = await create_role_method(role_name=role_name, owner_id=user.id)
 
-        return JSONResponse(status_code=200, content={"message": "Role created for tenant"})
+        return JSONResponse(
+            status_code=200, content={"message": "Role created for tenant", "role_id": str(role_id)}
+        )
 
     @permissions_router.post("/users/{user_id}/roles")
     async def add_user_to_role(
@@ -212,8 +214,10 @@ def get_permissions_router() -> APIRouter:
 
         from cognee.modules.users.tenants.methods import create_tenant as create_tenant_method
 
-        await create_tenant_method(tenant_name=tenant_name, user_id=user.id)
+        tenant_id = await create_tenant_method(tenant_name=tenant_name, user_id=user.id)
 
-        return JSONResponse(status_code=200, content={"message": "Tenant created."})
+        return JSONResponse(
+            status_code=200, content={"message": "Tenant created.", "tenant_id": str(tenant_id)}
+        )
 
     return permissions_router
