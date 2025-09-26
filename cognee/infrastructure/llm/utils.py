@@ -63,7 +63,7 @@ def get_model_max_completion_tokens(model_name: str):
         max_completion_tokens = litellm.model_cost[model_name]["max_tokens"]
         logger.debug(f"Max input tokens for {model_name}: {max_completion_tokens}")
     else:
-        logger.info("Model not found in LiteLLM's model_cost.")
+        logger.debug("Model not found in LiteLLM's model_cost.")
 
     return max_completion_tokens
 

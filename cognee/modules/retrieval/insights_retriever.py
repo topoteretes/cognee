@@ -25,7 +25,7 @@ class InsightsRetriever(BaseGraphRetriever):
     - top_k
     """
 
-    def __init__(self, exploration_levels: int = 1, top_k: int = 5):
+    def __init__(self, exploration_levels: int = 1, top_k: Optional[int] = 5):
         """Initialize retriever with exploration levels and search parameters."""
         self.exploration_levels = exploration_levels
         self.top_k = top_k

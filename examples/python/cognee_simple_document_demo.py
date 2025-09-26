@@ -15,6 +15,9 @@ async def cognee_demo():
     current_directory = Path(__file__).resolve().parent.parent
     file_path = os.path.join(current_directory, "data", "alice_in_wonderland.txt")
 
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
     # Call Cognee to process document
     await cognee.add(file_path)
     await cognee.cognify()

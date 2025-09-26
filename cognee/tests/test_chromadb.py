@@ -67,6 +67,39 @@ async def test_getting_of_documents(dataset_name_1):
     )
 
 
+async def test_vector_engine_search_none_limit():
+    file_path = os.path.join(
+        pathlib.Path(__file__).resolve().parent.parent.parent,
+        "examples",
+        "data",
+        "alice_in_wonderland.txt",
+    )
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    await cognee.add(file_path)
+
+    await cognee.cognify()
+
+    query_text = "List me all the important characters in Alice in Wonderland."
+
+    from cognee.infrastructure.databases.vector import get_vector_engine
+
+    vector_engine = get_vector_engine()
+
+    collection_name = "Entity_name"
+
+    query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
+
+    result = await vector_engine.search(
+        collection_name=collection_name, query_vector=query_vector, limit=None
+    )
+
+    # Check that we did not accidentally use any default value for limit in vector search along the way (like 5, 10, or 15)
+    assert len(result) > 15
+
+
 async def main():
     cognee.config.set_vector_db_config(
         {
@@ -164,6 +197,8 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
     tables_in_database = await vector_engine.get_collection_names()
     assert len(tables_in_database) == 0, "ChromaDB database is not empty"
+
+    await test_vector_engine_search_none_limit()
 
 
 if __name__ == "__main__":
