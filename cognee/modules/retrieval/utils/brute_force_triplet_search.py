@@ -89,7 +89,6 @@ async def get_memory_fragment(
 
 async def brute_force_triplet_search(
     query: str,
-    user: User,
     top_k: int = 5,
     collections: Optional[List[str]] = None,
     properties_to_project: Optional[List[str]] = None,
@@ -102,7 +101,6 @@ async def brute_force_triplet_search(
 
     Args:
         query (str): The search query.
-        user (User): The user performing the search.
         top_k (int): The number of top results to retrieve.
         collections (Optional[List[str]]): List of collections to query.
         properties_to_project (Optional[List[str]]): List of properties to project.
@@ -139,8 +137,6 @@ async def brute_force_triplet_search(
 
     query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
 
-    send_telemetry("cognee.brute_force_triplet_search EXECUTION STARTED", user.id)
-
     async def search_in_collection(collection_name: str):
         try:
             return await vector_engine.search(
@@ -176,20 +172,14 @@ async def brute_force_triplet_search(
 
         results = await memory_fragment.calculate_top_triplet_importances(k=top_k)
 
-        send_telemetry("cognee.brute_force_triplet_search EXECUTION COMPLETED", user.id)
-
         return results
 
     except CollectionNotFoundError:
         return []
     except Exception as error:
         logger.error(
-            "Error during brute force search for user: %s, query: %s. Error: %s",
-            user.id,
+            "Error during brute force search for query: %s. Error: %s",
             query,
             error,
-        )
-        send_telemetry(
-            "cognee.brute_force_triplet_search EXECUTION FAILED", user.id, {"error": str(error)}
         )
         raise error
