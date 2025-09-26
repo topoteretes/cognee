@@ -68,31 +68,25 @@ Build dynamic memory for Agents and replace RAG using scalable, modular ECL (Ext
 </div>
 
 
-## Features
-
-- Interconnect and retrieve your past conversations, documents, images and audio transcriptions
-- Replaces RAG systems and reduces developer effort, and cost.
-- Load data to graph and vector databases using only Pydantic
-- Manipulate your data while ingesting from 30+ data sources
 
 ## Get Started
 
 Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1jHbWVypDgCLwjE71GSXhRL3YxYhCZzG1?usp=sharing">notebook</a> , <a href="https://deepnote.com/workspace/cognee-382213d0-0444-4c89-8265-13770e333c02/project/cognee-demo-78ffacb9-5832-4611-bb1a-560386068b30/notebook/Notebook-1-75b24cda566d4c24ab348f7150792601?utm_source=share-modal&utm_medium=product-shared-content&utm_campaign=notebook&utm_content=78ffacb9-5832-4611-bb1a-560386068b30">Deepnote notebook</a> or  <a href="https://github.com/topoteretes/cognee/tree/main/cognee-starter-kit">starter repo</a>
 
 
-## Using cognee
+## About cognee
 
 Self-hosted package:
- - Get self-serve UI with embedded Python notebooks
- - Add custom tasks and pipelines via Python SDK
- - Get Docker images and MCP servers you can deploy
- - Use distributed cognee SDK to process a TBs of your data
- - Use community adapters to connect to Redis, Azure, Falkor and others
+
+- Interconnects any kind of documents: past conversations, files, images, and audio transcriptions
+- Replaces RAG systems with a memory layer based on graphs and vectors
+- Reduces developer effort and cost, while increasing quality and precision
+- Provides Pythonic data pipelines that manage data ingestion from 30+ data sources
+- Is highly customizable with custom tasks, pipelines, and a set of built-in search endpoints
 
 Hosted platform:
- - Sync your local data to our [hosted solution](www.cognee.ai)
- - Get a secure API endpoint
- - We manage the UI for you
+- Includes a managed UI and a [hosted solution](www.cognee.ai)
+
 
 
 ## Self-Hosted (Open Source)
