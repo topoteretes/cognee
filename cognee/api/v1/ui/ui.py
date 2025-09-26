@@ -1,5 +1,6 @@
 import os
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -7,7 +8,7 @@ import webbrowser
 import zipfile
 import requests
 from pathlib import Path
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional, Tuple, List
 import tempfile
 import shutil
 
@@ -15,6 +16,40 @@ from cognee.shared.logging_utils import get_logger
 from cognee.version import get_cognee_version
 
 logger = get_logger()
+
+
+def _is_port_available(port: int) -> bool:
+    """
+    Check if a port is available on localhost.
+    Returns True if the port is available, False otherwise.
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(1)  # 1 second timeout
+            result = sock.connect_ex(("localhost", port))
+            return result != 0  # Port is available if connection fails
+    except Exception:
+        return False
+
+
+def _check_required_ports(ports_to_check: List[Tuple[int, str]]) -> Tuple[bool, List[str]]:
+    """
+    Check if all required ports are available on localhost.
+
+    Args:
+        ports_to_check: List of (port, service_name) tuples
+
+    Returns:
+        Tuple of (all_available: bool, unavailable_services: List[str])
+    """
+    unavailable = []
+
+    for port, service_name in ports_to_check:
+        if not _is_port_available(port):
+            unavailable.append(f"{service_name} (port {port})")
+            logger.error(f"Port {port} is already in use for {service_name}")
+
+    return len(unavailable) == 0, unavailable
 
 
 def normalize_version_for_comparison(version: str) -> str:
@@ -327,14 +362,13 @@ def prompt_user_for_download() -> bool:
 
 def start_ui(
     pid_callback: Callable[[int], None],
-    host: str = "localhost",
     port: int = 3000,
     open_browser: bool = True,
     auto_download: bool = False,
     start_backend: bool = False,
-    backend_host: str = "localhost",
     backend_port: int = 8000,
     start_mcp: bool = False,
+    mcp_port: int = 8001,
 ) -> Optional[subprocess.Popen]:
     """
     Start the cognee frontend UI server, optionally with the backend API server and MCP server.
@@ -350,14 +384,13 @@ def start_ui(
 
     Args:
         pid_callback: Callback to notify with PID of each spawned process
-        host: Host to bind the frontend server to (default: localhost)
         port: Port to run the frontend server on (default: 3000)
         open_browser: Whether to open the browser automatically (default: True)
         auto_download: If True, download frontend without prompting (default: False)
         start_backend: If True, also start the cognee API backend server (default: False)
-        backend_host: Host to bind the backend server to (default: localhost)
         backend_port: Port to run the backend server on (default: 8000)
-        start_mcp: If True, also start the cognee MCP server on port 8001 (default: False)
+        start_mcp: If True, also start the cognee MCP server (default: False)
+        mcp_port: Port to run the MCP server on (default: 8001)
 
     Returns:
         subprocess.Popen object representing the running frontend server, or None if failed
@@ -366,22 +399,42 @@ def start_ui(
 
     Example:
         >>> import cognee
+        >>> def dummy_callback(pid): pass
         >>> # Start just the frontend
-        >>> server = cognee.start_ui()
+        >>> server = cognee.start_ui(dummy_callback)
         >>>
         >>> # Start both frontend and backend
-        >>> server = cognee.start_ui(start_backend=True)
+        >>> server = cognee.start_ui(dummy_callback, start_backend=True)
         >>> # UI will be available at http://localhost:3000
         >>> # API will be available at http://localhost:8000
         >>>
         >>> # Start frontend with MCP server
-        >>> server = cognee.start_ui(start_mcp=True)
+        >>> server = cognee.start_ui(dummy_callback, start_mcp=True)
         >>> # UI will be available at http://localhost:3000
         >>> # MCP server will be available at http://127.0.0.1:8001/sse
         >>> # To stop all servers later:
         >>> server.terminate()
     """
     logger.info("Starting cognee UI...")
+
+    ports_to_check = [(port, "Frontend UI")]
+
+    if start_backend:
+        ports_to_check.append((backend_port, "Backend API"))
+
+    if start_mcp:
+        ports_to_check.append((mcp_port, "MCP Server"))
+
+    logger.info("Checking port availability...")
+    all_ports_available, unavailable_services = _check_required_ports(ports_to_check)
+
+    if not all_ports_available:
+        error_msg = f"Cannot start cognee UI: The following services have ports already in use: {', '.join(unavailable_services)}"
+        logger.error(error_msg)
+        logger.error("Please stop the conflicting services or change the port configuration.")
+        return None
+
+    logger.info("✓ All required ports are available")
     backend_process = None
 
     if start_mcp:
@@ -394,7 +447,7 @@ def start_ui(
                     "docker",
                     "run",
                     "-p",
-                    "8001:8000",
+                    f"{mcp_port}:8000",
                     "--rm",
                     "--env-file",
                     env_file,
@@ -405,7 +458,7 @@ def start_ui(
                 preexec_fn=os.setsid if hasattr(os, "setsid") else None,
             )
             pid_callback(mcp_process.pid)
-            logger.info("✓ Cognee MCP server starting on http://127.0.0.1:8001/sse")
+            logger.info(f"✓ Cognee MCP server starting on http://127.0.0.1:{mcp_port}/sse")
         except Exception as e:
             logger.error(f"Failed to start MCP server with Docker: {str(e)}")
     # Start backend server if requested
@@ -421,7 +474,7 @@ def start_ui(
                     "uvicorn",
                     "cognee.api.client:app",
                     "--host",
-                    backend_host,
+                    "localhost",
                     "--port",
                     str(backend_port),
                 ],
@@ -440,7 +493,7 @@ def start_ui(
                 logger.error("Backend server failed to start - process exited early")
                 return None
 
-            logger.info(f"✓ Backend API started at http://{backend_host}:{backend_port}")
+            logger.info(f"✓ Backend API started at http://localhost:{backend_port}")
 
         except Exception as e:
             logger.error(f"Failed to start backend server: {str(e)}")
@@ -485,11 +538,11 @@ def start_ui(
 
     # Prepare environment variables
     env = os.environ.copy()
-    env["HOST"] = host
+    env["HOST"] = "localhost"
     env["PORT"] = str(port)
 
     # Start the development server
-    logger.info(f"Starting frontend server at http://{host}:{port}")
+    logger.info(f"Starting frontend server at http://localhost:{port}")
     logger.info("This may take a moment to compile and start...")
 
     try:
@@ -523,7 +576,7 @@ def start_ui(
             def open_browser_delayed():
                 time.sleep(5)  # Give Next.js time to fully start
                 try:
-                    webbrowser.open(f"http://{host}:{port}")  # TODO: use dashboard url?
+                    webbrowser.open(f"http://localhost:{port}")
                 except Exception as e:
                     logger.warning(f"Could not open browser automatically: {e}")
 
@@ -531,7 +584,7 @@ def start_ui(
             browser_thread.start()
 
         logger.info("✓ Cognee UI is starting up...")
-        logger.info(f"✓ Open your browser to: http://{host}:{port}")
+        logger.info(f"✓ Open your browser to: http://localhost:{port}")
         logger.info("✓ The UI will be available once Next.js finishes compiling")
 
         return process
@@ -551,12 +604,3 @@ def start_ui(
                 except (OSError, ProcessLookupError):
                     pass
         return None
-
-
-# Convenience function similar to DuckDB's approach
-def ui() -> Optional[subprocess.Popen]:
-    """
-    Convenient alias for start_ui() with default parameters.
-    Similar to how DuckDB provides simple ui() function.
-    """
-    return start_ui()
