@@ -38,9 +38,11 @@ mcp = FastMCP("Cognee")
 
 logger = get_logger()
 
+
 @mcp.custom_route("/health", methods=["GET"])
 async def health_check(request) -> dict:
     return JSONResponse({"status": "ok"})
+
 
 @mcp.tool()
 async def cognee_add_developer_rules(

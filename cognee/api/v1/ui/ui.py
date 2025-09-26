@@ -601,7 +601,6 @@ def start_ui(
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
             preexec_fn=os.setsid if hasattr(os, "setsid") else None,
         )
 
