@@ -58,7 +58,7 @@ body:
         - Python version: [e.g. 3.9.0]
         - Cognee version: [e.g. 0.1.0]
         - LLM Provider: [e.g. OpenAI, Ollama]
-        - Database: [e.g. Neo4j, FalkorDB]
+        - Database: [e.g. Neo4j]
     validations:
       required: true
       
