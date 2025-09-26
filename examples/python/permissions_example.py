@@ -152,7 +152,7 @@ async def main():
     print("\nOperation started as user_2 to add user_3 to CogneeLab tenant/organization")
     await add_user_to_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
 
-    print("\nOperation started as user_2 to add user_3 to Reasercher role")
+    print("\nOperation started as user_2 to add user_3 to Researcher role")
     await add_user_to_role(user_id=user_3.id, role_id=role_id, owner_id=user_2.id)
 
     print(
