@@ -31,9 +31,6 @@ async def migrate_relational_database(
     Both TableType and TableRow inherit from DataPoint to maintain consistency with Cognee data model.
     """
     # Create a mapping of node_id to node objects for referencing in edge creation
-    node_mapping = {}
-    edge_mapping = []
-
     if schema_only:
         node_mapping, edge_mapping = await schema_only_ingestion()
 
