@@ -1,5 +1,4 @@
 import os
-import signal
 import socket
 import subprocess
 import threading
@@ -16,6 +15,46 @@ from cognee.shared.logging_utils import get_logger
 from cognee.version import get_cognee_version
 
 logger = get_logger()
+
+
+def _stream_process_output(
+    process: subprocess.Popen, stream_name: str, prefix: str, color_code: str = ""
+) -> threading.Thread:
+    """
+    Stream output from a process with a prefix to identify the source.
+
+    Args:
+        process: The subprocess to monitor
+        stream_name: 'stdout' or 'stderr'
+        prefix: Text prefix for each line (e.g., '[BACKEND]', '[FRONTEND]')
+        color_code: ANSI color code for the prefix (optional)
+
+    Returns:
+        Thread that handles the streaming
+    """
+
+    def stream_reader():
+        stream = getattr(process, stream_name)
+        if stream is None:
+            return
+
+        reset_code = "\033[0m" if color_code else ""
+
+        try:
+            for line in iter(stream.readline, b""):
+                if line:
+                    line_text = line.decode("utf-8").rstrip()
+                    if line_text:
+                        print(f"{color_code}{prefix}{reset_code} {line_text}", flush=True)
+        except Exception:
+            pass
+        finally:
+            if stream:
+                stream.close()
+
+    thread = threading.Thread(target=stream_reader, daemon=True)
+    thread.start()
+    return thread
 
 
 def _is_port_available(port: int) -> bool:
@@ -455,8 +494,14 @@ def start_ui(
                     "TRANSPORT_MODE=sse",
                     "cognee/cognee-mcp:daulet-dev",
                 ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 preexec_fn=os.setsid if hasattr(os, "setsid") else None,
             )
+
+            _stream_process_output(mcp_process, "stdout", "[MCP]", "\033[34m")  # Blue
+            _stream_process_output(mcp_process, "stderr", "[MCP]", "\033[34m")  # Blue
+
             pid_callback(mcp_process.pid)
             logger.info(f"✓ Cognee MCP server starting on http://127.0.0.1:{mcp_port}/sse")
         except Exception as e:
@@ -478,11 +523,14 @@ def start_ui(
                     "--port",
                     str(backend_port),
                 ],
-                # Inherit stdout/stderr from parent process to show logs
-                stdout=None,
-                stderr=None,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 preexec_fn=os.setsid if hasattr(os, "setsid") else None,
             )
+
+            # Start threads to stream backend output with prefix
+            _stream_process_output(backend_process, "stdout", "[BACKEND]", "\033[32m")  # Green
+            _stream_process_output(backend_process, "stderr", "[BACKEND]", "\033[32m")  # Green
 
             pid_callback(backend_process.pid)
 
@@ -557,6 +605,10 @@ def start_ui(
             preexec_fn=os.setsid if hasattr(os, "setsid") else None,
         )
 
+        # Start threads to stream frontend output with prefix
+        _stream_process_output(process, "stdout", "[FRONTEND]", "\033[33m")  # Yellow
+        _stream_process_output(process, "stderr", "[FRONTEND]", "\033[33m")  # Yellow
+
         pid_callback(process.pid)
 
         # Give it a moment to start up
@@ -564,10 +616,7 @@ def start_ui(
 
         # Check if process is still running
         if process.poll() is not None:
-            stdout, stderr = process.communicate()
-            logger.error("Frontend server failed to start:")
-            logger.error(f"stdout: {stdout}")
-            logger.error(f"stderr: {stderr}")
+            logger.error("Frontend server failed to start - check the logs above for details")
             return None
 
         # Open browser if requested
