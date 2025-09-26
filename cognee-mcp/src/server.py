@@ -19,6 +19,7 @@ from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.storage.utils import JSONEncoder
+from starlette.responses import JSONResponse
 
 
 try:
@@ -37,6 +38,9 @@ mcp = FastMCP("Cognee")
 
 logger = get_logger()
 
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request) -> dict:
+    return JSONResponse({"status": "ok"})
 
 @mcp.tool()
 async def cognee_add_developer_rules(
