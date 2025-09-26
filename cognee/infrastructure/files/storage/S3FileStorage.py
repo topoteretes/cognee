@@ -34,6 +34,7 @@ class S3FileStorage(Storage):
             self.s3 = s3fs.S3FileSystem(
                 key=s3_config.aws_access_key_id,
                 secret=s3_config.aws_secret_access_key,
+                token=s3_config.aws_session_token,
                 anon=False,
                 endpoint_url=s3_config.aws_endpoint_url,
                 client_kwargs={"region_name": s3_config.aws_region},
