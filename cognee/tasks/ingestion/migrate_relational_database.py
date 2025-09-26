@@ -38,7 +38,7 @@ async def migrate_relational_database(graph_db, schema, migrate_column_data=True
             table_node = TableType(
                 id=uuid5(NAMESPACE_OID, name=table_name),
                 name=table_name,
-                description=f"Table: {table_name}",
+                description=f'Relational database table with the following name: "{table_name}".',
             )
 
             # Add TableType node to mapping ( node will be added to the graph later based on this mapping )
@@ -75,7 +75,7 @@ async def migrate_relational_database(graph_db, schema, migrate_column_data=True
                     name=node_id,
                     is_a=table_node,
                     properties=str(row_properties),
-                    description=f"Row in {table_name} with {primary_key_col}={primary_key_value}",
+                    description=f'Row in relational database table from the table with the name: "{table_name}" with the following row data {str(row_properties)} where the dictionary key value is the column name and the value is the column value. This row has the id of: {node_id}',
                 )
 
                 # Store the node object in our mapping
@@ -113,7 +113,7 @@ async def migrate_relational_database(graph_db, schema, migrate_column_data=True
                             id=uuid5(NAMESPACE_OID, name=column_node_id),
                             name=column_node_id,
                             properties=f"{key} {value} {table_name}",
-                            description=f"Column name={key} and value={value} from column from table={table_name}",
+                            description=f"column from relational database table={table_name}. Column name={key} and value={value}. The value of the column is related to the following row with this id: {row_node.id}. This column has the following ID: {column_node_id}",
                         )
                         node_mapping[column_node_id] = column_node
 
