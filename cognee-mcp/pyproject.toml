@@ -36,4 +36,5 @@ dev = [
 allow-direct-references = true
 
 [project.scripts]
-cognee-mcp = "src:main"
+cognee = "src:main"
+cognee-mcp = "src:main_mcp"
