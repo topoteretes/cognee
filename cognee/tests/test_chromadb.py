@@ -68,21 +68,25 @@ async def test_getting_of_documents(dataset_name_1):
 
 
 async def test_vector_engine_search_none_limit():
-    file_path = os.path.join(
-        pathlib.Path(__file__).resolve().parent.parent.parent,
-        "examples",
-        "data",
-        "alice_in_wonderland.txt",
+    file_path_quantum = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
+    )
+
+    file_path_nlp = os.path.join(
+        pathlib.Path(__file__).parent,
+        "test_data/Natural_language_processing.txt",
     )
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    await cognee.add(file_path)
+    await cognee.add(file_path_quantum)
+
+    await cognee.add(file_path_nlp)
 
     await cognee.cognify()
 
-    query_text = "List me all the important characters in Alice in Wonderland."
+    query_text = "Tell me about Quantum computers"
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
@@ -96,7 +100,8 @@ async def test_vector_engine_search_none_limit():
         collection_name=collection_name, query_vector=query_vector, limit=None
     )
 
-    # Check that we did not accidentally use any default value for limit in vector search along the way (like 5, 10, or 15)
+    # Check that we did not accidentally use any default value for limit
+    # in vector search along the way (like 5, 10, or 15)
     assert len(result) > 15
 
 
