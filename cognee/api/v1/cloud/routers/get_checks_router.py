@@ -16,13 +16,7 @@ def get_checks_router():
         api_token = request.headers.get("X-Api-Key")
 
         if api_token is None:
-            # Return a graceful response for local/self-hosted installations
-            return {
-                "status": "local_mode",
-                "message": "Running in local mode. Cloud features are not available without API key.",
-                "cloud_available": False,
-                "local_mode": True,
-            }
+            raise CloudApiKeyMissingError()
 
         return await check_api_key(api_token)
 
