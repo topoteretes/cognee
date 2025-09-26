@@ -4,12 +4,12 @@ from sqlalchemy.exc import OperationalError, DBAPIError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from distributed.app import app
+from distributed.signal import QueueSignal
 from distributed.modal_image import image
 from distributed.queues import add_data_points_queue
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
-
 
 logger = get_logger("data_point_saving_worker")
 
@@ -43,7 +43,7 @@ def is_deadlock_error(error):
     retries=3,
     image=image,
     timeout=86400,
-    max_containers=5,
+    max_containers=20,
     secrets=[modal.Secret.from_name("distributed_cognee")],
 )
 async def data_point_saving_worker():
@@ -53,40 +53,48 @@ async def data_point_saving_worker():
     while True:
         if await add_data_points_queue.len.aio() != 0:
             try:
+                print("Remaining elements in queue:")
+                print(await add_data_points_queue.len.aio())
                 add_data_points_request = await add_data_points_queue.get.aio(block=False)
             except modal.exception.DeserializationError as error:
                 logger.error(f"Deserialization error: {str(error)}")
                 continue
 
-            if len(add_data_points_request) == 0:
-                print("Finished processing all data points; stopping vector engine queue.")
-                return True
+            if add_data_points_request:
+                if add_data_points_request == QueueSignal.STOP:
+                    await add_data_points_queue.put.aio(QueueSignal.STOP)
+                    print("Finished processing all data points; stopping vector engine queue.")
+                    return True
 
-            if len(add_data_points_request) == 2:
-                (collection_name, data_points) = add_data_points_request
+                if len(add_data_points_request) == 2:
+                    (collection_name, data_points) = add_data_points_request
 
-                print(f"Adding {len(data_points)} data points to '{collection_name}' collection.")
+                    print(
+                        f"Adding {len(data_points)} data points to '{collection_name}' collection."
+                    )
 
-                @retry(
-                    retry=retry_if_exception_type(VectorDatabaseDeadlockError),
-                    stop=stop_after_attempt(3),
-                    wait=wait_exponential(multiplier=2, min=1, max=6),
-                )
-                async def add_data_points():
-                    try:
-                        await vector_engine.create_data_points(
-                            collection_name, data_points, distributed=False
-                        )
-                    except DBAPIError as error:
-                        if is_deadlock_error(error):
-                            raise VectorDatabaseDeadlockError()
-                    except OperationalError as error:
-                        if is_deadlock_error(error):
-                            raise VectorDatabaseDeadlockError()
+                    @retry(
+                        retry=retry_if_exception_type(VectorDatabaseDeadlockError),
+                        stop=stop_after_attempt(3),
+                        wait=wait_exponential(multiplier=2, min=1, max=6),
+                    )
+                    async def add_data_points():
+                        try:
+                            await vector_engine.create_data_points(
+                                collection_name, data_points, distributed=False
+                            )
+                        except DBAPIError as error:
+                            if is_deadlock_error(error):
+                                raise VectorDatabaseDeadlockError()
+                        except OperationalError as error:
+                            if is_deadlock_error(error):
+                                raise VectorDatabaseDeadlockError()
 
-                await add_data_points()
+                    await add_data_points()
 
-                print("Finished adding data points.")
+                    print("Finished adding data points.")
+            else:
+                print("NoneType detected.")
 
         else:
             print("No jobs, go to sleep.")

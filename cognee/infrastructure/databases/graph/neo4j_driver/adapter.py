@@ -68,6 +68,7 @@ class Neo4jAdapter(GraphDBInterface):
             auth=auth,
             max_connection_lifetime=120,
             notifications_min_severity="OFF",
+            keep_alive=True,
         )
 
     async def initialize(self) -> None:
@@ -205,7 +206,7 @@ class Neo4jAdapter(GraphDBInterface):
             {
                 "node_id": str(node.id),
                 "label": type(node).__name__,
-                "properties": self.serialize_properties(node.model_dump()),
+                "properties": self.serialize_properties(dict(node)),
             }
             for node in nodes
         ]

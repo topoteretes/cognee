@@ -5,7 +5,6 @@ from typing import Optional
 
 class TableRow(DataPoint):
     name: str
-    is_a: Optional[TableType] = None
     description: str
     properties: str
 
