@@ -135,7 +135,7 @@ async def main():
         print(f"{result}\n")
 
     # If we'd like for user_1 to add new documents to the QUANTUM dataset owned by user_2, user_1 would have to get "write" access permission,
-    # which he currently does not have
+    # which user_1 currently does not have
 
     # Users can also be added to Roles and Tenants and then permission can be assigned on a Role/Tenant level as well
     # To create a Role a user first must be the owner of a Tenant
