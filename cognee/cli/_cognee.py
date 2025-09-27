@@ -220,7 +220,7 @@ def main() -> int:
 
             if server_process:
                 fmt.success("UI server started successfully!")
-                fmt.echo("The interface is available at: http://localhost:3000")
+                fmt.echo(f"The interface is available at: http://localhost:{frontend_port}")
                 if start_backend:
                     fmt.echo(f"The API backend is available at: http://localhost:{backend_port}")
                 if start_mcp:
