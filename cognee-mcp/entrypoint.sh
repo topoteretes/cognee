@@ -48,27 +48,27 @@ if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
     if [ "$DEBUG" = "true" ]; then
         echo "Waiting for the debugger to attach..."
         if [ "$TRANSPORT_MODE" = "sse" ]; then
-            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee --transport sse --host 0.0.0.0 --port $HTTP_PORT --no-migration
+            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee-mcp --transport sse --host 0.0.0.0 --port $HTTP_PORT --no-migration
         elif [ "$TRANSPORT_MODE" = "http" ]; then
-            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee --transport http --host 0.0.0.0 --port $HTTP_PORT --no-migration
+            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee-mcp --transport http --host 0.0.0.0 --port $HTTP_PORT --no-migration
         else
-            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee --transport stdio --no-migration
+            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee-mcp --transport stdio --no-migration
         fi
     else
         if [ "$TRANSPORT_MODE" = "sse" ]; then
-            exec cognee --transport sse --host 0.0.0.0 --port $HTTP_PORT --no-migration
+            exec cognee-mcp --transport sse --host 0.0.0.0 --port $HTTP_PORT --no-migration
         elif [ "$TRANSPORT_MODE" = "http" ]; then
-            exec cognee --transport http --host 0.0.0.0 --port $HTTP_PORT --no-migration
+            exec cognee-mcp --transport http --host 0.0.0.0 --port $HTTP_PORT --no-migration
         else
-            exec cognee --transport stdio --no-migration
+            exec cognee-mcp --transport stdio --no-migration
         fi
     fi
 else
     if [ "$TRANSPORT_MODE" = "sse" ]; then
-        exec cognee --transport sse --host 0.0.0.0 --port $HTTP_PORT --no-migration
+        exec cognee-mcp --transport sse --host 0.0.0.0 --port $HTTP_PORT --no-migration
     elif [ "$TRANSPORT_MODE" = "http" ]; then
-        exec cognee --transport http --host 0.0.0.0 --port $HTTP_PORT --no-migration
+        exec cognee-mcp --transport http --host 0.0.0.0 --port $HTTP_PORT --no-migration
     else
-        exec cognee --transport stdio --no-migration
+        exec cognee-mcp --transport stdio --no-migration
     fi
 fi
