@@ -161,40 +161,10 @@ class OntologyEngine:
                     reader = csv.DictReader(content.splitlines())
                     return list(reader)
             elif file_path.endswith(".owl") or file_path.endswith(".rdf"):
-                from cognee.modules.ontology.rdf_xml.OntologyResolver import OntologyResolver
-                from cognee.modules.engine.models.Entity import Entity
-                from cognee.modules.engine.models.EntityType import EntityType
-                from cognee.tasks.storage.add_data_points import add_data_points
-                # If embedding API is available, batch embeddings
-                # Placeholder: batch_size can be tuned
-                batch_size = 50
-                resolver = OntologyResolver(ontology_file=file_path)
-                datapoints = []
-                texts_to_embed = []
-                # Parse classes as EntityType
-                for key, uri in resolver.lookup.get("classes", {}).items():
-                    entity_type = EntityType(
-                        name=key,
-                        description=str(uri),
-                        metadata={"index_fields": ["name"], "category": "class", "uri": str(uri)}
-                    )
-                    datapoints.append(entity_type)
-                    texts_to_embed.append(f"{key} {str(uri)}")
-                # Parse individuals as Entity
-                for key, uri in resolver.lookup.get("individuals", {}).items():
-                    entity = Entity(
-                        name=key,
-                        description=str(uri),
-                        metadata={"index_fields": ["name"], "category": "individual", "uri": str(uri)}
-                    )
-                    datapoints.append(entity)
-                    texts_to_embed.append(f"{key} {str(uri)}")
-                # Batch embedding API placeholder
-                # Example: embeddings = await embedding_api.embed_batch(texts_to_embed)
-                # for dp, emb in zip(datapoints, embeddings):
-                #     dp.embedding = emb
-                await add_data_points(datapoints, update_edge_collection=True)
-                # Ingestion is handled by add_data_points; no need to return structure
+                from cognee.modules.pipelines.operations.ontology_pipeline import OntologyPipeline
+                pipeline = OntologyPipeline(file_path)
+                await pipeline.ingest()
+                # Ingestion is handled by OntologyPipeline; no need to return structure
             else:
                 raise IngestionError(message="Unsupported file format")
         except Exception as e:
@@ -263,20 +233,22 @@ class OntologyEngine:
                 ]
             )
 
-            await graph_client.add_edges(
+            graph_edges = [
                 (
                     generate_node_id(edge.source_id),
                     generate_node_id(edge.target_id),
                     edge.relationship_type,
-                    dict(
-                        source_node_id=generate_node_id(edge.source_id),
-                        target_node_id=generate_node_id(edge.target_id),
-                        relationship_name=edge.relationship_type,
-                        updated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
-                    ),
+                    {
+                        "source_node_id": generate_node_id(edge.source_id),
+                        "target_node_id": generate_node_id(edge.target_id),
+                        "relationship_name": edge.relationship_type,
+                        "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                    },
                 )
                 for edge in ontology.edges
-            )
+            ]
+            if graph_edges:
+                await graph_client.add_edges(graph_edges)
 
         else:
             dataset_level_information = documents[0][1]
