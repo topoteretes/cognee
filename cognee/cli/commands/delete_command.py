@@ -54,21 +54,15 @@ Be careful with deletion operations as they are irreversible.
                     )
                 )
 
-                if not preview_data or all(value == 0 for value in preview_data.values()):
+                if not preview_data:
                     fmt.success("No data found to delete.")
                     return
 
                 fmt.echo("You are about to delete:")
-                if "datasets" in preview_data and preview_data["datasets"] > 0:
-                    fmt.echo(f"- {preview_data['datasets']} datasets")
-                if "data_entries" in preview_data and preview_data["data_entries"] > 0:
-                    fmt.echo(f"- {preview_data['data_entries']} data entries")
-                if "users" in preview_data and preview_data["users"] > 0:
-                    fmt.echo(
-                        f"- {preview_data['users']} {'users' if preview_data['users'] > 1 else 'user'}"
-                    )
+                fmt.echo(
+                    f"Datasets: {preview_data.datasets}\nEntries: {preview_data.entries}\nUsers: {preview_data.users}"
+                )
                 fmt.echo("-" * 20)
-
                 fmt.warning("This operation is irreversible!")
                 if not fmt.confirm("Proceed?"):
                     fmt.echo("Deletion cancelled.")
