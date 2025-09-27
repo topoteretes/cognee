@@ -4,7 +4,7 @@ import asyncio
 from uuid import UUID
 from fastapi.encoders import jsonable_encoder
 from typing import Any, List, Optional, Tuple, Type, Union
-
+from cognee.modules.retrieval.user_qa_feedback import UserQAFeedback
 from cognee.shared.utils import send_telemetry
 from cognee.context_global_variables import set_database_global_context_variables
 
@@ -24,6 +24,29 @@ from cognee.modules.users.permissions.methods import get_specific_user_permissio
 from .get_search_type_tools import get_search_type_tools
 from .no_access_control_search import no_access_control_search
 from ..utils.prepare_search_result import prepare_search_result
+from cognee.modules.retrieval.user_qa_feedback import UserQAFeedback
+
+
+async def analyze_search_sentiment(query_text: str, search_results: list, user: User):
+    """Analyze sentiment of search interactions and store feedback"""
+    try:
+        # Extract the search result text
+        if search_results and len(search_results) > 0:
+            search_result = search_results[0]
+            if isinstance(search_result, tuple):
+                result, context, datasets = search_result
+                if isinstance(result, list) and len(result) > 0:
+                    answer_text = result[0] 
+                    
+                    feedback_text = f"Question: {query_text}\nAnswer: {answer_text}"
+                    
+                    # Use existing UserQAFeedback to analyze sentiment
+                    feedback_analyzer = UserQAFeedback(last_k=1)
+                    await feedback_analyzer.add_feedback(feedback_text)
+                    
+    except Exception as e:
+        # Log error but don't fail the search
+        print(f"Sentiment analysis failed: {e}")
 
 
 async def search(
@@ -93,6 +116,9 @@ async def search(
         ]
 
     send_telemetry("cognee.search EXECUTION COMPLETED", user.id)
+    # Analyze sentiment if save_interaction is enabled
+    if save_interaction:
+        await analyze_search_sentiment(query_text, search_results, user)
 
     await log_result(
         query.id,
