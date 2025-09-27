@@ -85,7 +85,7 @@ Self-hosted package:
 - Is highly customizable with custom tasks, pipelines, and a set of built-in search endpoints
 
 Hosted platform:
-- Includes a managed UI and a [hosted solution](www.cognee.ai)
+- Includes a managed UI and a [hosted solution](https://www.cognee.ai)
 
 
 
