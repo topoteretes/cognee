@@ -38,3 +38,15 @@ class UserFeedbackEvaluation(BaseModel):
         ..., description="Sentiment score from -5 (negative) to +5 (positive)"
     )
     evaluation: UserFeedbackSentiment
+
+
+
+class CogneeSearchSentiment(DataPoint):
+    """Cognee - Search Sentiment"""
+    prev_question: str
+    prev_answer: str
+    current_question: str
+    sentiment: str   # Positive / Neutral / Negative
+    score: int       # -5 to 5
+    user_id: str
+    belongs_to_set: Optional[NodeSet] = None

@@ -8,7 +8,9 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.exceptions import DatasetNotFoundError
-
+from cognee.modules.retrieval.utils.models import CogneeUserInteraction
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.tasks.sentiment_analysis.sentiment_analysis import run_sentiment_analysis
 
 async def search(
     query_text: str,
@@ -167,7 +169,28 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
+     ########################
     # We use lists from now on for datasets
+    graph_engine = await get_graph_engine()
+    #fetch last interaction
+    last_interaction_ids = await graph_engine.get_last_user_interaction_ids(limit=1)
+
+# Fetch the actual interaction objects
+    last_interactions = []
+    for interaction_id in last_interaction_ids:
+        interaction = await graph_engine.get_node(node_id=interaction_id)
+        last_interactions.append(interaction)
+
+    # if last interaction is present and save interaction is enabled call sentiment analysis
+    if len(last_interactions)>0 and save_interaction:
+        results = await run_sentiment_analysis(
+        prev_question=last_interactions[0]['question'],
+        prev_answer=last_interactions[0]['answer'],
+        current_question=query_text,
+        user=User)
+        # print(results)
+        # print('here i am and this is interaction',last_interactions[0]['question'],last_interactions[0]['answer'],query_text)
+    ######################
     if isinstance(datasets, UUID) or isinstance(datasets, str):
         datasets = [datasets]
 
