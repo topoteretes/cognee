@@ -14,6 +14,7 @@ from cognee.infrastructure.databases.vector.embeddings.embedding_rate_limiter im
     embedding_rate_limit_async,
     embedding_sleep_and_retry_async,
 )
+from cognee.shared.utils import create_secure_ssl_context
 
 logger = get_logger("OllamaEmbeddingEngine")
 
@@ -101,7 +102,9 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        async with aiohttp.ClientSession() as session:
+        ssl_context = create_secure_ssl_context()
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.post(
                 self.endpoint, json=payload, headers=headers, timeout=60.0
             ) as response:
