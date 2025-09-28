@@ -288,7 +288,6 @@ class SummarizedCode(BaseModel):
 class GraphDBType(Enum):
     NETWORKX = auto()
     NEO4J = auto()
-    FALKORDB = auto()
     KUZU = auto()
 
 
