@@ -24,5 +24,11 @@ async def main():
         )
         all_results[q] = results
 
+    # Print results
+    for query, res in all_results.items():
+        print(f"\nQuery: {query}")
+        for r in res:
+            print(f"  - {r}")
+
 if __name__ == '__main__':
     asyncio.run(main())

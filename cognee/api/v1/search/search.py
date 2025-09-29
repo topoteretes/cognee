@@ -11,7 +11,8 @@ from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.modules.retrieval.utils.models import CogneeUserInteraction
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.tasks.sentiment_analysis.sentiment_analysis import run_sentiment_analysis
-
+from cognee.shared.logging_utils import get_logger
+logger = get_logger()
 async def search(
     query_text: str,
     query_type: SearchType = SearchType.GRAPH_COMPLETION,
@@ -169,31 +170,40 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
-     ########################
-    # We use lists from now on for datasets
-    graph_engine = await get_graph_engine()
-    #fetch last interaction
-    last_interaction_ids = await graph_engine.get_last_user_interaction_ids(limit=1)
 
-# Fetch the actual interaction objects
-    last_interactions = []
-    for interaction_id in last_interaction_ids:
-        interaction = await graph_engine.get_node(node_id=interaction_id)
-        last_interactions.append(interaction)
-
-    # if last interaction is present and save interaction is enabled call sentiment analysis
-    if len(last_interactions)>0 and save_interaction:
-        results = await run_sentiment_analysis(
-        prev_question=last_interactions[0]['question'],
-        prev_answer=last_interactions[0]['answer'],
-        current_question=query_text,
-        user=User)
     ######################
     if isinstance(datasets, UUID) or isinstance(datasets, str):
         datasets = [datasets]
 
     if user is None:
         user = await get_default_user()
+
+    # Run sentiment analysis only when saving interactions and when we have a prior interaction
+    if save_interaction:
+        try:
+            graph_engine = await get_graph_engine()
+            last_interaction_ids = await graph_engine.get_last_user_interaction_ids(limit=1)
+            last = None
+            for interaction_id in last_interaction_ids:
+                interaction = await graph_engine.get_node(node_id=interaction_id)
+                if not interaction:
+                    continue
+                props = interaction.get("properties", interaction)
+                
+                if "user_id" in props and str(props["user_id"]) != str(user.id):
+                    continue
+                if "question" in props and "answer" in props:
+                    last = props
+                    break
+            if last:
+                await run_sentiment_analysis(
+                    prev_question=last["question"],
+                    prev_answer=last["answer"],
+                    current_question=query_text,
+                    user=user,
+                )
+        except Exception as e:
+            logger.error(f"Sentiment Analysis Failed: {e}")
 
     # Transform string based datasets to UUID - String based datasets can only be found for current user
     if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
