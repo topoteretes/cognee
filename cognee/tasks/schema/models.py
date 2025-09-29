@@ -8,9 +8,8 @@ class DatabaseSchema(DataPoint):
 
     name: str
     database_type: str  # sqlite, postgres, etc.
-    tables: Dict[str, Dict]  # Reuse existing schema format from SqlAlchemyAdapter
-    sample_data: Dict[str, List[Dict]]  # Limited examples per table
-    extraction_timestamp: datetime
+    tables: str  # Reuse existing schema format from SqlAlchemyAdapter
+    sample_data: str  # Limited examples per table
     description: str
     metadata: dict = {"index_fields": ["description", "name"]}
 
@@ -19,10 +18,10 @@ class SchemaTable(DataPoint):
     """Represents an individual table schema with relationships"""
 
     name: str
-    columns: List[Dict]  # Column definitions with types
+    columns: str  # Column definitions with types
     primary_key: Optional[str]
-    foreign_keys: List[Dict]  # Foreign key relationships
-    sample_rows: List[Dict]  # Max 3-5 example rows
+    foreign_keys: str  # Foreign key relationships
+    sample_rows: str  # Max 3-5 example rows
     row_count_estimate: Optional[int]  # Actual table size
     description: str
     metadata: dict = {"index_fields": ["description", "name"]}
