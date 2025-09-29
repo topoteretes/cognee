@@ -3,9 +3,17 @@
 import classNames from "classnames";
 import { MutableRefObject, useEffect, useImperativeHandle, useRef, useState, useCallback } from "react";
 import { forceCollide, forceManyBody } from "d3-force-3d";
-import ForceGraph, { ForceGraphMethods, GraphData, LinkObject, NodeObject } from "react-force-graph-2d";
+import dynamic from "next/dynamic";
 import { GraphControlsAPI } from "./GraphControls";
 import getColorForNodeType from "./getColorForNodeType";
+
+// Dynamically import ForceGraph to prevent SSR issues
+const ForceGraph = dynamic(() => import("react-force-graph-2d"), {
+  ssr: false,
+  loading: () => <div className="w-full h-full flex items-center justify-center">Loading graph...</div>
+});
+
+import type { ForceGraphMethods, GraphData, LinkObject, NodeObject } from "react-force-graph-2d";
 
 interface GraphVisuzaliationProps {
   ref: MutableRefObject<GraphVisualizationAPI>;
@@ -200,7 +208,7 @@ export default function GraphVisualization({ ref, data, graphControls, className
   const graphRef = useRef<ForceGraphMethods>();
 
   useEffect(() => {
-    if (typeof window !== "undefined" && data && graphRef.current) {
+    if (data && graphRef.current) {
       // add collision force
       graphRef.current.d3Force("collision", forceCollide(nodeSize * 1.5));
       graphRef.current.d3Force("charge", forceManyBody().strength(-10).distanceMin(10).distanceMax(50));
@@ -216,56 +224,34 @@ export default function GraphVisualization({ ref, data, graphControls, className
 
   return (
     <div ref={containerRef} className={classNames("w-full h-full", className)} id="graph-container">
-      {(data && typeof window !== "undefined") ? (
-        <ForceGraph
-          ref={graphRef}
-          width={dimensions.width}
-          height={dimensions.height}
-          dagMode={graphShape as unknown as undefined}
-          dagLevelDistance={300}
-          onDagError={handleDagError}
-          graphData={data}
+      <ForceGraph
+        ref={graphRef}
+        width={dimensions.width}
+        height={dimensions.height}
+        dagMode={graphShape as unknown as undefined}
+        dagLevelDistance={data ? 300 : 100}
+        onDagError={handleDagError}
+        graphData={data || {
+          nodes: [{ id: 1, label: "Add" }, { id: 2, label: "Cognify" }, { id: 3, label: "Search" }],
+          links: [{ source: 1, target: 2, label: "but don't forget to" }, { source: 2, target: 3, label: "and after that you can" }],
+        }}
 
-          nodeLabel="label"
-          nodeRelSize={nodeSize}
-          nodeCanvasObject={renderNode}
-          nodeCanvasObjectMode={() => "replace"}
+        nodeLabel="label"
+        nodeRelSize={data ? nodeSize : 20}
+        nodeCanvasObject={data ? renderNode : renderInitialNode}
+        nodeCanvasObjectMode={() => data ? "replace" : "after"}
+        nodeAutoColorBy={data ? undefined : "type"}
 
-          linkLabel="label"
-          linkCanvasObject={renderLink}
-          linkCanvasObjectMode={() => "after"}
-          linkDirectionalArrowLength={3.5}
-          linkDirectionalArrowRelPos={1}
+        linkLabel="label"
+        linkCanvasObject={renderLink}
+        linkCanvasObjectMode={() => "after"}
+        linkDirectionalArrowLength={3.5}
+        linkDirectionalArrowRelPos={1}
 
-          onNodeClick={handleNodeClick}
-          onBackgroundClick={handleBackgroundClick}
-          d3VelocityDecay={0.3}
-        />
-      ) : (
-        <ForceGraph
-          ref={graphRef}
-          width={dimensions.width}
-          height={dimensions.height}
-          dagMode={graphShape as unknown as undefined}
-          dagLevelDistance={100}
-          graphData={{
-            nodes: [{ id: 1, label: "Add" }, { id: 2, label: "Cognify" }, { id: 3, label: "Search" }],
-            links: [{ source: 1, target: 2, label: "but don't forget to" }, { source: 2, target: 3, label: "and after that you can" }],
-          }}
-
-          nodeLabel="label"
-          nodeRelSize={20}
-          nodeCanvasObject={renderInitialNode}
-          nodeCanvasObjectMode={() => "after"}
-          nodeAutoColorBy="type"
-
-          linkLabel="label"
-          linkCanvasObject={renderLink}
-          linkCanvasObjectMode={() => "after"}
-          linkDirectionalArrowLength={3.5}
-          linkDirectionalArrowRelPos={1}
-        />
-      )}
+        onNodeClick={handleNodeClick}
+        onBackgroundClick={handleBackgroundClick}
+        d3VelocityDecay={data ? 0.3 : undefined}
+      />
     </div>
   );
 }

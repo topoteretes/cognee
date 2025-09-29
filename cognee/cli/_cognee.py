@@ -183,10 +183,20 @@ def main() -> int:
 
             for pid in spawned_pids:
                 try:
-                    pgid = os.getpgid(pid)
-                    os.killpg(pgid, signal.SIGTERM)
-                    fmt.success(f"✓ Process group {pgid} (PID {pid}) terminated.")
-                except (OSError, ProcessLookupError) as e:
+                    if hasattr(os, "killpg"):
+                        # Unix-like systems: Use process groups
+                        pgid = os.getpgid(pid)
+                        os.killpg(pgid, signal.SIGTERM)
+                        fmt.success(f"✓ Process group {pgid} (PID {pid}) terminated.")
+                    else:
+                        # Windows: Use taskkill to terminate process and its children
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(pid)],
+                            capture_output=True,
+                            check=False,
+                        )
+                        fmt.success(f"✓ Process {pid} and its children terminated.")
+                except (OSError, ProcessLookupError, subprocess.SubprocessError) as e:
                     fmt.warning(f"Could not terminate process {pid}: {e}")
 
             sys.exit(0)
