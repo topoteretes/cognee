@@ -43,58 +43,76 @@ def is_deadlock_error(error):
     retries=3,
     image=image,
     timeout=86400,
-    max_containers=20,
+    max_containers=10,
     secrets=[modal.Secret.from_name("distributed_cognee")],
 )
 async def data_point_saving_worker():
     print("Started processing of data points; starting vector engine queue.")
     vector_engine = get_vector_engine()
 
+    BATCH_SIZE = 20
+    stop_seen = False
+
     while True:
+        if stop_seen:
+            print("Finished processing all data points; stopping vector engine queue consumer.")
+            return True
+
         if await add_data_points_queue.len.aio() != 0:
             try:
                 print("Remaining elements in queue:")
                 print(await add_data_points_queue.len.aio())
-                add_data_points_request = await add_data_points_queue.get.aio(block=False)
+
+                # collect batched requests
+                batched_points = {}
+                for _ in range(min(BATCH_SIZE, await add_data_points_queue.len.aio())):
+                    add_data_points_request = await add_data_points_queue.get.aio(block=False)
+
+                    if not add_data_points_request:
+                        continue
+
+                    if add_data_points_request == QueueSignal.STOP:
+                        await add_data_points_queue.put.aio(QueueSignal.STOP)
+                        stop_seen = True
+                        break
+
+                    if len(add_data_points_request) == 2:
+                        collection_name, data_points = add_data_points_request
+                        if collection_name not in batched_points:
+                            batched_points[collection_name] = []
+                        batched_points[collection_name].extend(data_points)
+                    else:
+                        print("NoneType or invalid request detected.")
+
+                if batched_points:
+                    for collection_name, data_points in batched_points.items():
+                        print(
+                            f"Adding {len(data_points)} data points to '{collection_name}' collection."
+                        )
+
+                        @retry(
+                            retry=retry_if_exception_type(VectorDatabaseDeadlockError),
+                            stop=stop_after_attempt(3),
+                            wait=wait_exponential(multiplier=2, min=1, max=6),
+                        )
+                        async def add_data_points():
+                            try:
+                                await vector_engine.create_data_points(
+                                    collection_name, data_points, distributed=False
+                                )
+                            except DBAPIError as error:
+                                if is_deadlock_error(error):
+                                    raise VectorDatabaseDeadlockError()
+                            except OperationalError as error:
+                                if is_deadlock_error(error):
+                                    raise VectorDatabaseDeadlockError()
+
+                        await add_data_points()
+                        print(f"Finished adding data points to '{collection_name}'.")
+
             except modal.exception.DeserializationError as error:
                 logger.error(f"Deserialization error: {str(error)}")
                 continue
-
-            if add_data_points_request:
-                if add_data_points_request == QueueSignal.STOP:
-                    await add_data_points_queue.put.aio(QueueSignal.STOP)
-                    print("Finished processing all data points; stopping vector engine queue.")
-                    return True
-
-                if len(add_data_points_request) == 2:
-                    (collection_name, data_points) = add_data_points_request
-
-                    print(
-                        f"Adding {len(data_points)} data points to '{collection_name}' collection."
-                    )
-
-                    @retry(
-                        retry=retry_if_exception_type(VectorDatabaseDeadlockError),
-                        stop=stop_after_attempt(3),
-                        wait=wait_exponential(multiplier=2, min=1, max=6),
-                    )
-                    async def add_data_points():
-                        try:
-                            await vector_engine.create_data_points(
-                                collection_name, data_points, distributed=False
-                            )
-                        except DBAPIError as error:
-                            if is_deadlock_error(error):
-                                raise VectorDatabaseDeadlockError()
-                        except OperationalError as error:
-                            if is_deadlock_error(error):
-                                raise VectorDatabaseDeadlockError()
-
-                    await add_data_points()
-
-                    print("Finished adding data points.")
-            else:
-                print("NoneType detected.")
 
         else:
             print("No jobs, go to sleep.")
