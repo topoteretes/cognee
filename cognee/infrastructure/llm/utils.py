@@ -3,6 +3,7 @@ import litellm
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
     get_llm_client,
 )
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -28,7 +29,7 @@ def get_max_chunk_tokens():
 
     # Calculate max chunk size based on the following formula
     embedding_engine = get_vector_engine().embedding_engine
-    llm_client = get_llm_client()
+    llm_client = get_llm_client(raise_api_key_error=False)
 
     # We need to make sure chunk size won't take more than half of LLM max context token size
     # but it also can't be bigger than the embedding engine max token size
@@ -62,7 +63,7 @@ def get_model_max_completion_tokens(model_name: str):
         max_completion_tokens = litellm.model_cost[model_name]["max_tokens"]
         logger.debug(f"Max input tokens for {model_name}: {max_completion_tokens}")
     else:
-        logger.info("Model not found in LiteLLM's model_cost.")
+        logger.debug("Model not found in LiteLLM's model_cost.")
 
     return max_completion_tokens
 
@@ -76,8 +77,7 @@ async def test_llm_connection():
     the connection attempt and re-raise the exception for further handling.
     """
     try:
-        llm_adapter = get_llm_client()
-        await llm_adapter.acreate_structured_output(
+        await LLMGateway.acreate_structured_output(
             text_input="test",
             system_prompt='Respond to me with the following string: "test"',
             response_model=str,

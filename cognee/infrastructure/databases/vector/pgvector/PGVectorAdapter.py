@@ -3,12 +3,11 @@ from typing import List, Optional, get_type_hints
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import JSON, Column, Table, select, delete, MetaData
+from sqlalchemy import JSON, Column, Table, select, delete, MetaData, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.exc import ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from asyncpg import DeadlockDetectedError, DuplicateTableError, UniqueViolationError
-
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
@@ -299,7 +298,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         collection_name: str,
         query_text: Optional[str] = None,
         query_vector: Optional[List[float]] = None,
-        limit: int = 15,
+        limit: Optional[int] = 15,
         with_vector: bool = False,
     ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
@@ -310,6 +309,16 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
+
+        if limit is None:
+            async with self.get_async_session() as session:
+                query = select(func.count()).select_from(PGVectorDataPoint)
+                result = await session.execute(query)
+                limit = result.scalar_one()
+
+        # If limit is still 0, no need to do the search, just return empty results
+        if limit <= 0:
+            return []
 
         # NOTE: This needs to be initialized in case search doesn't return a value
         closest_items = []

@@ -6,6 +6,7 @@ from operator import itemgetter
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.shared.logging_utils import get_logger
@@ -72,7 +73,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         else:
             base_directory = None
 
-        system_prompt = LLMGateway.render_prompt(prompt_path, {}, base_directory=base_directory)
+        system_prompt = render_prompt(prompt_path, {}, base_directory=base_directory)
 
         interval = await LLMGateway.acreate_structured_output(query, system_prompt, QueryInterval)
 
@@ -129,7 +130,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
 
         vector_search_results = await vector_engine.search(
-            collection_name="Event_name", query_vector=query_vector, limit=0
+            collection_name="Event_name", query_vector=query_vector, limit=None
         )
 
         top_k_events = await self.filter_top_k_events(relevant_events, vector_search_results)
