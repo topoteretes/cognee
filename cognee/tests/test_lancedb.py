@@ -108,21 +108,19 @@ async def test_vector_engine_search_none_limit():
 async def main():
     cognee.config.set_vector_db_config(
         {
-            "vector_db_url": "http://localhost:3002",
-            "vector_db_key": "test-token",
-            "vector_db_provider": "chromadb",
+            "vector_db_provider": "lancedb",
         }
     )
 
     data_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_chromadb")
+            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_lancedb")
         ).resolve()
     )
     cognee.config.data_root_directory(data_directory_path)
     cognee_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_chromadb")
+            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_lancedb")
         ).resolve()
     )
     cognee.config.system_root_directory(cognee_directory_path)
@@ -200,8 +198,9 @@ async def main():
     assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
     await cognee.prune.prune_system(metadata=True)
-    tables_in_database = await vector_engine.get_collection_names()
-    assert len(tables_in_database) == 0, "ChromaDB database is not empty"
+    connection = await vector_engine.get_connection()
+    tables_in_database = await connection.table_names()
+    assert len(tables_in_database) == 0, "LanceDB database is not empty"
 
     await test_vector_engine_search_none_limit()
 
