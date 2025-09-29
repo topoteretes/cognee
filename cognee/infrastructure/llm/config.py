@@ -1,9 +1,13 @@
 import os
-from typing import Optional, ClassVar
+from typing import Optional, ClassVar, Any
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
-from baml_py import ClientRegistry
+
+try:
+    from baml_py import ClientRegistry
+except ImportError:
+    ClientRegistry = None
 
 
 class LLMConfig(BaseSettings):
@@ -65,25 +69,36 @@ class LLMConfig(BaseSettings):
     fallback_endpoint: str = ""
     fallback_model: str = ""
 
-    baml_registry: ClassVar[ClientRegistry] = ClientRegistry()
+    baml_registry: Optional[Any] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def model_post_init(self, __context) -> None:
         """Initialize the BAML registry after the model is created."""
-        self.baml_registry.add_llm_client(
-            name=self.baml_llm_provider,
-            provider=self.baml_llm_provider,
-            options={
+        # Check if BAML is selected as structured output framework but not available
+        if self.structured_output_framework.lower() == "baml" and ClientRegistry is None:
+            raise ImportError(
+                "BAML is selected as structured output framework but not available. "
+                "Please install with 'pip install cognee\"[baml]\"' to use BAML extraction features."
+            )
+        elif self.structured_output_framework.lower() == "baml" and ClientRegistry is not None:
+            self.baml_registry = ClientRegistry()
+
+            raw_options = {
                 "model": self.baml_llm_model,
                 "temperature": self.baml_llm_temperature,
                 "api_key": self.baml_llm_api_key,
                 "base_url": self.baml_llm_endpoint,
                 "api_version": self.baml_llm_api_version,
-            },
-        )
-        # Sets the primary client
-        self.baml_registry.set_primary(self.baml_llm_provider)
+            }
+
+            # Note: keep the item only when the value is not None or an empty string (they would override baml default values)
+            options = {k: v for k, v in raw_options.items() if v not in (None, "")}
+            self.baml_registry.add_llm_client(
+                name=self.baml_llm_provider, provider=self.baml_llm_provider, options=options
+            )
+            # Sets the primary client
+            self.baml_registry.set_primary(self.baml_llm_provider)
 
     @model_validator(mode="after")
     def ensure_env_vars_for_ollama(self) -> "LLMConfig":

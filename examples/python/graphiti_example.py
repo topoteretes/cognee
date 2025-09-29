@@ -12,6 +12,7 @@ from cognee.tasks.temporal_awareness.index_graphiti_objects import (
 )
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.modules.users.methods import get_default_user
 
@@ -47,7 +48,6 @@ async def main():
     query = "When was Kamala Harris in office?"
     triplets = await brute_force_triplet_search(
         query=query,
-        user=user,
         top_k=3,
         collections=["graphitinode_content", "graphitinode_name", "graphitinode_summary"],
     )
@@ -60,8 +60,8 @@ async def main():
         "context": context,
     }
 
-    user_prompt = LLMGateway.render_prompt("graph_context_for_question.txt", args)
-    system_prompt = LLMGateway.read_query_prompt("answer_simple_question_restricted.txt")
+    user_prompt = render_prompt("graph_context_for_question.txt", args)
+    system_prompt = read_query_prompt("answer_simple_question_restricted.txt")
 
     computed_answer = await LLMGateway.acreate_structured_output(
         text_input=user_prompt,
