@@ -10,7 +10,6 @@ class DatabaseSchema(DataPoint):
     database_type: str  # sqlite, postgres, etc.
     tables: str  # Reuse existing schema format from SqlAlchemyAdapter
     sample_data: str  # Limited examples per table
-    extraction_timestamp: str
     description: str
     metadata: dict = {"index_fields": ["description", "name"]}
 
