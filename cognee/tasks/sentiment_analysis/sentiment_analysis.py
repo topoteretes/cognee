@@ -21,7 +21,6 @@ async def run_sentiment_analysis(prev_question: str, prev_answer: str, current_q
         system_prompt="""Classify the user's reaction as Positive, Neutral, or Negative with a score (-5 to 5).Return the result as valid JSON like:{"sentiment": "Positive","score": 3}""",
         response_model= CogneeSearchSentiment  
     )
-    # print(sentiment_result)
     sentiment_data_point = CogneeSearchSentiment(
         id=uuid5(NAMESPACE_OID, name=user_id + current_question),
         prev_question=prev_question,
@@ -32,7 +31,6 @@ async def run_sentiment_analysis(prev_question: str, prev_answer: str, current_q
         user_id=user_id,
         belongs_to_set=NodeSet(id=uuid5(NAMESPACE_OID, "CogneeSearchSentiment"), name="CogneeSearchSentiment")
     )
-    # print(sentiment_data_point)
     await add_data_points(data_points=[sentiment_data_point], update_edge_collection=True)
     return {
         "prev_question" : prev_question,

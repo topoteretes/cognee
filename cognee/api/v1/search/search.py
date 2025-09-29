@@ -188,8 +188,6 @@ async def search(
         prev_answer=last_interactions[0]['answer'],
         current_question=query_text,
         user=User)
-        # print(results)
-        # print('here i am and this is interaction',last_interactions[0]['question'],last_interactions[0]['answer'],query_text)
     ######################
     if isinstance(datasets, UUID) or isinstance(datasets, str):
         datasets = [datasets]
