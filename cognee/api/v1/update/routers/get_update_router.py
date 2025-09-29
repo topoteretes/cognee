@@ -27,6 +27,35 @@ def get_update_router() -> APIRouter:
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
         user: User = Depends(get_authenticated_user),
     ):
+        """
+        Update data in a dataset.
+
+        This endpoint updates existing documents in a specified dataset by providing the data_id of the existing document
+        to update and the new document with the changes as the data.
+        The document is updated, analyzed, and the changes are integrated into the knowledge graph.
+
+        ## Request Parameters
+        - **data_id** (UUID): UUID of the document to update in Cognee memory
+        - **data** (List[UploadFile]): List of files to upload.
+        - **datasetId** (Optional[UUID]): UUID of an already existing dataset
+        - **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.
+                 Used for grouping related data points in the knowledge graph.
+
+        ## Response
+        Returns information about the add operation containing:
+        - Status of the operation
+        - Details about the processed data
+        - Any relevant metadata from the ingestion process
+
+        ## Error Codes
+        - **400 Bad Request**: Neither datasetId nor datasetName provided
+        - **409 Conflict**: Error during add operation
+        - **403 Forbidden**: User doesn't have permission to add to dataset
+
+        ## Notes
+        - To add data to datasets not owned by the user, use dataset_id (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)
+        - datasetId value can only be the UUID of an already existing dataset
+        """
         send_telemetry(
             "Update API Endpoint Invoked",
             user.id,
