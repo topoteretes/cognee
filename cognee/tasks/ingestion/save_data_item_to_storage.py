@@ -27,6 +27,12 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
 
         return await get_data_from_llama_index(data_item)
 
+    from docling_core.types import DoclingDocument
+
+    if isinstance(data_item, DoclingDocument):
+        # Convert DoclingDocument to plain text and continue processing file
+        data_item = data_item.export_to_text()
+
     # data is a file object coming from upload.
     if hasattr(data_item, "file"):
         return await save_data_to_file(data_item.file, filename=data_item.filename)
