@@ -68,6 +68,44 @@ async def test_getting_of_documents(dataset_name_1):
     )
 
 
+async def test_vector_engine_search_none_limit():
+    file_path_quantum = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
+    )
+
+    file_path_nlp = os.path.join(
+        pathlib.Path(__file__).parent,
+        "test_data/Natural_language_processing.txt",
+    )
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    await cognee.add(file_path_quantum)
+
+    await cognee.add(file_path_nlp)
+
+    await cognee.cognify()
+
+    query_text = "Tell me about Quantum computers"
+
+    from cognee.infrastructure.databases.vector import get_vector_engine
+
+    vector_engine = get_vector_engine()
+
+    collection_name = "Entity_name"
+
+    query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
+
+    result = await vector_engine.search(
+        collection_name=collection_name, query_vector=query_vector, limit=None
+    )
+
+    # Check that we did not accidentally use any default value for limit
+    # in vector search along the way (like 5, 10, or 15)
+    assert len(result) > 15
+
+
 async def main():
     cognee.config.set_vector_db_config(
         {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "pgvector"}
@@ -173,6 +211,8 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
     tables_in_database = await vector_engine.get_table_names()
     assert len(tables_in_database) == 0, "PostgreSQL database is not empty"
+
+    await test_vector_engine_search_none_limit()
 
 
 if __name__ == "__main__":

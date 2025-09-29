@@ -9,6 +9,8 @@ const backendApiUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localho
 
 const cloudApiUrl = process.env.NEXT_PUBLIC_CLOUD_API_URL || "http://localhost:8001";
 
+const mcpApiUrl = process.env.NEXT_PUBLIC_MCP_API_URL || "http://localhost:8001";
+
 let apiKey: string | null = process.env.NEXT_PUBLIC_COGWIT_API_KEY || null;
 let accessToken: string | null = null;
 
@@ -64,6 +66,10 @@ export default async function fetch(url: string, options: RequestInit = {}, useC
 
 fetch.checkHealth = () => {
   return global.fetch(`${backendApiUrl.replace("/api", "")}/health`);
+};
+
+fetch.checkMCPHealth = () => {
+  return global.fetch(`${mcpApiUrl.replace("/api", "")}/health`);
 };
 
 fetch.setApiKey = (newApiKey: string) => {
