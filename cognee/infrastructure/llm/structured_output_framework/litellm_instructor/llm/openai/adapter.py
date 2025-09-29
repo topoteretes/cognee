@@ -29,9 +29,6 @@ observe = get_observe()
 
 logger = get_logger()
 
-# litellm to drop unsupported params, e.g., reasoning_effort when not supported by the model.
-litellm.drop_params = True
-
 
 class OpenAIAdapter(LLMInterface):
     """
@@ -76,8 +73,8 @@ class OpenAIAdapter(LLMInterface):
         fallback_api_key: str = None,
         fallback_endpoint: str = None,
     ):
-        self.aclient = instructor.from_litellm(litellm.acompletion)
-        self.client = instructor.from_litellm(litellm.completion)
+        self.aclient = instructor.from_litellm(litellm.acompletion, mode=instructor.Mode.JSON)
+        self.client = instructor.from_litellm(litellm.completion, mode=instructor.Mode.JSON)
         self.transcription_model = transcription_model
         self.model = model
         self.api_key = api_key
@@ -135,7 +132,6 @@ class OpenAIAdapter(LLMInterface):
                 api_version=self.api_version,
                 response_model=response_model,
                 max_retries=self.MAX_RETRIES,
-                reasoning_effort="minimal",
             )
         except (
             ContentFilterFinishReasonError,
@@ -223,7 +219,6 @@ class OpenAIAdapter(LLMInterface):
             api_base=self.endpoint,
             api_version=self.api_version,
             response_model=response_model,
-            reasoning_effort="minimal",
             max_retries=self.MAX_RETRIES,
         )
 
