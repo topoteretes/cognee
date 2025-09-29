@@ -29,8 +29,11 @@ async def main():
     print("=" * 60)
 
     # Start the UI server
+    def dummy_callback(pid):
+        pass
+
     server = cognee.start_ui(
-        host="localhost",
+        pid_callback=dummy_callback,
         port=3000,
         open_browser=True,  # This will automatically open your browser
     )
