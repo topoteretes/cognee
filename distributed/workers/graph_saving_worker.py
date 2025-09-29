@@ -49,6 +49,7 @@ async def graph_saving_worker():
     graph_engine = await get_graph_engine()
 
     BATCH_SIZE = 20
+    stop_seen = False
 
     while True:
         if await add_nodes_and_edges_queue.len.aio() != 0:
@@ -65,10 +66,8 @@ async def graph_saving_worker():
 
                     if nodes_and_edges == QueueSignal.STOP:
                         await add_nodes_and_edges_queue.put.aio(QueueSignal.STOP)
-                        print(
-                            "Finished processing all nodes and edges; stopping graph engine queue."
-                        )
-                        return True
+                        stop_seen = True
+                        break
 
                     if len(nodes_and_edges) == 2:
                         nodes, edges = nodes_and_edges
@@ -111,6 +110,11 @@ async def graph_saving_worker():
                         await save_graph_edges(all_edges)
 
                     print("Finished adding nodes and edges.")
+
+                if stop_seen:
+                    print("Finished processing all data points; stopping vector engine queue.")
+                    return True
+
 
             except modal.exception.DeserializationError as error:
                 logger.error(f"Deserialization error: {str(error)}")
