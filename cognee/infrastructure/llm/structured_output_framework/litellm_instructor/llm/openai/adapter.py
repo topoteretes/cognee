@@ -73,8 +73,10 @@ class OpenAIAdapter(LLMInterface):
         fallback_api_key: str = None,
         fallback_endpoint: str = None,
     ):
-        self.aclient = instructor.from_litellm(litellm.acompletion, mode=instructor.Mode.JSON)
-        self.client = instructor.from_litellm(litellm.completion, mode=instructor.Mode.JSON)
+        self.aclient = instructor.from_litellm(
+            litellm.acompletion, mode=instructor.Mode.JSON_SCHEMA
+        )
+        self.client = instructor.from_litellm(litellm.completion, mode=instructor.Mode.JSON_SCHEMA)
         self.transcription_model = transcription_model
         self.model = model
         self.api_key = api_key
