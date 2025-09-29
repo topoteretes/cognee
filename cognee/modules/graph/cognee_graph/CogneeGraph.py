@@ -161,7 +161,7 @@ class CogneeGraph(CogneeAbstractGraph):
                 edge_distances = await vector_engine.search(
                     collection_name="EdgeType_relationship_name",
                     query_vector=query_vector,
-                    limit=0,
+                    limit=None,
                 )
                 projection_time = time.time() - start_time
                 logger.info(
