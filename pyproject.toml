@@ -142,6 +142,7 @@ Homepage = "https://www.cognee.ai"
 Repository = "https://github.com/topoteretes/cognee"
 
 [project.scripts]
+cognee = "cognee.cli._cognee:main"
 cognee-cli = "cognee.cli._cognee:main"
 
 [build-system]
