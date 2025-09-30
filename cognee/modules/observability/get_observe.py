@@ -9,12 +9,6 @@ def get_observe():
         from langfuse.decorators import observe
 
         return observe
-        # Return a no-op decorator for other monitoring tools
-        def noop_decorator(*args, **kwargs):
-            def wrapper(func):
-                return func
-            return wrapper
-        return noop_decorator
     elif monitoring == Observer.NONE:
         # Return a no-op decorator that handles keyword arguments
         def no_op_decorator(*args, **kwargs):
