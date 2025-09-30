@@ -1,4 +1,3 @@
-
 # pylint: disable=R0903, W0221
 """This module provides content translation capabilities for the Cognee framework."""
 import asyncio
@@ -9,14 +8,6 @@ from typing import Any, Dict, Tuple, Optional
 from cognee.shared.logging_utils import get_logger
 from .models import TranslatedContent, LanguageMetadata
 from .translation_providers_enum import TranslationProviderEnum, TranslationProvider
-from .translation_errors import (
-    TranslationDependencyError,
-    LangDetectError,
-    GoogleTranslateError,
-    AzureTranslateError,
-    AzureConfigError,
-    UnknownProviderError,
-)
 from .translation_registry import (
     register_translation_provider,
     get_available_providers,
@@ -80,14 +71,6 @@ class TranslationContext:  # pylint: disable=too-many-instance-attributes
             self.content_id = "unknown"
 
 from .translation_providers_enum import TranslationProviderEnum, TranslationProvider
-from .translation_errors import (
-    TranslationDependencyError,
-    LangDetectError,
-    GoogleTranslateError,
-    AzureTranslateError,
-    AzureConfigError,
-    UnknownProviderError,
-)
 from .translation_registry import (
     register_translation_provider,
     get_available_providers,
@@ -101,6 +84,16 @@ from .translation_providers.google_provider import GoogleTranslateProvider
 from .translation_providers.azure_provider import AzureTranslateProvider
 from .translation_providers.langdetect_provider import LangDetectProvider
 from .translation_providers.noop_provider import NoopProvider
+
+class TranslationProviderError(ValueError):
+    """Error related to translation provider initialization."""
+    pass
+
+class UnknownTranslationProviderError(TranslationProviderError):
+    """Unknown translation provider name."""
+
+class ProviderInitializationError(TranslationProviderError):
+    """Provider failed to initialize (likely missing dependency or bad config)."""
 
 def _get_provider(translation_provider: str) -> TranslationProvider:
     """Resolve and instantiate a registered translation provider by name."""
