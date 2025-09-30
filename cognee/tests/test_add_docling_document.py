@@ -3,9 +3,6 @@ import cognee
 
 import os
 
-# Provide your OpenAI LLM API KEY
-os.environ["LLM_API_KEY"] = ""
-
 
 async def main():
     # Get file path to document to process
