@@ -10,7 +10,6 @@ from distributed.app import app
 from distributed.queues import add_nodes_and_edges_queue, add_data_points_queue
 from distributed.workers.graph_saving_worker import graph_saving_worker
 from distributed.workers.data_point_saving_worker import data_point_saving_worker
-from cognee.api.v1.search import SearchType
 from distributed.signal import QueueSignal
 
 logger = get_logger()
@@ -25,13 +24,14 @@ async def main():
     await add_nodes_and_edges_queue.clear.aio()
     await add_data_points_queue.clear.aio()
 
-    number_of_graph_saving_workers = 1  # Total number of graph_saving_worker to spawn
-    number_of_data_point_saving_workers = 5  # Total number of graph_saving_worker to spawn
+    number_of_graph_saving_workers = 1  # Total number of graph_saving_worker to spawn (MAX 1)
+    number_of_data_point_saving_workers = (
+        10  # Total number of graph_saving_worker to spawn (MAX 10)
+    )
 
-    results = []
     consumer_futures = []
 
-    # await prune.prune_data()  # We don't want to delete files on s3
+    await prune.prune_data()  # This prunes the data from the file storage
     # Delete DBs and saved files from metastore
     await prune.prune_system(metadata=True)
 
@@ -47,13 +47,40 @@ async def main():
         worker_future = data_point_saving_worker.spawn()
         consumer_futures.append(worker_future)
 
-    # s3_bucket_path = os.getenv("S3_BUCKET_PATH")
-    # s3_data_path = "s3://" + s3_bucket_path
+    """ Example: Setting and adding S3 path as input
+    s3_bucket_path = os.getenv("S3_BUCKET_PATH")
+    s3_data_path = "s3://" + s3_bucket_path
 
-    # await cognee.add(s3_data_path, dataset_name="s3-files")
-
+    await cognee.add(s3_data_path, dataset_name="s3-files")
+    """
     await cognee.add(
-        ["Audi is a german car manufacturer", "Netherlands is next to Germany"],
+        [
+            "Audi is a German car manufacturer",
+            "The Netherlands is next to Germany",
+            "Berlin is the capital of Germany",
+            "The Rhine is a major European river",
+            "BMW produces luxury vehicles",
+            "The Alps are located in Europe",
+            "Paris is the capital of France",
+            "Vienna is famous for classical music",
+            "The Danube flows through many countries",
+            "Switzerland is known for its mountains",
+            "Amsterdam has many canals",
+            "Italy is famous for pasta and pizza",
+            "Spain borders Portugal",
+            "The Eiffel Tower is in Paris",
+            "Prague is the capital of the Czech Republic",
+            "Poland shares a border with Germany",
+            "Mercedes-Benz is a German brand",
+            "London is on the River Thames",
+            "Greece is known for ancient history",
+            "Norway has many fjords",
+            "Finland is part of Scandinavia",
+            "The Baltic Sea touches several countries",
+            "Hungary's capital is Budapest",
+            "The Euro is used in many EU countries",
+            "The Vatican is the smallest country in the world",
+        ],
         dataset_name="s3-files",
     )
 
@@ -69,13 +96,6 @@ async def main():
             print(f"All workers are done: {consumer_final}")
         except Exception as e:
             logger.error(e)
-
-    print(results)
-
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION, query_text="What is in the context?"
-    )
-    print(search_results)
 
 
 if __name__ == "__main__":
