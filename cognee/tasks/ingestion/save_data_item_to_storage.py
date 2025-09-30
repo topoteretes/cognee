@@ -29,6 +29,7 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
 
     if "docling" in str(type(data_item)):
         from docling_core.types import DoclingDocument
+
         if isinstance(data_item, DoclingDocument):
             data_item = data_item.export_to_text()
 
