@@ -200,8 +200,8 @@ async def _translate_and_update(translation_context: TranslationContext) -> None
             }
 
 async def _process_chunk(chunk, plan, provider_cache):
-    # Unpack plan: (target_language, primary_key, fallback_providers, confidence_threshold)
-    target_language, primary_key, fallback_providers, confidence_threshold = plan
+    # Unpack plan: (target_language, primary_key, fallback_providers, confidence_threshold, detection_provider_name)
+    target_language, primary_key, fallback_providers, confidence_threshold, detection_provider_name = plan
     try:
         provider = provider_cache.get(primary_key)
         if provider is None:
@@ -228,9 +228,25 @@ async def _process_chunk(chunk, plan, provider_cache):
         confidence_threshold=confidence_threshold,
     )
 
-    translation_context.detected_language, translation_context.detection_confidence = await _detect_language_with_fallback(
-        provider, text_to_translate, str(translation_context.content_id)
-    )
+    # Attempt detection using the requested detection provider; fall back to the provider's detection or langdetect
+    detection = None
+    try:
+        detector_cls = get_provider_class(detection_provider_name)
+        detector = detector_cls()
+        if hasattr(detector, "detect_language"):
+            detection = await detector.detect_language(text_to_translate)
+    except Exception:
+        detection = None
+
+    if detection is None:
+        # Fallback to original detection-with-fallback semantics
+        translation_context.detected_language, translation_context.detection_confidence = await _detect_language_with_fallback(
+            provider, text_to_translate, str(translation_context.content_id)
+        )
+    else:
+        lang_code, confidence = detection
+        translation_context.detected_language = _normalize_lang_code(lang_code)
+        translation_context.detection_confidence = _normalize_confidence(confidence)
 
     _decide_if_translation_is_required(translation_context)
     _attach_language_metadata(translation_context)
@@ -313,13 +329,14 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
     primary_key, fallback_providers = _build_provider_plan(
         translation_provider_name, kwargs.get("fallback_providers", [])
     )
+    detection_provider_name = kwargs.get("detection_provider", "langdetect")
     confidence_threshold = kwargs.get("confidence_threshold", CONFIDENCE_THRESHOLD)
 
     # Provider cache for this batch to reduce instantiation overhead
     provider_cache: Dict[str, Any] = {}
     
     # Bundle plan parameters to reduce argument count
-    plan = (target_language, primary_key, fallback_providers, confidence_threshold)
+    plan = (target_language, primary_key, fallback_providers, confidence_threshold, detection_provider_name)
     
     # Parse concurrency with error handling
     try:

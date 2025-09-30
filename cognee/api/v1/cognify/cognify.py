@@ -34,7 +34,7 @@ from cognee.tasks.documents import (
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
-from cognee.tasks.translation import translate_content, get_available_providers, validate_provider
+from cognee.tasks.translation import translate_content, get_available_providers, validate_provider, get_available_detectors
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 
 
@@ -375,6 +375,7 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
     ontology_file_path: Optional[str] = None,
     custom_prompt: Optional[str] = None,
     translation_provider: str = "noop",
+    detection_provider: str = "langdetect",
     target_language: str = "en",
 ) -> list[Task]:
     """
@@ -395,6 +396,7 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
     """
     # Fail fast on unknown providers (keeps errors close to the API surface)
     translation_provider = (translation_provider or "noop").strip().lower()
+    detection_provider = (detection_provider or "langdetect").strip().lower()
     # Validate provider using public API
     if translation_provider not in get_available_providers():
         available = ", ".join(get_available_providers())
@@ -402,6 +404,10 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
         raise UnknownTranslationProviderError(
             f"Unknown provider '{translation_provider}'. Available: {available}"
         )
+    # Validate detection provider is a known detector
+    if detection_provider not in get_available_detectors():
+        available_detectors = ", ".join(get_available_detectors())
+        raise ValueError(f"Invalid detection provider '{detection_provider}'. Available detectors: {available_detectors}")
     # Instantiate to validate dependencies; include provider-specific config errors
     try:
         validate_provider(translation_provider)
@@ -430,6 +436,7 @@ def get_default_tasks_with_translation(  # pylint: disable=too-many-arguments,to
             translate_content,
             target_language=target_language,
             translation_provider=translation_provider,
+            detection_provider=detection_provider,
             task_config={"batch_size": DEFAULT_BATCH_SIZE},
         ),  # Auto-translate non-English content and attach metadata
         Task(

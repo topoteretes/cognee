@@ -11,6 +11,17 @@ def get_available_providers() -> list:
     """Return a sorted list of available provider keys."""
     return sorted(_provider_registry.keys())
 
+
+def get_available_detectors() -> list:
+    """Return a sorted list of registered providers that implement language detection.
+
+    This inspects the registered provider classes and returns those whose class
+    defines a `detect_language` attribute/method. Detectors are a subset of
+    providers and may be used independently for detection tasks.
+    """
+    detectors = [name for name, cls in _provider_registry.items() if hasattr(cls, "detect_language")]
+    return sorted(detectors)
+
 def get_provider_class(name: str) -> Type[TranslationProvider]:
     """Get a provider class by name, or raise KeyError if not found."""
     return _provider_registry[name.lower()]
