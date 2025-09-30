@@ -48,7 +48,7 @@ async def graph_saving_worker():
     print("Started processing of nodes and edges; starting graph engine queue.")
     graph_engine = await get_graph_engine()
 
-    BATCH_SIZE = 20
+    BATCH_SIZE = 25
     stop_seen = False
 
     while True:

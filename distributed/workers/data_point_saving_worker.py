@@ -50,7 +50,7 @@ async def data_point_saving_worker():
     print("Started processing of data points; starting vector engine queue.")
     vector_engine = get_vector_engine()
 
-    BATCH_SIZE = 20
+    BATCH_SIZE = 25
     stop_seen = False
 
     while True:
