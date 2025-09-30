@@ -166,9 +166,6 @@ jobs:
             python-version: '3.11.x'
             extra-dependencies: "aws"
 
-        - name: Dependencies already installed
-          run: echo "Dependencies already installed in setup"
-
         - name: Run S3 Bucket Test
           env:
             ENV: 'dev'

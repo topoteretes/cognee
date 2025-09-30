@@ -205,9 +205,12 @@ class LanceDBAdapter(VectorDBInterface):
         collection = await self.get_collection(collection_name)
 
         if len(data_point_ids) == 1:
-            results = await collection.query().where(f"id = '{data_point_ids[0]}'").to_pandas()
+            results = await collection.query().where(f"id = '{data_point_ids[0]}'")
         else:
-            results = await collection.query().where(f"id IN {tuple(data_point_ids)}").to_pandas()
+            results = await collection.query().where(f"id IN {tuple(data_point_ids)}")
+
+        # Convert query results to list format
+        results_list = results.to_list() if hasattr(results, "to_list") else list(results)
 
         return [
             ScoredResult(
@@ -215,7 +218,7 @@ class LanceDBAdapter(VectorDBInterface):
                 payload=result["payload"],
                 score=0,
             )
-            for result in results.to_dict("index").values()
+            for result in results_list
         ]
 
     async def search(
@@ -223,7 +226,7 @@ class LanceDBAdapter(VectorDBInterface):
         collection_name: str,
         query_text: str = None,
         query_vector: List[float] = None,
-        limit: int = 15,
+        limit: Optional[int] = 15,
         with_vector: bool = False,
         normalized: bool = True,
     ):
@@ -235,16 +238,14 @@ class LanceDBAdapter(VectorDBInterface):
 
         collection = await self.get_collection(collection_name)
 
-        if limit == 0:
+        if limit is None:
             limit = await collection.count_rows()
 
         # LanceDB search will break if limit is 0 so we must return
-        if limit == 0:
+        if limit <= 0:
             return []
 
-        results = await collection.vector_search(query_vector).limit(limit).to_pandas()
-
-        result_values = list(results.to_dict("index").values())
+        result_values = await collection.vector_search(query_vector).limit(limit).to_list()
 
         if not result_values:
             return []
@@ -264,7 +265,7 @@ class LanceDBAdapter(VectorDBInterface):
         self,
         collection_name: str,
         query_texts: List[str],
-        limit: int = None,
+        limit: Optional[int] = None,
         with_vectors: bool = False,
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
