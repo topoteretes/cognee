@@ -26,11 +26,6 @@ from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 
 observe = get_observe()
-if observe is None:
-    def observe(*args, **kwargs):
-        def wrapper(func):
-            return func
-        return wrapper
 
 logger = get_logger()
 
