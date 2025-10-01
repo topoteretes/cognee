@@ -21,7 +21,7 @@ cognee_path = str(repo_root)
 if cognee_path not in sys.path:
     sys.path.insert(0, cognee_path)
 
-from cognee.infrastructure.loaders.core.csv_loader import CsvLoader
+from cognee.infrastructure.loaders.external.csv_loader import CsvLoader
 from cognee.modules.chunking.CSVChunker import CSVChunker
 from cognee.modules.data.processing.document_types import Document
 from uuid import uuid4

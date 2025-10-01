@@ -278,22 +278,21 @@ class CsvLoader(LoaderInterface):
             if value is None:
                 row_parts.append(f"  {field}: [null]")
             elif isinstance(value, str):
-                # Clean and escape multiline values to preserve row boundaries
-                value_str = value.strip()
-                if value_str:
-                    # Replace newlines and other problematic characters to maintain structure
-                    escaped_value = value_str.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
-                    row_parts.append(f"  {field}: {escaped_value}")
-                else:
+                # Preserve exact string content, only escape control characters
+                if value == "":
                     row_parts.append(f"  {field}: [empty]")
+                else:
+                    # Escape only control characters to maintain structure
+                    escaped_value = value.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                    row_parts.append(f"  {field}: {escaped_value}")
             else:
-                # For non-string values, convert safely
-                value_str = str(value).strip()
-                if value_str:
-                    # Escape any newlines that might be in converted string
+                # For non-string values, convert safely without stripping
+                value_str = str(value)
+                if value_str == "":
+                    row_parts.append(f"  {field}: [empty]")
+                else:
+                    # Escape control characters in converted string
                     escaped_value = value_str.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
                     row_parts.append(f"  {field}: {escaped_value}")
-                else:
-                    row_parts.append(f"  {field}: [empty]")
 
         return "\n".join(row_parts) + "\n"

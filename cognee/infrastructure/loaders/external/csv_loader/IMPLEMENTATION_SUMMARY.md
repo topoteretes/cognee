@@ -6,7 +6,7 @@ I have successfully implemented a dedicated CSV ingestion pipeline for Cognee th
 ## What Was Implemented
 
 ### 1. Custom CSV Loader (`CsvLoader`)
-**File**: `/workspaces/cognee/cognee/infrastructure/loaders/core/csv_loader.py`
+**File**: `/workspaces/cognee/cognee/infrastructure/loaders/external/csv_loader/csv_loader.py`
 
 **Features**:
 - Implements the `LoaderInterface` for consistent integration
