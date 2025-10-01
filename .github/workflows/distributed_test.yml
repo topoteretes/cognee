@@ -43,7 +43,7 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "distributed"
 
-      - name: Run Server Tests
+      - name: Run Distributed Cognee (Modal)
         env:
           ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
