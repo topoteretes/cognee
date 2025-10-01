@@ -41,6 +41,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
+          extra-dependencies: "distributed"
 
       - name: Run Server Tests
         env:
