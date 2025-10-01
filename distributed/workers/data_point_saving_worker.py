@@ -38,13 +38,13 @@ def is_deadlock_error(error):
 
     return False
 
-
+secret_name = os.environ.get("MODAL_SECRET_NAME", "distributed_cognee")
 @app.function(
     retries=3,
     image=image,
     timeout=86400,
     max_containers=10,
-    secrets=[modal.Secret.from_name("distributed_cognee")],
+    secrets=[modal.Secret.from_name(secret_name)],
 )
 async def data_point_saving_worker():
     print("Started processing of data points; starting vector engine queue.")

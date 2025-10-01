@@ -30,15 +30,18 @@ from .run_tasks_data_item import run_tasks_data_item
 logger = get_logger("run_tasks_distributed()")
 
 if modal:
+    import os
     from distributed.app import app
     from distributed.modal_image import image
+
+    secret_name = os.environ.get("MODAL_SECRET_NAME", "distributed_cognee")
 
     @app.function(
         retries=3,
         image=image,
         timeout=86400,
         max_containers=50,
-        secrets=[modal.Secret.from_name("distributed_cognee")],
+        secrets=[modal.Secret.from_name(secret_name)],
     )
     async def run_tasks_on_modal(
         data_item,

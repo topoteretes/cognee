@@ -56,4 +56,5 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          MODAL_SECRET_NAME: ${{ secrets.MODAL_SECRET_NAME }}
         run: uv run modal run ./distributed/entrypoint.py
