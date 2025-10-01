@@ -27,6 +27,11 @@ jobs:
     uses: ./.github/workflows/e2e_tests.yml
     secrets: inherit
 
+  distributed-tests:
+    name: Distributed Cognee Test
+    uses: ./.github/workflows/distributed_test.yml
+    secrets: inherit
+
   cli-tests:
     name: CLI Tests
     uses: ./.github/workflows/cli_tests.yml
