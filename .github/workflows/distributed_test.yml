@@ -1,5 +1,6 @@
 name: Distributed Cognee test with modal
-
+permissions:
+  contents: read
 on:
   workflow_call:
     inputs:
