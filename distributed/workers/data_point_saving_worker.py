@@ -1,3 +1,4 @@
+import os
 import modal
 import asyncio
 from sqlalchemy.exc import OperationalError, DBAPIError
