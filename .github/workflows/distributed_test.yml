@@ -59,9 +59,9 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           MODAL_SECRET_NAME: ${{ secrets.MODAL_SECRET_NAME }}
           GRAPH_DATABASE_PROVIDER: "neo4j"
-          GRAPH_DATABASE_URL: ${{ secrets.NEO4J_API_URL }}
-          GRAPH_DATABASE_USERNAME: "neo4j"
-          GRAPH_DATABASE_PASSWORD: ${{ secrets.NEO4J_API_KEY }}
+          GRAPH_DATABASE_URL: ${{ secrets.AZURE_NEO4j_URL }}
+          GRAPH_DATABASE_USERNAME: ${{ secrets.AZURE_NEO4J_USERNAME }}
+          GRAPH_DATABASE_PASSWORD: ${{ secrets.AZURE_NEO4J_PW }}
           DB_PROVIDER: "postgres"
           DB_NAME: ${{ secrets.AZURE_POSTGRES_DB_NAME }}
           DB_HOST: ${{ secrets.AZURE_POSTGRES_HOST }}
