@@ -1,7 +1,7 @@
 from tavily import AsyncTavilyClient
 from bs4 import BeautifulSoup
 import os
-import requests
+import httpx
 from typing import Dict, Any, List, Union
 from cognee.shared.logging_utils import get_logger
 
@@ -42,15 +42,17 @@ async def fetch_with_bs4(urls: Union[str, List[str]], extraction_rules: Dict) ->
     result_dict = {}
     if isinstance(urls, str):
         urls = [urls]
-    for url in urls:
-        response = requests.get(url, headers={"User-Agent": "Cognee-Scraper"})
-        response.raise_for_status()
+    async with httpx.AsyncClient(headers={"User-Agent": "Cognee-Scraper"}) as client:
+        for url in urls:
+            response = await client.get(url)
+            response.raise_for_status()
 
-        soup = BeautifulSoup(response.text, "html.parser")
-        extracted_data = ""
+            soup = BeautifulSoup(response.text, "html.parser")
+            extracted_data = ""
+            for field, selector in extraction_rules.items():
+                element = soup.select_one(selector)
+                extracted_data += (element.get_text(strip=True) + "\n") if element else ""
 
-        for field, selector in extraction_rules.items():
-            element = soup.select_one(selector)
-            extracted_data += element.get_text(strip=True) if element else ""
+            result_dict[url] = extracted_data.strip()
 
     return result_dict
