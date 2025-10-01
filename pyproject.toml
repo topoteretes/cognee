@@ -75,7 +75,8 @@ distributed = [
 ]
 scraping = [
     "tavily-python>=0.7.0",
-    "beautifulsoup4>=4.13.1"
+    "beautifulsoup4>=4.13.1",
+    "playwright>=1.9.0",
 ]
 neo4j = ["neo4j>=5.28.0,<6"]
 neptune = ["langchain_aws>=0.2.22"]
