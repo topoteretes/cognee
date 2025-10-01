@@ -1,4 +1,4 @@
-name: Reusable Integration Tests
+name: Distributed Cognee test with modal
 
 on:
   workflow_call:
@@ -29,7 +29,7 @@ on:
 
 jobs:
   run-server-start-test:
-    name: Server Start Test
+    name: Distributed Cognee test (Modal)
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
