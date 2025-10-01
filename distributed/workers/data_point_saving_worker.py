@@ -39,7 +39,10 @@ def is_deadlock_error(error):
 
     return False
 
+
 secret_name = os.environ.get("MODAL_SECRET_NAME", "distributed_cognee")
+
+
 @app.function(
     retries=3,
     image=image,
