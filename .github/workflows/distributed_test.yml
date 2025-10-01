@@ -69,4 +69,5 @@ jobs:
           DB_USERNAME: ${{ secrets.AZURE_POSTGRES_USERNAME }}
           DB_PASSWORD: ${{ secrets.AZURE_POSTGRES_PW }}
           VECTOR_DB_PROVIDER: "pgvector"
+          COGNEE_DISTRIBUTED: "true"
         run: uv run modal run ./distributed/entrypoint.py
