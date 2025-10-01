@@ -39,6 +39,10 @@ dependencies = [
     "langfuse>=2.32.0,<3",
     "filetype>=1.2.0,<2.0.0",
     "aiohttp>=3.11.14,<4.0.0",
+    # httpx/httpcore pinned for compatibility with googletrans (prevents
+    # "module 'httpcore' has no attribute 'SyncHTTPTransport'" errors)
+    "httpx==0.23.3",
+    "httpcore==0.13.7",
     "aiofiles>=23.2.1,<24.0.0",
     "rdflib>=7.1.4,<7.2.0",
     "pypdf>=4.1.0,<7.0.0",
