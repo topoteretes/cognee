@@ -57,4 +57,8 @@ jobs:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           MODAL_SECRET_NAME: ${{ secrets.MODAL_SECRET_NAME }}
+          GRAPH_DATABASE_PROVIDER: "neo4j"
+          GRAPH_DATABASE_URL: ${{ secrets.NEO4J_API_URL }}
+          GRAPH_DATABASE_USERNAME: "neo4j"
+          GRAPH_DATABASE_PASSWORD: ${{ secrets.NEO4J_API_KEY }}
         run: uv run modal run ./distributed/entrypoint.py
