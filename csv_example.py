@@ -124,24 +124,47 @@ async def cognee_integration_example():
     print("\n" + "=" * 50)
     print("Cognee Integration Example")
     print("=" * 50)
-
-    print("To use this in a full cognee pipeline:")
-    print()
-    print("```python")
-    print("import cognee")
-    print("from cognee.modules.chunking import CSVChunker")
-    print()
-    print("# Add CSV file with preferred loader")
-    print('await cognee.add("data.csv", preferred_loaders=["csv_loader"])')
-    print()
-    print("# Process with CSV chunker")
-    print("await cognee.cognify(chunker=CSVChunker)")
-    print()
-    print("# Search and retrieve")
-    print('results = await cognee.search("engineering employees")')
-    print("```")
-    print()
-    print("This will ensure:")
+    
+    # Use the test CSV file - compute path relative to script location
+    csv_file = script_dir / "test_employees.csv"
+    
+    if not csv_file.exists():
+        print(f"Error: CSV file not found: {csv_file}")
+        return
+    
+    try:
+        # Import cognee
+        import cognee
+        from cognee.modules.chunking.CSVChunker import CSVChunker
+        
+        print("# Add CSV file with preferred loader")
+        await cognee.add(str(csv_file), preferred_loaders=["csv_loader"])
+        
+        print("# Process with CSV chunker")
+        chunks = await cognee.cognify(chunker=CSVChunker)
+        
+        print(f"✅ Generated {len(chunks) if chunks else 0} chunks")
+        
+        if chunks:
+            print("\nFirst chunk preview:")
+            first_chunk = chunks[0]
+            chunk_lines = first_chunk.text.split("\n")
+            for i, line in enumerate(chunk_lines[:5]):
+                print(f"  {line}")
+            if len(chunk_lines) > 5:
+                print(f"  ... ({len(chunk_lines) - 5} more lines)")
+        
+        print("\n# Search and retrieve")
+        results = await cognee.search("employees")
+        print(f"Search results: {len(results) if results else 0} found")
+        
+        print("\n✅ Cognee integration completed successfully!")
+        
+    except Exception as e:
+        print(f"❌ Cognee integration failed: {e}")
+        print("Note: This example requires cognee to be properly installed and configured.")
+        
+    print("\nThis ensures:")
     print("- CSV files are processed with the dedicated CSV loader")
     print("- Row-column relationships are preserved in chunks")
     print("- Each chunk contains structured tabular data")
