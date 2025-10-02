@@ -46,13 +46,17 @@ Be careful with deletion operations as they are irreversible.
             if not args.force:
                 # --- START PREVIEW LOGIC ---
                 fmt.echo("Gathering data for preview...")
-                preview_data = asyncio.run(
-                    get_deletion_counts(
-                        dataset_name=args.dataset_name,
-                        user_id=args.user_id,
-                        all_data=args.all,
+                try:
+                    preview_data = asyncio.run(
+                        get_deletion_counts(
+                            dataset_name=args.dataset_name,
+                            user_id=args.user_id,
+                            all_data=args.all,
+                        )
                     )
-                )
+                except CliCommandException as e:
+                    fmt.error(f"Error occured when fetching preview data: {str(e)}")
+                    return
 
                 if not preview_data:
                     fmt.success("No data found to delete.")
@@ -63,21 +67,26 @@ Be careful with deletion operations as they are irreversible.
                     f"Datasets: {preview_data.datasets}\nEntries: {preview_data.entries}\nUsers: {preview_data.users}"
                 )
                 fmt.echo("-" * 20)
-                fmt.warning("This operation is irreversible!")
-                if not fmt.confirm("Proceed?"):
-                    fmt.echo("Deletion cancelled.")
-                    return
                 # --- END PREVIEW LOGIC ---
 
             # Build operation message for success/failure logging
             if args.all:
+                confirm_msg = "Delete ALL data from cognee?"
                 operation = "all data"
             elif args.dataset_name:
+                confirm_msg = f"Delete dataset '{args.dataset_name}'?"
                 operation = f"dataset '{args.dataset_name}'"
             elif args.user_id:
+                confirm_msg = f"Delete all data for user '{args.user_id}'?"
                 operation = f"data for user '{args.user_id}'"
             else:
                 operation = "data"
+
+            if not args.force:
+                fmt.warning("This operation is irreversible!")
+                if not fmt.confirm(confirm_msg):
+                    fmt.echo("Deletion cancelled.")
+                    return
 
             fmt.echo(f"Deleting {operation}...")
 

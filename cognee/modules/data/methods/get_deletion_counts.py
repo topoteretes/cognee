@@ -5,10 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.sql import func
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Dataset, Data, DatasetData
-from cognee.modules.users.models import User, DatasetDatabase
-from cognee.modules.users.methods import get_user, get_default_user
+from cognee.modules.users.models import User
+from cognee.modules.users.methods import get_user
 from dataclasses import dataclass
-import cognee.cli.echo as fmt
 
 
 @dataclass
@@ -35,7 +34,6 @@ async def get_deletion_counts(
             dataset = dataset_result.scalar_one_or_none()
 
             if dataset is None:
-                fmt.error(f"No dataset with this name: {dataset_name}")
                 raise CliCommandException(
                     f"No Dataset exists with the name {dataset_name}", error_code=1
                 )
@@ -72,27 +70,23 @@ async def get_deletion_counts(
                 user_uuid = UUID(user_id)
                 user = await get_user(user_uuid)
             except (ValueError, EntityNotFoundError):
-                # Handles cases where user_id is not a valid UUID or user is not found
-                fmt.error(f"No user exists with ID {user_id}")
                 raise CliCommandException(f"No User exists with ID {user_id}", error_code=1)
-            user = await get_user(user_uuid)
-            if user:
-                counts.users = 1
-                # Find all datasets owned by this user
-                datasets_query = select(Dataset).where(Dataset.owner_id == user.id)
-                user_datasets = (await session.execute(datasets_query)).scalars().all()
-                dataset_count = len(user_datasets)
-                counts.datasets = dataset_count
-                if dataset_count > 0:
-                    dataset_ids = [d.id for d in user_datasets]
-                    # Count all data entries across all of the user's datasets
-                    data_count_query = (
-                        select(func.count())
-                        .select_from(DatasetData)
-                        .where(DatasetData.dataset_id.in_(dataset_ids))
-                    )
-                    data_entry_count = (await session.execute(data_count_query)).scalar_one()
-                    counts.entries = data_entry_count
-                else:
-                    counts.entries = 0
-                return counts
+            counts.users = 1
+            # Find all datasets owned by this user
+            datasets_query = select(Dataset).where(Dataset.owner_id == user.id)
+            user_datasets = (await session.execute(datasets_query)).scalars().all()
+            dataset_count = len(user_datasets)
+            counts.datasets = dataset_count
+            if dataset_count > 0:
+                dataset_ids = [d.id for d in user_datasets]
+                # Count all data entries across all of the user's datasets
+                data_count_query = (
+                    select(func.count())
+                    .select_from(DatasetData)
+                    .where(DatasetData.dataset_id.in_(dataset_ids))
+                )
+                data_entry_count = (await session.execute(data_count_query)).scalar_one()
+                counts.entries = data_entry_count
+            else:
+                counts.entries = 0
+            return counts
