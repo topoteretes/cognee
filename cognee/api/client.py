@@ -28,6 +28,7 @@ from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.delete.routers import get_delete_router
 from cognee.api.v1.responses.routers import get_responses_router
 from cognee.api.v1.sync.routers import get_sync_router
+from cognee.api.v1.update.routers import get_update_router
 from cognee.api.v1.users.routers import (
     get_auth_router,
     get_register_router,
@@ -262,6 +263,8 @@ app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["sett
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
 
 app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
+
+app.include_router(get_update_router(), prefix="/api/v1/update", tags=["update"])
 
 app.include_router(get_responses_router(), prefix="/api/v1/responses", tags=["responses"])
 
