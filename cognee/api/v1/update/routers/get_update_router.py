@@ -75,7 +75,7 @@ def get_update_router() -> APIRouter:
                 data=data,
                 dataset_id=dataset_id,
                 user=user,
-                node_set=node_set,
+                node_set=node_set if node_set else None,
             )
 
             # If any cognify run errored return JSONResponse with proper error status code
