@@ -8,6 +8,10 @@ import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.modules.data.methods.get_deletion_counts import get_deletion_counts
 
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
 
 class DeleteCommand(SupportsCliCommand):
     command_string = "delete"
@@ -109,4 +113,5 @@ Be careful with deletion operations as they are irreversible.
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1)
+            logger.error(f"{str(e)}", exc_info=True)
             raise CliCommandException(f"Error deleting data: {str(e)}", error_code=1)
