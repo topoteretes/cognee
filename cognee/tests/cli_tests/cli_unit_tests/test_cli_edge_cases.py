@@ -379,13 +379,18 @@ class TestCognifyCommandEdgeCases:
 class TestDeleteCommandEdgeCases:
     """Test edge cases for DeleteCommand"""
 
+    @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
-    def test_delete_all_with_user_id(self, mock_asyncio_run, mock_confirm):
+    def test_delete_all_with_user_id(
+        self, mock_asyncio_run, mock_confirm, mock_get_deletion_counts
+    ):
         """Test delete command with both --all and --user-id"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.delete = AsyncMock()
+        mock_get_deletion_counts = AsyncMock()
+        mock_get_deletion_counts.return_value = DeletionCountsPreview()
 
         with patch.dict(sys.modules, {"cognee": mock_cognee}):
             command = DeleteCommand()
