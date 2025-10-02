@@ -117,5 +117,4 @@ async def add_rule_associations(data: str, rules_nodeset_name: str):
 
     if len(edges_to_save) > 0:
         await graph_engine.add_edges(edges_to_save)
-
-    await index_graph_edges()
+        await index_graph_edges(edges_to_save)

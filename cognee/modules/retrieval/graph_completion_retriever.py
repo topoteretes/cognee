@@ -194,7 +194,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
             belongs_to_set=interactions_node_set,
         )
 
-        await add_data_points(data_points=[cognee_user_interaction], update_edge_collection=False)
+        await add_data_points(data_points=[cognee_user_interaction])
 
         relationships = []
         relationship_name = "used_graph_element_to_answer"

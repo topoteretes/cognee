@@ -10,9 +10,7 @@ from cognee.tasks.storage.exceptions import (
 )
 
 
-async def add_data_points(
-    data_points: List[DataPoint], update_edge_collection: bool = True
-) -> List[DataPoint]:
+async def add_data_points(data_points: List[DataPoint]) -> List[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
     deduplicating them, and indexing them for retrieval.
@@ -25,9 +23,6 @@ async def add_data_points(
     Args:
         data_points (List[DataPoint]):
             A list of data points to process and insert into the graph.
-        update_edge_collection (bool, optional):
-            Whether to update the edge index after adding edges.
-            Defaults to True.
 
     Returns:
         List[DataPoint]:
@@ -73,12 +68,10 @@ async def add_data_points(
 
     graph_engine = await get_graph_engine()
 
+    await graph_engine.add_nodes(nodes)
     await index_data_points(nodes)
 
-    await graph_engine.add_nodes(nodes)
     await graph_engine.add_edges(edges)
-
-    if update_edge_collection:
-        await index_graph_edges()
+    await index_graph_edges(edges)
 
     return data_points

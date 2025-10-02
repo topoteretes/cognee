@@ -1,0 +1,73 @@
+name: Distributed Cognee test with modal
+permissions:
+  contents: read
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        required: false
+        type: string
+        default: '3.11.x'
+    secrets:
+      LLM_MODEL:
+        required: true
+      LLM_ENDPOINT:
+        required: true
+      LLM_API_KEY:
+        required: true
+      LLM_API_VERSION:
+        required: true
+      EMBEDDING_MODEL:
+        required: true
+      EMBEDDING_ENDPOINT:
+        required: true
+      EMBEDDING_API_KEY:
+        required: true
+      EMBEDDING_API_VERSION:
+        required: true
+      OPENAI_API_KEY:
+        required: true
+
+jobs:
+  run-server-start-test:
+    name: Distributed Cognee test (Modal)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "distributed postgres"
+
+      - name: Run Distributed Cognee (Modal)
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          MODAL_SECRET_NAME: ${{ secrets.MODAL_SECRET_NAME }}
+          GRAPH_DATABASE_PROVIDER: "neo4j"
+          GRAPH_DATABASE_URL: ${{ secrets.AZURE_NEO4j_URL }}
+          GRAPH_DATABASE_USERNAME: ${{ secrets.AZURE_NEO4J_USERNAME }}
+          GRAPH_DATABASE_PASSWORD: ${{ secrets.AZURE_NEO4J_PW }}
+          DB_PROVIDER: "postgres"
+          DB_NAME: ${{ secrets.AZURE_POSTGRES_DB_NAME }}
+          DB_HOST: ${{ secrets.AZURE_POSTGRES_HOST }}
+          DB_PORT: ${{ secrets.AZURE_POSTGRES_PORT }}
+          DB_USERNAME: ${{ secrets.AZURE_POSTGRES_USERNAME }}
+          DB_PASSWORD: ${{ secrets.AZURE_POSTGRES_PW }}
+          VECTOR_DB_PROVIDER: "pgvector"
+          COGNEE_DISTRIBUTED: "true"
+        run: uv run modal run ./distributed/entrypoint.py
