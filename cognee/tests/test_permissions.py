@@ -34,25 +34,21 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    explanation_file_path = os.path.join(
+    explanation_file_path_nlp = os.path.join(
         pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
     )
 
     # Add document for default user
-    await cognee.add([explanation_file_path], dataset_name="NLP")
+    await cognee.add([explanation_file_path_nlp], dataset_name="NLP")
     default_user = await get_default_user()
 
-    text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
-    At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
-    Classical physics cannot explain the operation of these quantum devices, and a scalable quantum computer could perform some calculations exponentially faster (with respect to input size scaling) than any modern "classical" computer. In particular, a large-scale quantum computer could break widely used encryption schemes and aid physicists in performing physical simulations; however, the current state of the technology is largely experimental and impractical, with several obstacles to useful applications. Moreover, scalable quantum computers do not hold promise for many practical tasks, and for many important tasks quantum speedups are proven impossible.
-    The basic unit of information in quantum computing is the qubit, similar to the bit in traditional digital electronics. Unlike a classical bit, a qubit can exist in a superposition of its two "basis" states. When measuring a qubit, the result is a probabilistic output of a classical bit, therefore making quantum computers nondeterministic in general. If a quantum computer manipulates the qubit in a particular way, wave interference effects can amplify the desired measurement results. The design of quantum algorithms involves creating procedures that allow a quantum computer to perform calculations efficiently and quickly.
-    Physically engineering high-quality qubits has proven challenging. If a physical qubit is not sufficiently isolated from its environment, it suffers from quantum decoherence, introducing noise into calculations. Paradoxically, perfectly isolating qubits is also undesirable because quantum computations typically need to initialize qubits, perform controlled qubit interactions, and measure the resulting quantum states. Each of those operations introduces errors and suffers from noise, and such inaccuracies accumulate.
-    In principle, a non-quantum (classical) computer can solve the same computational problems as a quantum computer, given enough time. Quantum advantage comes in the form of time complexity rather than computability, and quantum complexity theory shows that some quantum algorithms for carefully selected tasks require exponentially fewer computational steps than the best known non-quantum algorithms. Such tasks can in theory be solved on a large-scale quantum computer whereas classical computers would not finish computations in any reasonable amount of time. However, quantum speedup is not universal or even typical across computational tasks, since basic tasks such as sorting are proven to not allow any asymptotic quantum speedup. Claims of quantum supremacy have drawn significant attention to the discipline, but are demonstrated on contrived tasks, while near-term practical use cases remain limited.
-    """
+    explanation_file_path_quantum = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
+    )
 
     # Add document for test user
     test_user = await create_user("user@example.com", "example")
-    await cognee.add([text], dataset_name="QUANTUM", user=test_user)
+    await cognee.add([explanation_file_path_quantum], dataset_name="QUANTUM", user=test_user)
 
     nlp_cognify_result = await cognee.cognify(["NLP"], user=default_user)
     quantum_cognify_result = await cognee.cognify(["QUANTUM"], user=test_user)
@@ -101,7 +97,7 @@ async def main():
     add_error = False
     try:
         await cognee.add(
-            [explanation_file_path],
+            [explanation_file_path_nlp],
             dataset_name="QUANTUM",
             dataset_id=test_user_dataset_id,
             user=default_user,
@@ -143,7 +139,7 @@ async def main():
 
     # Add new data to test_users dataset from default_user
     await cognee.add(
-        [explanation_file_path],
+        [explanation_file_path_nlp],
         dataset_name="QUANTUM",
         dataset_id=test_user_dataset_id,
         user=default_user,
@@ -216,7 +212,7 @@ async def main():
     )
 
     # Try deleting data from test_user dataset with default_user after getting delete permission
-    # Get the dataset data to find the ID of the remaining data item (explanation_file_path)
+    # Get the dataset data to find the ID of the remaining data item (explanation_file_path_nlp)
     test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
     explanation_file_data_id = test_user_dataset_data[0].id
 
