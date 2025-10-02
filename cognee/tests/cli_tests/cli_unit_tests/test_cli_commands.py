@@ -12,7 +12,8 @@ from cognee.cli.commands.search_command import SearchCommand
 from cognee.cli.commands.cognify_command import CognifyCommand
 from cognee.cli.commands.delete_command import DeleteCommand
 from cognee.cli.commands.config_command import ConfigCommand
-from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.cli.exceptions import CliCommandException
+from cognee.modules.data.methods.get_deletion_counts import DeletionCountsPreview
 
 
 # Mock asyncio.run to properly handle coroutines
@@ -282,13 +283,18 @@ class TestDeleteCommand:
         assert "all" in actions
         assert "force" in actions
 
+    @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
-    def test_execute_delete_dataset_with_confirmation(self, mock_asyncio_run, mock_confirm):
+    def test_execute_delete_dataset_with_confirmation(
+        self, mock_asyncio_run, mock_confirm, mock_get_deletion_counts
+    ):
         """Test execute delete dataset with user confirmation"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.delete = AsyncMock()
+        mock_get_deletion_counts = AsyncMock()
+        mock_get_deletion_counts.return_value = DeletionCountsPreview()
 
         with patch.dict(sys.modules, {"cognee": mock_cognee}):
             command = DeleteCommand()
@@ -301,13 +307,16 @@ class TestDeleteCommand:
             command.execute(args)
 
         mock_confirm.assert_called_once_with(f"Delete dataset '{args.dataset_name}'?")
-        mock_asyncio_run.assert_called_once()
+        assert mock_asyncio_run.call_count == 2
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
         mock_cognee.delete.assert_awaited_once_with(dataset_name="test_dataset", user_id=None)
 
+    @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
-    def test_execute_delete_cancelled(self, mock_confirm):
+    def test_execute_delete_cancelled(self, mock_confirm, mock_get_deletion_counts):
         """Test execute when user cancels deletion"""
+        mock_get_deletion_counts = AsyncMock()
+        mock_get_deletion_counts.return_value = DeletionCountsPreview()
         command = DeleteCommand()
         args = argparse.Namespace(dataset_name="test_dataset", user_id=None, all=False, force=False)
 
