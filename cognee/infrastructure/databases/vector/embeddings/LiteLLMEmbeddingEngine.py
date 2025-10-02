@@ -183,9 +183,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 model=model, max_completion_tokens=self.max_completion_tokens
             )
         elif "gemini" in self.provider.lower():
-            tokenizer = GeminiTokenizer(
-                model=model, max_completion_tokens=self.max_completion_tokens
+            # Since Gemini tokenization needs to send an API request to get the token count we will use TikToken to
+            # count tokens as we calculate tokens word by word
+            tokenizer = TikTokenTokenizer(
+                model=None, max_completion_tokens=self.max_completion_tokens
             )
+            # Note: Gemini Tokenizer expects an LLM model as input and not the embedding model
+            # tokenizer = GeminiTokenizer(
+            #     llm_model=llm_model, max_completion_tokens=self.max_completion_tokens
+            # )
         elif "mistral" in self.provider.lower():
             tokenizer = MistralTokenizer(
                 model=model, max_completion_tokens=self.max_completion_tokens
