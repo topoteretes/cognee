@@ -19,7 +19,9 @@ from cognee.modules.search.types import (
 from cognee.modules.search.operations import log_query, log_result
 from cognee.modules.users.models import User
 from cognee.modules.data.models import Dataset
-from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
+from cognee.modules.data.methods.get_authorized_existing_datasets import (
+    get_authorized_existing_datasets,
+)
 
 from .get_search_type_tools import get_search_type_tools
 from .no_access_control_search import no_access_control_search
@@ -202,7 +204,9 @@ async def authorized_search(
     Not to be used outside of active access control mode.
     """
     # Find datasets user has read access for (if datasets are provided only return them. Provided user has read access)
-    search_datasets = await get_specific_user_permission_datasets(user.id, "read", dataset_ids)
+    search_datasets = await get_authorized_existing_datasets(
+        datasets=dataset_ids, permission_type="read", user=user
+    )
 
     if use_combined_context:
         search_responses = await search_in_datasets_context(
