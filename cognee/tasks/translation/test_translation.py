@@ -12,16 +12,18 @@ Tests cover:
 import pytest  # type: ignore[import-untyped]
 from typing import Tuple, Optional, Dict
 from pydantic import ValidationError
-import cognee.tasks.translation.translate_content as tr
+import cognee.tasks.translation.translate_content as translate_module
 
 from cognee.tasks.translation.translate_content import (
     translate_content,
     register_translation_provider, 
     get_available_providers,
     TranslationProvider,
-    NoOpProvider,
     _get_provider,
+    snapshot_registry,
+    restore_registry,
 )
+from cognee.tasks.translation.translation_providers.noop_provider import NoopProvider
 from cognee.tasks.translation.models import TranslatedContent, LanguageMetadata
 
 
@@ -41,11 +43,11 @@ def _restore_registry():
     
     Use to isolate tests that register or modify providers: the current registry state is captured before the test runs, and always restored when the fixture completes (including on exceptions).
     """
-    snapshot = tr.snapshot_registry()
+    snapshot = snapshot_registry()
     try:
         yield
     finally:
-        tr.restore_registry(snapshot)
+        restore_registry(snapshot)
 
 
 class MockDocumentChunk:  # pylint: disable=too-few-public-methods
@@ -143,14 +145,14 @@ class TestProviderRegistry:
             _get_provider("nonexistent_provider")
 
 
-class TestNoOpProvider:
+class TestNoopProvider:
     """Test NoOp provider functionality."""
     
     @pytest.mark.parametrize("text", ["Hello world", "Hëllo wörld"])
     @pytest.mark.asyncio
     async def test_detect_language_noop(self, text):
         """NoOp returns (None, 0.0) for any text."""
-        provider = NoOpProvider()
+        provider = NoopProvider()
         lang, conf = await provider.detect_language(text)
         assert lang is None
         assert conf == 0.0
@@ -158,7 +160,7 @@ class TestNoOpProvider:
     @pytest.mark.asyncio 
     async def test_translate_returns_original(self):
         """Test translation returns original text with zero confidence."""
-        provider = NoOpProvider()
+        provider = NoopProvider()
         text = "Test text"
         translated, conf = await provider.translate(text, "es")
         assert translated == text
@@ -353,12 +355,12 @@ class TestTranslateContentFunction:
         chunks = [MockDocumentChunk("Test text", "chunk_1")]
         
         # Disable 'langdetect' fallback to force unknown
-        ld = tr._provider_registry.pop("langdetect", None)
+        ld = translate_module._provider_registry.pop("langdetect", None)
         try:
             result = await translate_content(chunks, translation_provider="failing")
         finally:
             if ld is not None:
-                tr._provider_registry["langdetect"] = ld
+                translate_module._provider_registry["langdetect"] = ld
         
         chunk = result[0]
         assert "language" in chunk.metadata
@@ -484,6 +486,7 @@ class TestTranslateContentFunction:
         json_str = json.dumps(data)
         parsed = json.loads(json_str)
         assert parsed["original_chunk_id"] == "test"
+
 
 
 
