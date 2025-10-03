@@ -360,6 +360,12 @@ async def translate_content(*chunks: Any, **kwargs) -> Any:
 # Initialize providers
 register_translation_provider("noop", NoopProvider)
 register_translation_provider("langdetect", LangDetectProvider)
-register_translation_provider("llm", LLMProvider)
-register_translation_provider("google", GoogleTranslateProvider)
-register_translation_provider("azure", AzureTranslateProvider)
+# The following providers are temporarily unregistered in this PR per maintainer
+# feedback: they require live integration testing, extra dependencies, or
+# credentials before they should be merged. Keep the implementation files in
+# place (so they can be re-enabled later) and re-enable by uncommenting the
+# matching register_translation_provider(...) calls once the provider is
+# validated in CI or a local dev environment.
+# register_translation_provider("llm", LLMProvider)
+# register_translation_provider("google", GoogleTranslateProvider)
+# register_translation_provider("azure", AzureTranslateProvider)
