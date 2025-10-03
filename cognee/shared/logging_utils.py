@@ -76,9 +76,35 @@ log_levels = {
 # Track if structlog logging has been configured
 _is_structlog_configured = False
 
-# Path to logs directory
-LOGS_DIR = Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs"))
-LOGS_DIR.mkdir(exist_ok=True)  # Create logs dir if it doesn't exist
+# Determine the logs directory
+# Priority: LOG_FILE_NAME (extract dir from it) > LOGS_DIR env var > default
+log_file_name = os.environ.get("LOG_FILE_NAME")
+if log_file_name:
+    # If LOG_FILE_NAME is set, use it to determine the directory
+    log_file_path = Path(log_file_name)
+    if not log_file_path.is_absolute():
+        # Relative path: prepend default logs directory
+        default_logs_dir = os.environ.get("LOGS_DIR", "/tmp/cognee/")
+        log_file_path = Path(default_logs_dir) / log_file_path
+    LOGS_DIR = log_file_path.parent
+else:
+    # No LOG_FILE_NAME set, use LOGS_DIR
+    LOGS_DIR = Path(os.environ.get("LOGS_DIR", "/tmp/cognee/"))
+
+# Create logs dir if it doesn't exist
+# Use try-except to prevent import failures if directory creation fails
+try:
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+except (OSError, PermissionError) as e:
+    # Fallback to a temp directory if we can't create the desired log directory
+    import warnings
+
+    warnings.warn(
+        f"Could not create logs directory at {LOGS_DIR}: {e}. Falling back to /tmp/cognee_logs/",
+        stacklevel=2,
+    )
+    LOGS_DIR = Path("/tmp/cognee_logs/")
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Maximum number of log files to keep
 MAX_LOG_FILES = 10
@@ -434,12 +460,20 @@ def setup_logging(log_level=None, name=None):
     # NOTE: environment variable must be used here as it allows us to
     # log to a single file with a name based on a timestamp in a multiprocess setting.
     # Without it, we would have a separate log file for every process.
-    log_file_path = os.environ.get("LOG_FILE_NAME")
-    if not log_file_path:
+    log_file_name = os.environ.get("LOG_FILE_NAME")
+    if not log_file_name:
         # Create a new log file name with the cognee start time
         start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        log_file_path = os.path.join(LOGS_DIR, f"{start_time}.log")
+        log_file_path = str(LOGS_DIR / f"{start_time}.log")
         os.environ["LOG_FILE_NAME"] = log_file_path
+    else:
+        # LOG_FILE_NAME is set; resolve it (relative paths get LOGS_DIR prepended)
+        log_file_path = Path(log_file_name)
+        if not log_file_path.is_absolute():
+            # Relative path: prepend default logs directory
+            default_logs_dir = os.environ.get("LOGS_DIR", "/tmp/cognee/")
+            log_file_path = Path(default_logs_dir) / log_file_path
+        log_file_path = str(log_file_path)
 
     # Create a file handler that uses our custom PlainFileHandler
     file_handler = PlainFileHandler(log_file_path, encoding="utf-8")
