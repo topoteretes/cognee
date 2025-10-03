@@ -9,7 +9,7 @@ from cognee.modules.graph.models.EdgeType import EdgeType
 logger = get_logger(level=ERROR)
 
 
-async def index_graph_edges(batch_size: int = 1024):
+async def index_graph_edges(batch_size: int = 100):
     """
     Indexes graph edges by creating and managing vector indexes for relationship types.
 

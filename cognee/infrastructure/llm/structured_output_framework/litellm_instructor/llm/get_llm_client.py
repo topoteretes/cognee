@@ -143,7 +143,6 @@ def get_llm_client(raise_api_key_error: bool = True):
             max_completion_tokens=max_completion_tokens,
             endpoint=llm_config.llm_endpoint,
             api_version=llm_config.llm_api_version,
-            streaming=llm_config.llm_streaming,
         )
 
     else:

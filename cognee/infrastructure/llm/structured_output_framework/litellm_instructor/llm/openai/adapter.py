@@ -5,15 +5,13 @@ from typing import Type
 from pydantic import BaseModel
 from openai import ContentFilterFinishReasonError
 from litellm.exceptions import ContentPolicyViolationError
-from instructor.exceptions import InstructorRetryException
+from instructor.core import InstructorRetryException
 
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
-    MissingSystemPromptPathError,
 )
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
