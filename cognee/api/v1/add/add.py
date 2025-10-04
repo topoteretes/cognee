@@ -1,4 +1,5 @@
 from uuid import UUID
+import os
 from typing import Union, BinaryIO, List, Optional, Dict, Literal
 
 from cognee.modules.users.models import User
@@ -12,6 +13,11 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
 from cognee.tasks.web_scraper.config import TavilyConfig, SoupCrawlerConfig
+from cognee.context_global_variables import (
+    tavily_config as tavily,
+    soup_crawler_config as soup_crawler,
+)
+from urllib.parse import urlparse
 
 
 async def add(
@@ -25,7 +31,6 @@ async def add(
     preferred_loaders: List[str] = None,
     incremental_loading: bool = True,
     extraction_rules: Optional[Dict[str, str]] = None,
-    preferred_tool: Optional[Literal["tavily", "beautifulsoup"]] = "beautifulsoup",
     tavily_config: Optional[TavilyConfig] = None,
     soup_crawler_config: Optional[SoupCrawlerConfig] = None,
 ):
@@ -155,14 +160,20 @@ async def add(
             node_set,
             dataset_id,
             preferred_loaders,
-            extraction_rules,
-            preferred_tool,
-            tavily_config,
-            soup_crawler_config,
         ),
     ]
 
     await setup()
+    if not soup_crawler_config and extraction_rules:
+        soup_crawler_config = SoupCrawlerConfig(extraction_rules=extraction_rules)
+
+    if not tavily_config and os.getenv("TAVILY_API_KEY"):
+        tavily_config = TavilyConfig()
+
+    soup_crawler.set(soup_crawler_config)
+    tavily.set(tavily_config)
+    if urlparse(data).scheme in ["http", "https"]:
+        node_set = ["web_content"] if not node_set else node_set + ["web_content"]
 
     user, authorized_dataset = await resolve_authorized_user_dataset(dataset_id, dataset_name, user)
 

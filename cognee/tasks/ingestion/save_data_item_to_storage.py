@@ -7,7 +7,7 @@ from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
 from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from cognee.tasks.web_scraper import check_valid_arguments_for_web_scraper
+from cognee.context_global_variables import tavily_config, soup_crawler_config
 
 logger = get_logger()
 
@@ -61,28 +61,18 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any], **kwar
             try:
                 from cognee.tasks.web_scraper import fetch_page_content
 
-                extraction_rules = kwargs.get("extraction_rules", None)
-                preferred_tool = kwargs.get("preferred_tool", "beautifulsoup")
-                tavily_config = kwargs.get("tavily_config", None)
-                soup_crawler_config = kwargs.get("soup_crawler_config", None)
-                check_valid_arguments_for_web_scraper(
-                    extraction_rules=extraction_rules,
-                    preferred_tool=preferred_tool,
-                    tavily_config=tavily_config,
-                    soup_crawler_config=soup_crawler_config,
-                )
+                tavily = tavily_config.get()
+                soup_crawler = soup_crawler_config.get()
+
                 data = await fetch_page_content(
                     data_item,
-                    extraction_rules=extraction_rules,
-                    preferred_tool=preferred_tool,
-                    tavily_config=tavily_config,
-                    soup_crawler_config=soup_crawler_config,
+                    preferred_tool="beautifulsoup" if soup_crawler else "tavily",
+                    tavily_config=tavily,
+                    soup_crawler_config=soup_crawler,
                 )
                 content = ""
                 for key, value in data.items():
                     content += f"{key}:\n{value}\n\n"
-                else:
-                    content = data[data_item]
                 return await save_data_to_file(content)
             except Exception as e:
                 raise IngestionError(
