@@ -8,7 +8,6 @@ from cognee.modules.ingestion import save_data_to_file
 from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from cognee.tasks.web_scraper import check_valid_arguments_for_web_scraper
-import asyncio
 
 logger = get_logger()
 
