@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Union, BinaryIO, Any, Dict
+from typing import Union, BinaryIO, Any
 
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
