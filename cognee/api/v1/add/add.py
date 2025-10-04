@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional
+from typing import Union, BinaryIO, List, Optional, Dict, Literal
 
 from cognee.modules.users.models import User
 from cognee.modules.pipelines import Task, run_pipeline
@@ -11,6 +11,7 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 )
 from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
+from cognee.tasks.web_scraper.config import TavilyConfig, SoupCrawlerConfig
 
 
 async def add(
@@ -23,12 +24,16 @@ async def add(
     dataset_id: Optional[UUID] = None,
     preferred_loaders: List[str] = None,
     incremental_loading: bool = True,
+    extraction_rules: Optional[Dict[str, str]] = None,
+    preferred_tool: Optional[Literal["tavily", "beautifulsoup"]] = "beautifulsoup",
+    tavily_config: Optional[TavilyConfig] = None,
+    soup_crawler_config: Optional[SoupCrawlerConfig] = None,
 ):
     """
     Add data to Cognee for knowledge graph processing.
 
     This is the first step in the Cognee workflow - it ingests raw data and prepares it
-    for processing. The function accepts various data formats including text, files, and
+    for processing. The function accepts various data formats including text, files, urls and
     binary streams, then stores them in a specified dataset for further processing.
 
     Prerequisites:
@@ -143,7 +148,18 @@ async def add(
     """
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),
-        Task(ingest_data, dataset_name, user, node_set, dataset_id, preferred_loaders),
+        Task(
+            ingest_data,
+            dataset_name,
+            user,
+            node_set,
+            dataset_id,
+            preferred_loaders,
+            extraction_rules,
+            preferred_tool,
+            tavily_config,
+            soup_crawler_config,
+        ),
     ]
 
     await setup()

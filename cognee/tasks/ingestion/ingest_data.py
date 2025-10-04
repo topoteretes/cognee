@@ -1,7 +1,7 @@
 import json
 import inspect
 from uuid import UUID
-from typing import Union, BinaryIO, Any, List, Optional
+from typing import Union, BinaryIO, Any, List, Optional, Dict, Literal
 
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -16,6 +16,7 @@ from cognee.modules.data.methods import (
     get_dataset_data,
     load_or_create_datasets,
 )
+from cognee.tasks.web_scraper.config import SoupCrawlerConfig, TavilyConfig
 
 from .save_data_item_to_storage import save_data_item_to_storage
 from .data_item_to_text_file import data_item_to_text_file
@@ -28,6 +29,10 @@ async def ingest_data(
     node_set: Optional[List[str]] = None,
     dataset_id: UUID = None,
     preferred_loaders: List[str] = None,
+    extraction_rules: Optional[Dict[str, str]] = None,
+    preferred_tool: Optional[Literal["tavily", "beautifulsoup"]] = "beautifulsoup",
+    tavily_config: Optional[TavilyConfig] = None,
+    soup_crawler_config: Optional[SoupCrawlerConfig] = None,
 ):
     if not user:
         user = await get_default_user()
@@ -78,7 +83,13 @@ async def ingest_data(
 
         for data_item in data:
             # Get file path of data item or create a file it doesn't exist
-            original_file_path = await save_data_item_to_storage(data_item)
+            original_file_path = await save_data_item_to_storage(
+                data_item,
+                extraction_rules=extraction_rules,
+                preferred_tool=preferred_tool,
+                tavily_config=tavily_config,
+                soup_crawler_config=soup_crawler_config,
+            )
 
             # Transform file path to be OS usable
             actual_file_path = get_data_file_path(original_file_path)

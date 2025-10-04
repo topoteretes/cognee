@@ -91,6 +91,8 @@ class BeautifulSoupCrawler:
             parsed_url = urlparse(url)
             robots_url = f"{parsed_url.scheme}://{parsed_url.netloc}/robots.txt"
             content = await self._fetch_httpx(robots_url)
+            if content.strip() == "":
+                return True  # no robots.txt means allowed
             rp = Protego.parse(content)
             agent = next((v for k, v in self.headers.items() if k.lower() == "user-agent"), "*")
             return rp.can_fetch(agent, url) or rp.can_fetch("*", url)
@@ -114,23 +116,42 @@ class BeautifulSoupCrawler:
         await self._ensure_client()
         assert self._client is not None, "HTTP client not initialized"
         attempt = 0
+        parsed = urlparse(url)
+        domain_root = f"{parsed.scheme}://{parsed.netloc}"
+
+        # Handle robots.txt separately (no recursive crawl delay call)
+        is_robot = url.lower().endswith("/robots.txt")
+
         while True:
             try:
-                # get crawl delay from robots.txt if available
-                crawl_delay = await self._get_crawl_delay(
-                    f"{urlparse(url).scheme}://{urlparse(url).netloc}"
-                )
+                # Only get crawl delay for non-robots.txt pages
+                crawl_delay = self.crawl_delay
+                if not is_robot:
+                    try:
+                        crawl_delay = await self._get_crawl_delay(domain_root)
+                    except Exception as e:
+                        logger.debug(f"Failed to fetch crawl delay for {domain_root}: {e}")
+
                 await self._respect_rate_limit(url, crawl_delay)
                 resp = await self._client.get(url)
                 resp.raise_for_status()
                 return resp.text
+
             except Exception as exc:
+                # Special case: if robots.txt failed, just return empty string
+                if is_robot:
+                    logger.warning(f"Robots.txt not found or inaccessible at {url}: {exc}")
+                    return ""
+
                 attempt += 1
                 if attempt > self.max_retries:
-                    logger.error(f"Fetch failed for {url}: {exc}")
+                    logger.error(f"Fetch failed for {url} after {attempt} attempts: {exc}")
                     raise
+
                 delay = self.retry_delay_factor * (2 ** (attempt - 1))
-                logger.warning(f"Retrying {url} after {delay:.2f}s (attempt {attempt})")
+                logger.warning(
+                    f"Retrying {url} after {delay:.2f}s (attempt {attempt}) due to {exc}"
+                )
                 await asyncio.sleep(delay)
 
     async def _render_with_playwright(

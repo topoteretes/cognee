@@ -1,12 +1,14 @@
 import os
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Union, BinaryIO, Any
+from typing import Union, BinaryIO, Any, Dict
 
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
 from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from cognee.tasks.web_scraper import check_valid_arguments_for_web_scraper
+import asyncio
 
 logger = get_logger()
 
@@ -17,10 +19,17 @@ class SaveDataSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
 
+class HTMLContent(str):
+    def __new__(cls, value: str):
+        if not ("<" in value and ">" in value):
+            raise ValueError("Not valid HTML-like content")
+        return super().__new__(cls, value)
+
+
 settings = SaveDataSettings()
 
 
-async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str:
+async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any], **kwargs) -> str:
     if "llama_index" in str(type(data_item)):
         # Dynamic import is used because the llama_index module is optional.
         from .transform_data import get_data_from_llama_index
@@ -48,6 +57,38 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
         # data is s3 file path
         if parsed_url.scheme == "s3":
             return data_item
+        elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
+            # Validate URL by sending a HEAD request
+            try:
+                from cognee.tasks.web_scraper import fetch_page_content
+
+                extraction_rules = kwargs.get("extraction_rules", None)
+                preferred_tool = kwargs.get("preferred_tool", "beautifulsoup")
+                tavily_config = kwargs.get("tavily_config", None)
+                soup_crawler_config = kwargs.get("soup_crawler_config", None)
+                check_valid_arguments_for_web_scraper(
+                    extraction_rules=extraction_rules,
+                    preferred_tool=preferred_tool,
+                    tavily_config=tavily_config,
+                    soup_crawler_config=soup_crawler_config,
+                )
+                data = await fetch_page_content(
+                    data_item,
+                    extraction_rules=extraction_rules,
+                    preferred_tool=preferred_tool,
+                    tavily_config=tavily_config,
+                    soup_crawler_config=soup_crawler_config,
+                )
+                content = ""
+                for key, value in data.items():
+                    content += f"{key}:\n{value}\n\n"
+                else:
+                    content = data[data_item]
+                return await save_data_to_file(content)
+            except Exception as e:
+                raise IngestionError(
+                    message=f"Error ingesting webpage results of url {data_item}: {str(e)}"
+                )
 
         # data is local file path
         elif parsed_url.scheme == "file":
