@@ -54,7 +54,6 @@ async def fetch_page_content(
                 use_playwright=soup_crawler_config.use_playwright,
                 playwright_js_wait=soup_crawler_config.playwright_js_wait,
                 join_all_matches=soup_crawler_config.join_all_matches,
-                structured=soup_crawler_config.structured,
             )
             return results
         except Exception as e:

@@ -21,4 +21,3 @@ class SoupCrawlerConfig(BaseModel):
     use_playwright: bool = False
     playwright_js_wait: float = 0.8
     join_all_matches: bool = False
-    structured: bool = False

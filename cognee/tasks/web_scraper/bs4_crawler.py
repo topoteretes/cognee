@@ -262,11 +262,10 @@ class BeautifulSoupCrawler:
         use_playwright: bool = False,
         playwright_js_wait: float = 0.8,
         join_all_matches: bool = False,
-        structured: bool = False,  # return structured output instead of concatenated string
-    ) -> Dict[str, Union[str, Dict[str, str]]]:
+    ) -> Dict[str, str]:
         """
         Fetch one or more URLs and extract text using BeautifulSoup (or lxml xpath).
-        Returns: dict[url] -> concatenated string OR structured dict depending on `structured`.
+        Returns: dict[url] -> concatenated string of extracted content.
         """
         if isinstance(urls, str):
             urls = [urls]
@@ -284,7 +283,7 @@ class BeautifulSoupCrawler:
                 allowed = await self._is_url_allowed(url)
                 if not allowed:
                     logger.warning(f"URL disallowed by robots.txt: {url}")
-                    return url, "" if not structured else {}
+                    return url, ""
 
                 # fetch (rendered or not)
                 if use_playwright:
@@ -293,12 +292,6 @@ class BeautifulSoupCrawler:
                     )
                 else:
                     html = await self._fetch_httpx(url)
-
-                if structured:
-                    return url, {
-                        field: self._extract_with_bs4(html, rule)
-                        for field, rule in normalized_rules.items()
-                    }
 
                 pieces = []
                 for field, rule in normalized_rules.items():
@@ -314,7 +307,7 @@ class BeautifulSoupCrawler:
             try:
                 url, text = await coro
             except Exception as e:
-                results[url] = {} if structured else ""
+                results[url] = ""
                 logger.error(f"Error processing {url}: {e}")
                 continue
             results[url] = text
