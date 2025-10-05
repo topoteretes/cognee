@@ -4,9 +4,8 @@ from cognee.tasks.web_scraper.config import SoupCrawlerConfig
 
 
 async def test_web_scraping_using_bs4():
-    # 0. Prune only data (not full system prune)
     await cognee.prune.prune_data()
-
+    await cognee.prune.prune_system(metadata=True)
     # 1. Setup test URL and extraction rules
     url = "https://quotes.toscrape.com/"
     rules = {
