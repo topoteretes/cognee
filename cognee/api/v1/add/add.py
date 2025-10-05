@@ -1,6 +1,6 @@
 from uuid import UUID
 import os
-from typing import Union, BinaryIO, List, Optional, Dict, Literal
+from typing import Union, BinaryIO, List, Optional, Dict, Any
 
 from cognee.modules.users.models import User
 from cognee.modules.pipelines import Task, run_pipeline
@@ -30,7 +30,7 @@ async def add(
     dataset_id: Optional[UUID] = None,
     preferred_loaders: List[str] = None,
     incremental_loading: bool = True,
-    extraction_rules: Optional[Dict[str, str]] = None,
+    extraction_rules: Optional[Dict[str, Any]] = None,
     tavily_config: Optional[TavilyConfig] = None,
     soup_crawler_config: Optional[SoupCrawlerConfig] = None,
 ):
