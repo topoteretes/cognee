@@ -1,3 +1,10 @@
+"""Web scraping tasks for storing scraped data in a graph database.
+
+This module provides functions to scrape web content, create or update WebPage, WebSite,
+and ScrapingJob data points, and store them in a Kuzu graph database. It supports
+scheduled scraping tasks and ensures that node updates preserve existing graph edges.
+"""
+
 import os
 import hashlib
 from datetime import datetime
@@ -22,7 +29,7 @@ try:
 
     scheduler = BackgroundScheduler()
 except ImportError:
-    raise ImportError("Please install apscheduler by pip install APScheduler >=3.10")
+    raise ImportError("Please install apscheduler by pip install APScheduler>=3.10")
 
 logger = get_logger(__name__)
 
@@ -37,6 +44,28 @@ async def cron_web_scraper_task(
     tavily_config: TavilyConfig = None,
     job_name: str = "scraping",
 ):
+    """Schedule or run a web scraping task.
+
+    This function schedules a recurring web scraping task using APScheduler or runs it
+    immediately if no schedule is provided. It delegates to web_scraper_task for actual
+    scraping and graph storage.
+
+    Args:
+        url: A single URL or list of URLs to scrape.
+        schedule: A cron expression for scheduling (e.g., "0 0 * * *"). If None, runs immediately.
+        extraction_rules: Dictionary of extraction rules for BeautifulSoup (e.g., CSS selectors).
+        tavily_api_key: API key for Tavily. Defaults to TAVILY_API_KEY environment variable.
+        soup_crawler_config: Configuration for BeautifulSoup crawler.
+        tavily_config: Configuration for Tavily API.
+        job_name: Name of the scraping job. Defaults to "scraping".
+
+    Returns:
+        Any: The result of web_scraper_task if run immediately, or None if scheduled.
+
+    Raises:
+        ValueError: If the schedule is an invalid cron expression.
+        ImportError: If APScheduler is not installed.
+    """
     now = datetime.now()
     job_name = job_name or f"scrape_{now.strftime('%Y%m%d_%H%M%S')}"
     if schedule:
@@ -89,10 +118,29 @@ async def web_scraper_task(
     tavily_config: TavilyConfig = None,
     job_name: str = None,
 ):
-    """
-    Scrapes one or more URLs and returns WebPage, WebSite, and ScrapingJob data points.
-    Unique IDs are assigned to each WebPage, WebSite, and ScrapingJob.
-    Includes a description field summarizing other fields for each data point.
+    """Scrape URLs and store data points in a Kuzu graph database.
+
+    This function scrapes content from the provided URLs, creates or updates WebPage,
+    WebSite, and ScrapingJob data points, and stores them in a Kuzu graph database.
+    Each data point includes a description field summarizing its attributes. It creates
+    'is_scraping' (ScrapingJob to WebSite) and 'is_part_of' (WebPage to WebSite)
+    relationships, preserving existing edges during node updates.
+
+    Args:
+        url: A single URL or list of URLs to scrape.
+        schedule: A cron expression for scheduling (e.g., "0 0 * * *"). If None, runs once.
+        extraction_rules: Dictionary of extraction rules for BeautifulSoup (e.g., CSS selectors).
+        tavily_api_key: API key for Tavily. Defaults to TAVILY_API_KEY environment variable.
+        soup_crawler_config: Configuration for BeautifulSoup crawler.
+        tavily_config: Configuration for Tavily API.
+        job_name: Name of the scraping job. Defaults to a timestamp-based name.
+
+    Returns:
+        Any: The graph data returned by the graph database.
+
+    Raises:
+        TypeError: If neither tavily_config nor soup_crawler_config is provided.
+        Exception: If fetching content or database operations fail.
     """
     await setup()
     graph_db = await get_graph_engine()
@@ -260,7 +308,7 @@ async def web_scraper_task(
         base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
         edge_mapping.append(
             (
-                webpage.id,  # Corrected: WebPage is the source, WebSite is the target
+                webpage.id,
                 websites_dict[base_url].id,
                 "is_part_of",
                 {
@@ -280,8 +328,20 @@ async def web_scraper_task(
 
 
 def check_arguments(tavily_api_key, extraction_rules, tavily_config, soup_crawler_config):
-    """
-    Checking if the right argument are given, if not TypeError will be raised.
+    """Validate and configure arguments for web_scraper_task.
+
+    Args:
+        tavily_api_key: API key for Tavily.
+        extraction_rules: Extraction rules for BeautifulSoup.
+        tavily_config: Configuration for Tavily API.
+        soup_crawler_config: Configuration for BeautifulSoup crawler.
+
+    Returns:
+        Tuple[SoupCrawlerConfig, TavilyConfig, str]: Configured soup_crawler_config,
+            tavily_config, and preferred_tool ("tavily" or "beautifulsoup").
+
+    Raises:
+        TypeError: If neither tavily_config nor soup_crawler_config is provided.
     """
     preferred_tool = "beautifulsoup"
 
@@ -302,7 +362,19 @@ def check_arguments(tavily_api_key, extraction_rules, tavily_config, soup_crawle
     return soup_crawler_config, tavily_config, preferred_tool
 
 
-def get_path_after_base(base_url, url):
+def get_path_after_base(base_url: str, url: str) -> str:
+    """Extract the path after the base URL.
+
+    Args:
+        base_url: The base URL (e.g., "https://example.com").
+        url: The full URL to extract the path from.
+
+    Returns:
+        str: The path after the base URL, with leading slashes removed.
+
+    Raises:
+        ValueError: If the base URL and target URL are from different domains.
+    """
     parsed_base = urlparse(base_url)
     parsed_url = urlparse(url)
 
