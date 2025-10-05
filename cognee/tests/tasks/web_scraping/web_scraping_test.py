@@ -1,12 +1,13 @@
 import asyncio
 import cognee
 from cognee.tasks.web_scraper.config import SoupCrawlerConfig
+from cognee.tasks.web_scraper import cron_web_scraper_task
 
 
 async def test_web_scraping_using_bs4():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
-    # 1. Setup test URL and extraction rules
+
     url = "https://quotes.toscrape.com/"
     rules = {
         "quotes": {"selector": ".quote span.text", "all": True},
@@ -24,34 +25,26 @@ async def test_web_scraping_using_bs4():
         structured=True,
     )
 
-    # 2. Add / ingest the page
     await cognee.add(
         data=url,
         soup_crawler_config=soup_config,
         incremental_loading=False,
     )
 
-    # 3. Cognify
     await cognee.cognify()
 
-    # 4. Search for a known quote
     results = await cognee.search(
         "Who said 'The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking'?",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
     )
-    assert "Albert Einstein" in results[0], (
-        "Test failed! Albert Einstein not found in scraped data."
-    )
+    assert "Albert Einstein" in results[0]
     print("Test passed! Found Albert Einstein in scraped data.")
-    print(results)
-    print("Web scraping test using bs4 completed.")
 
 
 async def test_web_scraping_using_bs4_and_incremental_loading():
-    # 0. Prune only data (not full system prune)
     await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
 
-    # 1. Setup test URL and extraction rules
     url = "https://books.toscrape.com/"
     rules = {"titles": "article.product_pod h3 a", "prices": "article.product_pod p.price_color"}
 
@@ -66,94 +59,116 @@ async def test_web_scraping_using_bs4_and_incremental_loading():
         structured=True,
     )
 
-    # 2. Add / ingest the page
     await cognee.add(
         data=url,
         soup_crawler_config=soup_config,
         incremental_loading=True,
     )
 
-    # 3. Cognify
     await cognee.cognify()
 
-    # 4. Search for a known book
     results = await cognee.search(
         "What is the price of 'A Light in the Attic' book?",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
     )
-    assert "51.77" in results[0], "Test failed! 'A Light in the Attic' not found in scraped data."
+    assert "51.77" in results[0]
     print("Test passed! Found 'A Light in the Attic' in scraped data.")
-    print(results)
-    print("Web scraping test using bs4 with incremental loading completed.")
 
 
 async def test_web_scraping_using_tavily():
-    # 0. Prune only data (not full system prune)
     await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
 
-    # 1. Setup test URL and extraction rules
     url = "https://quotes.toscrape.com/"
 
-    # 2. Add / ingest the page
     await cognee.add(
         data=url,
         incremental_loading=False,
     )
 
-    # 3. Cognify
     await cognee.cognify()
 
-    # 4. Search for a known quote
     results = await cognee.search(
         "Who said 'The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking'?",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
     )
-    assert "Albert Einstein" in results[0], (
-        "Test failed! Albert Einstein not found in scraped data."
-    )
+    assert "Albert Einstein" in results[0]
     print("Test passed! Found Albert Einstein in scraped data.")
-    print(results)
-    print("Web scraping test using tavily completed.")
 
 
 async def test_web_scraping_using_tavily_and_incremental_loading():
-    # 0. Prune only data (not full system prune)
     await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
 
-    # 1. Setup test URL and extraction rules
     url = "https://quotes.toscrape.com/"
 
-    # 2. Add / ingest the page
     await cognee.add(
         data=url,
         incremental_loading=True,
     )
 
-    # 3. Cognify
     await cognee.cognify()
 
-    # 4. Search for a known quote
     results = await cognee.search(
         "Who said 'The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking'?",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
     )
-    assert "Albert Einstein" in results[0], (
-        "Test failed! Albert Einstein not found in scraped data."
-    )
+    assert "Albert Einstein" in results[0]
     print("Test passed! Found Albert Einstein in scraped data.")
-    print(results)
-    print("Web scraping test using tavily with incremental loading completed.")
+
+
+# ---------- cron job tests ----------
+async def test_cron_web_scraper():
+    urls = ["https://quotes.toscrape.com/", "https://books.toscrape.com/"]
+    extraction_rules = {
+        "quotes": {"selector": ".quote span.text", "all": True},
+        "authors": {"selector": ".quote small", "all": True},
+        "titles": "article.product_pod h3 a",
+        "prices": "article.product_pod p.price_color",
+    }
+
+    # Run cron_web_scraper_task (schedule string is required)
+    await cron_web_scraper_task(
+        urls=urls,
+        schedule="*/5 * * * *",  # every 5 minutes
+        extraction_rules=extraction_rules,
+        use_playwright=False,
+    )
+    
+    # Wait until first run of cron job is done
+    await asyncio.sleep(120)
+
+    # Validate that the scraped data is searchable
+    results = await cognee.search(
+        "Who said 'The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking'?",
+        query_type=cognee.SearchType.GRAPH_COMPLETION,
+    )
+    assert "Albert Einstein" in results[0]
+
+    results_books = await cognee.search(
+        "What is the price of 'A Light in the Attic' book?",
+        query_type=cognee.SearchType.GRAPH_COMPLETION,
+    )
+    assert "51.77" in results_books[0]
+
+    print("Cron job web_scraping test passed!")
 
 
 async def main():
-    print("starting web scraping test using bs4 with incremental loading...")
+    print("Starting BS4 incremental loading test...")
     await test_web_scraping_using_bs4_and_incremental_loading()
-    print("starting web scraping test using bs4 without incremental loading...")
+
+    print("Starting BS4 normal test...")
     await test_web_scraping_using_bs4()
-    print("starting web scraping test using tavily with incremental loading...")
+
+    print("Starting Tavily incremental loading test...")
     await test_web_scraping_using_tavily_and_incremental_loading()
-    print("starting web scraping test using tavily without incremental loading...")
+
+    print("Starting Tavily normal test...")
     await test_web_scraping_using_tavily()
+
+    print("Starting cron job test...")
+    await test_cron_web_scraper()
 
 
 if __name__ == "__main__":
