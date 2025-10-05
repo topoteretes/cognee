@@ -373,7 +373,7 @@ class BeautifulSoupCrawler:
         normalized_url_rules: Dict[str, List[ExtractionRule]] = {}
         for url, rules in url_rules_map.items():
             normalized_rules = []
-            for field, rule in rules.items():
+            for _, rule in rules.items():
                 r = self._normalize_rule(rule)
                 if join_all_matches:
                     r.all = True
