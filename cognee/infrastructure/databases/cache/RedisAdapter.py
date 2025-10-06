@@ -1,6 +1,7 @@
 import redis
 from contextlib import contextmanager
 
+
 class RedisAdapter:
     def __init__(self, host, port, lock_name):
         self.redis = redis.Redis(host=host, port=port)
