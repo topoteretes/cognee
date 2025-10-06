@@ -28,7 +28,6 @@ async def test_web_scraping_using_bs4():
         retry_delay_factor=0.5,
         extraction_rules=rules,
         use_playwright=False,
-        structured=True,
     )
 
     await cognee.add(
