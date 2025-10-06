@@ -171,7 +171,7 @@ async def add(
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
 
     """
-    
+
     if not soup_crawler_config and extraction_rules:
         soup_crawler_config = SoupCrawlerConfig(extraction_rules=extraction_rules)
     if not tavily_config and os.getenv("TAVILY_API_KEY"):

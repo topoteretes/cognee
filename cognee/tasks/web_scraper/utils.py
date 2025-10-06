@@ -50,9 +50,9 @@ async def fetch_page_content(
             raise ValueError("TAVILY_API_KEY must be set in TavilyConfig to use Tavily")
         return await fetch_with_tavily(urls, tavily_config)
 
-    elif preferred_tool == "beautifulsoup":
+    if preferred_tool == "beautifulsoup":
         try:
-            from bs4 import BeautifulSoup
+            from bs4 import BeautifulSoup as _  # noqa: F401
         except ImportError:
             logger.error(
                 "Failed to import bs4, make sure to install using pip install beautifulsoup4>=4.13.1"
