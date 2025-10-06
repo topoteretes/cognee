@@ -171,19 +171,7 @@ async def add(
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
 
     """
-    tasks = [
-        Task(resolve_data_directories, include_subdirectories=True),
-        Task(
-            ingest_data,
-            dataset_name,
-            user,
-            node_set,
-            dataset_id,
-            preferred_loaders,
-        ),
-    ]
-
-    await setup()
+    
     if not soup_crawler_config and extraction_rules:
         soup_crawler_config = SoupCrawlerConfig(extraction_rules=extraction_rules)
     if not tavily_config and os.getenv("TAVILY_API_KEY"):
@@ -201,6 +189,20 @@ async def add(
         node_set = ["web_content"] if not node_set else node_set + ["web_content"]
     elif isinstance(data, list) and any(_is_http_url(item) for item in data):
         node_set = ["web_content"] if not node_set else node_set + ["web_content"]
+
+    tasks = [
+        Task(resolve_data_directories, include_subdirectories=True),
+        Task(
+            ingest_data,
+            dataset_name,
+            user,
+            node_set,
+            dataset_id,
+            preferred_loaders,
+        ),
+    ]
+
+    await setup()
 
     user, authorized_dataset = await resolve_authorized_user_dataset(dataset_id, dataset_name, user)
 

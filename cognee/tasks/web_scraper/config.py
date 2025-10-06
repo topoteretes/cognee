@@ -1,12 +1,12 @@
 from pydantic import BaseModel, Field
-from typing import Any, Dict, Optional, Literal
+from typing import Any, Dict, Optional
 import os
 
 
 class TavilyConfig(BaseModel):
     api_key: str = os.getenv("TAVILY_API_KEY")
     extract_depth: str = "basic"
-    timeout: int = Field(None, ge=1, le=60)
+    timeout: Optional[int] = Field(default=None, ge=1, le=60)
 
 
 class SoupCrawlerConfig(BaseModel):

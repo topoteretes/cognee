@@ -58,8 +58,15 @@ async def fetch_page_content(
                 "Failed to import bs4, make sure to install using pip install beautifulsoup4>=4.13.1"
             )
             raise
-        crawler = BeautifulSoupCrawler()
-        if not soup_crawler_config and soup_crawler_config.extraction_rules is None:
+        crawler = BeautifulSoupCrawler(
+            concurrency=soup_crawler_config.concurrency,
+            crawl_delay=soup_crawler_config.crawl_delay,
+            timeout=soup_crawler_config.timeout,
+            max_retries=soup_crawler_config.max_retries,
+            retry_delay_factor=soup_crawler_config.retry_delay_factor,
+            headers=soup_crawler_config.headers,
+        )
+        if not soup_crawler_config or soup_crawler_config.extraction_rules is None:
             raise ValueError("extraction_rules must be provided when not using Tavily")
         extraction_rules = soup_crawler_config.extraction_rules
         try:

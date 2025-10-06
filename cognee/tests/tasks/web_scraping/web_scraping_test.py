@@ -139,48 +139,38 @@ async def test_cron_web_scraper():
     # Run cron_web_scraper_task
     await cron_web_scraper_task(
         url=urls,
-        schedule="*/3 * * * *",  # every 3 minutes
         job_name="cron_scraping_job",
         extraction_rules=extraction_rules,
     )
+    results = await cognee.search(
+        "Who said 'The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking'?",
+        query_type=cognee.SearchType.GRAPH_COMPLETION,
+    )
 
-    scraping_job_done = await graph_db.get_node(uuid5(NAMESPACE_OID, name="cron_scraping_job"))
-    while True:
-        if scraping_job_done:
-            results = await cognee.search(
-                "Who said 'The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking'?",
-                query_type=cognee.SearchType.GRAPH_COMPLETION,
-            )
+    assert "Albert Einstein" in results[0]
 
-            assert "Albert Einstein" in results[0]
+    results_books = await cognee.search(
+        "What is the price of 'A Light in the Attic' book?",
+        query_type=cognee.SearchType.GRAPH_COMPLETION,
+    )
 
-            results_books = await cognee.search(
-                "What is the price of 'A Light in the Attic' book?",
-                query_type=cognee.SearchType.GRAPH_COMPLETION,
-            )
+    assert "51.77" in results_books[0]
 
-            assert "51.77" in results_books[0]
-
-            print("Cron job web_scraping test passed!")
-            break
-        else:
-            scraping_job_done = await graph_db.get_node(
-                uuid5(NAMESPACE_OID, name="cron_scraping_job")
-            )
+    print("Cron job web_scraping test passed!")
 
 
 async def main():
-    # print("Starting BS4 incremental loading test...")
-    # await test_web_scraping_using_bs4_and_incremental_loading()
+    print("Starting BS4 incremental loading test...")
+    await test_web_scraping_using_bs4_and_incremental_loading()
 
-    # print("Starting BS4 normal test...")
-    # await test_web_scraping_using_bs4()
+    print("Starting BS4 normal test...")
+    await test_web_scraping_using_bs4()
 
-    # print("Starting Tavily incremental loading test...")
-    # await test_web_scraping_using_tavily_and_incremental_loading()
+    print("Starting Tavily incremental loading test...")
+    await test_web_scraping_using_tavily_and_incremental_loading()
 
-    # print("Starting Tavily normal test...")
-    # await test_web_scraping_using_tavily()
+    print("Starting Tavily normal test...")
+    await test_web_scraping_using_tavily()
 
     print("Starting cron job test...")
     await test_cron_web_scraper()
