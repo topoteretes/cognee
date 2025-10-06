@@ -18,7 +18,7 @@ async def fetch_page_content(
     preferred_tool: Optional[Literal["tavily", "beautifulsoup"]] = "beautifulsoup",
     tavily_config: Optional[TavilyConfig] = None,
     soup_crawler_config: Optional[SoupCrawlerConfig] = None,
-) -> Dict[str, Union[str, Dict[str, str]]]:
+) -> Dict[str, str]:
     """Fetch content from one or more URLs using the specified tool.
 
     This function retrieves web page content using either BeautifulSoup (with custom
