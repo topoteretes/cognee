@@ -105,8 +105,16 @@ async def fetch_with_tavily(
             "Failed to import tavily, make sure to install using pip install tavily-python>=0.7.0"
         )
         raise
-    client = AsyncTavilyClient(api_key=tavily_config.api_key if tavily_config else None)
-    results = await client.extract(urls, format="text")
+    client = AsyncTavilyClient(
+        api_key=tavily_config.api_key if tavily_config else None,
+        proxies=tavily_config.proxies if tavily_config else None
+    )
+    results = await client.extract(
+        urls, 
+        format="text",
+        extract_depth=tavily_config.extract_depth if tavily_config else "basic",
+        timeout=tavily_config.timeout if tavily_config else 10
+    )
     for failed_result in results.get("failed_results", []):
         logger.warning(f"Failed to fetch {failed_result}")
     return_results = {}
