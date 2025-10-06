@@ -2,10 +2,7 @@ import asyncio
 import cognee
 from cognee.tasks.web_scraper.config import SoupCrawlerConfig
 from cognee.tasks.web_scraper import cron_web_scraper_task
-from uuid import uuid5, NAMESPACE_OID
-from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from dotenv import load_dotenv
-from cognee.api.v1.visualize import visualize_graph
 
 load_dotenv()
 
