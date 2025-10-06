@@ -36,7 +36,7 @@ async def fetch_page_content(
             extraction_rules are needed.
 
     Returns:
-        Dict[str, Union[str, Dict[str, str]]]: A dictionary mapping each URL to its
+        Dict[str, str]: A dictionary mapping each URL to its
             extracted content (as a string for BeautifulSoup or a dict for Tavily).
 
     Raises:
