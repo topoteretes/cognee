@@ -6,9 +6,7 @@ from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
 
 
 async def main():
-    print("Reader: Waiting 2 seconds...")
-
-    time.sleep(5)
+    time.sleep(20)
     adapter = KuzuAdapter("test.db")
     result = await adapter.query("MATCH (n:Node) RETURN COUNT(n)")
 
