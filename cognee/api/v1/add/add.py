@@ -140,7 +140,7 @@ async def add(
 
         # Add a single file
         await cognee.add("/home/user/documents/analysis.pdf")
-        
+
         # Add a single url and bs4 extract ingestion method
         extraction_rules = {
             "title": "h1",
@@ -148,11 +148,11 @@ async def add(
             "more_info": "a[href*='more-info']"
         }
         await cognee.add("https://example.com",extraction_rules=extraction_rules)
-        
+
         # Add a single url and tavily extract ingestion method
         Make sure to TAVILY_API_KEY = YOUR_TAVILY_API_KEY as a environment variable
         await cognee.add("https://example.com")
-        
+
         # Add multiple urls
         await cognee.add(["https://example.com","https://books.toscrape.com"])
         ```
@@ -186,13 +186,20 @@ async def add(
     await setup()
     if not soup_crawler_config and extraction_rules:
         soup_crawler_config = SoupCrawlerConfig(extraction_rules=extraction_rules)
-
     if not tavily_config and os.getenv("TAVILY_API_KEY"):
-        tavily_config = TavilyConfig()
+        tavily_config = TavilyConfig(api_key=os.getenv("TAVILY_API_KEY"))
 
     soup_crawler.set(soup_crawler_config)
     tavily.set(tavily_config)
-    if urlparse(data).scheme in ["http", "https"]:
+
+    http_schemes = {"http", "https"}
+
+    def _is_http_url(item: Union[str, BinaryIO]) -> bool:
+        return isinstance(item, str) and urlparse(item).scheme in http_schemes
+
+    if _is_http_url(data):
+        node_set = ["web_content"] if not node_set else node_set + ["web_content"]
+    elif isinstance(data, list) and any(_is_http_url(item) for item in data):
         node_set = ["web_content"] if not node_set else node_set + ["web_content"]
 
     user, authorized_dataset = await resolve_authorized_user_dataset(dataset_id, dataset_name, user)

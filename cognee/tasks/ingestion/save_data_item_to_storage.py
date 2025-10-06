@@ -63,10 +63,19 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any], **kwar
 
                 tavily = tavily_config.get()
                 soup_crawler = soup_crawler_config.get()
+                preferred_tool = "beautifulsoup" if soup_crawler else "tavily"
+                if preferred_tool == "tavily" and tavily is None:
+                    raise IngestionError(
+                        message="TavilyConfig must be set on the ingestion context when fetching HTTP URLs without a SoupCrawlerConfig."
+                    )
+                if preferred_tool == "beautifulsoup" and soup_crawler is None:
+                    raise IngestionError(
+                        message="SoupCrawlerConfig must be set on the ingestion context when using the BeautifulSoup scraper."
+                    )
 
                 data = await fetch_page_content(
                     data_item,
-                    preferred_tool="beautifulsoup" if soup_crawler else "tavily",
+                    preferred_tool=preferred_tool,
                     tavily_config=tavily,
                     soup_crawler_config=soup_crawler,
                 )
@@ -74,6 +83,8 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any], **kwar
                 for key, value in data.items():
                     content += f"{key}:\n{value}\n\n"
                 return await save_data_to_file(content)
+            except IngestionError:
+                raise
             except Exception as e:
                 raise IngestionError(
                     message=f"Error ingesting webpage results of url {data_item}: {str(e)}"

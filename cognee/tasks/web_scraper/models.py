@@ -6,7 +6,6 @@ from datetime import datetime
 class WebPage(DataPoint):
     """Represents a scraped web page with metadata"""
 
-    url: str
     name: Optional[str]
     content: str
     content_hash: str
@@ -17,7 +16,7 @@ class WebPage(DataPoint):
     page_size: int
     extraction_rules: Dict[str, Any]  # CSS selectors, XPath rules used
     description: str
-    metadata: dict = {"index_fields": ["url", "title", "scraped_at", "description"]}
+    metadata: dict = {"index_fields": ["name", "description"]}
 
 
 class WebSite(DataPoint):
@@ -31,7 +30,7 @@ class WebSite(DataPoint):
     page_count: int
     scraping_config: Dict[str, Any]
     description: str
-    metadata: dict = {"index_fields": ["domain", "base_url", "description"]}
+    metadata: dict = {"index_fields": ["name", "description"]}
 
 
 class ScrapingJob(DataPoint):
@@ -44,4 +43,4 @@ class ScrapingJob(DataPoint):
     last_run: Optional[datetime]
     next_run: Optional[datetime]
     description: str
-    metadata: dict = {"index_fields": ["job_name", "status", "description"]}
+    metadata: dict = {"index_fields": ["name", "description"]}

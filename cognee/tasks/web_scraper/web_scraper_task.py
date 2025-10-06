@@ -87,12 +87,12 @@ async def cron_web_scraper_task(
                 )
             ),
             trigger=trigger,
-            id=uuid5(NAMESPACE_OID, name=job_name),
-            name=f"WebScraper_{uuid5(NAMESPACE_OID, name=job_name)}",
+            id=job_name,
+            name=job_name or f"WebScraper_{uuid5(NAMESPACE_OID, name=job_name)}",
             replace_existing=True,
         )
-
-        scheduler.start()
+        if not scheduler.running:
+            scheduler.start()
         return
 
     # If no schedule, run immediately
@@ -191,7 +191,6 @@ async def web_scraper_task(
         tavily_config=tavily_config,
         soup_crawler_config=soup_crawler_config,
     )
-
     for page_url, content in results.items():
         parsed_url = urlparse(page_url)
         domain = parsed_url.netloc
@@ -250,16 +249,15 @@ async def web_scraper_task(
             f"Webpage: {parsed_url.path.lstrip('/') or 'Home'}\n"
             f"URL: {page_url}\n"
             f"Scraped at: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"Content hash: {content_hash[:16]}...\n"
-            f"Content type: text/html\n"
+            f"Content: {content_str}"
+            f"Content type: text\n"
             f"Page size: {len(content_str)} bytes\n"
             f"Status code: 200"
         )
-
+        page_extraction_rules = extraction_rules
         webpage = WebPage(
-            id=uuid5(NAMESPACE_OID, name=parsed_url.path.lstrip("/")),
-            url=page_url,
-            name=get_path_after_base(base_url, page_url),
+            id=uuid5(NAMESPACE_OID, name=page_url),
+            name=page_url,
             content=content_str,
             content_hash=content_hash,
             scraped_at=now,
@@ -267,7 +265,7 @@ async def web_scraper_task(
             status_code=200,
             content_type="text/html",
             page_size=len(content_str),
-            extraction_rules=extraction_rules or {},
+            extraction_rules=page_extraction_rules or {},
             description=webpage_description,
         )
         webpages.append(webpage)
@@ -301,10 +299,10 @@ async def web_scraper_task(
                 },
             )
         )
-
+    print(len(webpages))
     for webpage in webpages:
         node_mapping[webpage.id] = webpage
-        parsed_url = urlparse(webpage.url)
+        parsed_url = urlparse(webpage.name)
         base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
         edge_mapping.append(
             (

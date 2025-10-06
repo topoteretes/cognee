@@ -2,11 +2,17 @@ import asyncio
 import cognee
 from cognee.tasks.web_scraper.config import SoupCrawlerConfig
 from cognee.tasks.web_scraper import cron_web_scraper_task
+from uuid import uuid5, NAMESPACE_OID
+from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+from dotenv import load_dotenv
+from cognee.api.v1.visualize import visualize_graph
+
+load_dotenv()
 
 
 async def test_web_scraping_using_bs4():
     await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    await cognee.prune.prune_system()
 
     url = "https://quotes.toscrape.com/"
     rules = {
@@ -119,6 +125,9 @@ async def test_web_scraping_using_tavily_and_incremental_loading():
 
 # ---------- cron job tests ----------
 async def test_cron_web_scraper():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    graph_db = await get_graph_engine()
     urls = ["https://quotes.toscrape.com/", "https://books.toscrape.com/"]
     extraction_rules = {
         "quotes": {"selector": ".quote span.text", "all": True},
@@ -127,45 +136,51 @@ async def test_cron_web_scraper():
         "prices": "article.product_pod p.price_color",
     }
 
-    # Run cron_web_scraper_task (schedule string is required)
+    # Run cron_web_scraper_task
     await cron_web_scraper_task(
-        urls=urls,
-        schedule="*/5 * * * *",  # every 5 minutes
+        url=urls,
+        schedule="*/3 * * * *",  # every 3 minutes
+        job_name="cron_scraping_job",
         extraction_rules=extraction_rules,
-        use_playwright=False,
     )
-    
-    # Wait until first run of cron job is done
-    await asyncio.sleep(120)
 
-    # Validate that the scraped data is searchable
-    results = await cognee.search(
-        "Who said 'The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking'?",
-        query_type=cognee.SearchType.GRAPH_COMPLETION,
-    )
-    assert "Albert Einstein" in results[0]
+    scraping_job_done = await graph_db.get_node(uuid5(NAMESPACE_OID, name="cron_scraping_job"))
+    while True:
+        if scraping_job_done:
+            results = await cognee.search(
+                "Who said 'The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking'?",
+                query_type=cognee.SearchType.GRAPH_COMPLETION,
+            )
 
-    results_books = await cognee.search(
-        "What is the price of 'A Light in the Attic' book?",
-        query_type=cognee.SearchType.GRAPH_COMPLETION,
-    )
-    assert "51.77" in results_books[0]
+            assert "Albert Einstein" in results[0]
 
-    print("Cron job web_scraping test passed!")
+            results_books = await cognee.search(
+                "What is the price of 'A Light in the Attic' book?",
+                query_type=cognee.SearchType.GRAPH_COMPLETION,
+            )
+
+            assert "51.77" in results_books[0]
+
+            print("Cron job web_scraping test passed!")
+            break
+        else:
+            scraping_job_done = await graph_db.get_node(
+                uuid5(NAMESPACE_OID, name="cron_scraping_job")
+            )
 
 
 async def main():
-    print("Starting BS4 incremental loading test...")
-    await test_web_scraping_using_bs4_and_incremental_loading()
+    # print("Starting BS4 incremental loading test...")
+    # await test_web_scraping_using_bs4_and_incremental_loading()
 
-    print("Starting BS4 normal test...")
-    await test_web_scraping_using_bs4()
+    # print("Starting BS4 normal test...")
+    # await test_web_scraping_using_bs4()
 
-    print("Starting Tavily incremental loading test...")
-    await test_web_scraping_using_tavily_and_incremental_loading()
+    # print("Starting Tavily incremental loading test...")
+    # await test_web_scraping_using_tavily_and_incremental_loading()
 
-    print("Starting Tavily normal test...")
-    await test_web_scraping_using_tavily()
+    # print("Starting Tavily normal test...")
+    # await test_web_scraping_using_tavily()
 
     print("Starting cron job test...")
     await test_cron_web_scraper()

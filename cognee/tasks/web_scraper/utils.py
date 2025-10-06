@@ -46,9 +46,9 @@ async def fetch_page_content(
             installed.
     """
     if preferred_tool == "tavily":
-        if tavily_config.api_key is None:
+        if not tavily_config or tavily_config.api_key is None:
             raise ValueError("TAVILY_API_KEY must be set in TavilyConfig to use Tavily")
-        return await fetch_with_tavily(urls)
+        return await fetch_with_tavily(urls, tavily_config)
 
     elif preferred_tool == "beautifulsoup":
         try:
@@ -59,9 +59,9 @@ async def fetch_page_content(
             )
             raise
         crawler = BeautifulSoupCrawler()
-        extraction_rules = soup_crawler_config.extraction_rules
-        if extraction_rules is None:
+        if not soup_crawler_config and soup_crawler_config.extraction_rules is None:
             raise ValueError("extraction_rules must be provided when not using Tavily")
+        extraction_rules = soup_crawler_config.extraction_rules
         try:
             results = await crawler.fetch_with_bs4(
                 urls,
@@ -76,7 +76,9 @@ async def fetch_page_content(
             raise
 
 
-async def fetch_with_tavily(urls: Union[str, List[str]]) -> Dict[str, str]:
+async def fetch_with_tavily(
+    urls: Union[str, List[str]], tavily_config: Optional[TavilyConfig] = None
+) -> Dict[str, str]:
     """Fetch content from URLs using the Tavily API.
 
     Args:
@@ -96,8 +98,8 @@ async def fetch_with_tavily(urls: Union[str, List[str]]) -> Dict[str, str]:
             "Failed to import tavily, make sure to install using pip install tavily-python>=0.7.0"
         )
         raise
-    client = AsyncTavilyClient()
-    results = await client.extract(urls)
+    client = AsyncTavilyClient(api_key=tavily_config.api_key if tavily_config else None)
+    results = await client.extract(urls, format="text")
     for failed_result in results.get("failed_results", []):
         logger.warning(f"Failed to fetch {failed_result}")
     return_results = {}
