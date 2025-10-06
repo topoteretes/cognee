@@ -126,7 +126,6 @@ async def test_web_scraping_using_tavily_and_incremental_loading():
 async def test_cron_web_scraper():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
-    graph_db = await get_graph_engine()
     urls = ["https://quotes.toscrape.com/", "https://books.toscrape.com/"]
     extraction_rules = {
         "quotes": {"selector": ".quote span.text", "all": True},
