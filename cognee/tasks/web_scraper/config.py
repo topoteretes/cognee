@@ -5,8 +5,8 @@ import os
 
 class TavilyConfig(BaseModel):
     api_key: str = os.getenv("TAVILY_API_KEY")
-    extract_depth: Literal["basic","advanced"] = "basic"
-    proxies: Optional[Dict[str,str]] = None
+    extract_depth: Literal["basic", "advanced"] = "basic"
+    proxies: Optional[Dict[str, str]] = None
     timeout: Optional[int] = Field(default=10, ge=1, le=60)
 
 

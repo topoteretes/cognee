@@ -68,7 +68,7 @@ async def fetch_page_content(
             max_retries=soup_crawler_config.max_retries,
             retry_delay_factor=soup_crawler_config.retry_delay_factor,
             headers=soup_crawler_config.headers,
-            robots_cache_ttl=soup_crawler_config.robots_cache_ttl
+            robots_cache_ttl=soup_crawler_config.robots_cache_ttl,
         )
         try:
             results = await crawler.fetch_with_bs4(
@@ -110,13 +110,13 @@ async def fetch_with_tavily(
         raise
     client = AsyncTavilyClient(
         api_key=tavily_config.api_key if tavily_config else None,
-        proxies=tavily_config.proxies if tavily_config else None
+        proxies=tavily_config.proxies if tavily_config else None,
     )
     results = await client.extract(
-        urls, 
+        urls,
         format="text",
         extract_depth=tavily_config.extract_depth if tavily_config else "basic",
-        timeout=tavily_config.timeout if tavily_config else 10
+        timeout=tavily_config.timeout if tavily_config else 10,
     )
     for failed_result in results.get("failed_results", []):
         logger.warning(f"Failed to fetch {failed_result}")
