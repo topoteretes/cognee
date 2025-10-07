@@ -51,7 +51,9 @@ class KuzuAdapter(GraphDBInterface):
         self.connection: Optional[Connection] = None
         self.executor = ThreadPoolExecutor()
         if cache_config.caching:
-            self.redis_lock = get_cache_engine(lock_key="kuzu-lock-" + str(uuid5(NAMESPACE_OID, db_path)))
+            self.redis_lock = get_cache_engine(
+                lock_key="kuzu-lock-" + str(uuid5(NAMESPACE_OID, db_path))
+            )
         else:
             self._initialize_connection()
         self.KUZU_ASYNC_LOCK = asyncio.Lock()
@@ -230,7 +232,6 @@ class KuzuAdapter(GraphDBInterface):
                     self.reopen()
             logger.info(f"Open connections after open: {self.open_connections}")
 
-
         result = await loop.run_in_executor(self.executor, blocking_query)
 
         if not cache_config.caching:
@@ -238,7 +239,7 @@ class KuzuAdapter(GraphDBInterface):
                 self.open_connections -= 1
                 logger.info(f"Opened connections after closing {self.open_connections}")
                 if self.open_connections == 0:
-                    self.connection.execute('CHECKPOINT;')
+                    self.connection.execute("CHECKPOINT;")
                     self.close()
 
         return result
