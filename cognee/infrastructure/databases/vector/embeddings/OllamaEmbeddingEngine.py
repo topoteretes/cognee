@@ -54,12 +54,14 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         max_completion_tokens: int = 512,
         endpoint: Optional[str] = "http://localhost:11434/api/embeddings",
         huggingface_tokenizer: str = "Salesforce/SFR-Embedding-Mistral",
+        batch_size: int = 100,
     ):
         self.model = model
         self.dimensions = dimensions
         self.max_completion_tokens = max_completion_tokens
         self.endpoint = endpoint
         self.huggingface_tokenizer_name = huggingface_tokenizer
+        self.batch_size = batch_size
         self.tokenizer = self.get_tokenizer()
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
@@ -121,6 +123,15 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             - int: The dimension of the embedding vectors.
         """
         return self.dimensions
+
+    def get_batch_size(self) -> int:
+        """
+        Return the desired batch size for embedding calls
+
+        Returns:
+
+        """
+        return self.batch_size
 
     def get_tokenizer(self):
         """
