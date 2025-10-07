@@ -83,7 +83,7 @@ async def fetch_page_content(
             logger.error(f"Error fetching page content: {str(e)}")
             raise
         finally:
-            crawler.close()
+            await crawler.close()
 
 
 async def fetch_with_tavily(
