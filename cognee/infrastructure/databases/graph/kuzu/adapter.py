@@ -175,7 +175,9 @@ class KuzuAdapter(GraphDBInterface):
 
             if self.connection:
                 async with self.KUZU_ASYNC_LOCK:
-                    self.connection.execute("CHECKPOINT;")
+                    self.redis_lock.acquire()
+                    await self.query("CHECKPOINT;")
+                    self.redis_lock.release()
 
             s3_file_storage.s3.put(self.temp_graph_file, self.db_path, recursive=True)
 
@@ -213,9 +215,8 @@ class KuzuAdapter(GraphDBInterface):
 
         def blocking_query():
             try:
-                if not self.connection:
-                    logger.debug("Reconnecting to Kuzu database...")
-                    self._initialize_connection()
+                if self._is_closed:
+                    self.reopen()
 
                 result = self.connection.execute(query, params)
                 rows = []
@@ -1590,6 +1591,7 @@ class KuzuAdapter(GraphDBInterface):
                 logger.info(f"Deleted Kuzu database files at {self.db_path}")
 
             # Reinitialize the database
+            self.redis_lock.acquire()
             self._initialize_connection()
             # Verify the database is empty
             result = self.connection.execute("MATCH (n:Node) RETURN COUNT(n)")
@@ -1600,6 +1602,7 @@ class KuzuAdapter(GraphDBInterface):
                 )
                 self.connection.execute("MATCH (n:Node) DETACH DELETE n")
             logger.info("Database cleared successfully")
+            self.redis_lock.release()
         except Exception as e:
             logger.error(f"Error during database clearing: {e}")
             raise
