@@ -299,7 +299,6 @@ async def web_scraper_task(
                 },
             )
         )
-    print(len(webpages))
     for webpage in webpages:
         node_mapping[webpage.id] = webpage
         parsed_url = urlparse(webpage.name)
