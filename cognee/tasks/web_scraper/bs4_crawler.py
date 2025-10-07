@@ -138,7 +138,7 @@ class BeautifulSoupCrawler:
         await self.close()
 
     @lru_cache(maxsize=1024)
-    def _domain_from_url(url: str) -> str:
+    def _domain_from_url(self, url: str) -> str:
         """Extract the domain (netloc) from a URL.
 
         Args:
@@ -153,7 +153,7 @@ class BeautifulSoupCrawler:
             return url
 
     @lru_cache(maxsize=1024)
-    def _get_domain_root(url: str) -> str:
+    def _get_domain_root(self, url: str) -> str:
         """Get the root URL (scheme and netloc) from a URL.
 
         Args:
@@ -376,7 +376,7 @@ class BeautifulSoupCrawler:
                 )
                 await asyncio.sleep(backoff)
 
-    def _normalize_rule(rule: Union[str, Dict[str, Any]]) -> ExtractionRule:
+    def _normalize_rule(self, rule: Union[str, Dict[str, Any]]) -> ExtractionRule:
         """Normalize an extraction rule to an ExtractionRule dataclass.
 
         Args:
