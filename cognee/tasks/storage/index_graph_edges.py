@@ -12,7 +12,6 @@ logger = get_logger()
 
 async def index_graph_edges(
     edges_data: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]] = None,
-    batch_size: int = 1024,
 ):
     """
     Indexes graph edges by creating and managing vector indexes for relationship types.
@@ -80,6 +79,8 @@ async def index_graph_edges(
     for index_name, indexable_points in index_points.items():
         index_name, field_name = index_name.split(".")
 
+        # Get maximum batch size for embedding model
+        batch_size = vector_engine.embedding_engine.get_batch_size()
         # We save the data in batches of {batch_size} to not put a lot of pressure on the database
         for start in range(0, len(indexable_points), batch_size):
             batch = indexable_points[start : start + batch_size]
