@@ -255,7 +255,7 @@ async def cognify(
         # 2. Get entity relationships and connections
         relationships = await cognee.search(
             "connections between concepts",
-            query_type=SearchType.INSIGHTS
+            query_type=SearchType.GRAPH_COMPLETION
         )
 
         # 3. Find relevant document chunks

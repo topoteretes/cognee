@@ -60,7 +60,7 @@ async def main():
     random_node_name = random_node.payload["text"]
 
     search_results = await cognee.search(
-        query_type=SearchType.INSIGHTS, query_text=random_node_name
+        query_type=SearchType.GRAPH_COMPLETION, query_text=random_node_name
     )
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
