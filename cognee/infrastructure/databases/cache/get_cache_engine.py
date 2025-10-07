@@ -40,7 +40,7 @@ def create_cache_engine(
     )
 
 
-def get_cache_engine() -> CacheDBInterface:
+def get_cache_engine(lock_key: str) -> CacheDBInterface:
     """
     Returns a cache adapter instance using current context configuration.
     """
@@ -48,7 +48,7 @@ def get_cache_engine() -> CacheDBInterface:
     return create_cache_engine(
         cache_host=config.cache_host,
         cache_port=config.cache_port,
-        lock_key=config.lock_key,
+        lock_key=lock_key,
         agentic_lock_expire=config.agentic_lock_expire,
         agentic_lock_timeout=config.agentic_lock_timeout,
     )
