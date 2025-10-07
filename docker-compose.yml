@@ -96,17 +96,6 @@ services:
     networks:
       - cognee-network
 
-  falkordb:
-    image: falkordb/falkordb:edge
-    container_name: falkordb
-    profiles:
-      - falkordb
-    ports:
-      - 6379:6379
-      - 3001:3000
-    networks:
-      - cognee-network
-
   chromadb:
     image: chromadb/chroma:0.6.3
     container_name: chromadb

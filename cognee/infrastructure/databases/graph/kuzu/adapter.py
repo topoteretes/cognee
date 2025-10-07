@@ -62,6 +62,29 @@ class KuzuAdapter(GraphDBInterface):
 
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
+
+        def _install_json_extension():
+            """
+            Function handles installing of the json extension for the current Kuzu version.
+            This has to be done with an empty graph db before connecting to an existing database otherwise
+            missing json extension errors will be raised.
+            """
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", delete=True) as temp_file:
+                    temp_graph_file = temp_file.name
+                    tmp_db = Database(
+                        temp_graph_file,
+                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
+                        max_db_size=4096 * 1024 * 1024,
+                    )
+                    tmp_db.init_database()
+                    connection = Connection(tmp_db)
+                    connection.execute("INSTALL JSON;")
+            except Exception as e:
+                logger.info(f"JSON extension already installed or not needed: {e}")
+
+        _install_json_extension()
+
         try:
             if "s3://" in self.db_path:
                 with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
@@ -122,11 +145,6 @@ class KuzuAdapter(GraphDBInterface):
 
             self.db.init_database()
             self.connection = Connection(self.db)
-
-            try:
-                self.connection.execute("INSTALL JSON;")
-            except Exception as e:
-                logger.info(f"JSON extension already installed or not needed: {e}")
 
             try:
                 self.connection.execute("LOAD EXTENSION JSON;")
