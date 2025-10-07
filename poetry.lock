@@ -510,7 +510,7 @@ description = "Timeout context manager for asyncio programs"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
-markers = "extra == \"falkordb\" and python_full_version < \"3.11.3\" or python_version == \"3.10\""
+markers = "python_version == \"3.10\""
 files = [
     {file = "async_timeout-5.0.1-py3-none-any.whl", hash = "sha256:39e3809566ff85354557ec2398b55e096c8364bacac9405a7a1fa429e77fe76c"},
     {file = "async_timeout-5.0.1.tar.gz", hash = "sha256:d9321a7a3d5a6a5e187e824d2fa0793ce379a202935782d555d6e9d2735677d3"},
@@ -2168,23 +2168,6 @@ files = [
 
 [package.extras]
 tests = ["asttokens (>=2.1.0)", "coverage", "coverage-enable-subprocess", "ipython", "littleutils", "pytest", "rich ; python_version >= \"3.11\""]
-
-[[package]]
-name = "falkordb"
-version = "1.2.0"
-description = "Python client for interacting with FalkorDB database"
-optional = true
-python-versions = "<4.0,>=3.8"
-groups = ["main"]
-markers = "extra == \"falkordb\""
-files = [
-    {file = "falkordb-1.2.0-py3-none-any.whl", hash = "sha256:7572d9cc377735d22efc52fe6fe73c7a435422c827b6ea3ca223a850a77be12e"},
-    {file = "falkordb-1.2.0.tar.gz", hash = "sha256:ce57365b86722d538e75aa5d438de67ecd8eb9478da612506d9812cd7f182d0b"},
-]
-
-[package.dependencies]
-python-dateutil = ">=2.9.0,<3.0.0"
-redis = ">=5.0.1,<6.0.0"
 
 [[package]]
 name = "fastapi"
@@ -9647,27 +9630,6 @@ networkx = ["networkx (>=2,<4)"]
 orjson = ["orjson (>=3.9.14,<4)"]
 
 [[package]]
-name = "redis"
-version = "5.3.1"
-description = "Python client for Redis database and key-value store"
-optional = true
-python-versions = ">=3.8"
-groups = ["main"]
-markers = "extra == \"falkordb\""
-files = [
-    {file = "redis-5.3.1-py3-none-any.whl", hash = "sha256:dc1909bd24669cc31b5f67a039700b16ec30571096c5f1f0d9d2324bff31af97"},
-    {file = "redis-5.3.1.tar.gz", hash = "sha256:ca49577a531ea64039b5a36db3d6cd1a0c7a60c34124d46924a45b956e8cf14c"},
-]
-
-[package.dependencies]
-async-timeout = {version = ">=4.0.3", markers = "python_full_version < \"3.11.3\""}
-PyJWT = ">=2.9.0"
-
-[package.extras]
-hiredis = ["hiredis (>=3.0.0)"]
-ocsp = ["cryptography (>=36.0.1)", "pyopenssl (==23.2.1)", "requests (>=2.31.0)"]
-
-[[package]]
 name = "referencing"
 version = "0.36.2"
 description = "JSON Referencing + Python"
@@ -12758,7 +12720,6 @@ distributed = ["modal"]
 dlt = ["dlt"]
 docs = ["unstructured"]
 evals = ["gdown", "matplotlib", "pandas", "plotly", "scikit-learn"]
-falkordb = ["falkordb"]
 graphiti = ["graphiti-core"]
 groq = ["groq"]
 huggingface = ["transformers"]
@@ -12777,4 +12738,4 @@ posthog = ["posthog"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<=3.13"
-content-hash = "874553043d02f0974213e040262fe0b1abf61b3c0be47c5e6d8e2db718f94ea2"
+content-hash = "38353807b06e5c06caaa107979529937b978204f0f405c6b38cee283f4a49d3c"
