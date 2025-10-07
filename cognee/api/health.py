@@ -189,21 +189,12 @@ class HealthChecker:
         start_time = time.time()
         try:
             from cognee.infrastructure.llm.config import get_llm_config
-            from cognee.infrastructure.llm import LLMGateway
 
             config = get_llm_config()
 
-            from pydantic import BaseModel
+            from cognee.infrastructure.llm.utils import test_llm_connection
 
-            class TestResponse(BaseModel):
-                status: str
-
-            # Use a simple test to verify LLM connectivity
-            await LLMGateway.acreate_structured_output(
-                text_input="Respond with status: ok",
-                system_prompt="You are a test assistant. Respond with a simple status.",
-                response_model=TestResponse,
-            )
+            await test_llm_connection()
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
@@ -226,13 +217,9 @@ class HealthChecker:
         """Check embedding service health (non-critical)."""
         start_time = time.time()
         try:
-            from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
-                get_embedding_engine,
-            )
+            from cognee.infrastructure.llm.utils import test_embedding_connection
 
-            # Test actual embedding generation with minimal text
-            engine = get_embedding_engine()
-            await engine.embed_text(["test"])
+            await test_embedding_connection()
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
