@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
 
 
@@ -16,6 +16,7 @@ async def test_index_graph_edges_success():
         ],
     )
     mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.get_batch_size = MagicMock(return_value=100)
 
     # Patch the globals of the function so that when it does:
     #   vector_engine = get_vector_engine()
