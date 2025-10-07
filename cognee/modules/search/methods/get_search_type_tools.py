@@ -15,6 +15,7 @@ from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
 from cognee.modules.retrieval.coding_rules_retriever import CodingRulesRetriever
+from cognee.modules.retrieval.jaccard_retrival import JaccardChunksRetriever
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
@@ -152,6 +153,12 @@ async def get_search_type_tools(
             TemporalRetriever(top_k=top_k).get_completion,
             TemporalRetriever(top_k=top_k).get_context,
         ],
+        SearchType.CHUNKS_LEXICAL: (
+            lambda _r=JaccardChunksRetriever(top_k=top_k): [
+                _r.get_completion,
+                _r.get_context,
+            ]
+        )(),
         SearchType.CODING_RULES: [
             CodingRulesRetriever(rules_nodeset_name=node_name).get_existing_rules,
         ],

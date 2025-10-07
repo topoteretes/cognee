@@ -20,3 +20,10 @@ try:
     __all__.append("UnstructuredLoader")
 except ImportError:
     pass
+
+try:
+    from .advanced_pdf_loader import AdvancedPdfLoader
+
+    __all__.append("AdvancedPdfLoader")
+except ImportError:
+    pass

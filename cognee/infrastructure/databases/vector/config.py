@@ -30,21 +30,21 @@ class VectorConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     @pydantic.model_validator(mode="after")
-    def validate_paths(cls, values):
+    def validate_paths(self):
         base_config = get_base_config()
 
         # If vector_db_url is provided and is not a path skip checking if path is absolute (as it can also be a url)
-        if values.vector_db_url and Path(values.vector_db_url).exists():
+        if self.vector_db_url and Path(self.vector_db_url).exists():
             # Relative path to absolute
-            values.vector_db_url = ensure_absolute_path(
-                values.vector_db_url,
+            self.vector_db_url = ensure_absolute_path(
+                self.vector_db_url,
             )
-        elif not values.vector_db_url:
+        elif not self.vector_db_url:
             # Default path
             databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
-            values.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
+            self.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
 
-        return values
+        return self
 
     def to_dict(self) -> dict:
         """

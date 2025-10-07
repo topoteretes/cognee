@@ -23,14 +23,14 @@ class RelationalConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     @pydantic.model_validator(mode="after")
-    def fill_derived(cls, values):
+    def fill_derived(self):
         # Set file path based on graph database provider if no file path is provided
-        if not values.db_path:
+        if not self.db_path:
             base_config = get_base_config()
             databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
-            values.db_path = databases_directory_path
+            self.db_path = databases_directory_path
 
-        return values
+        return self
 
     def to_dict(self) -> dict:
         """

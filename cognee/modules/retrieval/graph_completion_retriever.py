@@ -93,11 +93,8 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                         for field_name in index_fields:
                             vector_index_collections.append(f"{subclass.__name__}_{field_name}")
 
-        user = await get_default_user()
-
         found_triplets = await brute_force_triplet_search(
             query,
-            user=user,
             top_k=self.top_k,
             collections=vector_index_collections or None,
             node_type=self.node_type,

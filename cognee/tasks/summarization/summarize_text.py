@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from cognee.tasks.summarization.exceptions import InvalidSummaryInputsError
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.extraction import extract_summary
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.tasks.summarization.models import TextSummary
 
@@ -50,7 +50,7 @@ async def summarize_text(
         summarization_model = cognee_config.summarization_model
 
     chunk_summaries = await asyncio.gather(
-        *[LLMGateway.extract_summary(chunk.text, summarization_model) for chunk in data_chunks]
+        *[extract_summary(chunk.text, summarization_model) for chunk in data_chunks]
     )
 
     summaries = [
