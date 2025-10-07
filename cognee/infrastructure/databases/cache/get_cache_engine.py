@@ -3,8 +3,9 @@
 from functools import lru_cache
 from cognee.infrastructure.databases.cache.config import get_cache_config
 
-from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
+
+config = get_cache_config()
 
 
 @lru_cache
@@ -14,7 +15,7 @@ def create_cache_engine(
     lock_key: str,
     agentic_lock_expire: int = 240,
     agentic_lock_timeout: int = 300,
-) -> CacheDBInterface:
+):
     """
     Factory function to instantiate a cache coordination backend (currently Redis).
 
@@ -30,21 +31,25 @@ def create_cache_engine(
     --------
     - CacheDBInterface: An instance of the appropriate cache adapter. :TODO: Now we support only Redis. later if we add more here we can split the logic
     """
+    if config.caching:
+        from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 
-    return RedisAdapter(
-        host=cache_host,
-        port=cache_port,
-        lock_name=lock_key,
-        timeout=agentic_lock_expire,
-        blocking_timeout=agentic_lock_timeout,
-    )
+        return RedisAdapter(
+            host=cache_host,
+            port=cache_port,
+            lock_name=lock_key,
+            timeout=agentic_lock_expire,
+            blocking_timeout=agentic_lock_timeout,
+        )
+    else:
+        return None
 
 
 def get_cache_engine(lock_key: str) -> CacheDBInterface:
     """
     Returns a cache adapter instance using current context configuration.
     """
-    config = get_cache_config()
+
     return create_cache_engine(
         cache_host=config.cache_host,
         cache_port=config.cache_port,
