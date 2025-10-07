@@ -37,4 +37,3 @@ class CacheConfig(BaseSettings):
 @lru_cache
 def get_cache_config():
     return CacheConfig()
-
