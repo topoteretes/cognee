@@ -8,7 +8,7 @@ permissions:
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
-  ENV: 'test'
+  ENV: 'dev'
 
 jobs:
   test-gemini:
