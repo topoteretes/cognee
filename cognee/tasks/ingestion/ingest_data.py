@@ -1,7 +1,7 @@
 import json
 import inspect
 from uuid import UUID
-from typing import Union, BinaryIO, Any, List, Optional, Dict, Literal
+from typing import Union, BinaryIO, Any, List, Optional
 
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -16,7 +16,6 @@ from cognee.modules.data.methods import (
     get_dataset_data,
     load_or_create_datasets,
 )
-from cognee.tasks.web_scraper.config import SoupCrawlerConfig, TavilyConfig
 
 from .save_data_item_to_storage import save_data_item_to_storage
 from .data_item_to_text_file import data_item_to_text_file

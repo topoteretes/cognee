@@ -28,7 +28,7 @@ class HTMLContent(str):
 settings = SaveDataSettings()
 
 
-async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any], **kwargs) -> str:
+async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str:
     if "llama_index" in str(type(data_item)):
         # Dynamic import is used because the llama_index module is optional.
         from .transform_data import get_data_from_llama_index

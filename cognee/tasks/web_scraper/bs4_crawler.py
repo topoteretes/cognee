@@ -137,7 +137,6 @@ class BeautifulSoupCrawler:
         """Exit the context manager, closing the HTTP client."""
         await self.close()
 
-    @staticmethod
     @lru_cache(maxsize=1024)
     def _domain_from_url(url: str) -> str:
         """Extract the domain (netloc) from a URL.
@@ -153,7 +152,6 @@ class BeautifulSoupCrawler:
         except Exception:
             return url
 
-    @staticmethod
     @lru_cache(maxsize=1024)
     def _get_domain_root(url: str) -> str:
         """Get the root URL (scheme and netloc) from a URL.
@@ -378,7 +376,6 @@ class BeautifulSoupCrawler:
                 )
                 await asyncio.sleep(backoff)
 
-    @staticmethod
     def _normalize_rule(rule: Union[str, Dict[str, Any]]) -> ExtractionRule:
         """Normalize an extraction rule to an ExtractionRule dataclass.
 

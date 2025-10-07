@@ -20,4 +20,5 @@ class SoupCrawlerConfig(BaseModel):
     extraction_rules: Dict[str, Any]
     use_playwright: bool = False
     playwright_js_wait: float = 0.8
+    robots_cache_ttl: float = 3600.0
     join_all_matches: bool = False

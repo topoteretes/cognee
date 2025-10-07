@@ -68,6 +68,7 @@ async def fetch_page_content(
             max_retries=soup_crawler_config.max_retries,
             retry_delay_factor=soup_crawler_config.retry_delay_factor,
             headers=soup_crawler_config.headers,
+            robots_cache_ttl=soup_crawler_config.robots_cache_ttl
         )
         try:
             results = await crawler.fetch_with_bs4(
