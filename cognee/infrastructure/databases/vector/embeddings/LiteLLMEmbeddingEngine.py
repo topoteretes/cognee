@@ -58,6 +58,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         endpoint: str = None,
         api_version: str = None,
         max_completion_tokens: int = 512,
+        batch_size: int = 100,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
@@ -68,6 +69,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.max_completion_tokens = max_completion_tokens
         self.tokenizer = self.get_tokenizer()
         self.retry_count = 0
+        self.batch_size = batch_size
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
@@ -164,6 +166,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             - int: The size (dimensionality) of the embedding vectors.
         """
         return self.dimensions
+
+    def get_batch_size(self) -> int:
+        """
+        Return the desired batch size for embedding calls
+
+        Returns:
+
+        """
+        return self.batch_size
 
     def get_tokenizer(self):
         """
