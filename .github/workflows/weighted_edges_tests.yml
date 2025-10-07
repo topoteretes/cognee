@@ -62,8 +62,14 @@ jobs:
         include:
           - database: kuzu
             graph_db_provider: "kuzu"
+            graph_db_url: ""
+            graph_db_username: ""
+            graph_db_password: ""
           - database: neo4j
             graph_db_provider: "neo4j"
+            graph_db_url: ${{ steps.neo4j.outputs.neo4j-url }}
+            graph_db_username: ${{ steps.neo4j.outputs.neo4j-username }}
+            graph_db_password: ${{ steps.neo4j.outputs.neo4j-password }}
     env:
       LLM_PROVIDER: openai
       LLM_MODEL: gpt-5-mini
@@ -86,12 +92,19 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
+
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
 
       - name: Run Weighted Edges Tests
         env:
           GRAPH_DATABASE_PROVIDER: ${{ matrix.graph_db_provider }}
+          GRAPH_DATABASE_URL: ${{ matrix.graph_db_url }}
+          GRAPH_DATABASE_USERNAME: ${{ matrix.graph_db_username }}
+          GRAPH_DATABASE_PASSWORD: ${{ matrix.graph_db_password }}
         run: |
           uv run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v --tb=short
 
