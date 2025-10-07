@@ -223,7 +223,7 @@ class KuzuAdapter(GraphDBInterface):
                 logger.error(f"Query execution failed: {str(e)}")
                 raise
 
-        if cache_config.caching:
+        if not cache_config.caching:
             async with self._connection_change_lock:
                 self.open_connections += 1
                 if self._is_closed:
@@ -233,7 +233,7 @@ class KuzuAdapter(GraphDBInterface):
 
         result = await loop.run_in_executor(self.executor, blocking_query)
 
-        if cache_config.caching:
+        if not cache_config.caching:
             async with self._connection_change_lock:
                 self.open_connections -= 1
                 logger.info(f"Opened connections after closing {self.open_connections}")
