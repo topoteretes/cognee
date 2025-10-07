@@ -70,11 +70,11 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
                     await cognee.add(data=data_to_add, dataset_name=args.dataset_name)
                     fmt.success(f"Successfully added data to dataset '{args.dataset_name}'")
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to add data: {str(e)}")
+                    raise CliCommandInnerException(f"Failed to add data: {str(e)}") from e
 
             asyncio.run(run_add())
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
-                raise CliCommandException(str(e), error_code=1)
-            raise CliCommandException(f"Error adding data: {str(e)}", error_code=1)
+                raise CliCommandException(str(e), error_code=1) from e
+            raise CliCommandException(f"Error adding data: {str(e)}", error_code=1) from e
