@@ -76,6 +76,9 @@ Get started quickly with a Google Colab  <a href="https://colab.research.google.
 
 ## About cognee
 
+cognee works locally and stores your data on your device.
+Our hosted solution is just our deployment of OSS cognee on Modal, with the goal of making development and productionization easier.
+
 Self-hosted package:
 
 - Interconnects any kind of documents: past conversations, files, images, and audio transcriptions

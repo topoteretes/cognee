@@ -6,6 +6,10 @@ on:
 permissions:
   contents: read
 
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+
 jobs:
   test-gemini:
     name: Run S3 File Storage Test
