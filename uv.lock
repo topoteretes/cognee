@@ -1010,6 +1010,9 @@ postgres-binary = [
 posthog = [
     { name = "posthog" },
 ]
+redis = [
+    { name = "redis" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1086,6 +1089,7 @@ requires-dist = [
     { name = "python-magic-bin", marker = "sys_platform == 'win32'", specifier = "<0.5" },
     { name = "python-multipart", specifier = ">=0.0.20,<1.0.0" },
     { name = "rdflib", specifier = ">=7.1.4,<7.2.0" },
+    { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.3,<6.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.2,<=0.13.1" },
     { name = "s3fs", extras = ["boto3"], marker = "extra == 'aws'", specifier = "==2025.3.2" },
     { name = "scikit-learn", marker = "extra == 'evals'", specifier = ">=1.6.1,<2" },
@@ -1104,7 +1108,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34.0,<1.0.0" },
     { name = "websockets", specifier = ">=15.0.1,<16.0.0" },
 ]
-provides-extras = ["api", "distributed", "neo4j", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "deepeval", "posthog", "falkordb", "groq", "chromadb", "docs", "codegraph", "evals", "graphiti", "aws", "dlt", "baml", "dev", "debug", "monitoring"]
+provides-extras = ["api", "distributed", "neo4j", "neptune", "postgres", "postgres-binary", "notebook", "langchain", "llama-index", "huggingface", "ollama", "mistral", "anthropic", "deepeval", "posthog", "falkordb", "groq", "chromadb", "docs", "codegraph", "evals", "graphiti", "aws", "dlt", "baml", "dev", "debug", "redis", "monitoring"]
 
 [[package]]
 name = "colorama"
