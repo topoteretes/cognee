@@ -193,8 +193,17 @@ class HealthChecker:
 
             config = get_llm_config()
 
-            # Test actual API connection with minimal request
-            LLMGateway.show_prompt("test", "test.txt")
+            from pydantic import BaseModel
+
+            class TestResponse(BaseModel):
+                status: str
+
+            # Use a simple test to verify LLM connectivity
+            await LLMGateway.acreate_structured_output(
+                text_input="Respond with status: ok",
+                system_prompt="You are a test assistant. Respond with a simple status.",
+                response_model=TestResponse,
+            )
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
