@@ -194,7 +194,7 @@ class HealthChecker:
             config = get_llm_config()
 
             # Test actual API connection with minimal request
-            LLMGateway.show_prompt("test", "test")
+            LLMGateway.show_prompt("test", "test.txt")
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
