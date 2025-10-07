@@ -55,7 +55,7 @@ class KuzuAdapter(GraphDBInterface):
         else:
             self._initialize_connection()
         self.KUZU_ASYNC_LOCK = asyncio.Lock()
-        self._counter_lock = asyncio.Lock()
+        self._connection_change_lock = asyncio.Lock()
 
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
@@ -224,17 +224,17 @@ class KuzuAdapter(GraphDBInterface):
                 raise
 
         if cache_config.caching:
-            if self._is_closed:
-                self.reopen()
-            async with self._counter_lock:
+            async with self._connection_change_lock:
                 self.open_connections += 1
+                if self._is_closed:
+                    self.reopen()
             logger.info(f"Open connections after open: {self.open_connections}")
-        
+
 
         result = await loop.run_in_executor(self.executor, blocking_query)
 
         if cache_config.caching:
-            async with self._counter_lock:
+            async with self._connection_change_lock:
                 self.open_connections -= 1
                 logger.info(f"Opened connections after closing {self.open_connections}")
                 if self.open_connections == 0:
