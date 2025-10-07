@@ -82,6 +82,8 @@ async def fetch_page_content(
         except Exception as e:
             logger.error(f"Error fetching page content: {str(e)}")
             raise
+        finally:
+            crawler.close()
 
 
 async def fetch_with_tavily(
