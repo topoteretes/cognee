@@ -16,7 +16,7 @@ class WebPage(DataPoint):
     page_size: int
     extraction_rules: Dict[str, Any]  # CSS selectors, XPath rules used
     description: str
-    metadata: dict = {"index_fields": ["name", "description"]}
+    metadata: dict = {"index_fields": ["name", "description", "content"]}
 
 
 class WebSite(DataPoint):

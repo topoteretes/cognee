@@ -250,13 +250,13 @@ async def web_scraper_task(
         # Create WebPage
         content_str = content if isinstance(content, str) else str(content)
         content_hash = hashlib.sha256(content_str.encode("utf-8")).hexdigest()
-
+        content_preview = content_str[:500] + ("..." if len(content_str) > 500 else "")
         # Create description for WebPage
         webpage_description = (
             f"Webpage: {parsed_url.path.lstrip('/') or 'Home'}\n"
             f"URL: {page_url}\n"
             f"Scraped at: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"Content: {content_str}\n"
+            f"Content: {content_preview}\n"
             f"Content type: text\n"
             f"Page size: {len(content_str)} bytes\n"
             f"Status code: 200"
