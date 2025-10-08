@@ -25,12 +25,20 @@ from .utils import fetch_page_content
 try:
     from apscheduler.triggers.cron import CronTrigger
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
-    scheduler = AsyncIOScheduler()
 except ImportError:
     raise ImportError("Please install apscheduler by pip install APScheduler>=3.10")
 
 logger = get_logger(__name__)
+
+
+_scheduler = None
+
+
+def get_scheduler():
+    global _scheduler
+    if _scheduler is None:
+        _scheduler = AsyncIOScheduler()
+    return _scheduler
 
 
 async def cron_web_scraper_task(
@@ -73,6 +81,7 @@ async def cron_web_scraper_task(
         except ValueError as e:
             raise ValueError(f"Invalid cron string '{schedule}': {e}")
 
+        scheduler = get_scheduler()
         scheduler.add_job(
             web_scraper_task,
             kwargs={
