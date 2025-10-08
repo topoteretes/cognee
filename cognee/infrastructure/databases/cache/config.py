@@ -13,6 +13,7 @@ class CacheConfig(BaseSettings):
     - agentic_lock_expire: Automatic lock expiration time (in seconds).
     - agentic_lock_timeout: Maximum time (in seconds) to wait for the lock release.
     """
+
     caching: bool = False
     shared_kuzu_lock: bool = False
     cache_host: str = "localhost"
