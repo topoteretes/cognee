@@ -2,9 +2,6 @@ import asyncio
 import cognee
 from cognee.tasks.web_scraper.config import SoupCrawlerConfig
 from cognee.tasks.web_scraper import cron_web_scraper_task
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 async def test_web_scraping_using_bs4():
