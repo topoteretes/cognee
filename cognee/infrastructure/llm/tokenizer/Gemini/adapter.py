@@ -3,6 +3,7 @@ from typing import List, Any
 from ..tokenizer_interface import TokenizerInterface
 
 
+# NOTE: DEPRECATED as to count tokens you need to send an API request to Google it is too slow to use with Cognee
 class GeminiTokenizer(TokenizerInterface):
     """
     Implements a tokenizer interface for the Gemini model, managing token extraction and
@@ -16,10 +17,10 @@ class GeminiTokenizer(TokenizerInterface):
 
     def __init__(
         self,
-        model: str,
+        llm_model: str,
         max_completion_tokens: int = 3072,
     ):
-        self.model = model
+        self.llm_model = llm_model
         self.max_completion_tokens = max_completion_tokens
 
         # Get LLM API key from config
@@ -28,12 +29,11 @@ class GeminiTokenizer(TokenizerInterface):
             get_llm_config,
         )
 
-        config = get_embedding_config()
         llm_config = get_llm_config()
 
-        import google.generativeai as genai
+        from google import genai
 
-        genai.configure(api_key=config.embedding_api_key or llm_config.llm_api_key)
+        self.client = genai.Client(api_key=llm_config.llm_api_key)
 
     def extract_tokens(self, text: str) -> List[Any]:
         """
@@ -77,6 +77,7 @@ class GeminiTokenizer(TokenizerInterface):
 
             - int: The number of tokens in the given text.
         """
-        import google.generativeai as genai
 
-        return len(genai.embed_content(model=f"models/{self.model}", content=text))
+        tokens_response = self.client.models.count_tokens(model=self.llm_model, contents=text)
+
+        return tokens_response.total_tokens

@@ -189,12 +189,12 @@ class HealthChecker:
         start_time = time.time()
         try:
             from cognee.infrastructure.llm.config import get_llm_config
-            from cognee.infrastructure.llm import LLMGateway
 
             config = get_llm_config()
 
-            # Test actual API connection with minimal request
-            LLMGateway.show_prompt("test", "test.txt")
+            from cognee.infrastructure.llm.utils import test_llm_connection
+
+            await test_llm_connection()
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
@@ -217,13 +217,9 @@ class HealthChecker:
         """Check embedding service health (non-critical)."""
         start_time = time.time()
         try:
-            from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
-                get_embedding_engine,
-            )
+            from cognee.infrastructure.llm.utils import test_embedding_connection
 
-            # Test actual embedding generation with minimal text
-            engine = get_embedding_engine()
-            await engine.embed_text(["test"])
+            await test_embedding_connection()
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(

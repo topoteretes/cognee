@@ -5,15 +5,13 @@ from typing import Type
 from pydantic import BaseModel
 from openai import ContentFilterFinishReasonError
 from litellm.exceptions import ContentPolicyViolationError
-from instructor.exceptions import InstructorRetryException
+from instructor.core import InstructorRetryException
 
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
-    MissingSystemPromptPathError,
 )
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
@@ -148,11 +146,11 @@ class OpenAIAdapter(LLMInterface):
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
             InstructorRetryException,
-        ):
+        ) as e:
             if not (self.fallback_model and self.fallback_api_key):
                 raise ContentPolicyFilterError(
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
-                )
+                ) from e
 
             try:
                 return await self.aclient.chat.completions.create(
@@ -185,7 +183,7 @@ class OpenAIAdapter(LLMInterface):
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
-                    )
+                    ) from error
 
     @observe
     @sleep_and_retry_sync()

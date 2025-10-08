@@ -516,7 +516,7 @@ def start_ui(
                     env_file,
                     "-e",
                     "TRANSPORT_MODE=sse",
-                    "cognee/cognee-mcp:daulet-dev",
+                    "cognee/cognee-mcp:main",
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -627,7 +627,6 @@ def start_ui(
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
                 shell=True,
             )
         else:
@@ -637,7 +636,6 @@ def start_ui(
                 env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
                 preexec_fn=os.setsid if hasattr(os, "setsid") else None,
             )
 
