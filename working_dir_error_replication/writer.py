@@ -20,14 +20,14 @@ def create_node(name):
 
 async def main():
     adapter = KuzuAdapter("test.db")
-    nodes = [create_node(f"Node{i}") for i in range(200000)]
+    nodes = [create_node(f"Node{i}") for i in range(2)]
 
     print("Writer: Starting...")
     await adapter.add_nodes(nodes)
 
     print("writer finished...")
 
-    time.sleep(10)
+    time.sleep(5)
 
 
 if __name__ == "__main__":
