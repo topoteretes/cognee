@@ -11,8 +11,6 @@ from datetime import datetime
 from typing import Union, List
 from urllib.parse import urlparse
 from uuid import uuid5, NAMESPACE_OID
-import asyncio
-from apscheduler.triggers.cron import CronTrigger
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.logging_utils import get_logger
@@ -25,9 +23,10 @@ from .config import SoupCrawlerConfig, TavilyConfig
 from .utils import fetch_page_content
 
 try:
-    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-    scheduler = BackgroundScheduler()
+    scheduler = AsyncIOScheduler()
 except ImportError:
     raise ImportError("Please install apscheduler by pip install APScheduler>=3.10")
 
@@ -75,17 +74,16 @@ async def cron_web_scraper_task(
             raise ValueError(f"Invalid cron string '{schedule}': {e}")
 
         scheduler.add_job(
-            lambda: asyncio.run(
-                web_scraper_task(
-                    url=url,
-                    schedule=schedule,
-                    extraction_rules=extraction_rules,
-                    tavily_api_key=tavily_api_key,
-                    soup_crawler_config=soup_crawler_config,
-                    tavily_config=tavily_config,
-                    job_name=job_name,
-                )
-            ),
+            web_scraper_task,
+            kwargs={
+                "url": url,
+                "schedule": schedule,
+                "extraction_rules": extraction_rules,
+                "tavily_api_key": tavily_api_key,
+                "soup_crawler_config": soup_crawler_config,
+                "tavily_config": tavily_config,
+                "job_name": job_name,
+            },
             trigger=trigger,
             id=job_name,
             name=job_name or f"WebScraper_{uuid5(NAMESPACE_OID, name=job_name)}",
@@ -249,7 +247,7 @@ async def web_scraper_task(
             f"Webpage: {parsed_url.path.lstrip('/') or 'Home'}\n"
             f"URL: {page_url}\n"
             f"Scraped at: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"Content: {content_str}"
+            f"Content: {content_str}\n"
             f"Content type: text\n"
             f"Page size: {len(content_str)} bytes\n"
             f"Status code: 200"
