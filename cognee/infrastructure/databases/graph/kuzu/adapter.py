@@ -271,13 +271,13 @@ class KuzuAdapter(GraphDBInterface):
             del self.db
             self.db = None
         self._is_closed = True
-        logger.info(f"Kuzu database closed successfully")
+        logger.info("Kuzu database closed successfully")
 
     def reopen(self):
         if self._is_closed:
             self._is_closed = False
             self._initialize_connection()
-            logger.info(f"Kuzu database re-opened successfully")
+            logger.info("Kuzu database re-opened successfully")
 
     @asynccontextmanager
     async def get_session(self):
