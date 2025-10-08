@@ -3,7 +3,6 @@
 import os
 
 import uvicorn
-import sentry_sdk
 from traceback import format_exc
 from contextlib import asynccontextmanager
 from fastapi import Request
@@ -29,6 +28,7 @@ from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.delete.routers import get_delete_router
 from cognee.api.v1.responses.routers import get_responses_router
 from cognee.api.v1.sync.routers import get_sync_router
+from cognee.api.v1.update.routers import get_update_router
 from cognee.api.v1.users.routers import (
     get_auth_router,
     get_register_router,
@@ -42,11 +42,18 @@ from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTI
 logger = get_logger()
 
 if os.getenv("ENV", "prod") == "prod":
-    sentry_sdk.init(
-        dsn=os.getenv("SENTRY_REPORTING_URL"),
-        traces_sample_rate=1.0,
-        profiles_sample_rate=1.0,
-    )
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=os.getenv("SENTRY_REPORTING_URL"),
+            traces_sample_rate=1.0,
+            profiles_sample_rate=1.0,
+        )
+    except ImportError:
+        logger.info(
+            "Sentry SDK not available. Install with 'pip install cognee\"[monitoring]\"' to enable error monitoring."
+        )
 
 
 app_environment = os.getenv("ENV", "prod")
@@ -81,7 +88,7 @@ if CORS_ALLOWED_ORIGINS:
     ]
 else:
     allowed_origins = [
-        "http://localhost:3000",
+        os.getenv("UI_APP_URL", "http://localhost:3000"),
     ]  # Block all except explicitly set origins
 
 app.add_middleware(
@@ -256,6 +263,8 @@ app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["sett
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
 
 app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
+
+app.include_router(get_update_router(), prefix="/api/v1/update", tags=["update"])
 
 app.include_router(get_responses_router(), prefix="/api/v1/responses", tags=["responses"])
 

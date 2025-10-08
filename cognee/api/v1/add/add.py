@@ -204,7 +204,9 @@ async def add(
 
     await setup()
 
-    user, authorized_dataset = await resolve_authorized_user_dataset(dataset_id, dataset_name, user)
+    user, authorized_dataset = await resolve_authorized_user_dataset(
+        dataset_name=dataset_name, dataset_id=dataset_id, user=user
+    )
 
     await reset_dataset_pipeline_run_status(
         authorized_dataset.id, user, pipeline_names=["add_pipeline", "cognify_pipeline"]

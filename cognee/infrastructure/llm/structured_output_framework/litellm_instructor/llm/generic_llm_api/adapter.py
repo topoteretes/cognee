@@ -6,7 +6,7 @@ from typing import Type
 from pydantic import BaseModel
 from openai import ContentFilterFinishReasonError
 from litellm.exceptions import ContentPolicyViolationError
-from instructor.exceptions import InstructorRetryException
+from instructor.core import InstructorRetryException
 
 from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
@@ -56,9 +56,7 @@ class GenericAPIAdapter(LLMInterface):
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
 
-        self.aclient = instructor.from_litellm(
-            litellm.acompletion, mode=instructor.Mode.JSON, api_key=api_key
-        )
+        self.aclient = instructor.from_litellm(litellm.acompletion, mode=instructor.Mode.JSON)
 
     @sleep_and_retry_async()
     @rate_limit_async
@@ -102,6 +100,7 @@ class GenericAPIAdapter(LLMInterface):
                     },
                 ],
                 max_retries=5,
+                api_key=self.api_key,
                 api_base=self.endpoint,
                 response_model=response_model,
             )
@@ -119,7 +118,7 @@ class GenericAPIAdapter(LLMInterface):
             if not (self.fallback_model and self.fallback_api_key and self.fallback_endpoint):
                 raise ContentPolicyFilterError(
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
-                )
+                ) from error
 
             try:
                 return await self.aclient.chat.completions.create(
@@ -152,4 +151,4 @@ class GenericAPIAdapter(LLMInterface):
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
-                    )
+                    ) from error

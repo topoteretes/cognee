@@ -188,6 +188,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
+          extra-dependencies: "baml"
 
       - name: Run Simple Examples
         run: uv run python ./examples/python/simple_example.py
