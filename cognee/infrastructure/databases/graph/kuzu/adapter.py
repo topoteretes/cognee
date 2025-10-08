@@ -28,7 +28,7 @@ from cognee.infrastructure.databases.cache.config import get_cache_config
 logger = get_logger()
 
 cache_config = get_cache_config()
-if cache_config.caching:
+if cache_config.shared_kuzu_lock:
     from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
 
 
@@ -49,7 +49,7 @@ class KuzuAdapter(GraphDBInterface):
         self.db_path = db_path  # Path for the database directory
         self.db: Optional[Database] = None
         self.connection: Optional[Connection] = None
-        if cache_config.caching:
+        if cache_config.shared_kuzu_lock:
             self.redis_lock = get_cache_engine(
                 lock_key="kuzu-lock-" + str(uuid5(NAMESPACE_OID, db_path))
             )
@@ -224,7 +224,7 @@ class KuzuAdapter(GraphDBInterface):
         def blocking_query():
             lock_acquired = False
             try:
-                if cache_config.caching:
+                if cache_config.shared_kuzu_lock:
                     self.redis_lock.acquire()
                     lock_acquired = True
                 if not self.connection:
@@ -248,13 +248,13 @@ class KuzuAdapter(GraphDBInterface):
                 logger.error(f"Query execution failed: {str(e)}")
                 raise
             finally:
-                if cache_config.caching and lock_acquired:
+                if cache_config.shared_kuzu_lock and lock_acquired:
                     try:
                         self.close()
                     finally:
                         self.redis_lock.release()
 
-        if cache_config.caching:
+        if cache_config.shared_kuzu_lock:
             async with self._connection_change_lock:
                 self.open_connections += 1
                 logger.info(f"Open connections after open: {self.open_connections}")
