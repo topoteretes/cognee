@@ -96,7 +96,7 @@ async def cron_web_scraper_task(
         return
 
     # If no schedule, run immediately
-    print(f"[{datetime.now()}] Running web scraper task immediately...")
+    logger.info(f"[{datetime.now()}] Running web scraper task immediately...")
     return await web_scraper_task(
         url=url,
         schedule=schedule,
@@ -118,10 +118,10 @@ async def web_scraper_task(
     tavily_config: TavilyConfig = None,
     job_name: str = None,
 ):
-    """Scrape URLs and store data points in a Kuzu graph database.
+    """Scrape URLs and store data points in a Graph database.
 
     This function scrapes content from the provided URLs, creates or updates WebPage,
-    WebSite, and ScrapingJob data points, and stores them in a Kuzu graph database.
+    WebSite, and ScrapingJob data points, and stores them in a Graph database.
     Each data point includes a description field summarizing its attributes. It creates
     'is_scraping' (ScrapingJob to WebSite) and 'is_part_of' (WebPage to WebSite)
     relationships, preserving existing edges during node updates.
