@@ -258,7 +258,10 @@ class KuzuAdapter(GraphDBInterface):
                 if self.open_connections == 0:
                     self.close()
 
-        return result
+                return result
+        else:
+            result = await loop.run_in_executor(self.executor, blocking_query)
+            return result
 
     def close(self):
         if self.connection:
