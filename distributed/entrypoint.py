@@ -66,6 +66,7 @@ async def main():
 
     await cognee.cognify(datasets=["s3-files"])
 
+    # Put Processing end signal into the queues to stop the consumers
     await add_nodes_and_edges_queue.put.aio(QueueSignal.STOP)
     await add_data_points_queue.put.aio(QueueSignal.STOP)
 
