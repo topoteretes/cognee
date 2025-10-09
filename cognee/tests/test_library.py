@@ -94,8 +94,6 @@ async def main():
     collection_names = await connection.table_names()
     assert len(collection_names) == 0, "LanceDB vector database is not empty"
 
-
-
     db_path = get_relational_engine().db_path
     dir_path = os.path.dirname(db_path)
     file_path = os.path.basename(db_path)
