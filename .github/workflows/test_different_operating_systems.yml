@@ -193,6 +193,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Path setup
+        if: ${{ matrix.os }} == 'windows-latest'
+        shell: bash
+        run: |
+          PATH=$(printf '%s\n' "$PATH" | grep -vi '/git/usr/bin' | paste -sd: -)
+          export PATH
+
       - name: Run Soft Deletion Tests
         env:
           ENV: 'dev'
