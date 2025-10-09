@@ -32,7 +32,7 @@ class CogneeClient:
     def __init__(self, api_url: Optional[str] = None, api_token: Optional[str] = None):
         self.api_url = api_url.rstrip("/") if api_url else None
         self.api_token = api_token
-        self.use_api = api_url is not None
+        self.use_api = bool(api_url)
 
         if self.use_api:
             logger.info(f"Cognee client initialized in API mode: {self.api_url}")
