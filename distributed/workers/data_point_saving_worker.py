@@ -53,7 +53,7 @@ secret_name = os.environ.get("MODAL_SECRET_NAME", "distributed_cognee")
 async def data_point_saving_worker():
     print("Started processing of data points; starting vector engine queue.")
     vector_engine = get_vector_engine()
-
+    # Defines how many data packets do we glue together from the modal queue before embedding call and ingestion
     BATCH_SIZE = 25
     stop_seen = False
 

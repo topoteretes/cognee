@@ -51,7 +51,7 @@ secret_name = os.environ.get("MODAL_SECRET_NAME", "distributed_cognee")
 async def graph_saving_worker():
     print("Started processing of nodes and edges; starting graph engine queue.")
     graph_engine = await get_graph_engine()
-
+    # Defines how many data packets do we glue together from the queue before ingesting them into the graph database
     BATCH_SIZE = 25
     stop_seen = False
 
