@@ -502,20 +502,22 @@ def start_ui(
 
     if start_mcp:
         logger.info("Starting Cognee MCP server with Docker...")
-        cwd = os.getcwd()
-        env_file = os.path.join(cwd, ".env")
         try:
             image = "cognee/cognee-mcp:main"
             subprocess.run(["docker", "pull", image], check=True)
 
+            import uuid
+
+            container_name = f"cognee-mcp-{uuid.uuid4().hex[:8]}"
+
             docker_cmd = [
                 "docker",
                 "run",
+                "--name",
+                container_name,
                 "-p",
                 f"{mcp_port}:8000",
                 "--rm",
-                "--env-file",
-                env_file,
                 "-e",
                 "TRANSPORT_MODE=sse",
             ]
@@ -531,6 +533,10 @@ def start_ui(
                     f"Configuring MCP to connect to backend API at http://localhost:{backend_port}"
                 )
                 logger.info("(localhost will be auto-converted to host.docker.internal)")
+            else:
+                cwd = os.getcwd()
+                env_file = os.path.join(cwd, ".env")
+                docker_cmd.extend(["--env-file", env_file])
 
             docker_cmd.append("cognee/cognee-mcp:main")
 
@@ -544,7 +550,8 @@ def start_ui(
             _stream_process_output(mcp_process, "stdout", "[MCP]", "\033[34m")  # Blue
             _stream_process_output(mcp_process, "stderr", "[MCP]", "\033[34m")  # Blue
 
-            pid_callback(mcp_process.pid)
+            # Pass both PID and container name using a tuple
+            pid_callback((mcp_process.pid, container_name))
 
             mode_info = "API mode" if start_backend else "direct mode"
             logger.info(

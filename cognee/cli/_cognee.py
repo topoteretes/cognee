@@ -175,12 +175,40 @@ def main() -> int:
     # Handle UI flag
     if hasattr(args, "start_ui") and args.start_ui:
         spawned_pids = []
+        docker_container = None
 
         def signal_handler(signum, frame):
             """Handle Ctrl+C and other termination signals"""
-            nonlocal spawned_pids
+            nonlocal spawned_pids, docker_container
             fmt.echo("\nShutting down UI server...")
 
+            # First, stop Docker container if running
+            if docker_container:
+                try:
+                    fmt.echo(f"Stopping Docker container {docker_container}...")
+                    result = subprocess.run(
+                        ["docker", "stop", docker_container],
+                        capture_output=True,
+                        timeout=10,
+                        check=False,
+                    )
+                    if result.returncode == 0:
+                        fmt.success(f"✓ Docker container {docker_container} stopped.")
+                    else:
+                        fmt.warning(
+                            f"Could not stop container {docker_container}: {result.stderr.decode()}"
+                        )
+                except subprocess.TimeoutExpired:
+                    fmt.warning(
+                        f"Timeout stopping container {docker_container}, forcing removal..."
+                    )
+                    subprocess.run(
+                        ["docker", "rm", "-f", docker_container], capture_output=True, check=False
+                    )
+                except Exception as e:
+                    fmt.warning(f"Could not stop Docker container {docker_container}: {e}")
+
+            # Then, stop regular processes
             for pid in spawned_pids:
                 try:
                     if hasattr(os, "killpg"):
@@ -209,10 +237,16 @@ def main() -> int:
 
             fmt.echo("Starting cognee UI...")
 
-            # Callback to capture PIDs of all spawned processes
-            def pid_callback(pid):
-                nonlocal spawned_pids
-                spawned_pids.append(pid)
+            # Callback to capture PIDs and Docker container of all spawned processes
+            def pid_callback(pid_or_tuple):
+                nonlocal spawned_pids, docker_container
+                # Handle both regular PIDs and (PID, container_name) tuples
+                if isinstance(pid_or_tuple, tuple):
+                    pid, container_name = pid_or_tuple
+                    spawned_pids.append(pid)
+                    docker_container = container_name
+                else:
+                    spawned_pids.append(pid_or_tuple)
 
             frontend_port = 3000
             start_backend, backend_port = True, 8000
