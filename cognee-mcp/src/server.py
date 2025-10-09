@@ -18,8 +18,7 @@ from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 import uvicorn
 
-# Import the new CogneeClient abstraction
-from cognee_client import CogneeClient
+from .cognee_client import CogneeClient
 
 
 try:
@@ -38,7 +37,6 @@ mcp = FastMCP("Cognee")
 
 logger = get_logger()
 
-# Global CogneeClient instance (will be initialized in main())
 cognee_client: Optional[CogneeClient] = None
 
 

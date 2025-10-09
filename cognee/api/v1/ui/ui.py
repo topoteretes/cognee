@@ -507,19 +507,35 @@ def start_ui(
         try:
             image = "cognee/cognee-mcp:main"
             subprocess.run(["docker", "pull", image], check=True)
+
+            docker_cmd = [
+                "docker",
+                "run",
+                "-p",
+                f"{mcp_port}:8000",
+                "--rm",
+                "--env-file",
+                env_file,
+                "-e",
+                "TRANSPORT_MODE=sse",
+            ]
+
+            if start_backend:
+                docker_cmd.extend(
+                    [
+                        "-e",
+                        f"API_URL=http://localhost:{backend_port}",
+                    ]
+                )
+                logger.info(
+                    f"Configuring MCP to connect to backend API at http://localhost:{backend_port}"
+                )
+                logger.info("(localhost will be auto-converted to host.docker.internal)")
+
+            docker_cmd.append("cognee/cognee-mcp:daulet-dev")
+
             mcp_process = subprocess.Popen(
-                [
-                    "docker",
-                    "run",
-                    "-p",
-                    f"{mcp_port}:8000",
-                    "--rm",
-                    "--env-file",
-                    env_file,
-                    "-e",
-                    "TRANSPORT_MODE=sse",
-                    "cognee/cognee-mcp:main",
-                ],
+                docker_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 preexec_fn=os.setsid if hasattr(os, "setsid") else None,
@@ -529,7 +545,11 @@ def start_ui(
             _stream_process_output(mcp_process, "stderr", "[MCP]", "\033[34m")  # Blue
 
             pid_callback(mcp_process.pid)
-            logger.info(f"✓ Cognee MCP server starting on http://127.0.0.1:{mcp_port}/sse")
+
+            mode_info = "API mode" if start_backend else "direct mode"
+            logger.info(
+                f"✓ Cognee MCP server starting on http://127.0.0.1:{mcp_port}/sse ({mode_info})"
+            )
         except Exception as e:
             logger.error(f"Failed to start MCP server with Docker: {str(e)}")
     # Start backend server if requested
