@@ -508,6 +508,7 @@ class SQLAlchemyAdapter:
                 await self.engine.dispose(close=True)
                 # Wait for the database connections to close and release the file (Windows)
                 import gc
+
                 gc.collect()
                 # await asyncio.sleep(2)
                 db_directory = path.dirname(self.db_path)
