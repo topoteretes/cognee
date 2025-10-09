@@ -217,10 +217,24 @@ export default function GraphVisualization({ ref, data, graphControls, className
 
   const [graphShape, setGraphShape] = useState<string>();
   
+  const zoomToFit: ForceGraphMethods["zoomToFit"] = (
+    durationMs?: number,
+    padding?: number,
+    nodeFilter?: (node: NodeObject) => boolean
+  ) => {
+    if (!graphRef.current) {
+      console.warn("GraphVisualization: graphRef not ready yet");
+      return undefined as any;
+    }
+  
+    return graphRef.current.zoomToFit?.(durationMs, padding, nodeFilter);
+  };
+  
   useImperativeHandle(ref, () => ({
-    zoomToFit: graphRef.current!.zoomToFit,
-    setGraphShape: setGraphShape,
+    zoomToFit,
+    setGraphShape,
   }));
+  
 
   return (
     <div ref={containerRef} className={classNames("w-full h-full", className)} id="graph-container">
