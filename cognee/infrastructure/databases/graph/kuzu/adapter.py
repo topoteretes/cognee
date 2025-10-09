@@ -1609,44 +1609,6 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to delete graph data: {e}")
             raise
 
-    async def clear_database(self) -> None:
-        """
-        Clear all data from the database by deleting the database files and reinitializing.
-
-        This method removes all files associated with the database and reinitializes the Kuzu
-        database structure, ensuring a completely empty state. It handles exceptions that might
-        occur during file deletions or initializations carefully.
-        """
-        try:
-            if self.connection:
-                self.connection = None
-            if self.db:
-                self.db.close()
-                self.db = None
-
-            db_dir = os.path.dirname(self.db_path)
-            db_name = os.path.basename(self.db_path)
-            file_storage = get_file_storage(db_dir)
-
-            if await file_storage.file_exists(db_name):
-                await file_storage.remove_all()
-                logger.info(f"Deleted Kuzu database files at {self.db_path}")
-
-            # Reinitialize the database
-            self._initialize_connection()
-            # Verify the database is empty
-            result = self.connection.execute("MATCH (n:Node) RETURN COUNT(n)")
-            count = result.get_next()[0] if result.has_next() else 0
-            if count > 0:
-                logger.warning(
-                    f"Database still contains {count} nodes after clearing, forcing deletion"
-                )
-                self.connection.execute("MATCH (n:Node) DETACH DELETE n")
-            logger.info("Database cleared successfully")
-        except Exception as e:
-            logger.error(f"Error during database clearing: {e}")
-            raise
-
     async def get_document_subgraph(self, data_id: str):
         """
         Get all nodes that should be deleted when removing a document.
