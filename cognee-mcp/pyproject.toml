@@ -32,6 +32,7 @@ packages = ["src"]
 [dependency-groups]
 dev = [
     "debugpy>=1.8.12,<2.0.0",
+    "openapi-python-client>=0.26.2",
 ]
 
 [tool.hatch.metadata]

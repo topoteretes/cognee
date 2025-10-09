@@ -1,0 +1,4368 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Cognee API",
+    "description": "Cognee API with Bearer token and Cookie auth",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/": {
+      "get": {
+        "summary": "Root",
+        "description": "Root endpoint that returns a welcome message.",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "description": "Health check endpoint for liveness/readiness probes.",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/detailed": {
+      "get": {
+        "summary": "Detailed Health Check",
+        "description": "Comprehensive health status with component details.",
+        "operationId": "detailed_health_check_health_detailed_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Auth:Cookie.Login",
+        "operationId": "auth_cookie_login_api_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_auth_cookie_login_api_v1_auth_login_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                },
+                "examples": {
+                  "LOGIN_BAD_CREDENTIALS": {
+                    "summary": "Bad credentials or the user is inactive.",
+                    "value": {
+                      "detail": "LOGIN_BAD_CREDENTIALS"
+                    }
+                  },
+                  "LOGIN_USER_NOT_VERIFIED": {
+                    "summary": "The user is not verified.",
+                    "value": {
+                      "detail": "LOGIN_USER_NOT_VERIFIED"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Auth:Cookie.Logout",
+        "operationId": "auth_cookie_logout_api_v1_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Missing token or inactive user."
+          },
+          "204": {
+            "description": "No Content"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Get Me",
+        "operationId": "get_me_api_v1_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Register:Register",
+        "operationId": "register_register_api_v1_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRead"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                },
+                "examples": {
+                  "REGISTER_USER_ALREADY_EXISTS": {
+                    "summary": "A user with this email already exists.",
+                    "value": {
+                      "detail": "REGISTER_USER_ALREADY_EXISTS"
+                    }
+                  },
+                  "REGISTER_INVALID_PASSWORD": {
+                    "summary": "Password validation failed.",
+                    "value": {
+                      "detail": {
+                        "code": "REGISTER_INVALID_PASSWORD",
+                        "reason": "Password should beat least 3 characters"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/forgot-password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Reset:Forgot Password",
+        "operationId": "reset_forgot_password_api_v1_auth_forgot_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_reset_forgot_password_api_v1_auth_forgot_password_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/reset-password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Reset:Reset Password",
+        "operationId": "reset_reset_password_api_v1_auth_reset_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_reset_reset_password_api_v1_auth_reset_password_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                },
+                "examples": {
+                  "RESET_PASSWORD_BAD_TOKEN": {
+                    "summary": "Bad or expired token.",
+                    "value": {
+                      "detail": "RESET_PASSWORD_BAD_TOKEN"
+                    }
+                  },
+                  "RESET_PASSWORD_INVALID_PASSWORD": {
+                    "summary": "Password validation failed.",
+                    "value": {
+                      "detail": {
+                        "code": "RESET_PASSWORD_INVALID_PASSWORD",
+                        "reason": "Password should be at least 3 characters"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/request-verify-token": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Verify:Request-Token",
+        "operationId": "verify_request_token_api_v1_auth_request_verify_token_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_verify_request_token_api_v1_auth_request_verify_token_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/verify": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Verify:Verify",
+        "operationId": "verify_verify_api_v1_auth_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_verify_verify_api_v1_auth_verify_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRead"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                },
+                "examples": {
+                  "VERIFY_USER_BAD_TOKEN": {
+                    "summary": "Bad token, not existing user ornot the e-mail currently set for the user.",
+                    "value": {
+                      "detail": "VERIFY_USER_BAD_TOKEN"
+                    }
+                  },
+                  "VERIFY_USER_ALREADY_VERIFIED": {
+                    "summary": "The user is already verified.",
+                    "value": {
+                      "detail": "VERIFY_USER_ALREADY_VERIFIED"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/add": {
+      "post": {
+        "tags": [
+          "add"
+        ],
+        "summary": "Add",
+        "description": "Add data to a dataset for processing and knowledge graph construction.\n\nThis endpoint accepts various types of data (files, URLs, GitHub repositories)\nand adds them to a specified dataset for processing. The data is ingested,\nanalyzed, and integrated into the knowledge graph.\n\n## Request Parameters\n- **data** (List[UploadFile]): List of files to upload. Can also include:\n  - HTTP URLs (if ALLOW_HTTP_REQUESTS is enabled)\n  - GitHub repository URLs (will be cloned and processed)\n  - Regular file uploads\n- **datasetName** (Optional[str]): Name of the dataset to add data to\n- **datasetId** (Optional[UUID]): UUID of an already existing dataset\n- **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.\n         Used for grouping related data points in the knowledge graph.\n\nEither datasetName or datasetId must be provided.\n\n## Response\nReturns information about the add operation containing:\n- Status of the operation\n- Details about the processed data\n- Any relevant metadata from the ingestion process\n\n## Error Codes\n- **400 Bad Request**: Neither datasetId nor datasetName provided\n- **409 Conflict**: Error during add operation\n- **403 Forbidden**: User doesn't have permission to add to dataset\n\n## Notes\n- To add data to datasets not owned by the user, use dataset_id (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)\n- datasetId value can only be the UUID of an already existing dataset",
+        "operationId": "add_api_v1_add_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_add_api_v1_add_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Add Api V1 Add Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/cognify": {
+      "post": {
+        "tags": [
+          "cognify"
+        ],
+        "summary": "Cognify",
+        "description": "Transform datasets into structured knowledge graphs through cognitive processing.\n\nThis endpoint is the core of Cognee's intelligence layer, responsible for converting\nraw text, documents, and data added through the add endpoint into semantic knowledge graphs.\nIt performs deep analysis to extract entities, relationships, and insights from ingested content.\n\n## Processing Pipeline\n1. Document classification and permission validation\n2. Text chunking and semantic segmentation\n3. Entity extraction using LLM-powered analysis\n4. Relationship detection and graph construction\n5. Vector embeddings generation for semantic search\n6. Content summarization and indexing\n\n## Request Parameters\n- **datasets** (Optional[List[str]]): List of dataset names to process. Dataset names are resolved to datasets owned by the authenticated user.\n- **dataset_ids** (Optional[List[UUID]]): List of existing dataset UUIDs to process. UUIDs allow processing of datasets not owned by the user (if permitted).\n- **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).\n- **custom_prompt** (Optional[str]): Custom prompt for entity extraction and graph generation. If provided, this prompt will be used instead of the default prompts for knowledge graph extraction.\n\n## Response\n- **Blocking execution**: Complete pipeline run information with entity counts, processing duration, and success/failure status\n- **Background execution**: Pipeline run metadata including pipeline_run_id for status monitoring via WebSocket subscription\n\n## Error Codes\n- **400 Bad Request**: When neither datasets nor dataset_ids are provided, or when specified datasets don't exist\n- **409 Conflict**: When processing fails due to system errors, missing LLM API keys, database connection failures, or corrupted content\n\n## Example Request\n```json\n{\n    \"datasets\": [\"research_papers\", \"documentation\"],\n    \"run_in_background\": false,\n    \"custom_prompt\": \"Extract entities focusing on technical concepts and their relationships. Identify key technologies, methodologies, and their interconnections.\"\n}\n```\n\n## Notes\nTo cognify data in datasets not owned by the user and for which the current user has write permission,\nthe dataset_id must be used (when ENABLE_BACKEND_ACCESS_CONTROL is set to True).\n\n## Next Steps\nAfter successful processing, use the search endpoints to query the generated knowledge graph for insights, relationships, and semantic search.",
+        "operationId": "cognify_api_v1_cognify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CognifyPayloadDTO"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Cognify Api V1 Cognify Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/memify": {
+      "post": {
+        "tags": [
+          "memify"
+        ],
+        "summary": "Memify",
+        "description": "Enrichment pipeline in Cognee, can work with already built graphs. If no data is provided existing knowledge graph will be used as data,\ncustom data can also be provided instead which can be processed with provided extraction and enrichment tasks.\n\nProvided tasks and data will be arranged to run the Cognee pipeline and execute graph enrichment/creation.\n\n## Request Parameters\n- **extractionTasks** Optional[List[str]]: List of available Cognee Tasks to execute for graph/data extraction.\n- **enrichmentTasks** Optional[List[str]]: List of available Cognee Tasks to handle enrichment of provided graph/data from extraction tasks.\n- **data** Optional[List[str]]: The data to ingest. Can be any text data when custom extraction and enrichment tasks are used.\n      Data provided here will be forwarded to the first extraction task in the pipeline as input.\n      If no data is provided the whole graph (or subgraph if node_name/node_type is specified) will be forwarded\n- **dataset_name** (Optional[str]): Name of the datasets to memify\n- **dataset_id** (Optional[UUID]): List of UUIDs of an already existing dataset\n- **node_name** (Optional[List[str]]):  Filter graph to specific named entities (for targeted search). Used when no data is provided.\n- **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).\n\nEither datasetName or datasetId must be provided.\n\n## Response\nReturns information about the add operation containing:\n- Status of the operation\n- Details about the processed data\n- Any relevant metadata from the ingestion process\n\n## Error Codes\n- **400 Bad Request**: Neither datasetId nor datasetName provided\n- **409 Conflict**: Error during memify operation\n- **403 Forbidden**: User doesn't have permission to use dataset\n\n## Notes\n- To memify datasets not owned by the user, use dataset_id (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)\n- datasetId value can only be the UUID of an already existing dataset",
+        "operationId": "memify_api_v1_memify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemifyPayloadDTO"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Memify Api V1 Memify Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/search": {
+      "get": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Get Search History",
+        "description": "Get search history for the authenticated user.\n\nThis endpoint retrieves the search history for the authenticated user,\nreturning a list of previously executed searches with their timestamps.\n\n## Response\nReturns a list of search history items containing:\n- **id**: Unique identifier for the search\n- **text**: The search query text\n- **user**: User who performed the search\n- **created_at**: When the search was performed\n\n## Error Codes\n- **500 Internal Server Error**: Error retrieving search history",
+        "operationId": "get_search_history_api_v1_search_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SearchHistoryItem"
+                  },
+                  "type": "array",
+                  "title": "Response Get Search History Api V1 Search Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Search",
+        "description": "Search for nodes in the graph database.\n\nThis endpoint performs semantic search across the knowledge graph to find\nrelevant nodes based on the provided query. It supports different search\ntypes and can be scoped to specific datasets.\n\n## Request Parameters\n- **search_type** (SearchType): Type of search to perform\n- **datasets** (Optional[List[str]]): List of dataset names to search within\n- **dataset_ids** (Optional[List[UUID]]): List of dataset UUIDs to search within\n- **query** (str): The search query string\n- **system_prompt** Optional[str]: System prompt to be used for Completion type searches in Cognee\n- **node_name** Optional[list[str]]: Filter results to specific node_sets defined in the add pipeline (for targeted search).\n- **top_k** (Optional[int]): Maximum number of results to return (default: 10)\n- **only_context** bool: Set to true to only return context Cognee will be sending to LLM in Completion type searches. This will be returned instead of LLM calls for completion type searches.\n\n## Response\nReturns a list of search results containing relevant nodes from the graph.\n\n## Error Codes\n- **409 Conflict**: Error during search operation\n- **403 Forbidden**: User doesn't have permission to search datasets (returns empty list)\n\n## Notes\n- Datasets sent by name will only map to datasets owned by the request sender\n- To search datasets not owned by the request sender, dataset UUID is needed\n- If permission is denied, returns empty list instead of error",
+        "operationId": "search_api_v1_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchPayloadDTO"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "$ref": "#/components/schemas/SearchResult"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CombinedSearchResult"
+                    },
+                    {
+                      "items": {},
+                      "type": "array"
+                    }
+                  ],
+                  "title": "Response Search Api V1 Search Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/permissions/datasets/{principal_id}": {
+      "post": {
+        "tags": [
+          "permissions"
+        ],
+        "summary": "Give Datasets Permission To Principal",
+        "description": "Grant permission on datasets to a principal (user or role).\n\nThis endpoint allows granting specific permissions on one or more datasets\nto a principal (which can be a user or role). The authenticated user must\nhave appropriate permissions to grant access to the specified datasets.\n\n## Path Parameters\n- **principal_id** (UUID): The UUID of the principal (user or role) to grant permission to\n\n## Request Parameters\n- **permission_name** (str): The name of the permission to grant (e.g., \"read\", \"write\", \"delete\")\n- **dataset_ids** (List[UUID]): List of dataset UUIDs to grant permission on\n\n## Response\nReturns a success message indicating permission was assigned.\n\n## Error Codes\n- **400 Bad Request**: Invalid request parameters\n- **403 Forbidden**: User doesn't have permission to grant access\n- **500 Internal Server Error**: Error granting permission",
+        "operationId": "give_datasets_permission_to_principal_api_v1_permissions_datasets__principal_id__post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "principal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Principal Id"
+            }
+          },
+          {
+            "name": "permission_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Permission Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "title": "Dataset Ids"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/permissions/roles": {
+      "post": {
+        "tags": [
+          "permissions"
+        ],
+        "summary": "Create Role",
+        "description": "Create a new role.\n\nThis endpoint creates a new role with the specified name. Roles are used\nto group permissions and can be assigned to users to manage access control\nmore efficiently. The authenticated user becomes the owner of the created role.\n\n## Request Parameters\n- **role_name** (str): The name of the role to create\n\n## Response\nReturns a success message indicating the role was created.\n\n## Error Codes\n- **400 Bad Request**: Invalid role name or role already exists\n- **500 Internal Server Error**: Error creating the role",
+        "operationId": "create_role_api_v1_permissions_roles_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "role_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Role Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/permissions/users/{user_id}/roles": {
+      "post": {
+        "tags": [
+          "permissions"
+        ],
+        "summary": "Add User To Role",
+        "description": "Add a user to a role.\n\nThis endpoint assigns a user to a specific role, granting them all the\npermissions associated with that role. The authenticated user must be\nthe owner of the role or have appropriate administrative permissions.\n\n## Path Parameters\n- **user_id** (UUID): The UUID of the user to add to the role\n\n## Request Parameters\n- **role_id** (UUID): The UUID of the role to assign the user to\n\n## Response\nReturns a success message indicating the user was added to the role.\n\n## Error Codes\n- **400 Bad Request**: Invalid user or role ID\n- **403 Forbidden**: User doesn't have permission to assign roles\n- **404 Not Found**: User or role doesn't exist\n- **500 Internal Server Error**: Error adding user to role",
+        "operationId": "add_user_to_role_api_v1_permissions_users__user_id__roles_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "role_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Role Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/permissions/users/{user_id}/tenants": {
+      "post": {
+        "tags": [
+          "permissions"
+        ],
+        "summary": "Add User To Tenant",
+        "description": "Add a user to a tenant.\n\nThis endpoint assigns a user to a specific tenant, allowing them to access\nresources and data associated with that tenant. The authenticated user must\nbe the owner of the tenant or have appropriate administrative permissions.\n\n## Path Parameters\n- **user_id** (UUID): The UUID of the user to add to the tenant\n\n## Request Parameters\n- **tenant_id** (UUID): The UUID of the tenant to assign the user to\n\n## Response\nReturns a success message indicating the user was added to the tenant.\n\n## Error Codes\n- **400 Bad Request**: Invalid user or tenant ID\n- **403 Forbidden**: User doesn't have permission to assign tenants\n- **404 Not Found**: User or tenant doesn't exist\n- **500 Internal Server Error**: Error adding user to tenant",
+        "operationId": "add_user_to_tenant_api_v1_permissions_users__user_id__tenants_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "tenant_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Tenant Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/permissions/tenants": {
+      "post": {
+        "tags": [
+          "permissions"
+        ],
+        "summary": "Create Tenant",
+        "description": "Create a new tenant.\n\nThis endpoint creates a new tenant with the specified name. Tenants are used\nto organize users and resources in multi-tenant environments, providing\nisolation and access control between different groups or organizations.\n\n## Request Parameters\n- **tenant_name** (str): The name of the tenant to create\n\n## Response\nReturns a success message indicating the tenant was created.\n\n## Error Codes\n- **400 Bad Request**: Invalid tenant name or tenant already exists\n- **500 Internal Server Error**: Error creating the tenant",
+        "operationId": "create_tenant_api_v1_permissions_tenants_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tenant_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tenant Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Get Datasets",
+        "description": "Get all datasets accessible to the authenticated user.\n\nThis endpoint retrieves all datasets that the authenticated user has\nread permissions for. The datasets are returned with their metadata\nincluding ID, name, creation time, and owner information.\n\n## Response\nReturns a list of dataset objects containing:\n- **id**: Unique dataset identifier\n- **name**: Dataset name\n- **created_at**: When the dataset was created\n- **updated_at**: When the dataset was last updated\n- **owner_id**: ID of the dataset owner\n\n## Error Codes\n- **418 I'm a teapot**: Error retrieving datasets",
+        "operationId": "get_datasets_api_v1_datasets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DatasetDTO"
+                  },
+                  "type": "array",
+                  "title": "Response Get Datasets Api V1 Datasets Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Create New Dataset",
+        "description": "Create a new dataset or return existing dataset with the same name.\n\nThis endpoint creates a new dataset with the specified name. If a dataset\nwith the same name already exists for the user, it returns the existing\ndataset instead of creating a duplicate. The user is automatically granted\nall permissions (read, write, share, delete) on the created dataset.\n\n## Request Parameters\n- **dataset_data** (DatasetCreationPayload): Dataset creation parameters containing:\n  - **name**: The name for the new dataset\n\n## Response\nReturns the created or existing dataset object containing:\n- **id**: Unique dataset identifier\n- **name**: Dataset name\n- **created_at**: When the dataset was created\n- **updated_at**: When the dataset was last updated\n- **owner_id**: ID of the dataset owner\n\n## Error Codes\n- **418 I'm a teapot**: Error creating dataset",
+        "operationId": "create_new_dataset_api_v1_datasets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasetCreationPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetDTO"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/datasets/{dataset_id}": {
+      "delete": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Delete Dataset",
+        "description": "Delete a dataset by its ID.\n\nThis endpoint permanently deletes a dataset and all its associated data.\nThe user must have delete permissions on the dataset to perform this operation.\n\n## Path Parameters\n- **dataset_id** (UUID): The unique identifier of the dataset to delete\n\n## Response\nNo content returned on successful deletion.\n\n## Error Codes\n- **404 Not Found**: Dataset doesn't exist or user doesn't have access\n- **500 Internal Server Error**: Error during deletion",
+        "operationId": "delete_dataset_api_v1_datasets__dataset_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dataset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDTO"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/data/{data_id}": {
+      "delete": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Delete Data",
+        "description": "Delete a specific data item from a dataset.\n\nThis endpoint removes a specific data item from a dataset while keeping\nthe dataset itself intact. The user must have delete permissions on the\ndataset to perform this operation.\n\n## Path Parameters\n- **dataset_id** (UUID): The unique identifier of the dataset containing the data\n- **data_id** (UUID): The unique identifier of the data item to delete\n\n## Response\nNo content returned on successful deletion.\n\n## Error Codes\n- **404 Not Found**: Dataset or data item doesn't exist, or user doesn't have access\n- **500 Internal Server Error**: Error during deletion",
+        "operationId": "delete_data_api_v1_datasets__dataset_id__data__data_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "data_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Data Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDTO"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/graph": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Get Dataset Graph",
+        "description": "Get the knowledge graph visualization for a dataset.\n\nThis endpoint retrieves the knowledge graph data for a specific dataset,\nincluding nodes and edges that represent the relationships between entities\nin the dataset. The graph data is formatted for visualization purposes.\n\n## Path Parameters\n- **dataset_id** (UUID): The unique identifier of the dataset\n\n## Response\nReturns the graph data containing:\n- **nodes**: List of graph nodes with id, label, and properties\n- **edges**: List of graph edges with source, target, and label\n\n## Error Codes\n- **404 Not Found**: Dataset doesn't exist or user doesn't have access\n- **500 Internal Server Error**: Error retrieving graph data",
+        "operationId": "get_dataset_graph_api_v1_datasets__dataset_id__graph_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dataset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphDTO"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/data": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Get Dataset Data",
+        "description": "Get all data items in a dataset.\n\nThis endpoint retrieves all data items (documents, files, etc.) that belong\nto a specific dataset. Each data item includes metadata such as name, type,\ncreation time, and storage location.\n\n## Path Parameters\n- **dataset_id** (UUID): The unique identifier of the dataset\n\n## Response\nReturns a list of data objects containing:\n- **id**: Unique data item identifier\n- **name**: Data item name\n- **created_at**: When the data was added\n- **updated_at**: When the data was last updated\n- **extension**: File extension\n- **mime_type**: MIME type of the data\n- **raw_data_location**: Storage location of the raw data\n\n## Error Codes\n- **404 Not Found**: Dataset doesn't exist or user doesn't have access\n- **500 Internal Server Error**: Error retrieving data",
+        "operationId": "get_dataset_data_api_v1_datasets__dataset_id__data_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dataset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DataDTO"
+                  },
+                  "title": "Response Get Dataset Data Api V1 Datasets  Dataset Id  Data Get"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDTO"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/status": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Get Dataset Status",
+        "description": "Get the processing status of datasets.\n\nThis endpoint retrieves the current processing status of one or more datasets,\nindicating whether they are being processed, have completed processing, or\nencountered errors during pipeline execution.\n\n## Query Parameters\n- **dataset** (List[UUID]): List of dataset UUIDs to check status for\n\n## Response\nReturns a dictionary mapping dataset IDs to their processing status:\n- **pending**: Dataset is queued for processing\n- **running**: Dataset is currently being processed\n- **completed**: Dataset processing completed successfully\n- **failed**: Dataset processing encountered an error\n\n## Error Codes\n- **500 Internal Server Error**: Error retrieving status information",
+        "operationId": "get_dataset_status_api_v1_datasets_status_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dataset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "default": [],
+              "title": "Dataset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/PipelineRunStatus"
+                  },
+                  "title": "Response Get Dataset Status Api V1 Datasets Status Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/{dataset_id}/data/{data_id}/raw": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Get Raw Data",
+        "description": "Download the raw data file for a specific data item.\n\nThis endpoint allows users to download the original, unprocessed data file\nfor a specific data item within a dataset. The file is returned as a direct\ndownload with appropriate headers.\n\n## Path Parameters\n- **dataset_id** (UUID): The unique identifier of the dataset containing the data\n- **data_id** (UUID): The unique identifier of the data item to download\n\n## Response\nReturns the raw data file as a downloadable response.\n\n## Error Codes\n- **404 Not Found**: Dataset or data item doesn't exist, or user doesn't have access\n- **500 Internal Server Error**: Error accessing the raw data file",
+        "operationId": "get_raw_data_api_v1_datasets__dataset_id__data__data_id__raw_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "data_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Data Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Get Settings",
+        "description": "Get the current system settings.\n\nThis endpoint retrieves the current configuration settings for the system,\nincluding LLM (Large Language Model) configuration and vector database\nconfiguration. These settings determine how the system processes and stores data.\n\n## Response\nReturns the current system settings containing:\n- **llm**: LLM configuration (provider, model, API key)\n- **vector_db**: Vector database configuration (provider, URL, API key)\n\n## Error Codes\n- **500 Internal Server Error**: Error retrieving settings",
+        "operationId": "get_settings_api_v1_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsDTO"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Save Settings",
+        "description": "Save or update system settings.\n\nThis endpoint allows updating the system configuration settings. You can\nupdate either the LLM configuration, vector database configuration, or both.\nOnly provided settings will be updated; others remain unchanged.\n\n## Request Parameters\n- **llm** (Optional[LLMConfigInputDTO]): LLM configuration (provider, model, API key)\n- **vector_db** (Optional[VectorDBConfigInputDTO]): Vector database configuration (provider, URL, API key)\n\n## Response\nNo content returned on successful save.\n\n## Error Codes\n- **400 Bad Request**: Invalid settings provided\n- **500 Internal Server Error**: Error saving settings",
+        "operationId": "save_settings_api_v1_settings_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsPayloadDTO"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/visualize": {
+      "get": {
+        "tags": [
+          "visualize"
+        ],
+        "summary": "Visualize",
+        "description": "Generate an HTML visualization of the dataset's knowledge graph.\n\nThis endpoint creates an interactive HTML visualization of the knowledge graph\nfor a specific dataset. The visualization displays nodes and edges representing\nentities and their relationships, allowing users to explore the graph structure\nvisually.\n\n## Query Parameters\n- **dataset_id** (UUID): The unique identifier of the dataset to visualize\n\n## Response\nReturns an HTML page containing the interactive graph visualization.\n\n## Error Codes\n- **404 Not Found**: Dataset doesn't exist\n- **403 Forbidden**: User doesn't have permission to read the dataset\n- **500 Internal Server Error**: Error generating visualization\n\n## Notes\n- User must have read permissions on the dataset\n- Visualization is interactive and allows graph exploration",
+        "operationId": "visualize_api_v1_visualize_get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dataset_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dataset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/delete": {
+      "delete": {
+        "tags": [
+          "delete"
+        ],
+        "summary": "Delete",
+        "description": "Delete data by its ID from the specified dataset.\n\nArgs:\n    data_id: The UUID of the data to delete\n    dataset_id: The UUID of the dataset containing the data\n    mode: \"soft\" (default) or \"hard\" - hard mode also deletes degree-one entity nodes\n    user: Authenticated user\n\nReturns:\n    JSON response indicating success or failure",
+        "operationId": "delete_api_v1_delete_delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "data_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Data Id"
+            }
+          },
+          {
+            "name": "dataset_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dataset Id"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "soft",
+              "title": "Mode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/update": {
+      "patch": {
+        "tags": [
+          "update"
+        ],
+        "summary": "Update",
+        "description": "Update data in a dataset.\n\nThis endpoint updates existing documents in a specified dataset by providing the data_id of the existing document\nto update and the new document with the changes as the data.\nThe document is updated, analyzed, and the changes are integrated into the knowledge graph.\n\n## Request Parameters\n- **data_id** (UUID): UUID of the document to update in Cognee memory\n- **data** (List[UploadFile]): List of files to upload.\n- **datasetId** (Optional[UUID]): UUID of an already existing dataset\n- **node_set** Optional[list[str]]: List of node identifiers for graph organization and access control.\n         Used for grouping related data points in the knowledge graph.\n\n## Response\nReturns information about the add operation containing:\n- Status of the operation\n- Details about the processed data\n- Any relevant metadata from the ingestion process\n\n## Error Codes\n- **400 Bad Request**: Neither datasetId nor datasetName provided\n- **409 Conflict**: Error during add operation\n- **403 Forbidden**: User doesn't have permission to add to dataset\n\n## Notes\n- To add data to datasets not owned by the user, use dataset_id (when ENABLE_BACKEND_ACCESS_CONTROL is set to True)\n- datasetId value can only be the UUID of an already existing dataset",
+        "operationId": "update_api_v1_update_patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "data_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Data Id"
+            }
+          },
+          {
+            "name": "dataset_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dataset Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_update_api_v1_update_patch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/responses/": {
+      "post": {
+        "tags": [
+          "responses"
+        ],
+        "summary": "Create Response",
+        "description": "OpenAI-compatible responses endpoint with function calling support.\n\nThis endpoint provides OpenAI-compatible API responses with integrated\nfunction calling capabilities for Cognee operations.\n\n## Request Parameters\n- **input** (str): The input text to process\n- **model** (str): The model to use for processing\n- **tools** (Optional[List[Dict]]): Available tools for function calling\n- **tool_choice** (Any): Tool selection strategy (default: \"auto\")\n- **temperature** (float): Response randomness (default: 1.0)\n\n## Response\nReturns an OpenAI-compatible response body with function call results.\n\n## Error Codes\n- **400 Bad Request**: Invalid request parameters\n- **500 Internal Server Error**: Error processing request\n\n## Notes\n- Compatible with OpenAI API format\n- Supports function calling with Cognee tools\n- Uses default tools if none provided",
+        "operationId": "create_response_api_v1_responses__post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sync": {
+      "post": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "Sync To Cloud",
+        "description": "Sync local data to Cognee Cloud.\n\nThis endpoint triggers synchronization of local Cognee data to your cloud instance.\nIt uploads your local datasets, knowledge graphs, and processed data to the cloud\nfor backup, sharing, or cloud-based processing.\n\n## Request Body (JSON)\n```json\n{\n    \"dataset_ids\": [\"123e4567-e89b-12d3-a456-426614174000\", \"456e7890-e12b-34c5-d678-901234567000\"]\n}\n```\n\n## Response\nReturns immediate response for the sync operation:\n- **run_id**: Unique identifier for tracking the background sync operation\n- **status**: Always \"started\" (operation runs in background)\n- **dataset_ids**: List of dataset IDs being synced\n- **dataset_names**: List of dataset names being synced\n- **message**: Description of the background operation\n- **timestamp**: When the sync was initiated\n- **user_id**: User who initiated the sync\n\n## Cloud Sync Features\n- **Automatic Authentication**: Uses your Cognee Cloud credentials\n- **Data Compression**: Optimizes transfer size for faster uploads\n- **Smart Sync**: Automatically handles data updates efficiently\n- **Progress Tracking**: Monitor sync status with sync_id\n- **Error Recovery**: Automatic retry for failed transfers\n- **Data Validation**: Ensures data integrity during transfer\n\n## Example Usage\n```bash\n# Sync multiple datasets to cloud by IDs (JSON request)\ncurl -X POST \"http://localhost:8000/api/v1/sync\" \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Cookie: auth_token=your-token\" \\\n  -d '{\"dataset_ids\": [\"123e4567-e89b-12d3-a456-426614174000\", \"456e7890-e12b-34c5-d678-901234567000\"]}'\n\n# Sync all user datasets (empty request body or null dataset_ids)\ncurl -X POST \"http://localhost:8000/api/v1/sync\" \\\n  -H \"Content-Type: application/json\" \\\n  -H \"Cookie: auth_token=your-token\" \\\n  -d '{}'\n```\n\n## Error Codes\n- **400 Bad Request**: Invalid dataset_ids format\n- **401 Unauthorized**: Invalid or missing authentication\n- **403 Forbidden**: User doesn't have permission to access dataset\n- **404 Not Found**: Dataset not found\n- **409 Conflict**: Sync operation conflict or cloud service unavailable\n- **413 Payload Too Large**: Dataset too large for current cloud plan\n- **429 Too Many Requests**: Rate limit exceeded\n\n## Notes  \n- Sync operations run in the background - you get an immediate response\n- Use the returned run_id to track progress (status API coming soon)\n- Large datasets are automatically chunked for efficient transfer\n- Cloud storage usage counts against your plan limits\n- The sync will continue even if you close your connection",
+        "operationId": "sync_to_cloud_api_v1_sync_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/SyncResponse"
+                  },
+                  "type": "object",
+                  "title": "Response Sync To Cloud Api V1 Sync Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sync/status": {
+      "get": {
+        "tags": [
+          "sync"
+        ],
+        "summary": "Get Sync Status Overview",
+        "description": "Check if there are any running sync operations for the current user.\n\nThis endpoint provides a simple check to see if the user has any active sync operations\nwithout needing to know specific run IDs.\n\n## Response\nReturns a simple status overview:\n- **has_running_sync**: Boolean indicating if there are any running syncs\n- **running_sync_count**: Number of currently running sync operations\n- **latest_running_sync** (optional): Information about the most recent running sync if any exists\n\n## Example Usage\n```bash\ncurl -X GET \"http://localhost:8000/api/v1/sync/status\" \\\n  -H \"Cookie: auth_token=your-token\"\n```\n\n## Example Responses\n\n**No running syncs:**\n```json\n{\n  \"has_running_sync\": false,\n  \"running_sync_count\": 0\n}\n```\n\n**With running sync:**\n```json\n{\n  \"has_running_sync\": true,\n  \"running_sync_count\": 1,\n  \"latest_running_sync\": {\n    \"run_id\": \"12345678-1234-5678-9012-123456789012\",\n    \"dataset_name\": \"My Dataset\",\n    \"progress_percentage\": 45,\n    \"created_at\": \"2025-01-01T00:00:00Z\"\n  }\n}\n```",
+        "operationId": "get_sync_status_overview_api_v1_sync_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/code-pipeline/index": {
+      "post": {
+        "tags": [
+          "code-pipeline"
+        ],
+        "summary": "Code Pipeline Index",
+        "description": "Run indexation on a code repository.\n\nThis endpoint processes a code repository to create a knowledge graph\nof the codebase structure, dependencies, and relationships.\n\n## Request Parameters\n- **repo_path** (str): Path to the code repository\n- **include_docs** (bool): Whether to include documentation files (default: false)\n\n## Response\nNo content returned. Processing results are logged.\n\n## Error Codes\n- **409 Conflict**: Error during indexation process",
+        "operationId": "code_pipeline_index_api_v1_code_pipeline_index_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodePipelineIndexPayloadDTO"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/code-pipeline/retrieve": {
+      "post": {
+        "tags": [
+          "code-pipeline"
+        ],
+        "summary": "Code Pipeline Retrieve",
+        "description": "Retrieve context from the code knowledge graph.\n\nThis endpoint searches the indexed code repository to find relevant\ncontext based on the provided query.\n\n## Request Parameters\n- **query** (str): Search query for code context\n- **full_input** (str): Full input text for processing\n\n## Response\nReturns a list of relevant code files and context as JSON.\n\n## Error Codes\n- **409 Conflict**: Error during retrieval process",
+        "operationId": "code_pipeline_retrieve_api_v1_code_pipeline_retrieve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodePipelineRetrievePayloadDTO"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Code Pipeline Retrieve Api V1 Code Pipeline Retrieve Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/me": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Users:Current User",
+        "operationId": "users_current_user_api_v1_users_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRead"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing token or inactive user."
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Users:Patch Current User",
+        "operationId": "users_patch_current_user_api_v1_users_me_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRead"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing token or inactive user."
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                },
+                "examples": {
+                  "UPDATE_USER_EMAIL_ALREADY_EXISTS": {
+                    "summary": "A user with this email already exists.",
+                    "value": {
+                      "detail": "UPDATE_USER_EMAIL_ALREADY_EXISTS"
+                    }
+                  },
+                  "UPDATE_USER_INVALID_PASSWORD": {
+                    "summary": "Password validation failed.",
+                    "value": {
+                      "detail": {
+                        "code": "UPDATE_USER_INVALID_PASSWORD",
+                        "reason": "Password should beat least 3 characters"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/users/{id}": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Users:User",
+        "operationId": "users_user_api_v1_users__id__get",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRead"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing token or inactive user."
+          },
+          "403": {
+            "description": "Not a superuser."
+          },
+          "404": {
+            "description": "The user does not exist."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Users:Patch User",
+        "operationId": "users_patch_user_api_v1_users__id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserRead"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing token or inactive user."
+          },
+          "403": {
+            "description": "Not a superuser."
+          },
+          "404": {
+            "description": "The user does not exist."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "UPDATE_USER_EMAIL_ALREADY_EXISTS": {
+                    "summary": "A user with this email already exists.",
+                    "value": {
+                      "detail": "UPDATE_USER_EMAIL_ALREADY_EXISTS"
+                    }
+                  },
+                  "UPDATE_USER_INVALID_PASSWORD": {
+                    "summary": "Password validation failed.",
+                    "value": {
+                      "detail": {
+                        "code": "UPDATE_USER_INVALID_PASSWORD",
+                        "reason": "Password should beat least 3 characters"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Users:Delete User",
+        "operationId": "users_delete_user_api_v1_users__id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Missing token or inactive user."
+          },
+          "403": {
+            "description": "Not a superuser."
+          },
+          "404": {
+            "description": "The user does not exist."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notebooks": {
+      "get": {
+        "tags": [
+          "notebooks"
+        ],
+        "summary": "Get Notebooks Endpoint",
+        "operationId": "get_notebooks_endpoint_api_v1_notebooks_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "notebooks"
+        ],
+        "summary": "Create Notebook Endpoint",
+        "operationId": "create_notebook_endpoint_api_v1_notebooks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotebookData"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/notebooks/{notebook_id}": {
+      "put": {
+        "tags": [
+          "notebooks"
+        ],
+        "summary": "Update Notebook Endpoint",
+        "operationId": "update_notebook_endpoint_api_v1_notebooks__notebook_id__put",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "notebook_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Notebook Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotebookData"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "notebooks"
+        ],
+        "summary": "Delete Notebook Endpoint",
+        "operationId": "delete_notebook_endpoint_api_v1_notebooks__notebook_id__delete",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "notebook_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Notebook Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notebooks/{notebook_id}/{cell_id}/run": {
+      "post": {
+        "tags": [
+          "notebooks"
+        ],
+        "summary": "Run Notebook Cell Endpoint",
+        "operationId": "run_notebook_cell_endpoint_api_v1_notebooks__notebook_id___cell_id__run_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "notebook_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Notebook Id"
+            }
+          },
+          {
+            "name": "cell_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Cell Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunCodeData"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/checks/connection": {
+      "post": {
+        "tags": [
+          "checks"
+        ],
+        "summary": "Get Connection Check Endpoint",
+        "operationId": "get_connection_check_endpoint_api_v1_checks_connection_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          },
+          {
+            "APIKeyCookie": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Body_add_api_v1_add_post": {
+        "properties": {
+          "data": {
+            "items": {
+              "type": "string",
+              "format": "binary"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "datasetName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetname"
+          },
+          "datasetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "string",
+                "const": ""
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetid",
+            "examples": [
+              ""
+            ]
+          },
+          "node_set": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Set",
+            "default": [
+              ""
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Body_add_api_v1_add_post"
+      },
+      "Body_auth_cookie_login_api_v1_auth_login_post": {
+        "properties": {
+          "grant_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^password$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grant Type"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "title": "Password"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "default": ""
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "format": "password",
+            "title": "Client Secret"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "Body_auth_cookie_login_api_v1_auth_login_post"
+      },
+      "Body_reset_forgot_password_api_v1_auth_forgot_password_post": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "Body_reset_forgot_password_api_v1_auth_forgot_password_post"
+      },
+      "Body_reset_reset_password_api_v1_auth_reset_password_post": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "password"
+        ],
+        "title": "Body_reset_reset_password_api_v1_auth_reset_password_post"
+      },
+      "Body_update_api_v1_update_patch": {
+        "properties": {
+          "data": {
+            "items": {
+              "type": "string",
+              "format": "binary"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "node_set": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Set",
+            "default": [
+              ""
+            ]
+          }
+        },
+        "type": "object",
+        "title": "Body_update_api_v1_update_patch"
+      },
+      "Body_verify_request_token_api_v1_auth_request_verify_token_post": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "Body_verify_request_token_api_v1_auth_request_verify_token_post"
+      },
+      "Body_verify_verify_api_v1_auth_verify_post": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "title": "Body_verify_verify_api_v1_auth_verify_post"
+      },
+      "ChatUsage": {
+        "properties": {
+          "prompt_tokens": {
+            "type": "integer",
+            "title": "Prompt Tokens",
+            "default": 0
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "title": "Completion Tokens",
+            "default": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "ChatUsage",
+        "description": "Token usage information"
+      },
+      "CodePipelineIndexPayloadDTO": {
+        "properties": {
+          "repoPath": {
+            "type": "string",
+            "title": "Repopath"
+          },
+          "includeDocs": {
+            "type": "boolean",
+            "title": "Includedocs",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "repoPath"
+        ],
+        "title": "CodePipelineIndexPayloadDTO"
+      },
+      "CodePipelineRetrievePayloadDTO": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "fullInput": {
+            "type": "string",
+            "title": "Fullinput"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "fullInput"
+        ],
+        "title": "CodePipelineRetrievePayloadDTO"
+      },
+      "CogneeModel": {
+        "type": "string",
+        "enum": [
+          "cognee-v1"
+        ],
+        "title": "CogneeModel",
+        "description": "Enum for supported model types"
+      },
+      "CognifyPayloadDTO": {
+        "properties": {
+          "datasets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasets"
+          },
+          "datasetIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetids",
+            "examples": [
+              []
+            ]
+          },
+          "runInBackground": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runinbackground",
+            "default": false
+          },
+          "customPrompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customprompt",
+            "description": "Custom prompt for entity extraction and graph generation",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "CognifyPayloadDTO"
+      },
+      "CombinedSearchResult": {
+        "properties": {
+          "result": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "context": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Context"
+          },
+          "graphs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graphs",
+            "default": null
+          },
+          "datasets": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SearchResultDataset"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "result",
+          "context"
+        ],
+        "title": "CombinedSearchResult"
+      },
+      "ConfigChoice": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "ConfigChoice"
+      },
+      "DataDTO": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          },
+          "extension": {
+            "type": "string",
+            "title": "Extension"
+          },
+          "mimeType": {
+            "type": "string",
+            "title": "Mimetype"
+          },
+          "rawDataLocation": {
+            "type": "string",
+            "title": "Rawdatalocation"
+          },
+          "datasetId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Datasetid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "createdAt",
+          "extension",
+          "mimeType",
+          "rawDataLocation",
+          "datasetId"
+        ],
+        "title": "DataDTO"
+      },
+      "DatasetCreationPayload": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DatasetCreationPayload"
+      },
+      "DatasetDTO": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          },
+          "ownerId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Ownerid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "createdAt",
+          "ownerId"
+        ],
+        "title": "DatasetDTO"
+      },
+      "ErrorModel": {
+        "properties": {
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              }
+            ],
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "ErrorModel"
+      },
+      "ErrorResponseDTO": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "ErrorResponseDTO"
+      },
+      "Function": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/FunctionParameters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "parameters"
+        ],
+        "title": "Function",
+        "description": "Function definition compatible with OpenAI's format"
+      },
+      "FunctionCall": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "arguments": {
+            "type": "string",
+            "title": "Arguments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "arguments"
+        ],
+        "title": "FunctionCall",
+        "description": "Function call made by the assistant"
+      },
+      "FunctionParameters": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "object"
+          },
+          "properties": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Properties"
+          },
+          "required": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required"
+          }
+        },
+        "type": "object",
+        "required": [
+          "properties"
+        ],
+        "title": "FunctionParameters",
+        "description": "JSON Schema for function parameters"
+      },
+      "GraphDTO": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNodeDTO"
+            },
+            "type": "array",
+            "title": "Nodes"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdgeDTO"
+            },
+            "type": "array",
+            "title": "Edges"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "title": "GraphDTO"
+      },
+      "GraphEdgeDTO": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Source"
+          },
+          "target": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Target"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "target",
+          "label"
+        ],
+        "title": "GraphEdgeDTO"
+      },
+      "GraphNodeDTO": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "properties": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Properties"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "properties"
+        ],
+        "title": "GraphNodeDTO"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "LLMConfigInputDTO": {
+        "properties": {
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "openai"
+              },
+              {
+                "type": "string",
+                "const": "ollama"
+              },
+              {
+                "type": "string",
+                "const": "anthropic"
+              },
+              {
+                "type": "string",
+                "const": "gemini"
+              }
+            ],
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "apiKey": {
+            "type": "string",
+            "title": "Apikey"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "model",
+          "apiKey"
+        ],
+        "title": "LLMConfigInputDTO"
+      },
+      "LLMConfigOutputDTO": {
+        "properties": {
+          "apiKey": {
+            "type": "string",
+            "title": "Apikey"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint"
+          },
+          "apiVersion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apiversion"
+          },
+          "models": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/ConfigChoice"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Models"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigChoice"
+            },
+            "type": "array",
+            "title": "Providers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "apiKey",
+          "model",
+          "provider",
+          "endpoint",
+          "apiVersion",
+          "models",
+          "providers"
+        ],
+        "title": "LLMConfigOutputDTO"
+      },
+      "MemifyPayloadDTO": {
+        "properties": {
+          "extractionTasks": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extractiontasks",
+            "examples": [
+              []
+            ]
+          },
+          "enrichmentTasks": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enrichmenttasks",
+            "examples": [
+              []
+            ]
+          },
+          "data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data",
+            "default": ""
+          },
+          "datasetName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetname"
+          },
+          "datasetId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "string",
+                "const": ""
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetid",
+            "examples": [
+              ""
+            ]
+          },
+          "nodeName": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nodename",
+            "examples": [
+              []
+            ]
+          },
+          "runInBackground": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runinbackground",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "MemifyPayloadDTO"
+      },
+      "NotebookCell": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "code"
+            ],
+            "title": "Type"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "name",
+          "content"
+        ],
+        "title": "NotebookCell"
+      },
+      "NotebookData": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "cells": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/NotebookCell"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cells",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "NotebookData"
+      },
+      "PipelineRunStatus": {
+        "type": "string",
+        "enum": [
+          "DATASET_PROCESSING_INITIATED",
+          "DATASET_PROCESSING_STARTED",
+          "DATASET_PROCESSING_COMPLETED",
+          "DATASET_PROCESSING_ERRORED"
+        ],
+        "title": "PipelineRunStatus"
+      },
+      "ResponseBody": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "object": {
+            "type": "string",
+            "title": "Object",
+            "default": "response"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "completed"
+          },
+          "toolCalls": {
+            "items": {
+              "$ref": "#/components/schemas/ResponseToolCall"
+            },
+            "type": "array",
+            "title": "Toolcalls"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "toolCalls"
+        ],
+        "title": "ResponseBody",
+        "description": "Response body for the new responses endpoint"
+      },
+      "ResponseRequest": {
+        "properties": {
+          "model": {
+            "$ref": "#/components/schemas/CogneeModel",
+            "default": "cognee-v1"
+          },
+          "input": {
+            "type": "string",
+            "title": "Input"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ToolFunction"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools"
+          },
+          "toolChoice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toolchoice",
+            "default": "auto"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          },
+          "temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature",
+            "default": 1.0
+          },
+          "maxCompletionTokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxcompletiontokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "title": "ResponseRequest",
+        "description": "Request body for the new responses endpoint (OpenAI Responses API format)"
+      },
+      "ResponseToolCall": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "function"
+          },
+          "function": {
+            "$ref": "#/components/schemas/FunctionCall"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolCallOutput"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "function"
+        ],
+        "title": "ResponseToolCall",
+        "description": "Tool call in a response"
+      },
+      "RunCodeData": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "RunCodeData"
+      },
+      "SearchHistoryItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "user": {
+            "type": "string",
+            "title": "User"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "text",
+          "user",
+          "createdAt"
+        ],
+        "title": "SearchHistoryItem"
+      },
+      "SearchPayloadDTO": {
+        "properties": {
+          "searchType": {
+            "$ref": "#/components/schemas/SearchType",
+            "default": "GRAPH_COMPLETION"
+          },
+          "datasets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasets"
+          },
+          "datasetIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetids",
+            "examples": [
+              []
+            ]
+          },
+          "query": {
+            "type": "string",
+            "title": "Query",
+            "default": "What is in the document?"
+          },
+          "systemPrompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Systemprompt",
+            "default": "Answer the question using the provided context. Be as brief as possible."
+          },
+          "nodeName": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nodename",
+            "example": []
+          },
+          "topK": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topk",
+            "default": 10
+          },
+          "onlyContext": {
+            "type": "boolean",
+            "title": "Onlycontext",
+            "default": false
+          },
+          "useCombinedContext": {
+            "type": "boolean",
+            "title": "Usecombinedcontext",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "SearchPayloadDTO"
+      },
+      "SearchResult": {
+        "properties": {
+          "search_result": {
+            "title": "Search Result"
+          },
+          "dataset_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Id"
+          },
+          "dataset_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "search_result",
+          "dataset_id",
+          "dataset_name"
+        ],
+        "title": "SearchResult"
+      },
+      "SearchResultDataset": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "SearchResultDataset"
+      },
+      "SearchType": {
+        "type": "string",
+        "enum": [
+          "SUMMARIES",
+          "INSIGHTS",
+          "CHUNKS",
+          "RAG_COMPLETION",
+          "GRAPH_COMPLETION",
+          "GRAPH_SUMMARY_COMPLETION",
+          "CODE",
+          "CYPHER",
+          "NATURAL_LANGUAGE",
+          "GRAPH_COMPLETION_COT",
+          "GRAPH_COMPLETION_CONTEXT_EXTENSION",
+          "FEELING_LUCKY",
+          "FEEDBACK",
+          "TEMPORAL",
+          "CODING_RULES",
+          "CHUNKS_LEXICAL"
+        ],
+        "title": "SearchType"
+      },
+      "SettingsDTO": {
+        "properties": {
+          "llm": {
+            "$ref": "#/components/schemas/LLMConfigOutputDTO"
+          },
+          "vectorDb": {
+            "$ref": "#/components/schemas/VectorDBConfigOutputDTO"
+          }
+        },
+        "type": "object",
+        "required": [
+          "llm",
+          "vectorDb"
+        ],
+        "title": "SettingsDTO"
+      },
+      "SettingsPayloadDTO": {
+        "properties": {
+          "llm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LLMConfigInputDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vectorDb": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VectorDBConfigInputDTO"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "SettingsPayloadDTO"
+      },
+      "SyncRequest": {
+        "properties": {
+          "datasetIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datasetids"
+          }
+        },
+        "type": "object",
+        "title": "SyncRequest",
+        "description": "Request model for sync operations."
+      },
+      "SyncResponse": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "dataset_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dataset Ids"
+          },
+          "dataset_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dataset Names"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status",
+          "dataset_ids",
+          "dataset_names",
+          "message",
+          "timestamp",
+          "user_id"
+        ],
+        "title": "SyncResponse",
+        "description": "Response model for sync operations."
+      },
+      "ToolCallOutput": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "success"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "title": "ToolCallOutput",
+        "description": "Output of a tool call in the responses API"
+      },
+      "ToolFunction": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "function"
+          },
+          "function": {
+            "$ref": "#/components/schemas/Function"
+          }
+        },
+        "type": "object",
+        "required": [
+          "function"
+        ],
+        "title": "ToolFunction",
+        "description": "Tool function wrapper (for OpenAI compatibility)"
+      },
+      "UserCreate": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active",
+            "default": true
+          },
+          "is_superuser": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Superuser",
+            "default": false
+          },
+          "is_verified": {
+            "type": "boolean",
+            "title": "Is Verified",
+            "default": true
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "UserCreate"
+      },
+      "UserRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "is_superuser": {
+            "type": "boolean",
+            "title": "Is Superuser",
+            "default": false
+          },
+          "is_verified": {
+            "type": "boolean",
+            "title": "Is Verified",
+            "default": false
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "email"
+        ],
+        "title": "UserRead"
+      },
+      "UserUpdate": {
+        "properties": {
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "email"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "is_superuser": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Superuser"
+          },
+          "is_verified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Verified"
+          }
+        },
+        "type": "object",
+        "title": "UserUpdate"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VectorDBConfigInputDTO": {
+        "properties": {
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "lancedb"
+              },
+              {
+                "type": "string",
+                "const": "chromadb"
+              },
+              {
+                "type": "string",
+                "const": "pgvector"
+              }
+            ],
+            "title": "Provider"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "apiKey": {
+            "type": "string",
+            "title": "Apikey"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "url",
+          "apiKey"
+        ],
+        "title": "VectorDBConfigInputDTO"
+      },
+      "VectorDBConfigOutputDTO": {
+        "properties": {
+          "apiKey": {
+            "type": "string",
+            "title": "Apikey"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigChoice"
+            },
+            "type": "array",
+            "title": "Providers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "apiKey",
+          "url",
+          "provider",
+          "providers"
+        ],
+        "title": "VectorDBConfigOutputDTO"
+      }
+    },
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "CookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "auth_token"
+      }
+    }
+  }
+}
