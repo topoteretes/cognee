@@ -40,8 +40,8 @@ async def create_role(
             # Add association directly to the association table
             role = Role(name=role_name, tenant_id=tenant.id)
             session.add(role)
-        except IntegrityError:
-            raise EntityAlreadyExistsError(message="Role already exists for tenant.")
+        except IntegrityError as e:
+            raise EntityAlreadyExistsError(message="Role already exists for tenant.") from e
 
         await session.commit()
         await session.refresh(role)

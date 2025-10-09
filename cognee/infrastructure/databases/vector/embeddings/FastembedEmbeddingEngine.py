@@ -90,7 +90,9 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
 
         except Exception as error:
             logger.error(f"Embedding error in FastembedEmbeddingEngine: {str(error)}")
-            raise EmbeddingException(f"Failed to index data points using model {self.model}")
+            raise EmbeddingException(
+                f"Failed to index data points using model {self.model}"
+            ) from error
 
     def get_vector_size(self) -> int:
         """

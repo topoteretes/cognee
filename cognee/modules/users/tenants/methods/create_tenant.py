@@ -35,5 +35,5 @@ async def create_tenant(tenant_name: str, user_id: UUID) -> UUID:
             await session.merge(user)
             await session.commit()
             return tenant.id
-        except IntegrityError:
-            raise EntityAlreadyExistsError(message="Tenant already exists.")
+        except IntegrityError as e:
+            raise EntityAlreadyExistsError(message="Tenant already exists.") from e
