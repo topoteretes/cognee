@@ -159,14 +159,6 @@ async def run_tasks_distributed(
             data_ingestion_info=results,
         )
 
-        graph_engine = await get_graph_engine()
-        if hasattr(graph_engine, "push_to_s3"):
-            await graph_engine.push_to_s3()
-
-        relational_engine = get_relational_engine()
-        if hasattr(relational_engine, "push_to_s3"):
-            await relational_engine.push_to_s3()
-
     except Exception as error:
         await log_pipeline_run_error(
             pipeline_run_id, pipeline_id, pipeline_name, dataset_id, data, error
