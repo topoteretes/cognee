@@ -122,8 +122,8 @@ async def test_cron_web_scraper():
     await cognee.prune.prune_system(metadata=True)
     urls = ["https://quotes.toscrape.com/", "https://books.toscrape.com/"]
     extraction_rules = {
-        "quotes": {"selector": ".quote span.text", "all": True},
-        "authors": {"selector": ".quote small", "all": True},
+        "quotes": ".quote .text",
+        "authors": ".quote .author",
         "titles": "article.product_pod h3 a",
         "prices": "article.product_pod p.price_color",
     }
