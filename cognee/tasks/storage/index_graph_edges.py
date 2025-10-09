@@ -42,7 +42,7 @@ async def index_graph_edges(
         if edges_data is None:
             graph_engine = await get_graph_engine()
             _, edges_data = await graph_engine.get_graph_data()
-            logger.info(
+            logger.warning(
                 "Your graph edge embedding is deprecated, please pass edges to the index_graph_edges directly."
             )
     except Exception as e:
