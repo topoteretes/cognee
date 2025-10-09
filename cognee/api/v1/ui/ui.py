@@ -532,7 +532,7 @@ def start_ui(
                 )
                 logger.info("(localhost will be auto-converted to host.docker.internal)")
 
-            docker_cmd.append("cognee/cognee-mcp:daulet-dev")
+            docker_cmd.append("cognee/cognee-mcp:main")
 
             mcp_process = subprocess.Popen(
                 docker_cmd,
