@@ -82,17 +82,14 @@ async def main():
     data_root_directory = get_storage_config()["data_root_directory"]
     assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
-    from cognee.infrastructure.databases.relational import get_relational_engine
-
-    get_relational_engine().get_session().close()
-    await get_relational_engine().engine.dispose()
-
     # Assert relational, vector and graph databases have been cleaned properly
     await cognee.prune.prune_system(metadata=True)
 
     connection = await vector_engine.get_connection()
     collection_names = await connection.table_names()
     assert len(collection_names) == 0, "LanceDB vector database is not empty"
+
+    from cognee.infrastructure.databases.relational import get_relational_engine
 
     db_path = get_relational_engine().db_path
     dir_path = os.path.dirname(db_path)
