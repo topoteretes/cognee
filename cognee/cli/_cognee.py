@@ -180,33 +180,42 @@ def main() -> int:
         def signal_handler(signum, frame):
             """Handle Ctrl+C and other termination signals"""
             nonlocal spawned_pids, docker_container
-            fmt.echo("\nShutting down UI server...")
+
+            try:
+                fmt.echo("\nShutting down UI server...")
+            except (BrokenPipeError, OSError):
+                pass
 
             # First, stop Docker container if running
             if docker_container:
                 try:
-                    fmt.echo(f"Stopping Docker container {docker_container}...")
                     result = subprocess.run(
                         ["docker", "stop", docker_container],
                         capture_output=True,
                         timeout=10,
                         check=False,
                     )
-                    if result.returncode == 0:
-                        fmt.success(f"✓ Docker container {docker_container} stopped.")
-                    else:
-                        fmt.warning(
-                            f"Could not stop container {docker_container}: {result.stderr.decode()}"
-                        )
+                    try:
+                        if result.returncode == 0:
+                            fmt.success(f"✓ Docker container {docker_container} stopped.")
+                        else:
+                            fmt.warning(
+                                f"Could not stop container {docker_container}: {result.stderr.decode()}"
+                            )
+                    except (BrokenPipeError, OSError):
+                        pass
                 except subprocess.TimeoutExpired:
-                    fmt.warning(
-                        f"Timeout stopping container {docker_container}, forcing removal..."
-                    )
+                    try:
+                        fmt.warning(
+                            f"Timeout stopping container {docker_container}, forcing removal..."
+                        )
+                    except (BrokenPipeError, OSError):
+                        pass
                     subprocess.run(
                         ["docker", "rm", "-f", docker_container], capture_output=True, check=False
                     )
-                except Exception as e:
-                    fmt.warning(f"Could not stop Docker container {docker_container}: {e}")
+                except Exception:
+                    pass
 
             # Then, stop regular processes
             for pid in spawned_pids:
@@ -215,7 +224,10 @@ def main() -> int:
                         # Unix-like systems: Use process groups
                         pgid = os.getpgid(pid)
                         os.killpg(pgid, signal.SIGTERM)
-                        fmt.success(f"✓ Process group {pgid} (PID {pid}) terminated.")
+                        try:
+                            fmt.success(f"✓ Process group {pgid} (PID {pid}) terminated.")
+                        except (BrokenPipeError, OSError):
+                            pass
                     else:
                         # Windows: Use taskkill to terminate process and its children
                         subprocess.run(
@@ -223,14 +235,19 @@ def main() -> int:
                             capture_output=True,
                             check=False,
                         )
-                        fmt.success(f"✓ Process {pid} and its children terminated.")
-                except (OSError, ProcessLookupError, subprocess.SubprocessError) as e:
-                    fmt.warning(f"Could not terminate process {pid}: {e}")
+                        try:
+                            fmt.success(f"✓ Process {pid} and its children terminated.")
+                        except (BrokenPipeError, OSError):
+                            pass
+                except (OSError, ProcessLookupError, subprocess.SubprocessError):
+                    pass
 
             sys.exit(0)
 
         signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
         signal.signal(signal.SIGTERM, signal_handler)  # Termination request
+        if hasattr(signal, "SIGHUP"):
+            signal.signal(signal.SIGHUP, signal_handler)
 
         try:
             from cognee import start_ui
