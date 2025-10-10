@@ -18,7 +18,10 @@ from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 import uvicorn
 
-from .cognee_client import CogneeClient
+try:
+    from .cognee_client import CogneeClient
+except ImportError:
+    from cognee_client import CogneeClient
 
 
 try:
@@ -1088,7 +1091,7 @@ async def main():
     parser.add_argument(
         "--api-token",
         default=None,
-        help="Authentication token for the Cognee API. Required if --api-url is provided.",
+        help="Authentication token for the API (optional, required if API has authentication enabled).",
     )
 
     args = parser.parse_args()
