@@ -41,7 +41,12 @@ class TestCogneeServerStart(unittest.TestCase):
     def tearDownClass(cls):
         # Terminate the server process
         if hasattr(cls, "server_process") and cls.server_process:
-            os.killpg(os.getpgid(cls.server_process.pid), signal.SIGTERM)
+            if hasattr(os, "killpg"):
+                # Unix-like systems: Use process groups
+                os.killpg(os.getpgid(cls.server_process.pid), signal.SIGTERM)
+            else:
+                # Windows: Just terminate the main process
+                cls.server_process.terminate()
             cls.server_process.wait()
 
     def test_server_is_running(self):

@@ -2,7 +2,8 @@ from cognee.shared.logging_utils import get_logger
 import os
 from typing import Type
 
-from instructor.exceptions import InstructorRetryException
+from instructor.core import InstructorRetryException
+from cognee.infrastructure.llm.prompts import read_query_prompt
 from pydantic import BaseModel
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
@@ -25,7 +26,7 @@ def get_mock_summarized_code():
 
 
 async def extract_summary(content: str, response_model: Type[BaseModel]):
-    system_prompt = LLMGateway.read_query_prompt("summarize_content.txt")
+    system_prompt = read_query_prompt("summarize_content.txt")
 
     llm_output = await LLMGateway.acreate_structured_output(content, system_prompt, response_model)
 
