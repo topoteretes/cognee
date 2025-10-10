@@ -29,10 +29,6 @@ async def test_concurrent_subprocess_access():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    basic_nested_edges = ["is_a", "is_part_of", "contains", "made_from"]
-
-    entity_to_entity_edges = ["likes", "prefers", "watches"]
-
     text1 = "Dave watches Dexter Resurrection"
     text2 = "Ana likes apples"
     text3 = "Bob prefers Cognee over other solutions"
