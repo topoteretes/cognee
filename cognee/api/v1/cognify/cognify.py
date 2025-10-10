@@ -269,11 +269,11 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,
-            task_config={"batch_size": 30},
+            task_config={"batch_size": 100},
         ),  # Generate knowledge graphs from the document chunks.
         Task(
             summarize_text,
-            task_config={"batch_size": 30},
+            task_config={"batch_size": 100},
         ),
         Task(add_data_points, task_config={"batch_size": 100}),
     ]
