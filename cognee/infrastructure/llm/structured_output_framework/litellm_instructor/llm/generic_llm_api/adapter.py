@@ -118,7 +118,7 @@ class GenericAPIAdapter(LLMInterface):
             if not (self.fallback_model and self.fallback_api_key and self.fallback_endpoint):
                 raise ContentPolicyFilterError(
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
-                )
+                ) from error
 
             try:
                 return await self.aclient.chat.completions.create(
@@ -151,4 +151,4 @@ class GenericAPIAdapter(LLMInterface):
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
-                    )
+                    ) from error

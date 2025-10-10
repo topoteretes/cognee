@@ -516,7 +516,7 @@ def start_ui(
                     env_file,
                     "-e",
                     "TRANSPORT_MODE=sse",
-                    "cognee/cognee-mcp:daulet-dev",
+                    "cognee/cognee-mcp:main",
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
