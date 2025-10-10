@@ -14,7 +14,7 @@ from multiprocessing import Process
 logger = get_logger()
 
 
-async def test_concurrent_subprocess_access():
+async def concurrent_subprocess_access():
     data_directory_path = str(
         pathlib.Path(
             os.path.join(pathlib.Path(__file__).parent, ".data_storage/concurrent_tasks")
@@ -26,15 +26,24 @@ async def test_concurrent_subprocess_access():
         ).resolve()
     )
 
+    subprocess_directory_path = str(
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent , "subprocesses/")
+        ).resolve()
+    )
+
+    writer_path = subprocess_directory_path + "/writer.py"
+    reader_path = subprocess_directory_path + "/reader.py"
+
     cognee.config.data_root_directory(data_directory_path)
     cognee.config.system_root_directory(cognee_directory_path)
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    writer_process = subprocess.Popen([os.sys.executable, "subprocesses/writer.py"])
+    writer_process = subprocess.Popen([os.sys.executable, str(writer_path)])
 
-    reader_process = subprocess.Popen([os.sys.executable, "subprocesses/reader.py"])
+    reader_process = subprocess.Popen([os.sys.executable, str(reader_path)])
 
     # Wait for both processes to complete
     writer_process.wait()
@@ -42,4 +51,4 @@ async def test_concurrent_subprocess_access():
 
 
 if __name__ == "__main__":
-    asyncio.run(test_concurrent_subprocess_access())
+    asyncio.run(concurrent_subprocess_access())
