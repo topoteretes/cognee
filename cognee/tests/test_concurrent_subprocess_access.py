@@ -32,9 +32,9 @@ async def test_concurrent_subprocess_access():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    writer_process = subprocess.Popen([os.sys.executable, "writer.py"])
+    writer_process = subprocess.Popen([os.sys.executable, "subprocesses/writer.py"])
 
-    reader_process = subprocess.Popen([os.sys.executable, "reader.py"])
+    reader_process = subprocess.Popen([os.sys.executable, "subprocesses/reader.py"])
 
     # Wait for both processes to complete
     writer_process.wait()
