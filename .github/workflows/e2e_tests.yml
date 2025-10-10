@@ -295,7 +295,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-          extra-dependencies: "postgres"
+          extra-dependencies: "postgres redis"
 
       - name: Run Concurrent subprocess access test (Kuzu/Lancedb/Postgres)
         env:
