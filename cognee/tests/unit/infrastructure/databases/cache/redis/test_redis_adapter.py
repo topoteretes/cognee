@@ -207,7 +207,9 @@ def test_multiple_acquire_release_cycles(redis_adapter):
 
 def test_redis_adapter_redis_client_initialization():
     """Test that Redis client is initialized with correct connection parameters."""
-    with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis") as mock_redis_class:
+    with patch(
+        "cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis"
+    ) as mock_redis_class:
         mock_redis_instance = MagicMock()
         mock_redis_class.return_value = mock_redis_instance
 

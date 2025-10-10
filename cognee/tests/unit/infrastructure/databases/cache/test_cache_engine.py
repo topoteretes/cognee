@@ -211,7 +211,9 @@ def test_full_workflow_with_context_manager():
         mock_config.agentic_lock_expire = 240
         mock_config.agentic_lock_timeout = 300
 
-        with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis") as mock_redis_class:
+        with patch(
+            "cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis"
+        ) as mock_redis_class:
             mock_redis_instance = MagicMock()
             mock_redis_class.return_value = mock_redis_instance
 
