@@ -36,7 +36,7 @@ def test_create_cache_engine_with_caching_enabled(mock_cache_config):
     with patch("cognee.infrastructure.databases.cache.get_cache_engine.config") as mock_config:
         mock_config.caching = True
 
-        with patch("redis.Redis"):
+        with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis"):
             engine = create_cache_engine(
                 cache_host="localhost",
                 cache_port=6379,
@@ -73,7 +73,7 @@ def test_create_cache_engine_caching():
     with patch("cognee.infrastructure.databases.cache.get_cache_engine.config") as mock_config:
         mock_config.caching = True
 
-        with patch("redis.Redis"):
+        with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis"):
             engine1 = create_cache_engine(
                 cache_host="localhost",
                 cache_port=6379,
@@ -94,7 +94,7 @@ def test_create_cache_engine_different_params():
     with patch("cognee.infrastructure.databases.cache.get_cache_engine.config") as mock_config:
         mock_config.caching = True
 
-        with patch("redis.Redis"):
+        with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis"):
             engine1 = create_cache_engine(
                 cache_host="localhost",
                 cache_port=6379,
@@ -117,7 +117,7 @@ def test_create_cache_engine_custom_timeouts():
     with patch("cognee.infrastructure.databases.cache.get_cache_engine.config") as mock_config:
         mock_config.caching = True
 
-        with patch("redis.Redis"):
+        with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis"):
             engine = create_cache_engine(
                 cache_host="redis.example.com",
                 cache_port=6380,
@@ -138,7 +138,7 @@ def test_get_cache_engine_uses_config(mock_cache_config):
     with patch("cognee.infrastructure.databases.cache.get_cache_engine.config", mock_cache_config):
         mock_cache_config.caching = True
 
-        with patch("redis.Redis"):
+        with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis"):
             with patch(
                 "cognee.infrastructure.databases.cache.get_cache_engine.create_cache_engine"
             ) as mock_create:
@@ -164,7 +164,7 @@ def test_get_cache_engine_with_custom_config():
         mock_config.agentic_lock_expire = 100
         mock_config.agentic_lock_timeout = 200
 
-        with patch("redis.Redis"):
+        with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis"):
             engine = get_cache_engine("test-key")
 
             assert isinstance(engine, RedisAdapter)
@@ -190,7 +190,7 @@ def test_create_cache_engine_default_timeout_values():
     with patch("cognee.infrastructure.databases.cache.get_cache_engine.config") as mock_config:
         mock_config.caching = True
 
-        with patch("redis.Redis"):
+        with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis"):
             engine = create_cache_engine(
                 cache_host="localhost",
                 cache_port=6379,
@@ -211,7 +211,7 @@ def test_full_workflow_with_context_manager():
         mock_config.agentic_lock_expire = 240
         mock_config.agentic_lock_timeout = 300
 
-        with patch("redis.Redis") as mock_redis_class:
+        with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis") as mock_redis_class:
             mock_redis_instance = MagicMock()
             mock_redis_class.return_value = mock_redis_instance
 

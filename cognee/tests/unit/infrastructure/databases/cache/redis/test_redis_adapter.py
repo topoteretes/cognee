@@ -10,7 +10,7 @@ from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInte
 @pytest.fixture
 def mock_redis():
     """Fixture to mock redis.Redis client."""
-    with patch("redis.Redis") as mock:
+    with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis") as mock:
         yield mock
 
 
@@ -207,7 +207,7 @@ def test_multiple_acquire_release_cycles(redis_adapter):
 
 def test_redis_adapter_redis_client_initialization():
     """Test that Redis client is initialized with correct connection parameters."""
-    with patch("redis.Redis") as mock_redis_class:
+    with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis") as mock_redis_class:
         mock_redis_instance = MagicMock()
         mock_redis_class.return_value = mock_redis_instance
 
@@ -226,7 +226,7 @@ def test_redis_adapter_redis_client_initialization():
 
 def test_lock_name_vs_lock_key_parameter():
     """Test that lock_name parameter is correctly assigned to lock_key attribute."""
-    with patch("redis.Redis"):
+    with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis"):
         adapter = RedisAdapter(
             host="localhost",
             port=6379,
@@ -238,7 +238,7 @@ def test_lock_name_vs_lock_key_parameter():
 
 def test_default_timeout_parameters():
     """Test default timeout parameters."""
-    with patch("redis.Redis"):
+    with patch("cognee.infrastructure.databases.cache.redis.RedisAdapter.redis.Redis"):
         adapter = RedisAdapter(
             host="localhost",
             port=6379,
