@@ -12,7 +12,7 @@ from multiprocessing import Process
 
 
 logger = get_logger()
-run
+
 
 async def test_concurrent_subprocess_access():
     data_directory_path = str(
