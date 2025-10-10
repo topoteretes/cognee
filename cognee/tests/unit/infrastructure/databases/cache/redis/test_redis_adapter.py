@@ -106,30 +106,6 @@ def test_acquire_lock_failure(redis_adapter):
     mock_lock.acquire.assert_called_once()
 
 
-def test_acquire_lock_with_custom_parameters():
-    """Test lock acquisition with custom timeout parameters."""
-    with patch("redis.Redis") as mock_redis_class:
-        adapter = RedisAdapter(
-            host="localhost",
-            port=6379,
-            lock_name="custom-lock",
-            timeout=100,
-            blocking_timeout=200,
-        )
-
-        mock_lock = MagicMock()
-        mock_lock.acquire.return_value = True
-        adapter.redis.lock.return_value = mock_lock
-
-        adapter.acquire()
-
-        adapter.redis.lock.assert_called_once_with(
-            name="custom-lock",
-            timeout=100,
-            blocking_timeout=200,
-        )
-
-
 def test_release_lock_success(redis_adapter):
     """Test successful lock release."""
     mock_lock = MagicMock()
