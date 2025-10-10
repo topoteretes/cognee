@@ -41,14 +41,14 @@ async def index_data_points(data_points: list[DataPoint]):
         index_name = index_name_and_field[:first]
         field_name = index_name_and_field[first + 1 :]
 
-        # Split in the usual “range step batch_size” manner
+        # Create embedding requests per batch to run in parallel later
         for i in range(0, len(points), batch_size):
             batch = points[i : i + batch_size]
             tasks.append(
                 asyncio.create_task(vector_engine.index_data_points(index_name, field_name, batch))
             )
 
-    # Fire them all and wait until every task is done.
+    # Run all embedding requests in parallel
     await asyncio.gather(*tasks)
 
     return data_points
