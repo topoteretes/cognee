@@ -181,7 +181,7 @@ docker run \
 
 **Environment variables for API mode:**
 - `API_URL`: URL of the running Cognee API server
-- `API_TOKEN`: Authentication token (optional, if API requires auth)
+- `API_TOKEN`: Authentication token (optional, required if API has authentication enabled)
 
 **Note:** When running in API mode:
 - Database migrations are automatically skipped (API server handles its own DB)

@@ -12,6 +12,7 @@ from uuid import UUID
 from contextlib import redirect_stdout
 import httpx
 from cognee.shared.logging_utils import get_logger
+import json
 
 logger = get_logger()
 
@@ -26,7 +27,7 @@ class CogneeClient:
         Base URL of the Cognee API server (e.g., "http://localhost:8000").
         If None, uses direct cognee function calls.
     api_token : str, optional
-        Authentication token for API requests. Required if api_url is provided.
+        Authentication token for the API (optional, required if API has authentication enabled).
     """
 
     def __init__(self, api_url: Optional[str] = None, api_token: Optional[str] = None):
@@ -72,17 +73,14 @@ class CogneeClient:
             Result of the add operation
         """
         if self.use_api:
-            # API mode: Make HTTP request
             endpoint = f"{self.api_url}/api/v1/add"
 
-            # For API mode, we need to handle file uploads differently
-            # For now, we'll assume data is text content
             files = {"data": ("data.txt", str(data), "text/plain")}
             form_data = {
                 "datasetName": dataset_name,
             }
-            if node_set:
-                form_data["node_set"] = node_set
+            if node_set is not None:
+                form_data["node_set"] = json.dumps(node_set)
 
             response = await self.client.post(
                 endpoint,
@@ -93,7 +91,6 @@ class CogneeClient:
             response.raise_for_status()
             return response.json()
         else:
-            # Direct mode: Call cognee directly
             with redirect_stdout(sys.stderr):
                 await self.cognee.add(data, dataset_name=dataset_name, node_set=node_set)
                 return {"status": "success", "message": "Data added successfully"}
@@ -138,6 +135,8 @@ class CogneeClient:
             # Direct mode: Call cognee directly
             with redirect_stdout(sys.stderr):
                 kwargs = {}
+                if datasets:
+                    kwargs["datasets"] = datasets
                 if custom_prompt:
                     kwargs["custom_prompt"] = custom_prompt
                 if graph_model:
