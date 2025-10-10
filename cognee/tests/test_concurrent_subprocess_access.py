@@ -2,14 +2,17 @@ import os
 import asyncio
 import cognee
 import pathlib
+import subprocess
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from collections import Counter
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
+from multiprocessing import Process
+
 
 logger = get_logger()
-
+run
 
 async def test_concurrent_subprocess_access():
     data_directory_path = str(
@@ -29,15 +32,13 @@ async def test_concurrent_subprocess_access():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    text1 = "Dave watches Dexter Resurrection"
-    text2 = "Ana likes apples"
-    text3 = "Bob prefers Cognee over other solutions"
+    writer_process = subprocess.Popen([os.sys.executable, "writer.py"])
 
-    await cognee.add([text1, text2, text3], dataset_name="edge_ingestion_test")
+    reader_process = subprocess.Popen([os.sys.executable, "reader.py"])
 
-    user = await get_default_user()
-
-    await cognee.cognify(["edge_ingestion_test"], user=user)
+    # Wait for both processes to complete
+    writer_process.wait()
+    reader_process.wait()
 
 
 if __name__ == "__main__":

@@ -8,7 +8,6 @@ from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
 async def main():
     adapter = KuzuAdapter("test.db")
     result = await adapter.query("MATCH (n:Node) RETURN COUNT(n)")
-
     print(f"Reader: Found {result[0][0]} nodes")
     result = await adapter.query("MATCH (n:Node) RETURN COUNT(n)")
     print(f"Reader: Found {result[0][0]} nodes")
