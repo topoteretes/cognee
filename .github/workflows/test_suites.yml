@@ -22,11 +22,6 @@ jobs:
     uses: ./.github/workflows/basic_tests.yml
     secrets: inherit
 
-  concurrent-subprocess-tests:
-    name: Concurrent subprocess tests
-    uses: ./.github/workflows/concurrent_subprocess_tests.yml
-    secrets: inherit
-
   e2e-tests:
     name: End-to-End Tests
     uses: ./.github/workflows/e2e_tests.yml
