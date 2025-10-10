@@ -27,9 +27,7 @@ async def concurrent_subprocess_access():
     )
 
     subprocess_directory_path = str(
-        pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent , "subprocesses/")
-        ).resolve()
+        pathlib.Path(os.path.join(pathlib.Path(__file__).parent, "subprocesses/")).resolve()
     )
 
     writer_path = subprocess_directory_path + "/writer.py"
