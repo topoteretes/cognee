@@ -175,19 +175,59 @@ def main() -> int:
     # Handle UI flag
     if hasattr(args, "start_ui") and args.start_ui:
         spawned_pids = []
+        docker_container = None
 
         def signal_handler(signum, frame):
             """Handle Ctrl+C and other termination signals"""
-            nonlocal spawned_pids
-            fmt.echo("\nShutting down UI server...")
+            nonlocal spawned_pids, docker_container
 
+            try:
+                fmt.echo("\nShutting down UI server...")
+            except (BrokenPipeError, OSError):
+                pass
+
+            # First, stop Docker container if running
+            if docker_container:
+                try:
+                    result = subprocess.run(
+                        ["docker", "stop", docker_container],
+                        capture_output=True,
+                        timeout=10,
+                        check=False,
+                    )
+                    try:
+                        if result.returncode == 0:
+                            fmt.success(f"✓ Docker container {docker_container} stopped.")
+                        else:
+                            fmt.warning(
+                                f"Could not stop container {docker_container}: {result.stderr.decode()}"
+                            )
+                    except (BrokenPipeError, OSError):
+                        pass
+                except subprocess.TimeoutExpired:
+                    try:
+                        fmt.warning(
+                            f"Timeout stopping container {docker_container}, forcing removal..."
+                        )
+                    except (BrokenPipeError, OSError):
+                        pass
+                    subprocess.run(
+                        ["docker", "rm", "-f", docker_container], capture_output=True, check=False
+                    )
+                except Exception:
+                    pass
+
+            # Then, stop regular processes
             for pid in spawned_pids:
                 try:
                     if hasattr(os, "killpg"):
                         # Unix-like systems: Use process groups
                         pgid = os.getpgid(pid)
                         os.killpg(pgid, signal.SIGTERM)
-                        fmt.success(f"✓ Process group {pgid} (PID {pid}) terminated.")
+                        try:
+                            fmt.success(f"✓ Process group {pgid} (PID {pid}) terminated.")
+                        except (BrokenPipeError, OSError):
+                            pass
                     else:
                         # Windows: Use taskkill to terminate process and its children
                         subprocess.run(
@@ -195,24 +235,35 @@ def main() -> int:
                             capture_output=True,
                             check=False,
                         )
-                        fmt.success(f"✓ Process {pid} and its children terminated.")
-                except (OSError, ProcessLookupError, subprocess.SubprocessError) as e:
-                    fmt.warning(f"Could not terminate process {pid}: {e}")
+                        try:
+                            fmt.success(f"✓ Process {pid} and its children terminated.")
+                        except (BrokenPipeError, OSError):
+                            pass
+                except (OSError, ProcessLookupError, subprocess.SubprocessError):
+                    pass
 
             sys.exit(0)
 
         signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
         signal.signal(signal.SIGTERM, signal_handler)  # Termination request
+        if hasattr(signal, "SIGHUP"):
+            signal.signal(signal.SIGHUP, signal_handler)
 
         try:
             from cognee import start_ui
 
             fmt.echo("Starting cognee UI...")
 
-            # Callback to capture PIDs of all spawned processes
-            def pid_callback(pid):
-                nonlocal spawned_pids
-                spawned_pids.append(pid)
+            # Callback to capture PIDs and Docker container of all spawned processes
+            def pid_callback(pid_or_tuple):
+                nonlocal spawned_pids, docker_container
+                # Handle both regular PIDs and (PID, container_name) tuples
+                if isinstance(pid_or_tuple, tuple):
+                    pid, container_name = pid_or_tuple
+                    spawned_pids.append(pid)
+                    docker_container = container_name
+                else:
+                    spawned_pids.append(pid_or_tuple)
 
             frontend_port = 3000
             start_backend, backend_port = True, 8000

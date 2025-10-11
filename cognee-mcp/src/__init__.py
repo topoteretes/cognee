@@ -1,4 +1,7 @@
-from .server import main as server_main
+try:
+    from .server import main as server_main
+except ImportError:
+    from server import main as server_main
 import warnings
 import sys
 
