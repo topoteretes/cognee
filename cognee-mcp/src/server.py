@@ -19,6 +19,10 @@ from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 from cognee.modules.search.types import SearchType
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.modules.storage.utils import JSONEncoder
+from starlette.responses import JSONResponse
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
+import uvicorn
 
 
 try:
@@ -36,6 +40,53 @@ except ModuleNotFoundError:
 mcp = FastMCP("Cognee")
 
 logger = get_logger()
+
+
+async def run_sse_with_cors():
+    """Custom SSE transport with CORS middleware."""
+    sse_app = mcp.sse_app()
+    sse_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000"],
+        allow_credentials=True,
+        allow_methods=["GET"],
+        allow_headers=["*"],
+    )
+
+    config = uvicorn.Config(
+        sse_app,
+        host=mcp.settings.host,
+        port=mcp.settings.port,
+        log_level=mcp.settings.log_level.lower(),
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+async def run_http_with_cors():
+    """Custom HTTP transport with CORS middleware."""
+    http_app = mcp.streamable_http_app()
+    http_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000"],
+        allow_credentials=True,
+        allow_methods=["GET"],
+        allow_headers=["*"],
+    )
+
+    config = uvicorn.Config(
+        http_app,
+        host=mcp.settings.host,
+        port=mcp.settings.port,
+        log_level=mcp.settings.log_level.lower(),
+    )
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(request):
+    return JSONResponse({"status": "ok"})
 
 
 @mcp.tool()
@@ -204,7 +255,7 @@ async def cognify(
         # 2. Get entity relationships and connections
         relationships = await cognee.search(
             "connections between concepts",
-            query_type=SearchType.INSIGHTS
+            query_type=SearchType.GRAPH_COMPLETION
         )
 
         # 3. Find relevant document chunks
@@ -427,11 +478,6 @@ async def search(search_query: str, search_type: str) -> list:
             Best for: Direct document retrieval, specific fact-finding.
             Returns: LLM responses based on relevant text chunks.
 
-        **INSIGHTS**:
-            Structured entity relationships and semantic connections.
-            Best for: Understanding concept relationships, knowledge mapping.
-            Returns: Formatted relationship data and entity connections.
-
         **CHUNKS**:
             Raw text segments that match the query semantically.
             Best for: Finding specific passages, citations, exact content.
@@ -473,7 +519,6 @@ async def search(search_query: str, search_type: str) -> list:
         - "RAG_COMPLETION": Returns an LLM response based on the search query and standard RAG data
         - "CODE": Returns code-related knowledge in JSON format
         - "CHUNKS": Returns raw text chunks from the knowledge graph
-        - "INSIGHTS": Returns relationships between nodes in readable format
         - "SUMMARIES": Returns pre-generated hierarchical summaries
         - "CYPHER": Direct graph database queries
         - "FEELING_LUCKY": Automatically selects best search type
@@ -486,7 +531,6 @@ async def search(search_query: str, search_type: str) -> list:
         A list containing a single TextContent object with the search results.
         The format of the result depends on the search_type:
         - **GRAPH_COMPLETION/RAG_COMPLETION**: Conversational AI response strings
-        - **INSIGHTS**: Formatted relationship descriptions and entity connections
         - **CHUNKS**: Relevant text passages with source metadata
         - **SUMMARIES**: Hierarchical summaries from general to specific
         - **CODE**: Structured code information with context
@@ -496,7 +540,6 @@ async def search(search_query: str, search_type: str) -> list:
     Performance & Optimization:
         - **GRAPH_COMPLETION**: Slower but most intelligent, uses LLM + graph context
         - **RAG_COMPLETION**: Medium speed, uses LLM + document chunks (no graph traversal)
-        - **INSIGHTS**: Fast, returns structured relationships without LLM processing
         - **CHUNKS**: Fastest, pure vector similarity search without LLM
         - **SUMMARIES**: Fast, returns pre-computed summaries
         - **CODE**: Medium speed, specialized for code understanding
@@ -535,9 +578,6 @@ async def search(search_query: str, search_type: str) -> list:
                 return str(search_results[0])
             elif search_type.upper() == "CHUNKS":
                 return str(search_results)
-            elif search_type.upper() == "INSIGHTS":
-                results = retrieved_edges_to_string(search_results)
-                return results
             else:
                 return str(search_results)
 
@@ -975,12 +1015,12 @@ async def main():
         await mcp.run_stdio_async()
     elif args.transport == "sse":
         logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
-        await mcp.run_sse_async()
+        await run_sse_with_cors()
     elif args.transport == "http":
         logger.info(
             f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
         )
-        await mcp.run_streamable_http_async()
+        await run_http_with_cors()
 
 
 if __name__ == "__main__":

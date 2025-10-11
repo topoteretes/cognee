@@ -79,7 +79,7 @@ async def main():
     # Now let's perform some searches
     # 1. Search for insights related to "Neptune Analytics"
     insights_results = await cognee.search(
-        query_type=SearchType.INSIGHTS, query_text="Neptune Analytics"
+        query_type=SearchType.GRAPH_COMPLETION, query_text="Neptune Analytics"
     )
     print("\n========Insights about Neptune Analytics========:")
     for result in insights_results:

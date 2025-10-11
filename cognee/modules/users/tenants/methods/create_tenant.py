@@ -7,7 +7,7 @@ from cognee.modules.users.models import Tenant
 from cognee.modules.users.methods import get_user
 
 
-async def create_tenant(tenant_name: str, user_id: UUID):
+async def create_tenant(tenant_name: str, user_id: UUID) -> UUID:
     """
         Create a new tenant with the given name, for the user with the given id.
         This user is the owner of the tenant.
@@ -34,5 +34,6 @@ async def create_tenant(tenant_name: str, user_id: UUID):
             user.tenant_id = tenant.id
             await session.merge(user)
             await session.commit()
+            return tenant.id
         except IntegrityError:
             raise EntityAlreadyExistsError(message="Tenant already exists.")

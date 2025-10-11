@@ -31,6 +31,7 @@ def get_embedding_engine() -> EmbeddingEngine:
         config.embedding_endpoint,
         config.embedding_api_key,
         config.embedding_api_version,
+        config.embedding_batch_size,
         config.huggingface_tokenizer,
         llm_config.llm_api_key,
         llm_config.llm_provider,
@@ -46,6 +47,7 @@ def create_embedding_engine(
     embedding_endpoint,
     embedding_api_key,
     embedding_api_version,
+    embedding_batch_size,
     huggingface_tokenizer,
     llm_api_key,
     llm_provider,
@@ -84,6 +86,7 @@ def create_embedding_engine(
             model=embedding_model,
             dimensions=embedding_dimensions,
             max_completion_tokens=embedding_max_completion_tokens,
+            batch_size=embedding_batch_size,
         )
 
     if embedding_provider == "ollama":
@@ -95,6 +98,7 @@ def create_embedding_engine(
             max_completion_tokens=embedding_max_completion_tokens,
             endpoint=embedding_endpoint,
             huggingface_tokenizer=huggingface_tokenizer,
+            batch_size=embedding_batch_size,
         )
 
     from .LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
@@ -108,4 +112,5 @@ def create_embedding_engine(
         model=embedding_model,
         dimensions=embedding_dimensions,
         max_completion_tokens=embedding_max_completion_tokens,
+        batch_size=embedding_batch_size,
     )

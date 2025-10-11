@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
+from cognee.tasks.storage import index_graph_edges
 from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.get_default_ontology_resolver import (
@@ -17,7 +18,7 @@ from cognee.modules.graph.utils import (
     retrieve_existing_edges,
 )
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
     InvalidDataChunksError,
@@ -88,6 +89,7 @@ async def integrate_chunk_graphs(
 
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
+        await index_graph_edges(graph_edges)
 
     return data_chunks
 
@@ -111,7 +113,7 @@ async def extract_graph_from_data(
 
     chunk_graphs = await asyncio.gather(
         *[
-            LLMGateway.extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt)
+            extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt)
             for chunk in data_chunks
         ]
     )

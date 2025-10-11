@@ -19,7 +19,9 @@ from cognee.modules.search.types import (
 from cognee.modules.search.operations import log_query, log_result
 from cognee.modules.users.models import User
 from cognee.modules.data.models import Dataset
-from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
+from cognee.modules.data.methods.get_authorized_existing_datasets import (
+    get_authorized_existing_datasets,
+)
 
 from .get_search_type_tools import get_search_type_tools
 from .no_access_control_search import no_access_control_search
@@ -143,20 +145,35 @@ async def search(
                 context = prepared_search_results["context"]
                 datasets = prepared_search_results["datasets"]
 
-                return_value.append(
-                    {
-                        "search_result": [result] if result else None,
-                        "dataset_id": datasets[0].id,
-                        "dataset_name": datasets[0].name,
-                        "graphs": graphs,
-                    }
-                )
+                if only_context:
+                    return_value.append(
+                        {
+                            "search_result": [context] if context else None,
+                            "dataset_id": datasets[0].id,
+                            "dataset_name": datasets[0].name,
+                            "graphs": graphs,
+                        }
+                    )
+                else:
+                    return_value.append(
+                        {
+                            "search_result": [result] if result else None,
+                            "dataset_id": datasets[0].id,
+                            "dataset_name": datasets[0].name,
+                            "graphs": graphs,
+                        }
+                    )
             return return_value
         else:
             return_value = []
-            for search_result in search_results:
-                result, context, datasets = search_result
-                return_value.append(result)
+            if only_context:
+                for search_result in search_results:
+                    prepared_search_results = await prepare_search_result(search_result)
+                    return_value.append(prepared_search_results["context"])
+            else:
+                for search_result in search_results:
+                    result, context, datasets = search_result
+                    return_value.append(result)
             # For maintaining backwards compatibility
             if len(return_value) == 1 and isinstance(return_value[0], list):
                 return return_value[0]
@@ -187,7 +204,9 @@ async def authorized_search(
     Not to be used outside of active access control mode.
     """
     # Find datasets user has read access for (if datasets are provided only return them. Provided user has read access)
-    search_datasets = await get_specific_user_permission_datasets(user.id, "read", dataset_ids)
+    search_datasets = await get_authorized_existing_datasets(
+        datasets=dataset_ids, permission_type="read", user=user
+    )
 
     if use_combined_context:
         search_responses = await search_in_datasets_context(

@@ -5,15 +5,13 @@ from typing import Type
 from pydantic import BaseModel
 from openai import ContentFilterFinishReasonError
 from litellm.exceptions import ContentPolicyViolationError
-from instructor.exceptions import InstructorRetryException
+from instructor.core import InstructorRetryException
 
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
-    MissingSystemPromptPathError,
 )
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
@@ -73,8 +71,19 @@ class OpenAIAdapter(LLMInterface):
         fallback_api_key: str = None,
         fallback_endpoint: str = None,
     ):
-        self.aclient = instructor.from_litellm(litellm.acompletion)
-        self.client = instructor.from_litellm(litellm.completion)
+        # TODO: With gpt5 series models OpenAI expects JSON_SCHEMA as a mode for structured outputs.
+        #       Make sure all new gpt models will work with this mode as well.
+        if "gpt-5" in model:
+            self.aclient = instructor.from_litellm(
+                litellm.acompletion, mode=instructor.Mode.JSON_SCHEMA
+            )
+            self.client = instructor.from_litellm(
+                litellm.completion, mode=instructor.Mode.JSON_SCHEMA
+            )
+        else:
+            self.aclient = instructor.from_litellm(litellm.acompletion)
+            self.client = instructor.from_litellm(litellm.completion)
+
         self.transcription_model = transcription_model
         self.model = model
         self.api_key = api_key
@@ -132,43 +141,16 @@ class OpenAIAdapter(LLMInterface):
                 api_version=self.api_version,
                 response_model=response_model,
                 max_retries=self.MAX_RETRIES,
-                extra_body={"reasoning_effort": "minimal"},
             )
         except (
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
             InstructorRetryException,
-        ) as error:
-            if (
-                isinstance(error, InstructorRetryException)
-                and "content management policy" not in str(error).lower()
-            ):
-                logger.debug(
-                    "LLM Model does not support reasoning_effort parameter, trying call without the parameter."
-                )
-                return await self.aclient.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": f"""{text_input}""",
-                        },
-                        {
-                            "role": "system",
-                            "content": system_prompt,
-                        },
-                    ],
-                    api_key=self.api_key,
-                    api_base=self.endpoint,
-                    api_version=self.api_version,
-                    response_model=response_model,
-                    max_retries=self.MAX_RETRIES,
-                )
-
+        ) as e:
             if not (self.fallback_model and self.fallback_api_key):
                 raise ContentPolicyFilterError(
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
-                )
+                ) from e
 
             try:
                 return await self.aclient.chat.completions.create(
@@ -201,7 +183,7 @@ class OpenAIAdapter(LLMInterface):
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
-                    )
+                    ) from error
 
     @observe
     @sleep_and_retry_sync()
@@ -328,35 +310,3 @@ class OpenAIAdapter(LLMInterface):
             max_completion_tokens=300,
             max_retries=self.MAX_RETRIES,
         )
-
-    def show_prompt(self, text_input: str, system_prompt: str) -> str:
-        """
-        Format and display the prompt for a user query.
-
-        This method formats the prompt using the provided user input and system prompt,
-        returning a string representation. Raises MissingSystemPromptPathError if the system prompt is not
-        provided.
-
-        Parameters:
-        -----------
-
-            - text_input (str): The input text provided by the user.
-            - system_prompt (str): The system's prompt to guide the model's response.
-
-        Returns:
-        --------
-
-            - str: A formatted string representing the user input and system prompt.
-        """
-        if not text_input:
-            text_input = "No user input provided."
-        if not system_prompt:
-            raise MissingSystemPromptPathError()
-        system_prompt = LLMGateway.read_query_prompt(system_prompt)
-
-        formatted_prompt = (
-            f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
-            if system_prompt
-            else None
-        )
-        return formatted_prompt
