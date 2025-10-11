@@ -57,7 +57,9 @@ async def main():
 
     # Now let's perform some searches
     # 1. Search for insights related to "ChromaDB"
-    insights_results = await cognee.search(query_type=SearchType.INSIGHTS, query_text="ChromaDB")
+    insights_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION, query_text="ChromaDB"
+    )
     print("\nInsights about ChromaDB:")
     for result in insights_results:
         print(f"- {result}")

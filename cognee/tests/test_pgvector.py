@@ -141,10 +141,10 @@ async def main():
     dataset_name_1 = "natural_language"
     dataset_name_2 = "quantum"
 
-    explanation_file_path = os.path.join(
+    explanation_file_path_nlp = os.path.join(
         pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
     )
-    await cognee.add([explanation_file_path], dataset_name_1)
+    await cognee.add([explanation_file_path_nlp], dataset_name_1)
 
     text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
     At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
@@ -167,7 +167,7 @@ async def main():
     random_node_name = random_node.payload["text"]
 
     search_results = await cognee.search(
-        query_type=SearchType.INSIGHTS, query_text=random_node_name
+        query_type=SearchType.GRAPH_COMPLETION, query_text=random_node_name
     )
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
@@ -202,7 +202,7 @@ async def main():
     history = await get_history(user.id)
     assert len(history) == 8, "Search history is not correct."
 
-    await test_local_file_deletion(text, explanation_file_path)
+    await test_local_file_deletion(text, explanation_file_path_nlp)
 
     await cognee.prune.prune_data()
     data_root_directory = get_storage_config()["data_root_directory"]
