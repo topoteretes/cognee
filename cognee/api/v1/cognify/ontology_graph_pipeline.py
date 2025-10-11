@@ -17,7 +17,7 @@ from cognee.modules.data.processing.document_types import Document
 from io import IOBase
 
 # ---------- Step 1: Load Ontology (from file object) ----------
-async def load_ontology_data(ontology_file: Union[str, bytes, "IOBase"]) -> list[dict]:
+async def load_ontology_data(ontology_file: Union[str, bytes, "IOBase"],format: str) -> list[dict]:
     """
     Loads OWL/RDF ontology directly from a file-like object and extracts RDF triples.
     
@@ -88,7 +88,7 @@ def convert_triples_to_chunks(triples: list[dict], format: str = "xml") -> list[
 
 
 # ---------- Step 3: Run Ontology Pipeline ----------
-async def run_ontology_pipeline(ontology_file, dataset_name: str = "ontology_dataset"):
+async def run_ontology_pipeline(ontology_file,format: str, dataset_name: str = "ontology_dataset"):
     """
     Run the ontology ingestion pipeline directly from a file object (no file path).
     """
@@ -106,7 +106,7 @@ async def run_ontology_pipeline(ontology_file, dataset_name: str = "ontology_dat
         dataset = await create_dataset(dataset_name, user, session)
 
     # ✅ Process ontology file directly
-    triples = await load_ontology_data(ontology_file)
+    triples = await load_ontology_data(ontology_file,format)
     chunks = convert_triples_to_chunks(triples)
 
     # Define pipeline tasks
