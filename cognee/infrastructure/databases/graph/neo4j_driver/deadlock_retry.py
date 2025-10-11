@@ -8,7 +8,7 @@ from cognee.infrastructure.utils.calculate_backoff import calculate_backoff
 logger = get_logger("deadlock_retry")
 
 
-def deadlock_retry(max_retries=5):
+def deadlock_retry(max_retries=10):
     """
     Decorator that automatically retries an asynchronous function when rate limit errors occur.
 
