@@ -1,6 +1,7 @@
 from typing import List, Tuple
 from pydantic import BaseModel
 
+from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.root_dir import get_absolute_path
 
@@ -32,12 +33,12 @@ async def extract_content_nodes_and_relationship_names(
         }
 
         base_directory = get_absolute_path("./tasks/graph/cascade_extract/prompts")
-        text_input = LLMGateway.render_prompt(
+        text_input = render_prompt(
             "extract_graph_relationship_names_prompt_input.txt",
             context,
             base_directory=base_directory,
         )
-        system_prompt = LLMGateway.read_query_prompt(
+        system_prompt = read_query_prompt(
             "extract_graph_relationship_names_prompt_system.txt", base_directory=base_directory
         )
         response = await LLMGateway.acreate_structured_output(

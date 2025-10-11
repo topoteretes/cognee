@@ -71,3 +71,4 @@ body:
           required: true
         - label: I have specified the location of the documentation issue
           required: true
+
