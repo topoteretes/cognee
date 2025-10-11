@@ -1,10 +1,10 @@
 from typing import Any, Optional
-
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.modules.data.access_tracking import track_chunk_access
 
 logger = get_logger("ChunksRetriever")
 
@@ -15,10 +15,9 @@ class ChunksRetriever(BaseRetriever):
     completions from them.
 
     Public methods:
-
     - get_context: Retrieves document chunks based on a query.
     - get_completion: Generates a completion using provided context or retrieves context if
-    not given.
+      not given.
     """
 
     def __init__(
@@ -33,20 +32,8 @@ class ChunksRetriever(BaseRetriever):
 
         Searches for document chunks relevant to the specified query using a vector engine.
         Raises a NoDataError if no data is found in the system.
-
-        Parameters:
-        -----------
-
-            - query (str): The query string to search for relevant document chunks.
-
-        Returns:
-        --------
-
-            - Any: A list of document chunk payloads retrieved from the search.
         """
-        logger.info(
-            f"Starting chunk retrieval for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
-        )
+        logger.info(f"Retrieving context for query: '{query[:100]}{'...' if len(query) > 100 else ''}")
 
         vector_engine = get_vector_engine()
 
@@ -58,7 +45,19 @@ class ChunksRetriever(BaseRetriever):
             raise NoDataError("No data found in the system, please add data first.") from error
 
         chunk_payloads = [result.payload for result in found_chunks]
+        
+        # Track chunk access for cleanup feature
+        try:
+            chunk_ids = [payload.get('id') for payload in chunk_payloads if payload.get('id')]
+            if chunk_ids:
+                await track_chunk_access(chunk_ids)
+                logger.debug(f"Tracked access for {len(chunk_ids)} chunks")
+        except Exception as e:
+            # Don't fail the retrieval if tracking fails
+            logger.warning(f"Failed to track chunk access: {str(e)}")
+        
         logger.info(f"Returning {len(chunk_payloads)} chunk payloads")
+
         return chunk_payloads
 
     async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
@@ -70,14 +69,12 @@ class ChunksRetriever(BaseRetriever):
 
         Parameters:
         -----------
-
             - query (str): The query string to be used for generating a completion.
             - context (Optional[Any]): Optional pre-fetched context to use for generating the
               completion; if None, it retrieves the context for the query. (default None)
 
         Returns:
         --------
-
             - Any: The context used for the completion or the retrieved context if none was
               provided.
         """
@@ -94,4 +91,5 @@ class ChunksRetriever(BaseRetriever):
         logger.info(
             f"Returning context with {len(context) if isinstance(context, list) else 1} item(s)"
         )
+
         return context
