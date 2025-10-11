@@ -26,7 +26,17 @@ async def load_ontology_data(ontology_file) -> list[dict]:
 
     triples = []
     for s, p, o in g:
-        triples.append({"subject": str(s), "predicate": str(p), "object": str(o)})
+        triple = {
+            "subject": str(s),
+            "predicate": str(p),
+            "object": str(o),
+            "object_type": type(o).__name__,  # 'URIRef', 'Literal', 'BNode'
+        }
+        if hasattr(o, 'datatype') and o.datatype:
+            triple["object_datatype"] = str(o.datatype)
+        if hasattr(o, 'language') and o.language:
+            triple["object_language"] = o.language
+        triples.append(triple)
     return triples
 
 
