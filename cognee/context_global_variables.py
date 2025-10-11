@@ -12,6 +12,8 @@ from cognee.modules.users.methods import get_user
 #       for different async tasks, threads and processes
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
+soup_crawler_config = ContextVar("soup_crawler_config", default=None)
+tavily_config = ContextVar("tavily_config", default=None)
 
 
 async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):
