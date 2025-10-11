@@ -505,6 +505,8 @@ def start_ui(
         cwd = os.getcwd()
         env_file = os.path.join(cwd, ".env")
         try:
+            image = "cognee/cognee-mcp:main"
+            subprocess.run(["docker", "pull", image], check=True)
             mcp_process = subprocess.Popen(
                 [
                     "docker",
