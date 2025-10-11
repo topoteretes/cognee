@@ -6,7 +6,7 @@ that hasn't been accessed for a specified period.
 Issue: #1335 - Task to automatically delete data not accessed for specified time period
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 import logging
@@ -26,7 +26,8 @@ class CleanupResult:
 
 async def cleanup_unused_data(
     days_threshold: int = 30,
-    dry_run: bool = True
+    dry_run: bool = True,
+    adapter = None
 ) -> CleanupResult:
     """Clean up data that hasn't been accessed within the threshold period.
     
@@ -44,6 +45,7 @@ async def cleanup_unused_data(
                        Default is 30 days.
         dry_run: If True, only reports what would be deleted without actually deleting.
                 Default is True for safety.
+        adapter: Database adapter instance. If None, will get from infrastructure.
     
     Returns:
         CleanupResult: Object containing status, counts of deleted items, and any errors.
@@ -65,48 +67,185 @@ async def cleanup_unused_data(
     }
     errors = []
     
-    cutoff_date = datetime.now() - timedelta(days=days_threshold)
+    # Get database adapter
+    if adapter is None:
+        try:
+            from cognee.infrastructure.databases.relational import get_relational_engine
+            adapter = get_relational_engine()
+        except Exception as e:
+            logger.error(f"Failed to get database adapter: {str(e)}")
+            errors.append(f"Database connection error: {str(e)}")
+            return CleanupResult(
+                status="error",
+                deleted_counts=deleted_counts,
+                dry_run=dry_run,
+                timestamp=datetime.now(timezone.utc),
+                errors=errors,
+            )
+    
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_threshold)
+    logger.info(f"Cutoff date for cleanup: {cutoff_date}")
     
     try:
-        # TODO: Implement database queries to identify old data
-        # NOTE: This requires adding a 'last_accessed' timestamp field to tables
-        # as discussed in issue #1335
+        # Query and delete document chunks
+        try:
+            count_query = """
+                SELECT COUNT(*) FROM DocumentChunk
+                WHERE last_accessed < :cutoff_date OR last_accessed IS NULL
+            """
+            result = await adapter.execute(count_query, {"cutoff_date": cutoff_date})
+            chunk_count = result.scalar() if hasattr(result, 'scalar') else 0
+            
+            logger.info(f"Found {chunk_count} document chunks for cleanup")
+            
+            if not dry_run and chunk_count > 0:
+                delete_query = """
+                    DELETE FROM DocumentChunk
+                    WHERE last_accessed < :cutoff_date OR last_accessed IS NULL
+                """
+                await adapter.execute(delete_query, {"cutoff_date": cutoff_date})
+                deleted_counts["document_chunks"] = chunk_count
+                logger.info(f"Deleted {chunk_count} document chunks")
+            else:
+                deleted_counts["document_chunks"] = chunk_count
+        except Exception as e:
+            logger.warning(f"Error cleaning document chunks: {str(e)}")
+            errors.append(f"document_chunks: {str(e)}")
         
-        # TODO: Query document chunks not accessed since cutoff_date
-        # TODO: Query entities not accessed since cutoff_date
-        # TODO: Query summaries not accessed since cutoff_date
-        # TODO: Query associations not accessed since cutoff_date
-        # TODO: Query metadata not accessed since cutoff_date
+        # Query and delete entities
+        try:
+            count_query = """
+                SELECT COUNT(*) FROM Entity
+                WHERE last_accessed < :cutoff_date OR last_accessed IS NULL
+            """
+            result = await adapter.execute(count_query, {"cutoff_date": cutoff_date})
+            entity_count = result.scalar() if hasattr(result, 'scalar') else 0
+            
+            logger.info(f"Found {entity_count} entities for cleanup")
+            
+            if not dry_run and entity_count > 0:
+                delete_query = """
+                    DELETE FROM Entity
+                    WHERE last_accessed < :cutoff_date OR last_accessed IS NULL
+                """
+                await adapter.execute(delete_query, {"cutoff_date": cutoff_date})
+                deleted_counts["entities"] = entity_count
+                logger.info(f"Deleted {entity_count} entities")
+            else:
+                deleted_counts["entities"] = entity_count
+        except Exception as e:
+            logger.warning(f"Error cleaning entities: {str(e)}")
+            errors.append(f"entities: {str(e)}")
         
-        if not dry_run:
-            # TODO: Implement actual deletion logic
-            logger.warning("Actual deletion not yet implemented")
-        else:
-            logger.info("Dry run mode - no data will be deleted")
+        # Query and delete summaries
+        try:
+            count_query = """
+                SELECT COUNT(*) FROM DocumentSummary
+                WHERE last_accessed < :cutoff_date OR last_accessed IS NULL
+            """
+            result = await adapter.execute(count_query, {"cutoff_date": cutoff_date})
+            summary_count = result.scalar() if hasattr(result, 'scalar') else 0
+            
+            logger.info(f"Found {summary_count} summaries for cleanup")
+            
+            if not dry_run and summary_count > 0:
+                delete_query = """
+                    DELETE FROM DocumentSummary
+                    WHERE last_accessed < :cutoff_date OR last_accessed IS NULL
+                """
+                await adapter.execute(delete_query, {"cutoff_date": cutoff_date})
+                deleted_counts["summaries"] = summary_count
+                logger.info(f"Deleted {summary_count} summaries")
+            else:
+                deleted_counts["summaries"] = summary_count
+        except Exception as e:
+            logger.warning(f"Error cleaning summaries: {str(e)}")
+            errors.append(f"summaries: {str(e)}")
         
-        status = "success"
+        # Query and delete associations
+        try:
+            count_query = """
+                SELECT COUNT(*) FROM Association
+                WHERE last_accessed < :cutoff_date OR last_accessed IS NULL
+            """
+            result = await adapter.execute(count_query, {"cutoff_date": cutoff_date})
+            assoc_count = result.scalar() if hasattr(result, 'scalar') else 0
+            
+            logger.info(f"Found {assoc_count} associations for cleanup")
+            
+            if not dry_run and assoc_count > 0:
+                delete_query = """
+                    DELETE FROM Association
+                    WHERE last_accessed < :cutoff_date OR last_accessed IS NULL
+                """
+                await adapter.execute(delete_query, {"cutoff_date": cutoff_date})
+                deleted_counts["associations"] = assoc_count
+                logger.info(f"Deleted {assoc_count} associations")
+            else:
+                deleted_counts["associations"] = assoc_count
+        except Exception as e:
+            logger.warning(f"Error cleaning associations: {str(e)}")
+            errors.append(f"associations: {str(e)}")
+        
+        # Query and delete metadata
+        try:
+            count_query = """
+                SELECT COUNT(*) FROM Metadata
+                WHERE last_accessed < :cutoff_date OR last_accessed IS NULL
+            """
+            result = await adapter.execute(count_query, {"cutoff_date": cutoff_date})
+            meta_count = result.scalar() if hasattr(result, 'scalar') else 0
+            
+            logger.info(f"Found {meta_count} metadata items for cleanup")
+            
+            if not dry_run and meta_count > 0:
+                delete_query = """
+                    DELETE FROM Metadata
+                    WHERE last_accessed < :cutoff_date OR last_accessed IS NULL
+                """
+                await adapter.execute(delete_query, {"cutoff_date": cutoff_date})
+                deleted_counts["metadata"] = meta_count
+                logger.info(f"Deleted {meta_count} metadata items")
+            else:
+                deleted_counts["metadata"] = meta_count
+        except Exception as e:
+            logger.warning(f"Error cleaning metadata: {str(e)}")
+            errors.append(f"metadata: {str(e)}")
+        
+        if dry_run:
+            logger.info("Dry run mode - no data was actually deleted")
+        
+        status = "success" if not errors else "partial_success"
         
     except Exception as e:
-        logger.error(f"Error during cleanup: {str(e)}")
-        errors.append(str(e))
+        logger.error(f"Unexpected error during cleanup: {str(e)}")
+        errors.append(f"Unexpected error: {str(e)}")
         status = "error"
     
     result = CleanupResult(
         status=status,
         deleted_counts=deleted_counts,
         dry_run=dry_run,
-        timestamp=datetime.now(),
+        timestamp=datetime.now(timezone.utc),
         errors=errors,
     )
     
+    total_deleted = sum(deleted_counts.values())
     logger.info(
-        f"Cleanup completed: status={status}, deleted={sum(deleted_counts.values())}"
+        f"Cleanup completed: status={status}, "
+        f"{'would delete' if dry_run else 'deleted'}={total_deleted} items"
     )
     
     return result
 
 
-# TODO: Add scheduling functionality to run cleanup periodically
-# TODO: Add configuration for enabling/disabling automatic cleanup
-# TODO: Add notifications/logging for cleanup operations
-# TODO: Implement last_accessed field updates throughout the codebase
+# Design Notes:
+# - All database tables should have a 'last_accessed' timestamp field
+# - Access tracking is implemented via cognee.modules.data.access_tracking module
+# - Hooks are integrated in retrieval functions to update timestamps
+# - This function can be scheduled to run periodically (e.g., via cron or task scheduler)
+# - Default behavior is dry_run=True for safety
+# - Consider adding configuration options for:
+#   - Enabling/disabling automatic cleanup
+#   - Customizing thresholds per data type
+#   - Notification/alerting for cleanup operations
