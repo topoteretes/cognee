@@ -14,16 +14,23 @@ from cognee.modules.data.methods import create_dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.modules.data.processing.document_types import Document
-
+from io import IOBase
 
 # ---------- Step 1: Load Ontology (from file object) ----------
-async def load_ontology_data(ontology_file) -> list[dict]:
+async def load_ontology_data(ontology_file: Union[str, bytes, "IOBase"]) -> list[dict]:
     """
     Loads OWL/RDF ontology directly from a file-like object and extracts RDF triples.
+    
+    Args:
+        ontology_file: File-like object or path to RDF data
+        format: RDF serialization format (xml, turtle, n3, json-ld, etc.). 
+                If None, rdflib will attempt auto-detection.
     """
     g = Graph()
-    g.parse(ontology_file, format="xml")  # Works for standard OWL/RDF/XML
-
+    try:
+        g.parse(ontology_file, format=format)
+    except Exception as e:
+        raise ValueError(f"Failed to parse ontology file: {str(e)}") from e
     triples = []
     for s, p, o in g:
         triple = {
@@ -41,10 +48,19 @@ async def load_ontology_data(ontology_file) -> list[dict]:
 
 
 # ---------- Step 2: Convert Triples into Chunks ----------
-def convert_triples_to_chunks(triples: list[dict]) -> list[DocumentChunk]:
+def convert_triples_to_chunks(triples: list[dict], format: str = "xml") -> list[DocumentChunk]:
     """
     Convert ontology triples into Cognee-compatible DocumentChunk objects.
     """
+    
+    # Map RDF formats to MIME types
+    mime_types = {
+        "xml": "application/rdf+xml",
+        "turtle": "text/turtle",
+        "n3": "text/n3",
+        "nt": "application/n-triples",
+        "json-ld": "application/ld+json",
+    }
     chunks = []
 
     # Minimal valid Document (from your class)
@@ -53,7 +69,7 @@ def convert_triples_to_chunks(triples: list[dict]) -> list[DocumentChunk]:
         name="in_memory_ontology.owl",
         raw_data_location="in_memory_source",
         external_metadata=None,
-        mime_type="application/rdf+xml"
+        mime_type=mime_types.get(format, "application/rdf+xml")
     )
 
     for i, t in enumerate(triples):
