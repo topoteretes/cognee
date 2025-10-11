@@ -1,10 +1,10 @@
 from typing import Any, Optional
-
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from cognee.modules.data.access_tracking import track_summary_access
 
 logger = get_logger("SummariesRetriever")
 
@@ -35,12 +35,10 @@ class SummariesRetriever(BaseRetriever):
 
         Parameters:
         -----------
-
             - query (str): The search query for which to retrieve summary context.
 
         Returns:
         --------
-
             - Any: A list of payloads from the retrieved summaries.
         """
         logger.info(
@@ -59,7 +57,19 @@ class SummariesRetriever(BaseRetriever):
             raise NoDataError("No data found in the system, please add data first.") from error
 
         summary_payloads = [summary.payload for summary in summaries_results]
+        
+        # Track summary access for cleanup feature
+        try:
+            summary_ids = [payload.get('id') for payload in summary_payloads if payload.get('id')]
+            if summary_ids:
+                await track_summary_access(summary_ids)
+                logger.debug(f"Tracked access for {len(summary_ids)} summaries")
+        except Exception as e:
+            # Don't fail the retrieval if tracking fails
+            logger.warning(f"Failed to track summary access: {str(e)}")
+        
         logger.info(f"Returning {len(summary_payloads)} summary payloads")
+
         return summary_payloads
 
     async def get_completion(self, query: str, context: Optional[Any] = None, **kwargs) -> Any:
@@ -71,14 +81,12 @@ class SummariesRetriever(BaseRetriever):
 
         Parameters:
         -----------
-
             - query (str): The search query for generating the completion.
             - context (Optional[Any]): Optional context for the completion; if not provided,
               will be retrieved based on the query. (default None)
 
         Returns:
         --------
-
             - Any: The generated completion context, which is either provided or retrieved.
         """
         logger.info(
@@ -94,4 +102,5 @@ class SummariesRetriever(BaseRetriever):
         logger.info(
             f"Returning context with {len(context) if isinstance(context, list) else 1} item(s)"
         )
+
         return context

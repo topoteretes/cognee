@@ -1,11 +1,10 @@
 from typing import Any, Optional, List
 from cognee.shared.logging_utils import get_logger
-
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
 from cognee.infrastructure.context.BaseContextProvider import BaseContextProvider
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
-
+from cognee.modules.data.access_tracking import track_entity_access
 
 logger = get_logger("entity_completion_retriever")
 
@@ -15,12 +14,10 @@ class EntityCompletionRetriever(BaseRetriever):
     Retriever that uses entity-based completion for generating responses.
 
     Public methods:
-
     - get_context
     - get_completion
 
     Instance variables:
-
     - extractor
     - context_provider
     - user_prompt_path
@@ -49,12 +46,10 @@ class EntityCompletionRetriever(BaseRetriever):
 
         Parameters:
         -----------
-
             - query (str): The query string for which context is being retrieved.
 
         Returns:
         --------
-
             - Any: The context retrieved from the context provider or None if not found or an
               error occurred.
         """
@@ -62,11 +57,23 @@ class EntityCompletionRetriever(BaseRetriever):
             logger.info(f"Processing query: {query[:100]}")
 
             entities = await self.extractor.extract_entities(query)
+
             if not entities:
                 logger.info("No entities extracted")
                 return None
 
+            # Track entity access for cleanup feature
+            try:
+                entity_ids = [entity.get('id') for entity in entities if isinstance(entity, dict) and entity.get('id')]
+                if entity_ids:
+                    await track_entity_access(entity_ids)
+                    logger.debug(f"Tracked access for {len(entity_ids)} entities")
+            except Exception as e:
+                # Don't fail the retrieval if tracking fails
+                logger.warning(f"Failed to track entity access: {str(e)}")
+
             context = await self.context_provider.get_context(entities, query)
+
             if not context:
                 logger.info("No context retrieved")
                 return None
@@ -87,14 +94,12 @@ class EntityCompletionRetriever(BaseRetriever):
 
         Parameters:
         -----------
-
             - query (str): The query string for which completion is being generated.
             - context (Optional[Any]): Optional context to be used for generating completion;
               fetched if not provided. (default None)
 
         Returns:
         --------
-
             - List[str]: A list containing the generated completion or an error message if no
               relevant entities were found.
         """
@@ -111,6 +116,7 @@ class EntityCompletionRetriever(BaseRetriever):
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
             )
+
             return [completion]
 
         except Exception as e:
