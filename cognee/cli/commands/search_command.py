@@ -31,10 +31,6 @@ Search Types & Use Cases:
     Traditional RAG using document chunks without graph structure.
     Best for: Direct document retrieval, specific fact-finding.
 
-**INSIGHTS**:
-    Structured entity relationships and semantic connections.
-    Best for: Understanding concept relationships, knowledge mapping.
-
 **CHUNKS**:
     Raw text segments that match the query semantically.
     Best for: Finding specific passages, citations, exact content.
