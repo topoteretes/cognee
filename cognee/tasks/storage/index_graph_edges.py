@@ -1,3 +1,5 @@
+import asyncio
+
 from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 from cognee.shared.logging_utils import get_logger
 from collections import Counter
@@ -76,15 +78,20 @@ async def index_graph_edges(
             indexed_data_point.metadata["index_fields"] = [field_name]
             index_points[index_name].append(indexed_data_point)
 
+    # Get maximum batch size for embedding model
+    batch_size = vector_engine.embedding_engine.get_batch_size()
+    tasks: list[asyncio.Task] = []
+
     for index_name, indexable_points in index_points.items():
         index_name, field_name = index_name.split(".")
 
-        # Get maximum batch size for embedding model
-        batch_size = vector_engine.embedding_engine.get_batch_size()
-        # We save the data in batches of {batch_size} to not put a lot of pressure on the database
+        # Create embedding tasks to run in parallel later
         for start in range(0, len(indexable_points), batch_size):
             batch = indexable_points[start : start + batch_size]
 
-            await vector_engine.index_data_points(index_name, field_name, batch)
+            tasks.append(vector_engine.index_data_points(index_name, field_name, batch))
+
+    # Start all embedding tasks and wait for completion
+    await asyncio.gather(*tasks)
 
     return None
