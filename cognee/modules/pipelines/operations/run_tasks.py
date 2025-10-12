@@ -91,7 +91,6 @@ async def run_tasks(
         if incremental_loading:
             data = await resolve_data_directories(data)
 
-
         # Create and gather batches of async tasks of data items that will run the pipeline for the data item
         results = []
         for start in range(0, len(data), DOCUMENT_BATCH_SIZE):
