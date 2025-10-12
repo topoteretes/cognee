@@ -38,7 +38,8 @@ Build memory for Agents and query from any client that speaks MCP – in your t
 ## ✨ Features
 
 - Multiple transports – choose Streamable HTTP --transport http (recommended for web deployments), SSE --transport sse (real‑time streaming), or stdio (classic pipe, default)
-- Integrated logging – all actions written to a rotating file (see get_log_file_location()) and mirrored to console in dev
+- **API Mode** – connect to an already running Cognee FastAPI server instead of using cognee directly (see [API Mode](#-api-mode) below)
+- Integrated logging – all actions written to a rotating file (see get_log_file_location()) and mirrored to console in dev
 - Local file ingestion – feed .md, source files, Cursor rule‑sets, etc. straight from disk
 - Background pipelines – long‑running cognify & codify jobs spawn off‑thread; check progress with status tools
 - Developer rules bootstrap – one call indexes .cursorrules, .cursor/rules, AGENT.md, and friends into the developer_rules nodeset
@@ -91,7 +92,7 @@ To use different LLM providers / database configurations, and for more info chec
 
 ## 🐳 Docker Usage
 
-If you’d rather run cognee-mcp in a container, you have two options:
+If you'd rather run cognee-mcp in a container, you have two options:
 
 1. **Build locally**
    1. Make sure you are in /cognee root directory and have a fresh `.env` containing only your `LLM_API_KEY` (and your chosen settings).
@@ -127,6 +128,64 @@ If you’d rather run cognee-mcp in a container, you have two options:
 **Direct Python usage** uses command line arguments:
 - ✅ Direct: `python src/server.py --transport http`
 - ❌ Direct: `-e TRANSPORT_MODE=http` (won't work)
+
+### **Docker API Mode**
+
+To connect the MCP Docker container to a Cognee API server running on your host machine:
+
+#### **Simple Usage (Automatic localhost handling):**
+```bash
+# Start your Cognee API server on the host
+python -m cognee.api.client
+
+# Run MCP container in API mode - localhost is automatically converted!
+docker run \
+  -e TRANSPORT_MODE=sse \
+  -e API_URL=http://localhost:8000 \
+  -e API_TOKEN=your_auth_token \
+  -p 8001:8000 \
+  --rm -it cognee/cognee-mcp:main
+```
+**Note:** The container will automatically convert `localhost` to `host.docker.internal` on Mac/Windows/Docker Desktop. You'll see a message in the logs showing the conversion.
+
+#### **Explicit host.docker.internal (Mac/Windows):**
+```bash
+# Or explicitly use host.docker.internal
+docker run \
+  -e TRANSPORT_MODE=sse \
+  -e API_URL=http://host.docker.internal:8000 \
+  -e API_TOKEN=your_auth_token \
+  -p 8001:8000 \
+  --rm -it cognee/cognee-mcp:main
+```
+
+#### **On Linux (use host network or container IP):**
+```bash
+# Option 1: Use host network (simplest)
+docker run \
+  --network host \
+  -e TRANSPORT_MODE=sse \
+  -e API_URL=http://localhost:8000 \
+  -e API_TOKEN=your_auth_token \
+  --rm -it cognee/cognee-mcp:main
+
+# Option 2: Use host IP address
+# First, get your host IP: ip addr show docker0
+docker run \
+  -e TRANSPORT_MODE=sse \
+  -e API_URL=http://172.17.0.1:8000 \
+  -e API_TOKEN=your_auth_token \
+  -p 8001:8000 \
+  --rm -it cognee/cognee-mcp:main
+```
+
+**Environment variables for API mode:**
+- `API_URL`: URL of the running Cognee API server
+- `API_TOKEN`: Authentication token (optional, required if API has authentication enabled)
+
+**Note:** When running in API mode:
+- Database migrations are automatically skipped (API server handles its own DB)
+- Some features are limited (see [API Mode Limitations](#-api-mode))
 
 
 ## 🔗 MCP Client Configuration
@@ -255,6 +314,76 @@ You can configure both transports simultaneously for testing:
 
 **Note:** Only enable the server you're actually running to avoid connection errors.
 
+## 🌐 API Mode
+
+The MCP server can operate in two modes:
+
+### **Direct Mode** (Default)
+The MCP server directly imports and uses the cognee library. This is the default mode with full feature support.
+
+### **API Mode**
+The MCP server connects to an already running Cognee FastAPI server via HTTP requests. This is useful when:
+- You have a centralized Cognee API server running
+- You want to separate the MCP server from the knowledge graph backend
+- You need multiple MCP servers to share the same knowledge graph
+
+**Starting the MCP server in API mode:**
+```bash
+# Start your Cognee FastAPI server first (default port 8000)
+cd /path/to/cognee
+python -m cognee.api.client
+
+# Then start the MCP server in API mode
+cd cognee-mcp
+python src/server.py --api-url http://localhost:8000 --api-token YOUR_AUTH_TOKEN
+```
+
+**API Mode with different transports:**
+```bash
+# With SSE transport
+python src/server.py --transport sse --api-url http://localhost:8000 --api-token YOUR_TOKEN
+
+# With HTTP transport
+python src/server.py --transport http --api-url http://localhost:8000 --api-token YOUR_TOKEN
+```
+
+**API Mode with Docker:**
+```bash
+# On Mac/Windows (use host.docker.internal to access host)
+docker run \
+  -e TRANSPORT_MODE=sse \
+  -e API_URL=http://host.docker.internal:8000 \
+  -e API_TOKEN=YOUR_TOKEN \
+  -p 8001:8000 \
+  --rm -it cognee/cognee-mcp:main
+
+# On Linux (use host network)
+docker run \
+  --network host \
+  -e TRANSPORT_MODE=sse \
+  -e API_URL=http://localhost:8000 \
+  -e API_TOKEN=YOUR_TOKEN \
+  --rm -it cognee/cognee-mcp:main
+```
+
+**Command-line arguments for API mode:**
+- `--api-url`: Base URL of the running Cognee FastAPI server (e.g., `http://localhost:8000`)
+- `--api-token`: Authentication token for the API (optional, required if API has authentication enabled)
+
+**Docker environment variables for API mode:**
+- `API_URL`: Base URL of the running Cognee FastAPI server
+- `API_TOKEN`: Authentication token (optional, required if API has authentication enabled)
+
+**API Mode limitations:**
+Some features are only available in direct mode:
+- `codify` (code graph pipeline)
+- `cognify_status` / `codify_status` (pipeline status tracking)
+- `prune` (data reset)
+- `get_developer_rules` (developer rules retrieval)
+- `list_data` with specific dataset_id (detailed data listing)
+
+Basic operations like `cognify`, `search`, `delete`, and `list_data` (all datasets) work in both modes.
+
 ## 💻 Basic Usage
 
 The MCP server exposes its functionality through tools. Call them from any MCP client (Cursor, Claude Desktop, Cline, Roo and more).
@@ -266,7 +395,7 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 - **codify**: Analyse a code repository, build a code graph, stores it in memory
 
-- **search**: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS, INSIGHTS
+- **search**: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS
 
 - **list_data**: List all datasets and their data items with IDs for deletion operations
 
