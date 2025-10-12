@@ -12,6 +12,7 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 )
 from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
+
 try:
     from cognee.tasks.web_scraper.config import TavilyConfig, SoupCrawlerConfig
     from cognee.context_global_variables import (
@@ -177,7 +178,6 @@ async def add(
     """
 
     try:
-
         if not soup_crawler_config and extraction_rules:
             soup_crawler_config = SoupCrawlerConfig(extraction_rules=extraction_rules)
         if not tavily_config and os.getenv("TAVILY_API_KEY"):
