@@ -1,3 +1,4 @@
+import json
 from typing import List, Dict
 from uuid import uuid5, NAMESPACE_OID
 from cognee.infrastructure.engine.models.DataPoint import DataPoint
@@ -79,10 +80,10 @@ async def ingest_database_schema(
             schema_table = SchemaTable(
                 id=uuid5(NAMESPACE_OID, name=f"{table_name}"),
                 name=table_name,
-                columns=details["columns"],
+                columns=json.dumps(details["columns"], default=str),
                 primary_key=details.get("primary_key"),
-                foreign_keys=details.get("foreign_keys", []),
-                sample_rows=rows,
+                foreign_keys=json.dumps(details.get("foreign_keys", []), default=str),
+                sample_rows=json.dumps(rows, default=str),
                 row_count_estimate=row_count_estimate,
                 description=f"Relational database table with '{table_name}' with {len(details['columns'])} columns and approx. {row_count_estimate} rows."
                 f"Here are the columns this table contains: {details['columns']}"
@@ -119,9 +120,8 @@ async def ingest_database_schema(
         id=uuid5(NAMESPACE_OID, name=id_str),
         name=migration_config.migration_db_name,
         database_type=migration_config.migration_db_provider,
-        tables=tables,
-        sample_data=sample_data,
-        extraction_timestamp=datetime.now(timezone.utc),
+        tables=json.dumps(tables, default=str),
+        sample_data=json.dumps(sample_data, default=str),
         description=f"Database schema containing {len(schema_tables)} tables and {len(schema_relationships)} relationships. "
         f"The database type is {migration_config.migration_db_provider}."
         f"The database contains the following tables: {tables}",

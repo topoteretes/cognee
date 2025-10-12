@@ -53,7 +53,7 @@ def parse_neptune_url(url: str) -> Tuple[str, str]:
         return graph_id, region
 
     except Exception as e:
-        raise ValueError(f"Failed to parse Neptune Analytics URL '{url}': {str(e)}")
+        raise ValueError(f"Failed to parse Neptune Analytics URL '{url}': {str(e)}") from e
 
 
 def validate_graph_id(graph_id: str) -> bool:

@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.3.4"
+version = "0.3.5"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -48,13 +48,14 @@ dependencies = [
     "pympler>=1.1,<2.0.0",
     "onnxruntime<=1.22.1",
     "pylance>=0.22.0,<=0.36.0",
-    "kuzu (==0.11.0)",
+    "kuzu (==0.11.2)",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
     "fastembed<=0.6.0",
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
     "gunicorn>=20.1.0,<24",
-    "websockets>=15.0.1,<16.0.0"
+    "websockets>=15.0.1,<16.0.0",
+    "mistralai>=1.9.10",
 ]
 
 [project.optional-dependencies]
@@ -63,7 +64,14 @@ api=[]
 distributed = [
     "modal>=1.0.5,<2.0.0",
 ]
-
+scraping = [
+    "tavily-python>=0.7.0",
+    "beautifulsoup4>=4.13.1",
+    "playwright>=1.9.0",
+    "lxml>=4.9.3,<5.0.0",
+    "protego>=0.1",
+    "APScheduler>=3.10.0,<=3.11.0"
+]
 neo4j = ["neo4j>=5.28.0,<6"]
 neptune = ["langchain_aws>=0.2.22"]
 postgres = [
@@ -82,20 +90,18 @@ langchain = [
     "langchain_text_splitters>=0.3.2,<1.0.0",
 ]
 llama-index = ["llama-index-core>=0.12.11,<0.13"]
-gemini = ["google-generativeai>=0.8.4,<0.9"]
 huggingface = ["transformers>=4.46.3,<5"]
 ollama = ["transformers>=4.46.3,<5"]
 mistral = ["mistral-common>=1.5.2,<2"]
 anthropic = ["anthropic>=0.27"]
 deepeval = ["deepeval>=3.0.1,<4"]
 posthog = ["posthog>=3.5.0,<4"]
-falkordb = ["falkordb>=1.0.9,<2.0.0"]
 groq = ["groq>=0.8.0,<1.0.0"]
 chromadb = [
     "chromadb>=0.6,<0.7",
     "pypika==0.48.9",
 ]
-docs = ["unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx]>=0.18.1,<19"]
+docs = ["unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19"]
 codegraph = [
     "fastembed<=0.6.0 ; python_version < '3.13'",
     "transformers>=4.46.3,<5",
@@ -144,6 +150,7 @@ Homepage = "https://www.cognee.ai"
 Repository = "https://github.com/topoteretes/cognee"
 
 [project.scripts]
+cognee = "cognee.cli._cognee:main"
 cognee-cli = "cognee.cli._cognee:main"
 
 [build-system]

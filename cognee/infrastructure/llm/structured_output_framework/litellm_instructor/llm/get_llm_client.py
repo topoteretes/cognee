@@ -23,6 +23,7 @@ class LLMProvider(Enum):
     - ANTHROPIC: Represents the Anthropic provider.
     - CUSTOM: Represents a custom provider option.
     - GEMINI: Represents the Gemini provider.
+    - MISTRAL: Represents the Mistral AI provider.
     """
 
     OPENAI = "openai"
@@ -30,6 +31,7 @@ class LLMProvider(Enum):
     ANTHROPIC = "anthropic"
     CUSTOM = "custom"
     GEMINI = "gemini"
+    MISTRAL = "mistral"
 
 
 def get_llm_client(raise_api_key_error: bool = True):
@@ -143,7 +145,36 @@ def get_llm_client(raise_api_key_error: bool = True):
             max_completion_tokens=max_completion_tokens,
             endpoint=llm_config.llm_endpoint,
             api_version=llm_config.llm_api_version,
-            streaming=llm_config.llm_streaming,
+        )
+
+    elif provider == LLMProvider.MISTRAL:
+        if llm_config.llm_api_key is None:
+            raise LLMAPIKeyNotSetError()
+
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.mistral.adapter import (
+            MistralAdapter,
+        )
+
+        return MistralAdapter(
+            api_key=llm_config.llm_api_key,
+            model=llm_config.llm_model,
+            max_completion_tokens=max_completion_tokens,
+            endpoint=llm_config.llm_endpoint,
+        )
+
+    elif provider == LLMProvider.MISTRAL:
+        if llm_config.llm_api_key is None:
+            raise LLMAPIKeyNotSetError()
+
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.mistral.adapter import (
+            MistralAdapter,
+        )
+
+        return MistralAdapter(
+            api_key=llm_config.llm_api_key,
+            model=llm_config.llm_model,
+            max_completion_tokens=max_completion_tokens,
+            endpoint=llm_config.llm_endpoint,
         )
 
     else:
