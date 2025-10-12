@@ -59,7 +59,7 @@ async def handle_search(arguments: Dict[str, Any], user) -> list:
     valid_search_types = (
         search_tool["parameters"]["properties"]["search_type"]["enum"]
         if search_tool
-        else ["INSIGHTS", "CODE", "GRAPH_COMPLETION", "NATURAL_LANGUAGE"]
+        else ["CODE", "GRAPH_COMPLETION", "NATURAL_LANGUAGE"]
     )
 
     if search_type_str not in valid_search_types:

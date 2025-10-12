@@ -395,7 +395,7 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 - **codify**: Analyse a code repository, build a code graph, stores it in memory
 
-- **search**: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS, INSIGHTS
+- **search**: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS
 
 - **list_data**: List all datasets and their data items with IDs for deletion operations
 
