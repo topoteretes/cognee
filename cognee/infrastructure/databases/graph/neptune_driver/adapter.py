@@ -6,7 +6,6 @@ from uuid import UUID
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
-    record_graph_changes,
     NodeData,
     EdgeData,
     Node,
@@ -229,7 +228,6 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to add node {node.id}: {error_msg}")
             raise Exception(f"Failed to add node: {error_msg}") from e
 
-    @record_graph_changes
     async def add_nodes(self, nodes: List[DataPoint]) -> None:
         """
         Add multiple nodes to the graph in a single operation.
@@ -534,7 +532,6 @@ class NeptuneGraphDB(GraphDBInterface):
             logger.error(f"Failed to add edge {source_id} -> {target_id}: {error_msg}")
             raise Exception(f"Failed to add edge: {error_msg}") from e
 
-    @record_graph_changes
     async def add_edges(self, edges: List[Tuple[str, str, str, Optional[Dict[str, Any]]]]) -> None:
         """
         Add multiple edges to the graph in a single operation.

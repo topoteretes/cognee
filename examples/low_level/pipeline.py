@@ -100,7 +100,7 @@ async def main():
 
     pipeline = run_tasks(
         [Task(ingest_files), Task(add_data_points)],
-        dataset_id=datasets[0].id,
+        dataset=datasets[0],
         data=data,
         incremental_loading=False,
     )

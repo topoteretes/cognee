@@ -1,4 +1,3 @@
-import pickle
 from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timezone
@@ -28,8 +27,6 @@ class DataPoint(BaseModel):
     - update_version
     - to_json
     - from_json
-    - to_pickle
-    - from_pickle
     - to_dict
     - from_dict
     """

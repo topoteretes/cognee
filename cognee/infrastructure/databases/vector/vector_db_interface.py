@@ -1,7 +1,7 @@
-from typing import List, Protocol, Optional, Union, Any
+from typing import List, Protocol, Optional, Any
 from abc import abstractmethod
+from uuid import UUID
 from cognee.infrastructure.engine import DataPoint
-from .models.PayloadSchema import PayloadSchema
 
 
 class VectorDBInterface(Protocol):
@@ -127,9 +127,7 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    async def delete_data_points(
-        self, collection_name: str, data_point_ids: Union[List[str], list[str]]
-    ):
+    async def delete_data_points(self, collection_name: str, data_point_ids: List[UUID]):
         """
         Delete specified data points from a collection.
 

@@ -17,6 +17,7 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
     get_ontology_resolver_from_env,
 )
 from cognee.modules.users.models import User
+from cognee.modules.users.methods import get_default_user
 
 from cognee.tasks.documents import (
     check_permissions_on_dataset,
@@ -207,6 +208,9 @@ async def cognify(
             config: Config = {
                 "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
             }
+
+    if user is None:
+        user = await get_default_user()
 
     if temporal_cognify:
         tasks = await get_temporal_tasks(user, chunker, chunk_size)

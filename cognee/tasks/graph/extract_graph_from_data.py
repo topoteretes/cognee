@@ -1,10 +1,9 @@
 import asyncio
-from typing import Type, List, Optional
+from typing import Dict, Type, List, Optional
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
-from cognee.tasks.storage import index_graph_edges
 from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.get_default_ontology_resolver import (
@@ -32,6 +31,7 @@ async def integrate_chunk_graphs(
     chunk_graphs: list,
     graph_model: Type[BaseModel],
     ontology_resolver: BaseOntologyResolver,
+    context: Dict,
 ) -> List[DocumentChunk]:
     """Integrate chunk graphs with ontology validation and store in databases.
 
@@ -85,19 +85,19 @@ async def integrate_chunk_graphs(
     )
 
     if len(graph_nodes) > 0:
-        await add_data_points(graph_nodes)
+        await add_data_points(graph_nodes, context)
 
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
-        await index_graph_edges(graph_edges)
 
     return data_chunks
 
 
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
+    context: Dict,
     graph_model: Type[BaseModel],
-    config: Config = None,
+    config: Optional[Config] = None,
     custom_prompt: Optional[str] = None,
 ) -> List[DocumentChunk]:
     """
@@ -136,16 +136,16 @@ async def extract_graph_from_data(
             and ontology_config.ontology_resolver
             and ontology_config.matching_strategy
         ):
-            config: Config = {
+            config = {
                 "ontology_config": {
                     "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
                 }
             }
         else:
-            config: Config = {
-                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
-            }
+            config = {"ontology_config": {"ontology_resolver": get_default_ontology_resolver()}}
 
     ontology_resolver = config["ontology_config"]["ontology_resolver"]
 
-    return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_resolver)
+    return await integrate_chunk_graphs(
+        data_chunks, chunk_graphs, graph_model, ontology_resolver, context
+    )

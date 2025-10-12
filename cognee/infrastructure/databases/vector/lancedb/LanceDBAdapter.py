@@ -1,5 +1,6 @@
 import asyncio
 from os import path
+from uuid import UUID
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
@@ -282,7 +283,7 @@ class LanceDBAdapter(VectorDBInterface):
             ]
         )
 
-    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
         collection = await self.get_collection(collection_name)
 
         # Delete one at a time to avoid commit conflicts

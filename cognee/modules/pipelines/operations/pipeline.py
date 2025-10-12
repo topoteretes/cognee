@@ -1,6 +1,6 @@
 import asyncio
 from uuid import UUID
-from typing import Union
+from typing import Dict, Optional, Union
 
 from cognee.modules.pipelines.layers.setup_and_check_environment import (
     setup_and_check_environment,
@@ -29,12 +29,13 @@ update_status_lock = asyncio.Lock()
 async def run_pipeline(
     tasks: list[Task],
     data=None,
-    datasets: Union[str, list[str], list[UUID]] = None,
-    user: User = None,
+    datasets: Optional[Union[str, list[str], list[UUID]]] = None,
+    user: Optional[User] = None,
     pipeline_name: str = "custom_pipeline",
-    vector_db_config: dict = None,
-    graph_db_config: dict = None,
+    vector_db_config: Optional[dict] = None,
+    graph_db_config: Optional[dict] = None,
     incremental_loading: bool = False,
+    context: Optional[Dict] = None,
 ):
     validate_pipeline_tasks(tasks)
     await setup_and_check_environment(vector_db_config, graph_db_config)
@@ -48,8 +49,8 @@ async def run_pipeline(
             tasks=tasks,
             data=data,
             pipeline_name=pipeline_name,
-            context={"dataset": dataset},
             incremental_loading=incremental_loading,
+            context=context,
         ):
             yield run_info
 
@@ -58,16 +59,16 @@ async def run_pipeline_per_dataset(
     dataset: Dataset,
     user: User,
     tasks: list[Task],
-    data=None,
+    data: Optional[list[Data]] = None,
     pipeline_name: str = "custom_pipeline",
-    context: dict = None,
     incremental_loading=False,
+    context: Optional[Dict] = None,
 ):
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
     if not data:
-        data: list[Data] = await get_dataset_data(dataset_id=dataset.id)
+        data = await get_dataset_data(dataset_id=dataset.id)
 
     process_pipeline_status = await check_pipeline_run_qualification(dataset, data, pipeline_name)
     if process_pipeline_status:
@@ -77,7 +78,7 @@ async def run_pipeline_per_dataset(
         return
 
     pipeline_run = run_tasks(
-        tasks, dataset.id, data, user, pipeline_name, context, incremental_loading
+        tasks, dataset, data, user, pipeline_name, context, incremental_loading
     )
 
     async for pipeline_run_info in pipeline_run:
