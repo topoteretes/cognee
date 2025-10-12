@@ -77,4 +77,4 @@ After adding data, use `cognee cognify` to process it into knowledge graphs.
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
                 raise CliCommandException(str(e), error_code=1) from e
-            raise CliCommandException(f"Error adding data: {str(e)}", error_code=1) from e
+            raise CliCommandException(f"Failed to add data: {str(e)}", error_code=1) from e

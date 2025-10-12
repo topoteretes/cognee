@@ -7,7 +7,7 @@ from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
 from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from cognee.context_global_variables import tavily_config, soup_crawler_config
+
 
 logger = get_logger()
 
@@ -59,6 +59,7 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
         elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
             # Validate URL by sending a HEAD request
             try:
+                from cognee.context_global_variables import tavily_config, soup_crawler_config
                 from cognee.tasks.web_scraper import fetch_page_content
 
                 tavily = tavily_config.get()
