@@ -198,7 +198,7 @@ async def add(
             node_set = ["web_content"] if not node_set else node_set + ["web_content"]
         elif isinstance(data, list) and any(_is_http_url(item) for item in data):
             node_set = ["web_content"] if not node_set else node_set + ["web_content"]
-    except ImportError:
+    except NameError:
         logger.debug(f"Unable to import {str(ImportError)}")
         pass
 
