@@ -12,11 +12,15 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 )
 from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
-from cognee.tasks.web_scraper.config import TavilyConfig, SoupCrawlerConfig
-from cognee.context_global_variables import (
-    tavily_config as tavily,
-    soup_crawler_config as soup_crawler,
-)
+try:
+    from cognee.tasks.web_scraper.config import TavilyConfig, SoupCrawlerConfig
+    from cognee.context_global_variables import (
+        tavily_config as tavily,
+        soup_crawler_config as soup_crawler,
+    )
+except:
+    pass
+from pydantic import BaseModel
 from urllib.parse import urlparse
 
 
@@ -31,8 +35,8 @@ async def add(
     preferred_loaders: List[str] = None,
     incremental_loading: bool = True,
     extraction_rules: Optional[Dict[str, Any]] = None,
-    tavily_config: Optional[TavilyConfig] = None,
-    soup_crawler_config: Optional[SoupCrawlerConfig] = None,
+    tavily_config: Optional[BaseModel] = None,
+    soup_crawler_config: Optional[BaseModel] = None,
 ):
     """
     Add data to Cognee for knowledge graph processing.
@@ -172,23 +176,27 @@ async def add(
 
     """
 
-    if not soup_crawler_config and extraction_rules:
-        soup_crawler_config = SoupCrawlerConfig(extraction_rules=extraction_rules)
-    if not tavily_config and os.getenv("TAVILY_API_KEY"):
-        tavily_config = TavilyConfig(api_key=os.getenv("TAVILY_API_KEY"))
+    try:
 
-    soup_crawler.set(soup_crawler_config)
-    tavily.set(tavily_config)
+        if not soup_crawler_config and extraction_rules:
+            soup_crawler_config = SoupCrawlerConfig(extraction_rules=extraction_rules)
+        if not tavily_config and os.getenv("TAVILY_API_KEY"):
+            tavily_config = TavilyConfig(api_key=os.getenv("TAVILY_API_KEY"))
 
-    http_schemes = {"http", "https"}
+        soup_crawler.set(soup_crawler_config)
+        tavily.set(tavily_config)
 
-    def _is_http_url(item: Union[str, BinaryIO]) -> bool:
-        return isinstance(item, str) and urlparse(item).scheme in http_schemes
+        http_schemes = {"http", "https"}
 
-    if _is_http_url(data):
-        node_set = ["web_content"] if not node_set else node_set + ["web_content"]
-    elif isinstance(data, list) and any(_is_http_url(item) for item in data):
-        node_set = ["web_content"] if not node_set else node_set + ["web_content"]
+        def _is_http_url(item: Union[str, BinaryIO]) -> bool:
+            return isinstance(item, str) and urlparse(item).scheme in http_schemes
+
+        if _is_http_url(data):
+            node_set = ["web_content"] if not node_set else node_set + ["web_content"]
+        elif isinstance(data, list) and any(_is_http_url(item) for item in data):
+            node_set = ["web_content"] if not node_set else node_set + ["web_content"]
+    except:
+        pass
 
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),
