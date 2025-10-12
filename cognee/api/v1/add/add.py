@@ -1,7 +1,8 @@
 from uuid import UUID
 import os
 from typing import Union, BinaryIO, List, Optional, Dict, Any
-
+from pydantic import BaseModel
+from urllib.parse import urlparse
 from cognee.modules.users.models import User
 from cognee.modules.pipelines import Task, run_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
@@ -12,6 +13,9 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 )
 from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 try:
     from cognee.tasks.web_scraper.config import TavilyConfig, SoupCrawlerConfig
@@ -19,10 +23,9 @@ try:
         tavily_config as tavily,
         soup_crawler_config as soup_crawler,
     )
-except:
+except ImportError:
+    logger.debug(f"Unable to import {str(ImportError)}")
     pass
-from pydantic import BaseModel
-from urllib.parse import urlparse
 
 
 async def add(
@@ -195,7 +198,8 @@ async def add(
             node_set = ["web_content"] if not node_set else node_set + ["web_content"]
         elif isinstance(data, list) and any(_is_http_url(item) for item in data):
             node_set = ["web_content"] if not node_set else node_set + ["web_content"]
-    except:
+    except ImportError:
+        logger.debug(f"Unable to import {str(ImportError)}")
         pass
 
     tasks = [
