@@ -68,16 +68,16 @@ class MistralAdapter(LLMInterface):
         """
         try:
             messages = [
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": f"""Use the given format to extract information
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": f"""Use the given format to extract information
                 from the following input: {text_input}""",
-                    },
-                ]
+                },
+            ]
             try:
                 response = await self.aclient.chat.completions.create(
                     model=self.model,
@@ -94,7 +94,7 @@ class MistralAdapter(LLMInterface):
             except litellm.exceptions.BadRequestError as e:
                 logger.error(f"Bad request error: {str(e)}")
                 raise ValueError(f"Invalid request: {str(e)}")
-            
+
         except JSONSchemaValidationError as e:
             logger.error(f"Schema validation failed: {str(e)}")
             logger.debug(f"Raw response: {e.raw_response}")
