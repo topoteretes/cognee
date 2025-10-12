@@ -65,6 +65,9 @@ ENV PYTHONUNBUFFERED=1
 ENV MCP_LOG_LEVEL=DEBUG
 ENV PYTHONPATH=/app
 
+# Add labels for API mode usage
+LABEL org.opencontainers.image.description="Cognee MCP Server with API mode support"
+
 # Use the application name from pyproject.toml for normal operation
 # For testing, we'll override this with a direct command
 ENTRYPOINT ["/app/entrypoint.sh"]
