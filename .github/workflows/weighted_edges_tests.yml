@@ -86,12 +86,19 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
+
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
 
       - name: Run Weighted Edges Tests
         env:
           GRAPH_DATABASE_PROVIDER: ${{ matrix.graph_db_provider }}
+          GRAPH_DATABASE_URL: ${{ matrix.graph_db_provider == 'neo4j' && steps.neo4j.outputs.neo4j-url || '' }}
+          GRAPH_DATABASE_USERNAME: ${{ matrix.graph_db_provider == 'neo4j' && steps.neo4j.outputs.neo4j-username || '' }}
+          GRAPH_DATABASE_PASSWORD: ${{ matrix.graph_db_provider == 'neo4j' && steps.neo4j.outputs.neo4j-password || '' }}
         run: |
           uv run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v --tb=short
 

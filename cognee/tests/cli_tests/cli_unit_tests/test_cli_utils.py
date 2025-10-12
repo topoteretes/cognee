@@ -53,7 +53,6 @@ class TestCliConfig:
         expected_types = [
             "GRAPH_COMPLETION",
             "RAG_COMPLETION",
-            "INSIGHTS",
             "CHUNKS",
             "SUMMARIES",
             "CODE",

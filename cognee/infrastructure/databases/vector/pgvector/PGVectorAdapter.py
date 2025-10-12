@@ -3,7 +3,7 @@ from typing import List, Optional, get_type_hints
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import JSON, Column, Table, select, delete, MetaData
+from sqlalchemy import JSON, Column, Table, select, delete, MetaData, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.exc import ProgrammingError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -125,41 +125,42 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         data_point_types = get_type_hints(DataPoint)
         vector_size = self.embedding_engine.get_vector_size()
 
-        async with self.VECTOR_DB_LOCK:
-            if not await self.has_collection(collection_name):
+        if not await self.has_collection(collection_name):
+            async with self.VECTOR_DB_LOCK:
+                if not await self.has_collection(collection_name):
 
-                class PGVectorDataPoint(Base):
-                    """
-                    Represent a point in a vector data space with associated data and vector representation.
+                    class PGVectorDataPoint(Base):
+                        """
+                        Represent a point in a vector data space with associated data and vector representation.
 
-                    This class inherits from Base and is associated with a database table defined by
-                    __tablename__. It maintains the following public methods and instance variables:
+                        This class inherits from Base and is associated with a database table defined by
+                        __tablename__. It maintains the following public methods and instance variables:
 
-                    - __init__(self, id, payload, vector): Initializes a new PGVectorDataPoint instance.
+                        - __init__(self, id, payload, vector): Initializes a new PGVectorDataPoint instance.
 
-                    Instance variables:
-                    - id: Identifier for the data point, defined by data_point_types.
-                    - payload: JSON data associated with the data point.
-                    - vector: Vector representation of the data point, with size defined by vector_size.
-                    """
+                        Instance variables:
+                        - id: Identifier for the data point, defined by data_point_types.
+                        - payload: JSON data associated with the data point.
+                        - vector: Vector representation of the data point, with size defined by vector_size.
+                        """
 
-                    __tablename__ = collection_name
-                    __table_args__ = {"extend_existing": True}
-                    # PGVector requires one column to be the primary key
-                    id: Mapped[data_point_types["id"]] = mapped_column(primary_key=True)
-                    payload = Column(JSON)
-                    vector = Column(self.Vector(vector_size))
+                        __tablename__ = collection_name
+                        __table_args__ = {"extend_existing": True}
+                        # PGVector requires one column to be the primary key
+                        id: Mapped[data_point_types["id"]] = mapped_column(primary_key=True)
+                        payload = Column(JSON)
+                        vector = Column(self.Vector(vector_size))
 
-                    def __init__(self, id, payload, vector):
-                        self.id = id
-                        self.payload = payload
-                        self.vector = vector
+                        def __init__(self, id, payload, vector):
+                            self.id = id
+                            self.payload = payload
+                            self.vector = vector
 
-                async with self.engine.begin() as connection:
-                    if len(Base.metadata.tables.keys()) > 0:
-                        await connection.run_sync(
-                            Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
-                        )
+                    async with self.engine.begin() as connection:
+                        if len(Base.metadata.tables.keys()) > 0:
+                            await connection.run_sync(
+                                Base.metadata.create_all, tables=[PGVectorDataPoint.__table__]
+                            )
 
     @retry(
         retry=retry_if_exception_type(DeadlockDetectedError),
@@ -298,7 +299,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         collection_name: str,
         query_text: Optional[str] = None,
         query_vector: Optional[List[float]] = None,
-        limit: int = 15,
+        limit: Optional[int] = 15,
         with_vector: bool = False,
     ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
@@ -309,6 +310,16 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Get PGVectorDataPoint Table from database
         PGVectorDataPoint = await self.get_table(collection_name)
+
+        if limit is None:
+            async with self.get_async_session() as session:
+                query = select(func.count()).select_from(PGVectorDataPoint)
+                result = await session.execute(query)
+                limit = result.scalar_one()
+
+        # If limit is still 0, no need to do the search, just return empty results
+        if limit <= 0:
+            return []
 
         # NOTE: This needs to be initialized in case search doesn't return a value
         closest_items = []

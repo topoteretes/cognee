@@ -9,6 +9,8 @@ const backendApiUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localho
 
 const cloudApiUrl = process.env.NEXT_PUBLIC_CLOUD_API_URL || "http://localhost:8001";
 
+const mcpApiUrl = process.env.NEXT_PUBLIC_MCP_API_URL || "http://localhost:8001";
+
 let apiKey: string | null = process.env.NEXT_PUBLIC_COGWIT_API_KEY || null;
 let accessToken: string | null = null;
 
@@ -49,6 +51,13 @@ export default async function fetch(url: string, options: RequestInit = {}, useC
   )
     .then((response) => handleServerErrors(response, retry, useCloud))
     .catch((error) => {
+      // Handle network errors more gracefully
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        return Promise.reject(
+          new Error("Backend server is not responding. Please check if the server is running.")
+        );
+      }
+      
       if (error.detail === undefined) {
         return Promise.reject(
           new Error("No connection to the server.")
@@ -62,8 +71,31 @@ export default async function fetch(url: string, options: RequestInit = {}, useC
     });
 }
 
-fetch.checkHealth = () => {
-  return global.fetch(`${backendApiUrl.replace("/api", "")}/health`);
+fetch.checkHealth = async () => {
+  const maxRetries = 5;
+  const retryDelay = 1000; // 1 second
+  
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await global.fetch(`${backendApiUrl.replace("/api", "")}/health`);
+      if (response.ok) {
+        return response;
+      }
+    } catch (error) {
+      // If this is the last retry, throw the error
+      if (i === maxRetries - 1) {
+        throw error;
+      }
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+    }
+  }
+  
+  throw new Error("Backend server is not responding after multiple attempts");
+};
+
+fetch.checkMCPHealth = () => {
+  return global.fetch(`${mcpApiUrl.replace("/api", "")}/health`);
 };
 
 fetch.setApiKey = (newApiKey: string) => {

@@ -186,6 +186,10 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "postgres"
 
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
+
       - name: Install specific db dependency
         run: echo "Dependencies already installed in setup"
 
@@ -206,9 +210,9 @@ jobs:
         env:
           ENV: 'dev'
           GRAPH_DATABASE_PROVIDER: "neo4j"
-          GRAPH_DATABASE_URL: ${{ secrets.NEO4J_API_URL }}
-          GRAPH_DATABASE_PASSWORD: ${{ secrets.NEO4J_API_KEY }}
-          GRAPH_DATABASE_USERNAME: "neo4j"
+          GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
+          GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
+          GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
 
           LLM_PROVIDER: openai
           LLM_MODEL: ${{ secrets.LLM_MODEL }}

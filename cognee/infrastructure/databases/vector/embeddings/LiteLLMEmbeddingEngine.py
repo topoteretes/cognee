@@ -58,6 +58,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         endpoint: str = None,
         api_version: str = None,
         max_completion_tokens: int = 512,
+        batch_size: int = 100,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
@@ -68,6 +69,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.max_completion_tokens = max_completion_tokens
         self.tokenizer = self.get_tokenizer()
         self.retry_count = 0
+        self.batch_size = batch_size
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
@@ -148,7 +150,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             litellm.exceptions.NotFoundError,
         ) as e:
             logger.error(f"Embedding error with model {self.model}: {str(e)}")
-            raise EmbeddingException(f"Failed to index data points using model {self.model}")
+            raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
 
         except Exception as error:
             logger.error("Error embedding text: %s", str(error))
@@ -164,6 +166,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             - int: The size (dimensionality) of the embedding vectors.
         """
         return self.dimensions
+
+    def get_batch_size(self) -> int:
+        """
+        Return the desired batch size for embedding calls
+
+        Returns:
+
+        """
+        return self.batch_size
 
     def get_tokenizer(self):
         """
@@ -183,9 +194,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 model=model, max_completion_tokens=self.max_completion_tokens
             )
         elif "gemini" in self.provider.lower():
-            tokenizer = GeminiTokenizer(
-                model=model, max_completion_tokens=self.max_completion_tokens
+            # Since Gemini tokenization needs to send an API request to get the token count we will use TikToken to
+            # count tokens as we calculate tokens word by word
+            tokenizer = TikTokenTokenizer(
+                model=None, max_completion_tokens=self.max_completion_tokens
             )
+            # Note: Gemini Tokenizer expects an LLM model as input and not the embedding model
+            # tokenizer = GeminiTokenizer(
+            #     llm_model=llm_model, max_completion_tokens=self.max_completion_tokens
+            # )
         elif "mistral" in self.provider.lower():
             tokenizer = MistralTokenizer(
                 model=model, max_completion_tokens=self.max_completion_tokens

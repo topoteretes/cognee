@@ -5,15 +5,13 @@ from typing import Type
 from pydantic import BaseModel
 from openai import ContentFilterFinishReasonError
 from litellm.exceptions import ContentPolicyViolationError
-from instructor.exceptions import InstructorRetryException
+from instructor.core import InstructorRetryException
 
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
-    MissingSystemPromptPathError,
 )
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
@@ -28,9 +26,6 @@ from cognee.shared.logging_utils import get_logger
 observe = get_observe()
 
 logger = get_logger()
-
-# litellm to drop unsupported params, e.g., reasoning_effort when not supported by the model.
-litellm.drop_params = True
 
 
 class OpenAIAdapter(LLMInterface):
@@ -76,8 +71,19 @@ class OpenAIAdapter(LLMInterface):
         fallback_api_key: str = None,
         fallback_endpoint: str = None,
     ):
-        self.aclient = instructor.from_litellm(litellm.acompletion)
-        self.client = instructor.from_litellm(litellm.completion)
+        # TODO: With gpt5 series models OpenAI expects JSON_SCHEMA as a mode for structured outputs.
+        #       Make sure all new gpt models will work with this mode as well.
+        if "gpt-5" in model:
+            self.aclient = instructor.from_litellm(
+                litellm.acompletion, mode=instructor.Mode.JSON_SCHEMA
+            )
+            self.client = instructor.from_litellm(
+                litellm.completion, mode=instructor.Mode.JSON_SCHEMA
+            )
+        else:
+            self.aclient = instructor.from_litellm(litellm.acompletion)
+            self.client = instructor.from_litellm(litellm.completion)
+
         self.transcription_model = transcription_model
         self.model = model
         self.api_key = api_key
@@ -135,17 +141,16 @@ class OpenAIAdapter(LLMInterface):
                 api_version=self.api_version,
                 response_model=response_model,
                 max_retries=self.MAX_RETRIES,
-                reasoning_effort="minimal",
             )
         except (
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
             InstructorRetryException,
-        ):
+        ) as e:
             if not (self.fallback_model and self.fallback_api_key):
                 raise ContentPolicyFilterError(
                     f"The provided input contains content that is not aligned with our content policy: {text_input}"
-                )
+                ) from e
 
             try:
                 return await self.aclient.chat.completions.create(
@@ -178,7 +183,7 @@ class OpenAIAdapter(LLMInterface):
                 else:
                     raise ContentPolicyFilterError(
                         f"The provided input contains content that is not aligned with our content policy: {text_input}"
-                    )
+                    ) from error
 
     @observe
     @sleep_and_retry_sync()
@@ -223,7 +228,6 @@ class OpenAIAdapter(LLMInterface):
             api_base=self.endpoint,
             api_version=self.api_version,
             response_model=response_model,
-            reasoning_effort="minimal",
             max_retries=self.MAX_RETRIES,
         )
 
