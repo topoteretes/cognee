@@ -54,7 +54,8 @@ dependencies = [
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
     "gunicorn>=20.1.0,<24",
-    "websockets>=15.0.1,<16.0.0"
+    "websockets>=15.0.1,<16.0.0",
+    "mistralai>=1.9.10",
 ]
 
 [project.optional-dependencies]
@@ -147,6 +148,7 @@ Homepage = "https://www.cognee.ai"
 Repository = "https://github.com/topoteretes/cognee"
 
 [project.scripts]
+cognee = "cognee.cli._cognee:main"
 cognee-cli = "cognee.cli._cognee:main"
 
 [build-system]
