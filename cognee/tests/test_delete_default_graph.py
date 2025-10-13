@@ -2,6 +2,7 @@ import os
 import pathlib
 
 import cognee
+from cognee.api.v1.datasets import datasets
 from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -10,6 +11,7 @@ from cognee.modules.engine.operations.setup import setup
 from cognee.modules.graph.methods import (
     delete_data_nodes_and_edges,
 )
+from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -58,9 +60,8 @@ async def main():
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) >= 12 and len(edges) >= 18, "Nodes and edges are not deleted."
 
-    await delete_data_nodes_and_edges(dataset_id, added_data.id)  # type: ignore
-
-    await delete_data(added_data)
+    user = await get_default_user()
+    await datasets.delete_data(dataset_id, added_data.id, user.id)  # type: ignore
 
     file_path = os.path.join(
         pathlib.Path(__file__).parent, ".artifacts", "graph_visualization_after_delete.html"

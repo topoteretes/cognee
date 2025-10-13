@@ -188,8 +188,10 @@ async def main():
         test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
         text_data_id = test_user_dataset_data[0].id
 
-        await cognee.delete(
-            data_id=text_data_id, dataset_id=test_user_dataset_id, user=default_user
+        await cognee.datasets.delete_data(
+            dataset_id=test_user_dataset_id,
+            data_id=text_data_id,
+            user_id=default_user.id,
         )
     except PermissionDeniedError:
         delete_error = True
@@ -201,7 +203,9 @@ async def main():
     test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
     text_data_id = test_user_dataset_data[0].id
 
-    await cognee.delete(data_id=text_data_id, dataset_id=test_user_dataset_id, user=test_user)
+    await cognee.datasets.delete_data(
+        dataset_id=test_user_dataset_id, data_id=text_data_id, user_id=test_user.id
+    )
 
     # Actually give permission to default_user to delete data for test_users dataset
     await authorized_give_permission_on_datasets(
@@ -216,8 +220,10 @@ async def main():
     test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
     explanation_file_data_id = test_user_dataset_data[0].id
 
-    await cognee.delete(
-        data_id=explanation_file_data_id, dataset_id=test_user_dataset_id, user=default_user
+    await cognee.datasets.delete_data(
+        dataset_id=test_user_dataset_id,
+        data_id=explanation_file_data_id,
+        user_id=default_user.id,
     )
 
 

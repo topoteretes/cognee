@@ -134,7 +134,7 @@ def run_coroutine(coroutine_func, *args, **kwargs):
 
 
 async def get_repo_file_dependencies(
-    repo_path: str,
+    repo_data: List,
     detailed_extraction: bool = False,
     supported_languages: list = None,
     excluded_paths: Optional[List[str]] = None,
@@ -156,8 +156,7 @@ async def get_repo_file_dependencies(
         - supported_languages (list | None): Subset of languages to include; if None, use defaults.
     """
 
-    if isinstance(repo_path, list) and len(repo_path) == 1:
-        repo_path = repo_path[0]
+    repo_path: str = repo_data[0].repo_path
 
     if not os.path.exists(repo_path):
         raise FileNotFoundError(f"Repository path {repo_path} does not exist.")

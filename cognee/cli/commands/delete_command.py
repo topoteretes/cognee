@@ -1,11 +1,11 @@
 import argparse
 import asyncio
-from typing import Optional
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.modules.data.methods import get_datasets_by_name
 from cognee.modules.data.methods.get_deletion_counts import get_deletion_counts
 
 
@@ -38,8 +38,10 @@ Be careful with deletion operations as they are irreversible.
             import cognee
 
             # Validate arguments
-            if not any([args.dataset_name, args.user_id, args.all]):
-                fmt.error("Please specify what to delete: --dataset-name, --user-id, or --all")
+            if not any([args.dataset_name, args.dataset_id, args.data_id, args.user_id, args.all]):
+                fmt.error(
+                    "Please specify what to delete: --dataset-name, --dataset-id, --data-id, --user-id, or --all"
+                )
                 return
 
             # If --force is used, skip the preview and go straight to deletion
@@ -93,12 +95,29 @@ Be careful with deletion operations as they are irreversible.
             # Run the async delete function
             async def run_delete():
                 try:
-                    # NOTE: The underlying cognee.delete() function is currently not working as expected.
-                    # This is a separate bug that this preview feature helps to expose.
                     if args.all:
-                        await cognee.delete(dataset_name=None, user_id=args.user_id)
-                    else:
-                        await cognee.delete(dataset_name=args.dataset_name, user_id=args.user_id)
+                        await cognee.datasets.delete_all(user_id=args.user_id)
+                    elif args.dataset_name or args.dataset_id:
+                        dataset_id = args.dataset_id
+
+                        if args.dataset_name and not args.dataset_id:
+                            datasets = await get_datasets_by_name(
+                                args.dataset_name, user_id=args.user_id
+                            )
+
+                            if not datasets:
+                                raise CliCommandException(
+                                    f"No dataset found for name '{args.dataset_name}'."
+                                )
+
+                            dataset = datasets[0]
+                            dataset_id = dataset.id
+
+                        await cognee.datasets.delete_dataset(
+                            dataset_id=dataset_id, user_id=args.user_id
+                        )
+                    elif args.dataset_id and args.data_id:
+                        await cognee.datasets.delete_data(args.dataset_id, args.data_id)
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to delete: {str(e)}") from e
 

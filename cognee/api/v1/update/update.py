@@ -2,9 +2,9 @@ from uuid import UUID
 from typing import Union, BinaryIO, List, Optional
 
 from cognee.modules.users.models import User
-from cognee.api.v1.delete import delete
 from cognee.api.v1.add import add
 from cognee.api.v1.cognify import cognify
+from cognee.api.v1.datasets import datasets
 
 
 async def update(
@@ -72,10 +72,10 @@ async def update(
             - Processing status and any errors
             - Execution timestamps and metadata
     """
-    await delete(
-        data_id=data_id,
+    await datasets.delete_data(
         dataset_id=dataset_id,
-        user=user,
+        data_id=data_id,
+        user_id=user.id,
     )
 
     await add(

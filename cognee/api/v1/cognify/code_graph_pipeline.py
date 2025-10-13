@@ -2,6 +2,9 @@ import os
 import pathlib
 import asyncio
 from typing import Optional
+from uuid import UUID, uuid4
+
+from pydantic import BaseModel
 from cognee.shared.logging_utils import get_logger, setup_logging
 from cognee.modules.observability.get_observe import get_observe
 
@@ -83,15 +86,19 @@ async def run_code_graph_pipeline(
     async with db_engine.get_async_session() as session:
         dataset = await create_dataset(dataset_name, user, session)
 
+    class RepoData(BaseModel):
+        id: UUID
+        repo_path: str
+
+    data = RepoData(id=uuid4(), repo_path=repo_path)
+
     if include_docs:
-        non_code_pipeline_run = run_tasks(
-            non_code_tasks, dataset, repo_path, user, "cognify_pipeline"
-        )
+        non_code_pipeline_run = run_tasks(non_code_tasks, dataset, data, user, "cognify_pipeline")
         async for run_status in non_code_pipeline_run:
             yield run_status
 
     async for run_status in run_tasks(
-        tasks, dataset, repo_path, user, "cognify_code_pipeline", incremental_loading=False
+        tasks, dataset, data, user, "cognify_code_pipeline", incremental_loading=False
     ):
         yield run_status
 

@@ -4,6 +4,7 @@ from typing import List
 from uuid import uuid4
 
 import cognee
+from cognee.api.v1.datasets import datasets
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.models import Data, Dataset
 from cognee.modules.engine.operations.setup import setup
@@ -90,12 +91,12 @@ async def main():
         "Nodes and edges are not correctly added to the graph."
     )
 
-    await delete_data_nodes_and_edges(dataset.id, data1.id)  # type: ignore
+    await datasets.delete_data(dataset.id, data1.id, user.id)  # type: ignore
 
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 2 and len(edges) == 1, "Nodes and edges are not deleted properly."
 
-    await delete_data_nodes_and_edges(dataset.id, data2.id)  # type: ignore
+    await datasets.delete_data(dataset.id, data2.id, user.id)  # type: ignore
 
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 0 and len(edges) == 0, "Nodes and edges are not deleted."

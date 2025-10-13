@@ -20,7 +20,7 @@ class Edge(Base):
 
     data_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
 
-    dataset_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    dataset_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
 
     source_node_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     destination_node_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
