@@ -103,12 +103,7 @@ class TestCliIntegration:
             )
 
             try:
-                assert (
-                    not has_error
-                    or has_expected_failure
-                    or has_litellm_cancellation
-                    or has_kuzu_extension_error
-                )
+                assert not has_error or has_expected_failure or has_litellm_cancellation
             except Exception as e:
                 logger.error(f"{str(e)}", exc_info=True)
                 import pprint
