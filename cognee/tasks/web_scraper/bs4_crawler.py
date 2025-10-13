@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 try:
     from playwright.async_api import async_playwright
 except ImportError:
-    logger.error(
+    logger.warning(
         "Failed to import playwright, make sure to install using pip install playwright>=1.9.0"
     )
     async_playwright = None
@@ -28,7 +28,7 @@ except ImportError:
 try:
     from protego import Protego
 except ImportError:
-    logger.error("Failed to import protego, make sure to install using pip install protego>=0.1")
+    logger.warning("Failed to import protego, make sure to install using pip install protego>=0.1")
     Protego = None
 
 
