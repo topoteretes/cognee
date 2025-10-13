@@ -4,11 +4,7 @@ import cognee
 import pathlib
 import subprocess
 
-from cognee.infrastructure.databases.graph import get_graph_engine
-from collections import Counter
-from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
-from multiprocessing import Process
 
 
 logger = get_logger()
@@ -46,6 +42,34 @@ async def concurrent_subprocess_access():
     # Wait for both processes to complete
     writer_process.wait()
     reader_process.wait()
+
+    logger.info(f"Basic write read subprocess example finished")
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    text = """
+            This is the text of the first cognify subprocess
+            """
+    await cognee.add(text, dataset_name="first_cognify_dataset")
+
+    text = """
+            This is the text of the second cognify subprocess
+            """
+    await cognee.add(text, dataset_name="second_cognify_dataset")
+
+    first_cognify_path = subprocess_directory_path + "/simple_cognify_1.py"
+    second_cognify_path = subprocess_directory_path + "/simple_cognify_2.py"
+
+    first_cognify_process = subprocess.Popen([os.sys.executable, str(first_cognify_path)])
+
+    second_cognify_process = subprocess.Popen([os.sys.executable, str(second_cognify_path)])
+
+    # Wait for both processes to complete
+    first_cognify_process.wait()
+    second_cognify_process.wait()
+
+    logger.info(f"Database concurrent subprocess example finished")
 
 
 if __name__ == "__main__":
