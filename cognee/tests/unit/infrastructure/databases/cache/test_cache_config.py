@@ -4,14 +4,6 @@ import pytest
 from cognee.infrastructure.databases.cache.config import CacheConfig, get_cache_config
 
 
-@pytest.fixture(autouse=True)
-def reset_cache_config_singleton():
-    """Reset the singleton instance between tests."""
-    get_cache_config.cache_clear()
-    yield
-    get_cache_config.cache_clear()
-
-
 def test_cache_config_defaults():
     """Test that CacheConfig has the correct default values."""
     config = CacheConfig()
