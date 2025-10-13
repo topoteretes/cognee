@@ -8,6 +8,9 @@ import sys
 import subprocess
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 class TestCliIntegration:
@@ -91,7 +94,11 @@ class TestCliIntegration:
                 "loggingworker cancelled" in stderr_lower or "cancellederror" in stderr_lower
             )
 
-            assert not has_error or has_expected_failure or has_litellm_cancellation
+            try:
+                assert not has_error or has_expected_failure or has_litellm_cancellation
+            except Exception as e:
+                logger.error(f"{str(e)}", exc_info=True)
+                raise e
 
         finally:
             os.unlink(temp_file)
