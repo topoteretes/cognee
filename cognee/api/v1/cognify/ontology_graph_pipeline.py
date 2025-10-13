@@ -23,8 +23,7 @@ async def load_ontology_data(ontology_file: Union[str, bytes, "IOBase"],format: 
     
     Args:
         ontology_file: File-like object or path to RDF data
-        format: RDF serialization format (xml, turtle, n3, json-ld, etc.). 
-                If None, rdflib will attempt auto-detection.
+        format: RDF serialization format (xml, turtle, n3, json-ld, etc.).
     """
     g = Graph()
     try:
@@ -88,37 +87,53 @@ def convert_triples_to_chunks(triples: list[dict], format: str = "xml") -> list[
 
 
 # ---------- Step 3: Run Ontology Pipeline ----------
-async def run_ontology_pipeline(ontology_file,format: str, dataset_name: str = "ontology_dataset"):
+
+async def run_ontology_pipeline(
+    ontology_file: Union[str, bytes, "IOBase"],
+    format: str,
+    dataset_name: str = "ontology_dataset"
+):
     """
     Run the ontology ingestion pipeline directly from a file object (no file path).
     """
-    from cognee.low_level import setup
-    import cognee
+    try:
+        from cognee.low_level import setup
+        import cognee
 
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-    await setup()
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
+        await setup()
 
-    user = await get_default_user()
-    db_engine = get_relational_engine()
+        user = await get_default_user()
+        db_engine = get_relational_engine()
 
-    async with db_engine.get_async_session() as session:
-        dataset = await create_dataset(dataset_name, user, session)
+        async with db_engine.get_async_session() as session:
+            dataset = await create_dataset(dataset_name, user, session)
 
-    # ✅ Process ontology file directly
-    triples = await load_ontology_data(ontology_file,format)
-    chunks = convert_triples_to_chunks(triples)
+        # ✅ Process ontology file directly
+        triples = await load_ontology_data(ontology_file, format=format)
+        chunks = convert_triples_to_chunks(triples, format=format or "xml")
+        
+        if not triples:
+            raise ValueError("No triples found in ontology file")
+        
+        chunks = convert_triples_to_chunks(triples)
 
-    # Define pipeline tasks
-    tasks = [
-        Task(
-            extract_graph_from_data,
-            graph_model=KnowledgeGraph,
-            task_config={"batch_size": 20},
-        ),
-        Task(add_data_points, task_config={"batch_size": 20}),
-    ]
+        # Define pipeline tasks
+        tasks = [
+            Task(
+                extract_graph_from_data,
+                graph_model=KnowledgeGraph,
+                task_config={"batch_size": 20},
+            ),
+            Task(add_data_points, task_config={"batch_size": 20}),
+        ]
 
-    # Run tasks with chunks
-    async for run_status in run_tasks(tasks, dataset.id, chunks, user, "ontology_pipeline"):
-        yield run_status
+        # Run tasks with chunks
+        async for run_status in run_tasks(tasks, dataset.id, chunks, user, "ontology_pipeline"):
+            yield run_status
+    except Exception as e:
+        # Log error and re-raise with context
+        import logging
+        logging.error(f"Ontology pipeline failed: {str(e)}")
+        raise RuntimeError(f"Failed to process ontology file: {str(e)}") from e
