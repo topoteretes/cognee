@@ -283,7 +283,7 @@ class SQLAlchemyAdapter:
             try:
                 data_entity = (await session.scalars(select(Data).where(Data.id == data_id))).one()
             except (ValueError, NoResultFound) as e:
-                raise EntityNotFoundError(message=f"Entity not found: {str(e)}")
+                raise EntityNotFoundError(message=f"Entity not found: {str(e)}") from e
 
             # Check if other data objects point to the same raw data location
             raw_data_location_entities = (

@@ -1,6 +1,8 @@
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional
-
+import os
+from typing import Union, BinaryIO, List, Optional, Dict, Any
+from pydantic import BaseModel
+from urllib.parse import urlparse
 from cognee.modules.users.models import User
 from cognee.modules.pipelines import Task, run_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
@@ -11,6 +13,19 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 )
 from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
+
+try:
+    from cognee.tasks.web_scraper.config import TavilyConfig, SoupCrawlerConfig
+    from cognee.context_global_variables import (
+        tavily_config as tavily,
+        soup_crawler_config as soup_crawler,
+    )
+except ImportError:
+    logger.debug(f"Unable to import {str(ImportError)}")
+    pass
 
 
 async def add(
@@ -23,12 +38,15 @@ async def add(
     dataset_id: Optional[UUID] = None,
     preferred_loaders: List[str] = None,
     incremental_loading: bool = True,
+    extraction_rules: Optional[Dict[str, Any]] = None,
+    tavily_config: Optional[BaseModel] = None,
+    soup_crawler_config: Optional[BaseModel] = None,
 ):
     """
     Add data to Cognee for knowledge graph processing.
 
     This is the first step in the Cognee workflow - it ingests raw data and prepares it
-    for processing. The function accepts various data formats including text, files, and
+    for processing. The function accepts various data formats including text, files, urls and
     binary streams, then stores them in a specified dataset for further processing.
 
     Prerequisites:
@@ -68,6 +86,7 @@ async def add(
             - S3 path: "s3://my-bucket/documents/file.pdf"
             - List of mixed types: ["text content", "/path/file.pdf", "file://doc.txt", file_handle]
             - Binary file object: open("file.txt", "rb")
+            - url: A web link url (https or http)
         dataset_name: Name of the dataset to store data in. Defaults to "main_dataset".
                     Create separate datasets to organize different knowledge domains.
         user: User object for authentication and permissions. Uses default user if None.
@@ -78,6 +97,9 @@ async def add(
         vector_db_config: Optional configuration for vector database (for custom setups).
         graph_db_config: Optional configuration for graph database (for custom setups).
         dataset_id: Optional specific dataset UUID to use instead of dataset_name.
+        extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
+        tavily_config: Optional configuration for Tavily API, including API key and extraction settings
+        soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
 
     Returns:
         PipelineRunInfo: Information about the ingestion pipeline execution including:
@@ -126,6 +148,21 @@ async def add(
 
         # Add a single file
         await cognee.add("/home/user/documents/analysis.pdf")
+
+        # Add a single url and bs4 extract ingestion method
+        extraction_rules = {
+            "title": "h1",
+            "description": "p",
+            "more_info": "a[href*='more-info']"
+        }
+        await cognee.add("https://example.com",extraction_rules=extraction_rules)
+
+        # Add a single url and tavily extract ingestion method
+        Make sure to set TAVILY_API_KEY = YOUR_TAVILY_API_KEY as a environment variable
+        await cognee.add("https://example.com")
+
+        # Add multiple urls
+        await cognee.add(["https://example.com","https://books.toscrape.com"])
         ```
 
     Environment Variables:
@@ -133,17 +170,48 @@ async def add(
         - LLM_API_KEY: API key for your LLM provider (OpenAI, Anthropic, etc.)
 
         Optional:
-        - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama"
+        - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama", "mistral"
         - LLM_MODEL: Model name (default: "gpt-5-mini")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
         - VECTOR_DB_PROVIDER: "lancedb" (default), "chromadb", "pgvector"
         - GRAPH_DATABASE_PROVIDER: "kuzu" (default), "neo4j"
+        - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
 
     """
+
+    try:
+        if not soup_crawler_config and extraction_rules:
+            soup_crawler_config = SoupCrawlerConfig(extraction_rules=extraction_rules)
+        if not tavily_config and os.getenv("TAVILY_API_KEY"):
+            tavily_config = TavilyConfig(api_key=os.getenv("TAVILY_API_KEY"))
+
+        soup_crawler.set(soup_crawler_config)
+        tavily.set(tavily_config)
+
+        http_schemes = {"http", "https"}
+
+        def _is_http_url(item: Union[str, BinaryIO]) -> bool:
+            return isinstance(item, str) and urlparse(item).scheme in http_schemes
+
+        if _is_http_url(data):
+            node_set = ["web_content"] if not node_set else node_set + ["web_content"]
+        elif isinstance(data, list) and any(_is_http_url(item) for item in data):
+            node_set = ["web_content"] if not node_set else node_set + ["web_content"]
+    except NameError:
+        logger.debug(f"Unable to import {str(ImportError)}")
+        pass
+
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),
-        Task(ingest_data, dataset_name, user, node_set, dataset_id, preferred_loaders),
+        Task(
+            ingest_data,
+            dataset_name,
+            user,
+            node_set,
+            dataset_id,
+            preferred_loaders,
+        ),
     ]
 
     await setup()

@@ -50,7 +50,9 @@ async def main():
     query_text = "Tell me about NLP"
     print(f"Searching cognee for insights with query: '{query_text}'")
     # Query cognee for insights on the added text
-    search_results = await cognee.search(query_type=SearchType.INSIGHTS, query_text=query_text)
+    search_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION, query_text=query_text
+    )
 
     print("Search results:")
     # Display results

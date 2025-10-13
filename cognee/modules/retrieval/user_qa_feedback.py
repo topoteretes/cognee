@@ -8,7 +8,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.base_feedback import BaseFeedback
 from cognee.modules.retrieval.utils.models import CogneeUserFeedback
 from cognee.modules.retrieval.utils.models import UserFeedbackEvaluation
-from cognee.tasks.storage import add_data_points
+from cognee.tasks.storage import add_data_points, index_graph_edges
 
 logger = get_logger("CompletionRetriever")
 
@@ -47,7 +47,7 @@ class UserQAFeedback(BaseFeedback):
             belongs_to_set=feedbacks_node_set,
         )
 
-        await add_data_points(data_points=[cognee_user_feedback], update_edge_collection=False)
+        await add_data_points(data_points=[cognee_user_feedback])
 
         relationships = []
         relationship_name = "gives_feedback_to"
@@ -76,6 +76,7 @@ class UserQAFeedback(BaseFeedback):
         if len(relationships) > 0:
             graph_engine = await get_graph_engine()
             await graph_engine.add_edges(relationships)
+            await index_graph_edges(relationships)
             await graph_engine.apply_feedback_weight(
                 node_ids=to_node_ids, weight=feedback_sentiment.score
             )

@@ -52,11 +52,6 @@ async def search(
             Best for: Direct document retrieval, specific fact-finding.
             Returns: LLM responses based on relevant text chunks.
 
-        **INSIGHTS**:
-            Structured entity relationships and semantic connections.
-            Best for: Understanding concept relationships, knowledge mapping.
-            Returns: Formatted relationship data and entity connections.
-
         **CHUNKS**:
             Raw text segments that match the query semantically.
             Best for: Finding specific passages, citations, exact content.
@@ -124,9 +119,6 @@ async def search(
             **GRAPH_COMPLETION/RAG_COMPLETION**:
                 [List of conversational AI response strings]
 
-            **INSIGHTS**:
-                [List of formatted relationship descriptions and entity connections]
-
             **CHUNKS**:
                 [List of relevant text passages with source metadata]
 
@@ -146,7 +138,6 @@ async def search(
     Performance & Optimization:
         - **GRAPH_COMPLETION**: Slower but most intelligent, uses LLM + graph context
         - **RAG_COMPLETION**: Medium speed, uses LLM + document chunks (no graph traversal)
-        - **INSIGHTS**: Fast, returns structured relationships without LLM processing
         - **CHUNKS**: Fastest, pure vector similarity search without LLM
         - **SUMMARIES**: Fast, returns pre-computed summaries
         - **CODE**: Medium speed, specialized for code understanding

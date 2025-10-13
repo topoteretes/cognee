@@ -51,20 +51,6 @@ jobs:
     name: Temporal Graph test Neo4j (lancedb + sqlite)
     runs-on: ubuntu-22.04
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'neo4j/lance/sqlite') }}
-    services:
-      neo4j:
-        image: neo4j:5.11
-        env:
-          NEO4J_AUTH: neo4j/pleaseletmein
-          NEO4J_PLUGINS: '["apoc","graph-data-science"]'
-        ports:
-          - 7474:7474
-          - 7687:7687
-        options: >-
-          --health-cmd="cypher-shell -u neo4j -p pleaseletmein 'RETURN 1'"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
 
     steps:
       - name: Check out
@@ -76,6 +62,10 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
+
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
 
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
@@ -94,9 +84,9 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'neo4j'
           VECTOR_DB_PROVIDER: 'lancedb'
           DB_PROVIDER: 'sqlite'
-          GRAPH_DATABASE_URL: bolt://localhost:7687
-          GRAPH_DATABASE_USERNAME: neo4j
-          GRAPH_DATABASE_PASSWORD: pleaseletmein
+          GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
+          GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
+          GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
         run: uv run python ./cognee/tests/test_temporal_graph.py
 
   run_temporal_graph_kuzu_postgres_pgvector:
