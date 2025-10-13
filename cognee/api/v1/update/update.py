@@ -2,6 +2,7 @@ from uuid import UUID
 from typing import Union, BinaryIO, List, Optional
 
 from cognee.modules.users.models import User
+from cognee.modules.users.methods import get_default_user
 from cognee.api.v1.add import add
 from cognee.api.v1.cognify import cognify
 from cognee.api.v1.datasets import datasets
@@ -72,6 +73,9 @@ async def update(
             - Processing status and any errors
             - Execution timestamps and metadata
     """
+    if not user:
+        user = get_default_user()
+
     await datasets.delete_data(
         dataset_id=dataset_id,
         data_id=data_id,

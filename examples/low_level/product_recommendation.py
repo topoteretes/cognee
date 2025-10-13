@@ -13,6 +13,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.low_level import setup, DataPoint
 from cognee.modules.data.models import Dataset
 from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
 from cognee.pipelines import run_tasks, Task
 from cognee.tasks.storage import add_data_points
 

@@ -2,6 +2,7 @@ import os
 import cognee
 import pathlib
 
+from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
@@ -193,10 +194,12 @@ async def main():
             data_id=text_data_id,
             user_id=default_user.id,
         )
-    except PermissionDeniedError:
+    except UnauthorizedDataAccessError:
         delete_error = True
 
-    assert delete_error, "PermissionDeniedError was not raised during delete operation as expected"
+    assert delete_error, (
+        "UnauthorizedDataAccessError was not raised during delete operation as expected"
+    )
 
     # Try deleting data from test_user dataset with test_user
     # Get the dataset data to find the ID of the first data item (text)
