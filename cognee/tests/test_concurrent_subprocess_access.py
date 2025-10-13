@@ -43,7 +43,7 @@ async def concurrent_subprocess_access():
     writer_process.wait()
     reader_process.wait()
 
-    logger.info(f"Basic write read subprocess example finished")
+    logger.info("Basic write read subprocess example finished")
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
