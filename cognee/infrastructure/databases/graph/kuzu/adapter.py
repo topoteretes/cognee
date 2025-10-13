@@ -81,6 +81,7 @@ class KuzuAdapter(GraphDBInterface):
                     connection.execute("INSTALL JSON;")
             except Exception as e:
                 logger.info(f"JSON extension already installed or not needed: {e}", exc_info=True)
+                raise e
 
         _install_json_extension()
 
