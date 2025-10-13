@@ -82,6 +82,7 @@ class TestCliIntegration:
                 capture_output=True,
                 text=True,
                 cwd=Path(__file__).parent.parent.parent,  # Go to project root
+                check=True,
             )
 
             # Note: This might fail due to dependencies, but we're testing the CLI structure
@@ -93,13 +94,6 @@ class TestCliIntegration:
             has_expected_failure = "failed to add data" in stderr_lower
             has_litellm_cancellation = (
                 "loggingworker cancelled" in stderr_lower or "cancellederror" in stderr_lower
-            )
-            has_kuzu_extension_error = (
-                "could not establish connection" in stderr_lower
-                and "extension.kuzudb.com" in stderr_lower
-            ) or (
-                "binder exception: extension" in stderr_lower
-                and "has not been installed" in stderr_lower
             )
 
             try:
