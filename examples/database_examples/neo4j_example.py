@@ -64,7 +64,9 @@ async def main():
 
     # Now let's perform some searches
     # 1. Search for insights related to "Neo4j"
-    insights_results = await cognee.search(query_type=SearchType.INSIGHTS, query_text="Neo4j")
+    insights_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION, query_text="Neo4j"
+    )
     print("\nInsights about Neo4j:")
     for result in insights_results:
         print(f"- {result}")

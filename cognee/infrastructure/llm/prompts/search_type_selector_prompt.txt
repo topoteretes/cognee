@@ -10,8 +10,6 @@ Here are the available `SearchType` tools and their specific functions:
   - Summarizing large amounts of information 
   - Quick understanding of complex subjects
 
-* **`INSIGHTS`**: The `INSIGHTS` search type discovers connections and relationships between entities in the knowledge graph.
-
   **Best for:**
 
   - Discovering how entities are connected
@@ -94,9 +92,6 @@ Here are the available `SearchType` tools and their specific functions:
 
 Query: "Summarize the key findings from these research papers"
 Response: `SUMMARIES`
-
-Query: "What is the relationship between the methodologies used in these papers?"
-Response: `INSIGHTS`
 
 Query: "When was Einstein born?"
 Response: `CHUNKS`
