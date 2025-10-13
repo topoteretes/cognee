@@ -2,6 +2,7 @@
 Base classes for the cognee add preprocessor system.
 """
 
+from uuid import UUID
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union, BinaryIO
 from pydantic import BaseModel
@@ -23,7 +24,7 @@ class PreprocessorContext(BaseModel):
     node_set: Optional[List[str]] = None
     vector_db_config: Optional[Dict] = None
     graph_db_config: Optional[Dict] = None
-    dataset_id: Optional[str] = None
+    dataset_id: Optional[UUID] = None
     preferred_loaders: Optional[List[str]] = None
     incremental_loading: bool = True
     extra_params: Dict[str, Any] = {}
