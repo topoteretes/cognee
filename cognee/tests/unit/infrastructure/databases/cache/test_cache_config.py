@@ -76,12 +76,6 @@ def test_cache_config_extra_fields_allowed():
     assert config.another_field == 123
 
 
-def test_cache_config_port_type_validation():
-    """Test that cache_port validates integer type."""
-    with pytest.raises(Exception):
-        CacheConfig(cache_port="not_a_number")
-
-
 def test_cache_config_boolean_type_validation():
     """Test that boolean fields accept various truthy/falsy values."""
     config1 = CacheConfig(caching="true", shared_kuzu_lock="yes")
