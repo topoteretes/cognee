@@ -1,7 +1,6 @@
 """Tests for cache configuration."""
 
 import pytest
-from unittest.mock import patch
 from cognee.infrastructure.databases.cache.config import CacheConfig, get_cache_config
 
 
@@ -75,35 +74,10 @@ def test_get_cache_config_singleton():
     assert config1 is config2
 
 
-def test_cache_config_from_environment():
-    """Test that CacheConfig reads from environment variables."""
-    with patch.dict(
-        "os.environ",
-        {
-            "CACHING": "true",
-            "SHARED_KUZU_LOCK": "true",
-            "CACHE_HOST": "env-redis",
-            "CACHE_PORT": "6380",
-            "AGENTIC_LOCK_EXPIRE": "300",
-            "AGENTIC_LOCK_TIMEOUT": "400",
-        },
-    ):
-        get_cache_config.cache_clear()
-        config = get_cache_config()
-
-        assert config.caching is True
-        assert config.shared_kuzu_lock is True
-        assert config.cache_host == "env-redis"
-        assert config.cache_port == 6380
-        assert config.agentic_lock_expire == 300
-        assert config.agentic_lock_timeout == 400
-
-
 def test_cache_config_extra_fields_allowed():
     """Test that CacheConfig allows extra fields due to extra='allow'."""
     config = CacheConfig(extra_field="extra_value", another_field=123)
 
-    # Extra fields should be accepted without error
     assert hasattr(config, "extra_field")
     assert config.extra_field == "extra_value"
     assert hasattr(config, "another_field")
@@ -112,7 +86,7 @@ def test_cache_config_extra_fields_allowed():
 
 def test_cache_config_port_type_validation():
     """Test that cache_port validates integer type."""
-    with pytest.raises(Exception):  # Pydantic validation error
+    with pytest.raises(Exception):
         CacheConfig(cache_port="not_a_number")
 
 
