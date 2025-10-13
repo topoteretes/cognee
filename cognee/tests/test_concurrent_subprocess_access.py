@@ -69,7 +69,7 @@ async def concurrent_subprocess_access():
     first_cognify_process.wait()
     second_cognify_process.wait()
 
-    logger.info(f"Database concurrent subprocess example finished")
+    logger.info("Database concurrent subprocess example finished")
 
 
 if __name__ == "__main__":
