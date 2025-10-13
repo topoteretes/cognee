@@ -87,17 +87,33 @@ class TestCliIntegration:
             # Note: This might fail due to dependencies, but we're testing the CLI structure
             # The important thing is that it doesn't crash with argument parsing errors
             # Allow litellm logging worker cancellation errors as they're expected during process shutdown
+            # Also allow Kuzu extension errors as they're non-critical warnings in CI environments
             stderr_lower = result.stderr.lower()
             has_error = "error" in stderr_lower
             has_expected_failure = "failed to add data" in stderr_lower
             has_litellm_cancellation = (
                 "loggingworker cancelled" in stderr_lower or "cancellederror" in stderr_lower
             )
+            has_kuzu_extension_error = (
+                "could not establish connection" in stderr_lower
+                and "extension.kuzudb.com" in stderr_lower
+            ) or (
+                "binder exception: extension" in stderr_lower
+                and "has not been installed" in stderr_lower
+            )
 
             try:
-                assert not has_error or has_expected_failure or has_litellm_cancellation
+                assert (
+                    not has_error
+                    or has_expected_failure
+                    or has_litellm_cancellation
+                    or has_kuzu_extension_error
+                )
             except Exception as e:
                 logger.error(f"{str(e)}", exc_info=True)
+                import pprint
+
+                pprint.pprint(result.stderr)
                 raise e
 
         finally:
