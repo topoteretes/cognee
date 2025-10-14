@@ -24,11 +24,10 @@ class EmbeddingConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     def model_post_init(self, __context) -> None:
-        # If embedding batch size is not defined use 2048 as default for OpenAI and 100 for all other embedding models
         if not self.embedding_batch_size and self.embedding_provider.lower() == "openai":
-            self.embedding_batch_size = 30
+            self.embedding_batch_size = 1024
         elif not self.embedding_batch_size:
-            self.embedding_batch_size = 10
+            self.embedding_batch_size = 100
 
     def to_dict(self) -> dict:
         """
