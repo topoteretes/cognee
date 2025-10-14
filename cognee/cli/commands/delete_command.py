@@ -38,22 +38,30 @@ Be careful with deletion operations as they are irreversible.
             import cognee
 
             # Validate arguments
-            if not any([args.dataset_name, args.dataset_id, args.data_id, args.user_id, args.all]):
+            if not any(
+                [
+                    hasattr(args, "dataset_name"),
+                    hasattr(args, "dataset_id"),
+                    hasattr(args, "data_id"),
+                    hasattr(args, "user_id"),
+                    hasattr(args, "all"),
+                ]
+            ):
                 fmt.error(
                     "Please specify what to delete: --dataset-name, --dataset-id, --data-id, --user-id, or --all"
                 )
                 return
 
             # If --force is used, skip the preview and go straight to deletion
-            if not args.force:
+            if not getattr(args, "force", False):
                 # --- START PREVIEW LOGIC ---
                 fmt.echo("Gathering data for preview...")
                 try:
                     preview_data = asyncio.run(
                         get_deletion_counts(
-                            dataset_name=args.dataset_name,
-                            user_id=args.user_id,
-                            all_data=args.all,
+                            dataset_name=getattr(args, "dataset_name", None),
+                            user_id=getattr(args, "user_id", None),
+                            all_data=getattr(args, "all", False),
                         )
                     )
                 except CliCommandException as e:
@@ -66,25 +74,25 @@ Be careful with deletion operations as they are irreversible.
 
                 fmt.echo("You are about to delete:")
                 fmt.echo(
-                    f"Datasets: {preview_data.datasets}\nEntries: {preview_data.entries}\nUsers: {preview_data.users}"
+                    f"Datasets: {preview_data.datasets}\nEntries: {preview_data.data_entries}\nUsers: {preview_data.users}"
                 )
                 fmt.echo("-" * 20)
                 # --- END PREVIEW LOGIC ---
 
             # Build operation message for success/failure logging
-            if args.all:
+            if getattr(args, "all", False):
                 confirm_msg = "Delete ALL data from cognee?"
                 operation = "all data"
-            elif args.dataset_name:
+            elif hasattr(args, "dataset_name"):
                 confirm_msg = f"Delete dataset '{args.dataset_name}'?"
                 operation = f"dataset '{args.dataset_name}'"
-            elif args.user_id:
+            elif hasattr(args, "user_id"):
                 confirm_msg = f"Delete all data for user '{args.user_id}'?"
                 operation = f"data for user '{args.user_id}'"
             else:
                 operation = "data"
 
-            if not args.force:
+            if not getattr(args, "force", False):
                 fmt.warning("This operation is irreversible!")
                 if not fmt.confirm(confirm_msg):
                     fmt.echo("Deletion cancelled.")
@@ -95,12 +103,16 @@ Be careful with deletion operations as they are irreversible.
             # Run the async delete function
             async def run_delete():
                 try:
-                    if args.all:
+                    if getattr(args, "all", False):
+                        if not hasattr(args, "user_id"):
+                            raise CliCommandException(
+                                "No user ID provided for '--all' deletion. Please specify using --user-id param."
+                            )
                         await cognee.datasets.delete_all(user_id=args.user_id)
-                    elif args.dataset_name or args.dataset_id:
-                        dataset_id = args.dataset_id
+                    elif hasattr(args, "dataset_name") or hasattr(args, "dataset_id"):
+                        dataset_id = getattr(args, "dataset_id", None)
 
-                        if args.dataset_name and not args.dataset_id:
+                        if hasattr(args, "dataset_name") and not hasattr(args, "dataset_id"):
                             datasets = await get_datasets_by_name(
                                 args.dataset_name, user_id=args.user_id
                             )
@@ -113,10 +125,15 @@ Be careful with deletion operations as they are irreversible.
                             dataset = datasets[0]
                             dataset_id = dataset.id
 
+                        if not hasattr(args, "user_id"):
+                            raise CliCommandException(
+                                "No user ID provided for deletion. Please specify using --user-id param."
+                            )
+
                         await cognee.datasets.delete_dataset(
                             dataset_id=dataset_id, user_id=args.user_id
                         )
-                    elif args.dataset_id and args.data_id:
+                    elif hasattr(args, "dataset_id") and hasattr(args, "data_id"):
                         await cognee.datasets.delete_data(args.dataset_id, args.data_id)
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to delete: {str(e)}") from e

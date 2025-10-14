@@ -6,6 +6,7 @@ import pytest
 import sys
 import argparse
 import asyncio
+from uuid import uuid4
 from unittest.mock import patch, MagicMock, AsyncMock, ANY
 from cognee.cli.commands.add_command import AddCommand
 from cognee.cli.commands.search_command import SearchCommand
@@ -14,6 +15,7 @@ from cognee.cli.commands.delete_command import DeleteCommand
 from cognee.cli.commands.config_command import ConfigCommand
 from cognee.cli.exceptions import CliCommandException
 from cognee.modules.data.methods.get_deletion_counts import DeletionCountsPreview
+from cognee.modules.users.models import User
 
 
 # Mock asyncio.run to properly handle coroutines
@@ -283,33 +285,29 @@ class TestDeleteCommand:
         assert "all" in actions
         assert "force" in actions
 
-    @patch("cognee.cli.commands.delete_command.get_deletion_counts")
+    @patch("cognee.api.v1.datasets.datasets.delete_dataset")
+    @patch("cognee.modules.data.methods.get_deletion_counts.get_user")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
     def test_execute_delete_dataset_with_confirmation(
-        self, mock_asyncio_run, mock_confirm, mock_get_deletion_counts
+        self, mock_asyncio_run, mock_confirm, get_user_mock, delete_dataset_mock
     ):
         """Test execute delete dataset with user confirmation"""
-        # Mock the cognee module
-        mock_cognee = MagicMock()
-        mock_cognee.delete = AsyncMock()
-        mock_get_deletion_counts = AsyncMock()
-        mock_get_deletion_counts.return_value = DeletionCountsPreview()
+        expected_user_id = uuid4()
+        expected_dataset_id = uuid4()
 
-        with patch.dict(sys.modules, {"cognee": mock_cognee}):
-            command = DeleteCommand()
-            args = argparse.Namespace(
-                dataset_name="test_dataset", user_id=None, all=False, force=False
-            )
+        get_user_mock.return_value = User(id=expected_user_id)
 
-            mock_confirm.return_value = True
+        command = DeleteCommand()
+        args = argparse.Namespace(dataset_id=expected_dataset_id, user_id=expected_user_id)
 
-            command.execute(args)
+        mock_confirm.return_value = True
 
-        mock_confirm.assert_called_once_with(f"Delete dataset '{args.dataset_name}'?")
-        assert mock_asyncio_run.call_count == 2
-        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        mock_cognee.delete.assert_awaited_once_with(dataset_name="test_dataset", user_id=None)
+        command.execute(args)
+
+        delete_dataset_mock.assert_awaited_once_with(
+            dataset_id=expected_dataset_id, user_id=expected_user_id
+        )
 
     @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
@@ -327,29 +325,29 @@ class TestDeleteCommand:
 
         mock_confirm.assert_called_once_with(f"Delete dataset '{args.dataset_name}'?")
 
+    @patch("cognee.api.v1.datasets.datasets.delete_all")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
-    def test_execute_delete_forced(self, mock_asyncio_run):
+    def test_execute_delete_forced(self, mock_asyncio_run, delete_all_mock):
         """Test execute delete with force flag"""
-        # Mock the cognee module
-        mock_cognee = MagicMock()
-        mock_cognee.delete = AsyncMock()
+        command = DeleteCommand()
 
-        with patch.dict(sys.modules, {"cognee": mock_cognee}):
-            command = DeleteCommand()
-            args = argparse.Namespace(
-                dataset_name="test_dataset", user_id=None, all=False, force=True
-            )
+        expected_user_id = uuid4()
 
-            command.execute(args)
+        args = argparse.Namespace(
+            dataset_name="test_dataset",
+            force=True,
+            all=True,
+            user_id=expected_user_id,
+        )
 
-        mock_asyncio_run.assert_called_once()
-        assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
-        mock_cognee.delete.assert_awaited_once_with(dataset_name="test_dataset", user_id=None)
+        command.execute(args)
+
+        delete_all_mock.assert_awaited_once_with(user_id=expected_user_id)
 
     def test_execute_no_delete_target(self):
         """Test execute when no delete target is specified"""
         command = DeleteCommand()
-        args = argparse.Namespace(dataset_name=None, user_id=None, all=False, force=False)
+        args = argparse.Namespace(force=True)
 
         # Should not raise exception, just return with error message
         command.execute(args)

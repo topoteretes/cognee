@@ -74,7 +74,7 @@ async def update(
             - Execution timestamps and metadata
     """
     if not user:
-        user = get_default_user()
+        user = await get_default_user()
 
     await datasets.delete_data(
         dataset_id=dataset_id,
