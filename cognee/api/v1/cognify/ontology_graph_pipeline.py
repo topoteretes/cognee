@@ -1,139 +1,157 @@
 import asyncio
-from typing import List, Union, Optional
+from typing import Union, Dict, List, Tuple
 from rdflib import Graph
 from uuid import uuid4
-from datetime import datetime, timezone
+from io import IOBase, BytesIO
+from pydantic import Field
 
-from cognee.modules.pipelines import run_tasks
-from cognee.modules.pipelines.tasks.task import Task
+from cognee.low_level import DataPoint
+from cognee.infrastructure.engine import Edge
 from cognee.modules.users.methods import get_default_user
-from cognee.shared.data_models import KnowledgeGraph
-from cognee.tasks.storage import add_data_points
-from cognee.tasks.graph import extract_graph_from_data
 from cognee.modules.data.methods import create_dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
-from cognee.modules.data.processing.document_types import Document
-from io import IOBase
+from cognee.tasks.storage import add_data_points
+from cognee.modules.pipelines import run_tasks
+from cognee.modules.pipelines.tasks.task import Task
 
-# ---------- Step 1: Load Ontology (from file object) ----------
-async def load_ontology_data(ontology_file: Union[str, bytes, "IOBase"],format: str) -> list[dict]:
-    """
-    Loads OWL/RDF ontology directly from a file-like object and extracts RDF triples.
-    
-    Args:
-        ontology_file: File-like object or path to RDF data
-        format: RDF serialization format (xml, turtle, n3, json-ld, etc.).
-    """
+
+# -----------------------------
+# STEP 1: Load ontology triples
+# -----------------------------
+async def load_ontology_data(ontology_file: Union[str, bytes, IOBase], format: str = "xml") -> list[dict]:
+    """Parses RDF/OWL ontology into subject-predicate-object triples."""
     g = Graph()
+    if isinstance(ontology_file, bytes):
+        ontology_file = BytesIO(ontology_file)
+    if isinstance(ontology_file, IOBase):
+        try:
+            ontology_file.seek(0)
+        except (OSError, AttributeError):
+            # Some streams may not be seekable; continue with current position.
+            pass
     try:
         g.parse(ontology_file, format=format)
     except Exception as e:
-        raise ValueError(f"Failed to parse ontology file: {str(e)}") from e
+        raise ValueError(f"Failed to parse ontology file: {e}")
+
     triples = []
     for s, p, o in g:
-        triple = {
+        triples.append({
             "subject": str(s),
             "predicate": str(p),
-            "object": str(o),
-            "object_type": type(o).__name__,  # 'URIRef', 'Literal', 'BNode'
-        }
-        if hasattr(o, 'datatype') and o.datatype:
-            triple["object_datatype"] = str(o.datatype)
-        if hasattr(o, 'language') and o.language:
-            triple["object_language"] = o.language
-        triples.append(triple)
+            "object": str(o)
+        })
+    print("These are the triplets from the owl file")
+    print(triples)
     return triples
 
 
-# ---------- Step 2: Convert Triples into Chunks ----------
-def convert_triples_to_chunks(triples: list[dict], format: str = "xml") -> list[DocumentChunk]:
+# -------------------------------------
+# STEP 2: Convert RDF triples to DataPoints
+# -------------------------------------
+class OntologyEntity(DataPoint):
     """
-    Convert ontology triples into Cognee-compatible DocumentChunk objects.
+    Represents an ontology resource as a Cognee DataPoint.
+
+    `related_to` stores outgoing relationships as tuples of (Edge metadata, target entity).
     """
-    
-    # Map RDF formats to MIME types
-    mime_types = {
-        "xml": "application/rdf+xml",
-        "turtle": "text/turtle",
-        "n3": "text/n3",
-        "nt": "application/n-triples",
-        "json-ld": "application/ld+json",
-    }
-    chunks = []
 
-    # Minimal valid Document (from your class)
-    ontology_doc = Document(
-        id=uuid4(),
-        name="in_memory_ontology.owl",
-        raw_data_location="in_memory_source",
-        external_metadata=None,
-        mime_type=mime_types.get(format, "application/rdf+xml")
-    )
+    name: str
+    uri: str
+    related_to: List[Tuple[Edge, "OntologyEntity"]] = Field(default_factory=list)
+    metadata: dict = {"index_fields": ["name"]}
 
-    for i, t in enumerate(triples):
-        text = f"{t['subject']} {t['predicate']} {t['object']}"
-        chunk = DocumentChunk(
-            id=uuid4(),
-            text=text,
-            chunk_size=len(text.split()),
-            chunk_index=i,
-            cut_type="triple",
-            is_part_of=ontology_doc,
-            metadata={"triple": t, "index_fields": ["text"]}
+
+OntologyEntity.model_rebuild()
+
+
+def _extract_label(uri: str) -> str:
+    """Return the local name for a URI (last fragment or path component)."""
+    if "#" in uri:
+        return uri.rsplit("#", 1)[-1] or uri
+    if "/" in uri:
+        return uri.rstrip("/").rsplit("/", 1)[-1] or uri
+    return uri
+
+
+async def ontology_to_datapoints(triples: list[dict]) -> list[DataPoint]:
+    """
+    Converts parsed triples into Cognee DataPoints (entities + relations).
+    This preserves the ontology's structure as a graph.
+    """
+    entities: Dict[str, OntologyEntity] = {}
+
+    for t in triples:
+        subj = t["subject"]
+        pred = t["predicate"]
+        obj = t["object"]
+
+        # Create or reuse entities
+        if subj not in entities:
+            entities[subj] = OntologyEntity(
+                id=uuid4(),
+                name=_extract_label(subj),
+                uri=subj,
+            )
+
+        if obj not in entities:
+            entities[obj] = OntologyEntity(
+                id=uuid4(),
+                name=_extract_label(obj),
+                uri=obj,
+            )
+
+        predicate_label = _extract_label(pred)
+        edge = Edge(
+            relationship_type=predicate_label,
+            properties={"uri": pred},
         )
-        chunks.append(chunk)
-    return chunks
+        if not any(
+            existing_edge.relationship_type == predicate_label and target.uri == obj
+            for existing_edge, target in entities[subj].related_to
+        ):
+            entities[subj].related_to.append((edge, entities[obj]))
+
+    return list(entities.values())
 
 
-# ---------- Step 3: Run Ontology Pipeline ----------
-
-async def run_ontology_pipeline(
-    ontology_file: Union[str, bytes, "IOBase"],
-    format: str,
-    dataset_name: str = "ontology_dataset"
-):
+# -------------------------------------
+# STEP 3: Define the custom task function
+# -------------------------------------
+async def ontology_ingestion_task(inputs: list, format: str = "xml"):
     """
-    Run the ontology ingestion pipeline directly from a file object (no file path).
+    Custom Cognee Task: Ingest OWL/RDF ontology and store as structured DataPoints.
     """
-    try:
-        from cognee.low_level import setup
-        import cognee
+    ontology_file = inputs[0]
+    triples = await load_ontology_data(ontology_file, format)
+    datapoints = await ontology_to_datapoints(triples)
+    await add_data_points(datapoints)
+    return datapoints
 
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
-        await setup()
 
-        user = await get_default_user()
-        db_engine = get_relational_engine()
+# -------------------------------------
+# STEP 4: Build and run the pipeline
+# -------------------------------------
+async def run_ontology_pipeline(ontology_file: Union[str, bytes, IOBase], format: str = "xml"):
+    import cognee
+    from cognee.low_level import setup
 
-        async with db_engine.get_async_session() as session:
-            dataset = await create_dataset(dataset_name, user, session)
+    # Reset state for clean runs
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    await setup()
 
-        # ✅ Process ontology file directly
-        triples = await load_ontology_data(ontology_file, format=format)
-        chunks = convert_triples_to_chunks(triples, format=format or "xml")
-        
-        if not triples:
-            raise ValueError("No triples found in ontology file")
-        
-        chunks = convert_triples_to_chunks(triples)
+    user = await get_default_user()
+    db_engine = get_relational_engine()
 
-        # Define pipeline tasks
-        tasks = [
-            Task(
-                extract_graph_from_data,
-                graph_model=KnowledgeGraph,
-                task_config={"batch_size": 20},
-            ),
-            Task(add_data_points, task_config={"batch_size": 20}),
-        ]
+    async with db_engine.get_async_session() as session:
+        dataset = await create_dataset("ontology_dataset", user, session)
 
-        # Run tasks with chunks
-        async for run_status in run_tasks(tasks, dataset.id, chunks, user, "ontology_pipeline"):
-            yield run_status
-    except Exception as e:
-        # Log error and re-raise with context
-        import logging
-        logging.error(f"Ontology pipeline failed: {str(e)}")
-        raise RuntimeError(f"Failed to process ontology file: {str(e)}") from e
+    # Define your pipeline with the new custom task
+    tasks = [
+        Task(ontology_ingestion_task, task_config={"batch_size": 50}),
+    ]
+
+    async for status in run_tasks(tasks, dataset.id, ontology_file, user, "ontology_ingestion_pipeline"):
+        yield status
+
