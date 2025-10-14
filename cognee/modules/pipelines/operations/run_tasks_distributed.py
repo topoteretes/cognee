@@ -61,8 +61,6 @@ if modal:
         from cognee.infrastructure.databases.relational import get_relational_engine
 
         async with get_relational_engine().get_async_session() as session:
-            from cognee.modules.data.models import Dataset
-
             dataset = await session.get(Dataset, dataset_id)
 
         result = await run_tasks_data_item(
