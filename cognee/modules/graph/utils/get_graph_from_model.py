@@ -152,10 +152,10 @@ async def get_graph_from_model(
     Returns:
         Tuple of (nodes, edges) extracted from the model
     """
-    if added_nodes == None:
+    if added_nodes is None:
         added_nodes = {}
 
-    if added_edges == None:
+    if added_edges is None:
         added_edges = {}
 
     if str(data_point.id) in added_nodes:
