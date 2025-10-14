@@ -41,8 +41,6 @@ async def load_ontology_data(ontology_file: Union[str, bytes, IOBase], format: s
             "predicate": str(p),
             "object": str(o)
         })
-    print("These are the triplets from the owl file")
-    print(triples)
     return triples
 
 
