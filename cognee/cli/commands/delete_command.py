@@ -5,6 +5,7 @@ from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
 from cognee.modules.data.methods import get_datasets_by_name
 from cognee.modules.data.methods.get_deletion_counts import get_deletion_counts
 
@@ -34,9 +35,6 @@ Be careful with deletion operations as they are irreversible.
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
-            # Import cognee here to avoid circular imports
-            from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
-
             # Validate arguments
             if not any(
                 [

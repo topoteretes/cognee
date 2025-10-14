@@ -381,7 +381,7 @@ class TestDeleteCommandEdgeCases:
     """Test edge cases for DeleteCommand"""
 
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
-    @patch("cognee.api.v1.datasets.datasets.datasets.delete_all")
+    @patch("cognee.cli.commands.delete_command.cognee_datasets.delete_all")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     def test_delete_all_with_user_id(self, fmt_confirm_mock, delete_all_mock, async_run_mock):
         """Test delete command with both --all and --user-id"""

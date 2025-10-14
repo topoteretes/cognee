@@ -286,7 +286,7 @@ class TestDeleteCommand:
         assert "force" in actions
 
     @patch("cognee.modules.data.methods.get_deletion_counts.get_user")
-    @patch("cognee.api.v1.datasets.datasets.datasets.delete_dataset")
+    @patch("cognee.cli.commands.delete_command.cognee_datasets.delete_dataset")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
     def test_execute_delete_dataset_with_confirmation(
