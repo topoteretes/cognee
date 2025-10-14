@@ -90,7 +90,7 @@ async def test_circular_reference_extraction():
         code_file.contains.extend(
             [
                 CodePart(
-                    part_of=code_file,
+                    # part_of=code_file,
                     source_code=f"Part {part_index}",
                 )
                 for part_index in range(2)

@@ -2,12 +2,15 @@
 Tests for CLI edge cases and error scenarios with proper mocking.
 """
 
+import os
 import pytest
 import sys
 import asyncio
 import argparse
 from uuid import uuid4
 from unittest.mock import patch, MagicMock, AsyncMock, ANY
+
+import cognee
 from cognee.cli.commands.add_command import AddCommand
 from cognee.cli.commands.search_command import SearchCommand
 from cognee.cli.commands.cognify_command import CognifyCommand
@@ -15,6 +18,7 @@ from cognee.cli.commands.delete_command import DeleteCommand
 from cognee.cli.commands.config_command import ConfigCommand
 from cognee.cli.exceptions import CliCommandException
 from cognee.modules.data.methods.get_deletion_counts import DeletionCountsPreview
+from cognee.modules.engine.operations.setup import setup
 
 
 # Mock asyncio.run to properly handle coroutines
@@ -385,6 +389,21 @@ class TestDeleteCommandEdgeCases:
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     def test_delete_all_with_user_id(self, fmt_confirm_mock, delete_all_mock, async_run_mock):
         """Test delete command with both --all and --user-id"""
+        data_directory_path = os.path.join(
+            os.path.dirname(__file__), ".data_storage/test_cli_commands"
+        )
+        cognee_directory_path = os.path.join(
+            os.path.dirname(__file__), ".cognee_system/test_cli_commands"
+        )
+
+        cognee.config.data_root_directory(data_directory_path)
+        cognee.config.system_root_directory(cognee_directory_path)
+
+        asyncio.run(cognee.prune.prune_data())
+        asyncio.run(cognee.prune.prune_system(metadata=True))
+
+        asyncio.run(setup())
+
         fmt_confirm_mock.return_value = True
 
         expected_user_id = uuid4()
@@ -398,6 +417,9 @@ class TestDeleteCommandEdgeCases:
         command.execute(args)
 
         delete_all_mock.assert_called_once_with(user_id=expected_user_id)
+
+        asyncio.run(cognee.prune.prune_data())
+        asyncio.run(cognee.prune.prune_system(metadata=True))
 
     @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")

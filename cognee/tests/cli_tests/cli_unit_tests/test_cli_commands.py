@@ -2,12 +2,14 @@
 Tests for individual CLI commands with proper mocking and coroutine handling.
 """
 
+import os
 import pytest
 import sys
 import argparse
 import asyncio
 from uuid import uuid4
 from unittest.mock import patch, MagicMock, AsyncMock, ANY
+import cognee
 from cognee.cli.commands.add_command import AddCommand
 from cognee.cli.commands.search_command import SearchCommand
 from cognee.cli.commands.cognify_command import CognifyCommand
@@ -15,6 +17,7 @@ from cognee.cli.commands.delete_command import DeleteCommand
 from cognee.cli.commands.config_command import ConfigCommand
 from cognee.cli.exceptions import CliCommandException
 from cognee.modules.data.methods.get_deletion_counts import DeletionCountsPreview
+from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.models import User
 
 
@@ -289,10 +292,26 @@ class TestDeleteCommand:
     @patch("cognee.cli.commands.delete_command.cognee_datasets.delete_dataset")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
+    # @pytest.mark.asyncio
     def test_execute_delete_dataset_with_confirmation(
         self, mock_asyncio_run, mock_confirm, delete_dataset_mock, get_user_mock
     ):
         """Test execute delete dataset with user confirmation"""
+        data_directory_path = os.path.join(
+            os.path.dirname(__file__), ".data_storage/test_cli_commands"
+        )
+        cognee_directory_path = os.path.join(
+            os.path.dirname(__file__), ".cognee_system/test_cli_commands"
+        )
+
+        cognee.config.data_root_directory(data_directory_path)
+        cognee.config.system_root_directory(cognee_directory_path)
+
+        asyncio.run(cognee.prune.prune_data())
+        asyncio.run(cognee.prune.prune_system(metadata=True))
+
+        asyncio.run(setup())
+
         expected_user_id = uuid4()
         expected_dataset_id = uuid4()
 
@@ -308,6 +327,9 @@ class TestDeleteCommand:
         delete_dataset_mock.assert_awaited_once_with(
             dataset_id=expected_dataset_id, user_id=expected_user_id
         )
+
+        asyncio.run(cognee.prune.prune_data())
+        asyncio.run(cognee.prune.prune_system(metadata=True))
 
     @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
