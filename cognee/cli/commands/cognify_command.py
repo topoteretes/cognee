@@ -107,7 +107,7 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                     )
                     return result
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to cognify: {str(e)}")
+                    raise CliCommandInnerException(f"Failed to cognify: {str(e)}") from e
 
             result = asyncio.run(run_cognify())
 
@@ -124,5 +124,5 @@ After successful cognify processing, use `cognee search` to query the knowledge 
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
-                raise CliCommandException(str(e), error_code=1)
-            raise CliCommandException(f"Error during cognification: {str(e)}", error_code=1)
+                raise CliCommandException(str(e), error_code=1) from e
+            raise CliCommandException(f"Error during cognification: {str(e)}", error_code=1) from e
