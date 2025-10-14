@@ -3,8 +3,16 @@ from cognee.shared.logging_utils import get_logger
 import aiohttp
 from typing import List, Optional
 import os
-
+import litellm
+import logging
 import aiohttp.http_exceptions
+from tenacity import (
+    retry,
+    stop_after_delay,
+    wait_exponential_jitter,
+    retry_if_not_exception_type,
+    before_sleep_log,
+)
 
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.llm.tokenizer.HuggingFace import (
@@ -69,7 +77,6 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
-    @embedding_rate_limit_async
     async def embed_text(self, text: List[str]) -> List[List[float]]:
         """
         Generate embedding vectors for a list of text prompts.
@@ -92,7 +99,13 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         embeddings = await asyncio.gather(*[self._get_embedding(prompt) for prompt in text])
         return embeddings
 
-    @embedding_sleep_and_retry_async()
+    @retry(
+        stop=stop_after_delay(180),
+        wait=wait_exponential_jitter(1, 180),
+        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        reraise=True,
+    )
     async def _get_embedding(self, prompt: str) -> List[float]:
         """
         Internal method to call the Ollama embeddings endpoint for a single prompt.

@@ -856,7 +856,7 @@ wheels = [
 
 [[package]]
 name = "cognee"
-version = "0.3.4"
+version = "0.3.5"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -892,6 +892,7 @@ dependencies = [
     { name = "rdflib" },
     { name = "sqlalchemy" },
     { name = "structlog" },
+    { name = "tenacity" },
     { name = "tiktoken" },
     { name = "typing-extensions" },
     { name = "uvicorn" },
@@ -1086,6 +1087,7 @@ requires-dist = [
     { name = "sentry-sdk", extras = ["fastapi"], marker = "extra == 'monitoring'", specifier = ">=2.9.0,<3" },
     { name = "sqlalchemy", specifier = ">=2.0.39,<3.0.0" },
     { name = "structlog", specifier = ">=25.2.0,<26" },
+    { name = "tenacity", specifier = ">=9.0.0" },
     { name = "tiktoken", specifier = ">=0.8.0,<1.0.0" },
     { name = "transformers", marker = "extra == 'codegraph'", specifier = ">=4.46.3,<5" },
     { name = "transformers", marker = "extra == 'huggingface'", specifier = ">=4.46.3,<5" },
