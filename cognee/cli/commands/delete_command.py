@@ -35,7 +35,7 @@ Be careful with deletion operations as they are irreversible.
     def execute(self, args: argparse.Namespace) -> None:
         try:
             # Import cognee here to avoid circular imports
-            import cognee
+            from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
 
             # Validate arguments
             if not any(
@@ -107,7 +107,7 @@ Be careful with deletion operations as they are irreversible.
                             raise CliCommandException(
                                 "No user ID provided for '--all' deletion. Please specify using --user-id param."
                             )
-                        await cognee.datasets.delete_all(user_id=args.user_id)
+                        await cognee_datasets.delete_all(user_id=args.user_id)
                     elif hasattr(args, "dataset_name") or hasattr(args, "dataset_id"):
                         dataset_id = getattr(args, "dataset_id", None)
 
@@ -129,11 +129,11 @@ Be careful with deletion operations as they are irreversible.
                                 "No user ID provided for deletion. Please specify using --user-id param."
                             )
 
-                        await cognee.datasets.delete_dataset(
+                        await cognee_datasets.delete_dataset(
                             dataset_id=dataset_id, user_id=args.user_id
                         )
                     elif hasattr(args, "dataset_id") and hasattr(args, "data_id"):
-                        await cognee.datasets.delete_data(args.dataset_id, args.data_id)
+                        await cognee_datasets.delete_data(args.dataset_id, args.data_id)
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to delete: {str(e)}") from e
 

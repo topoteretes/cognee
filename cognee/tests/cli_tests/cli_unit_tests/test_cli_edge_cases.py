@@ -381,26 +381,23 @@ class TestDeleteCommandEdgeCases:
     """Test edge cases for DeleteCommand"""
 
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
+    @patch("cognee.api.v1.datasets.datasets.datasets.delete_all")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
-    def test_delete_all_with_user_id(self, fmt_confirm_mock, async_run_mock):
+    def test_delete_all_with_user_id(self, fmt_confirm_mock, delete_all_mock, async_run_mock):
         """Test delete command with both --all and --user-id"""
         fmt_confirm_mock.return_value = True
 
         expected_user_id = uuid4()
 
-        mock_cognee = MagicMock()
-        mock_cognee.datasets.delete_all = AsyncMock()
+        command = DeleteCommand()
+        args = argparse.Namespace(
+            user_id=expected_user_id,
+            all=True,
+        )
 
-        with patch.dict(sys.modules, {"cognee": mock_cognee}):
-            command = DeleteCommand()
-            args = argparse.Namespace(
-                user_id=expected_user_id,
-                all=True,
-            )
+        command.execute(args)
 
-            command.execute(args)
-
-            mock_cognee.datasets.delete_all.assert_called_once_with(user_id=expected_user_id)
+        delete_all_mock.assert_called_once_with(user_id=expected_user_id)
 
     @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
