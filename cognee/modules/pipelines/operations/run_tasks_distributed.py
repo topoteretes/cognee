@@ -6,9 +6,9 @@ except ModuleNotFoundError:
 from typing import Any, List, Optional
 from uuid import UUID
 
+from cognee.modules.data.models import Dataset
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.pipelines.models import (
     PipelineRunStarted,
     PipelineRunCompleted,
@@ -72,7 +72,12 @@ if modal:
             pipeline_name=pipeline_name,
             pipeline_id=pipeline_id,
             pipeline_run_id=pipeline_run_id,
-            context=context,
+            context={
+                **(context or {}),
+                "user": user,
+                "data": data_item,
+                "dataset": dataset,
+            },
             user=user,
             incremental_loading=incremental_loading,
         )
@@ -92,16 +97,19 @@ async def run_tasks_distributed(
     if not user:
         user = await get_default_user()
 
+    dataset: Optional[Dataset] = None
+
     # Get dataset object
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
-        from cognee.modules.data.models import Dataset
-
         dataset = await session.get(Dataset, dataset_id)
 
-    pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
+    if not dataset:
+        raise ValueError(f"Dataset ({dataset_id}) not found.")
+
+    pipeline_id: UUID = generate_pipeline_id(user.id, dataset.id, pipeline_name)
     pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset_id, data)
-    pipeline_run_id = pipeline_run.pipeline_run_id
+    pipeline_run_id: UUID = pipeline_run.pipeline_run_id
 
     yield PipelineRunStarted(
         pipeline_run_id=pipeline_run_id,

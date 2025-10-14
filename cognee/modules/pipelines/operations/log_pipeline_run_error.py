@@ -7,7 +7,7 @@ from typing import Any
 
 async def log_pipeline_run_error(
     pipeline_run_id: UUID,
-    pipeline_id: str,
+    pipeline_id: UUID,
     pipeline_name: str,
     dataset_id: UUID,
     data: Any,
