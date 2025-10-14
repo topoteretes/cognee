@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from typing import Optional
 
+
 class CacheConfig(BaseSettings):
     """
     Configuration for distributed cache systems (e.g., Redis), used for locking or coordination.
