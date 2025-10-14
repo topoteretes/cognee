@@ -311,7 +311,7 @@ async def get_temporal_tasks(
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
             chunker=chunker,
         ),
-        Task(extract_events_and_timestamps, task_config={"chunk_size": 10}),
+        Task(extract_events_and_timestamps, task_config={"batch_size": 10}),
         Task(extract_knowledge_graph_from_events),
         Task(add_data_points, task_config={"batch_size": 10}),
     ]
