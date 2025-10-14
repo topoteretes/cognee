@@ -73,7 +73,11 @@ def get_add_router() -> APIRouter:
 
         try:
             add_run = await cognee_add(
-                data, datasetName, user=user, dataset_id=datasetId, node_set=node_set
+                data,
+                datasetName,
+                user=user,
+                dataset_id=datasetId,
+                node_set=node_set if node_set else None,
             )
 
             if isinstance(add_run, PipelineRunErrored):

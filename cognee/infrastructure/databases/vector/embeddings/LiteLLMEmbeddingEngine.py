@@ -164,7 +164,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             litellm.exceptions.NotFoundError,
         ) as e:
             logger.error(f"Embedding error with model {self.model}: {str(e)}")
-            raise EmbeddingException(f"Failed to index data points using model {self.model}")
+            raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
 
         except Exception as error:
             logger.error("Error embedding text: %s", str(error))
