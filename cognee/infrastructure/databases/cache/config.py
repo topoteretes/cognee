@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
-
+from typing import Optional
 
 class CacheConfig(BaseSettings):
     """
@@ -18,6 +18,8 @@ class CacheConfig(BaseSettings):
     shared_kuzu_lock: bool = False
     cache_host: str = "localhost"
     cache_port: int = 6379
+    cache_username: Optional[str] = None
+    cache_password: Optional[str] = None
     agentic_lock_expire: int = 240
     agentic_lock_timeout: int = 300
 
@@ -29,6 +31,8 @@ class CacheConfig(BaseSettings):
             "shared_kuzu_lock": self.shared_kuzu_lock,
             "cache_host": self.cache_host,
             "cache_port": self.cache_port,
+            "cache_username": self.cache_username,
+            "cache_password": self.cache_password,
             "agentic_lock_expire": self.agentic_lock_expire,
             "agentic_lock_timeout": self.agentic_lock_timeout,
         }

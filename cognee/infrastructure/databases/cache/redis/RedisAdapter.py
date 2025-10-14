@@ -4,9 +4,10 @@ from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInte
 
 
 class RedisAdapter(CacheDBInterface):
-    def __init__(self, host, port, lock_name, timeout=240, blocking_timeout=300):
+    def __init__(self, host, port, lock_name, username=None, password=None, timeout=240, blocking_timeout=300):
         super().__init__(host, port, lock_name)
-        self.redis = redis.Redis(host=host, port=port)
+
+        self.redis = redis.Redis(host=host, port=port, username=username, password=password)
         self.timeout = timeout
         self.blocking_timeout = blocking_timeout
 
