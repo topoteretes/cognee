@@ -103,10 +103,10 @@ class TestCliIntegration:
                 import pprint
 
                 pprint.pprint(result.stderr)
-                raise e
 
         finally:
             os.unlink(temp_file)
+        assert 1 == 0
 
     def test_config_subcommands(self):
         """Test config subcommands help"""
