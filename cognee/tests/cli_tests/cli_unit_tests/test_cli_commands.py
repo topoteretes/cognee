@@ -285,7 +285,7 @@ class TestDeleteCommand:
         assert "all" in actions
         assert "force" in actions
 
-    @patch("cognee.api.v1.datasets.datasets.delete_dataset")
+    @patch("cognee.datasets.delete_dataset")
     @patch("cognee.modules.data.methods.get_deletion_counts.get_user")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
@@ -325,7 +325,7 @@ class TestDeleteCommand:
 
         mock_confirm.assert_called_once_with(f"Delete dataset '{args.dataset_name}'?")
 
-    @patch("cognee.api.v1.datasets.datasets.delete_all")
+    @patch("cognee.datasets.delete_all")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
     def test_execute_delete_forced(self, mock_asyncio_run, delete_all_mock):
         """Test execute delete with force flag"""

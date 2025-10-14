@@ -40,11 +40,10 @@ Be careful with deletion operations as they are irreversible.
             # Validate arguments
             if not any(
                 [
-                    hasattr(args, "dataset_name"),
-                    hasattr(args, "dataset_id"),
-                    hasattr(args, "data_id"),
-                    hasattr(args, "user_id"),
-                    hasattr(args, "all"),
+                    getattr(args, "dataset_name", None),
+                    getattr(args, "dataset_id", None),
+                    getattr(args, "data_id", None),
+                    getattr(args, "all", False) and getattr(args, "user_id", None),
                 ]
             ):
                 fmt.error(
