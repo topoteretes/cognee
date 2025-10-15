@@ -160,6 +160,14 @@ class GraphDBInterface(ABC):
     """
 
     @abstractmethod
+    async def count_nodes(self) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def count_edges(self) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
     async def query(self, query: str, params: dict) -> List[Any]:
         """
         Execute a raw database query and return the results.
