@@ -1,8 +1,8 @@
 """Factory to get the appropriate cache coordination engine (e.g., Redis)."""
 
 from functools import lru_cache
+from typing import Optional
 from cognee.infrastructure.databases.cache.config import get_cache_config
-
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 
 config = get_cache_config()
@@ -51,7 +51,7 @@ def create_cache_engine(
         return None
 
 
-def get_cache_engine(lock_key: str) -> CacheDBInterface:
+def get_cache_engine(lock_key: Optional[str] = None) -> CacheDBInterface:
     """
     Returns a cache adapter instance using current context configuration.
     """

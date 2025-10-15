@@ -40,3 +40,40 @@ class CacheDBInterface(ABC):
             yield
         finally:
             self.release()
+
+    @abstractmethod
+    async def add_qa(
+            self,
+            user_id: str,
+            session_id: str,
+            question: str,
+            context: str,
+            answer: str,
+            ttl: int | None = 86400,
+    ):
+        """
+        Add a Q/A/context triplet to a cache session.
+        """
+
+        pass
+
+    @abstractmethod
+    async def get_latest_qa(self, user_id: str, session_id: str, last_n: int = 10):
+        """
+        Retrieve the most recent Q/A/context triplets for a session.
+        """
+        pass
+
+    @abstractmethod
+    async def get_all_qas(self, user_id: str, session_id: str):
+        """
+        Retrieve all Q/A/context triplets for the given session.
+        """
+        pass
+
+    @abstractmethod
+    async def close(self):
+        """
+        Gracefully close any async connections.
+        """
+        pass
