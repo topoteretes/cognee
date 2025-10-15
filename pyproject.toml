@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.3.5"
+version = "0.3.6"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -48,7 +48,7 @@ dependencies = [
     "pympler>=1.1,<2.0.0",
     "onnxruntime<=1.22.1",
     "pylance>=0.22.0,<=0.36.0",
-    "kuzu (==0.11.2)",
+    "kuzu (==0.11.3)",
     "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
     "fastembed<=0.6.0",
     "networkx>=3.4.2,<4",
