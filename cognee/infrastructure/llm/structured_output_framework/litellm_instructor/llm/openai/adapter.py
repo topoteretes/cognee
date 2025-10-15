@@ -7,6 +7,15 @@ from openai import ContentFilterFinishReasonError
 from litellm.exceptions import ContentPolicyViolationError
 from instructor.core import InstructorRetryException
 
+import logging
+from tenacity import (
+    retry,
+    stop_after_delay,
+    wait_exponential_jitter,
+    retry_if_not_exception_type,
+    before_sleep_log,
+)
+
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
@@ -14,18 +23,12 @@ from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
 )
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
-    rate_limit_async,
-    rate_limit_sync,
-    sleep_and_retry_async,
-    sleep_and_retry_sync,
-)
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
 
-observe = get_observe()
-
 logger = get_logger()
+
+observe = get_observe()
 
 
 class OpenAIAdapter(LLMInterface):
@@ -97,8 +100,13 @@ class OpenAIAdapter(LLMInterface):
         self.fallback_endpoint = fallback_endpoint
 
     @observe(as_type="generation")
-    @sleep_and_retry_async()
-    @rate_limit_async
+    @retry(
+        stop=stop_after_delay(128),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        reraise=True,
+    )
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
@@ -186,8 +194,13 @@ class OpenAIAdapter(LLMInterface):
                     ) from error
 
     @observe
-    @sleep_and_retry_sync()
-    @rate_limit_sync
+    @retry(
+        stop=stop_after_delay(128),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        reraise=True,
+    )
     def create_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
@@ -231,7 +244,13 @@ class OpenAIAdapter(LLMInterface):
             max_retries=self.MAX_RETRIES,
         )
 
-    @rate_limit_async
+    @retry(
+        stop=stop_after_delay(128),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        reraise=True,
+    )
     async def create_transcript(self, input):
         """
         Generate an audio transcript from a user query.
@@ -263,7 +282,13 @@ class OpenAIAdapter(LLMInterface):
 
         return transcription
 
-    @rate_limit_async
+    @retry(
+        stop=stop_after_delay(128),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        reraise=True,
+    )
     async def transcribe_image(self, input) -> BaseModel:
         """
         Generate a transcription of an image from a user query.
