@@ -44,7 +44,7 @@ async def cognify(
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,
     chunk_size: int = None,
-    chunk_batch_size: int = None,
+    chunks_per_batch: int = None,
     config: Config = None,
     vector_db_config: dict = None,
     graph_db_config: dict = None,
@@ -106,7 +106,7 @@ async def cognify(
                    Formula: min(embedding_max_completion_tokens, llm_max_completion_tokens // 2)
                    Default limits: ~512-8192 tokens depending on models.
                    Smaller chunks = more granular but potentially fragmented knowledge.
-        chunk_batch_size: Number of chunks to be processed in a single batch in Cognify tasks.
+        chunks_per_batch: Number of chunks to be processed in a single batch in Cognify tasks.
         vector_db_config: Custom vector database configuration for embeddings storage.
         graph_db_config: Custom graph database configuration for relationship storage.
         run_in_background: If True, starts processing asynchronously and returns immediately.
@@ -212,7 +212,7 @@ async def cognify(
 
     if temporal_cognify:
         tasks = await get_temporal_tasks(
-            user=user, chunker=chunker, chunk_size=chunk_size, chunk_batch_size=chunk_batch_size
+            user=user, chunker=chunker, chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
         )
     else:
         tasks = await get_default_tasks(
@@ -222,7 +222,7 @@ async def cognify(
             chunk_size=chunk_size,
             config=config,
             custom_prompt=custom_prompt,
-            chunk_batch_size=chunk_batch_size,
+            chunks_per_batch=chunks_per_batch,
         )
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
@@ -248,7 +248,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunk_size: int = None,
     config: Config = None,
     custom_prompt: Optional[str] = None,
-    chunk_batch_size: int = 100,
+    chunks_per_batch: int = 100,
 ) -> list[Task]:
     if config is None:
         ontology_config = get_ontology_env_config()
@@ -267,8 +267,8 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
                 "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
             }
 
-    if chunk_batch_size is None:
-        chunk_batch_size = 100
+    if chunks_per_batch is None:
+        chunks_per_batch = 100
 
     default_tasks = [
         Task(classify_documents),
@@ -283,20 +283,20 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,
-            task_config={"batch_size": chunk_batch_size},
+            task_config={"batch_size": chunks_per_batch},
         ),  # Generate knowledge graphs from the document chunks.
         Task(
             summarize_text,
-            task_config={"batch_size": chunk_batch_size},
+            task_config={"batch_size": chunks_per_batch},
         ),
-        Task(add_data_points, task_config={"batch_size": chunk_batch_size}),
+        Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
     ]
 
     return default_tasks
 
 
 async def get_temporal_tasks(
-    user: User = None, chunker=TextChunker, chunk_size: int = None, chunk_batch_size: int = 10
+    user: User = None, chunker=TextChunker, chunk_size: int = None, chunks_per_batch: int = 10
 ) -> list[Task]:
     """
     Builds and returns a list of temporal processing tasks to be executed in sequence.
@@ -313,13 +313,13 @@ async def get_temporal_tasks(
         user (User, optional): The user requesting task execution, used for permission checks.
         chunker (Callable, optional): A text chunking function/class to split documents. Defaults to TextChunker.
         chunk_size (int, optional): Maximum token size per chunk. If not provided, uses system default.
-        chunk_batch_size (int, optional): Number of chunks to process in a single batch in Cognify
+        chunks_per_batch (int, optional): Number of chunks to process in a single batch in Cognify
 
     Returns:
         list[Task]: A list of Task objects representing the temporal processing pipeline.
     """
-    if chunk_batch_size is None:
-        chunk_batch_size = 10
+    if chunks_per_batch is None:
+        chunks_per_batch = 10
 
     temporal_tasks = [
         Task(classify_documents),
@@ -329,9 +329,9 @@ async def get_temporal_tasks(
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
             chunker=chunker,
         ),
-        Task(extract_events_and_timestamps, task_config={"batch_size": chunk_batch_size}),
+        Task(extract_events_and_timestamps, task_config={"batch_size": chunks_per_batch}),
         Task(extract_knowledge_graph_from_events),
-        Task(add_data_points, task_config={"batch_size": chunk_batch_size}),
+        Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
     ]
 
     return temporal_tasks
