@@ -9,7 +9,7 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
-async def helper_func(num_of_searches):
+async def process_and_search(num_of_searches):
 
     start_time = time.time()
 
@@ -37,6 +37,9 @@ async def main():
     upper_boundary_minutes = 3
     average_minutes = 1.5
 
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
     await asyncio.gather(
         *[
             cognee.add(file_path, dataset_name=f"dataset_{i}")
@@ -45,7 +48,7 @@ async def main():
     )
 
     recorded_times = await asyncio.gather(
-        *[helper_func(num_of_pdfs) for _ in range(num_of_reps)]
+        *[process_and_search(num_of_pdfs) for _ in range(num_of_reps)]
     )
 
     average_recorded_time = sum(recorded_times) / len(recorded_times)
@@ -53,8 +56,6 @@ async def main():
     assert average_recorded_time <= average_minutes * 60
 
     assert all(rec_time <= upper_boundary_minutes * 60 for rec_time in recorded_times)
-
-    return
 
 
 if __name__ == "__main__":
