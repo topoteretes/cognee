@@ -16,9 +16,6 @@ import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions import EmbeddingException
-from cognee.infrastructure.llm.tokenizer.Gemini import (
-    GeminiTokenizer,
-)
 from cognee.infrastructure.llm.tokenizer.HuggingFace import (
     HuggingFaceTokenizer,
 )
@@ -27,10 +24,6 @@ from cognee.infrastructure.llm.tokenizer.Mistral import (
 )
 from cognee.infrastructure.llm.tokenizer.TikToken import (
     TikTokenTokenizer,
-)
-from cognee.infrastructure.databases.vector.embeddings.embedding_rate_limiter import (
-    embedding_rate_limit_async,
-    embedding_sleep_and_retry_async,
 )
 
 litellm.set_verbose = False
@@ -86,8 +79,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.mock = enable_mocking in ("true", "1", "yes")
 
     @retry(
-        stop=stop_after_delay(180),
-        wait=wait_exponential_jitter(1, 180),
+        stop=stop_after_delay(128),
+        wait=wait_exponential_jitter(2, 128),
         retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,

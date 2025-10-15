@@ -25,9 +25,9 @@ class EmbeddingConfig(BaseSettings):
 
     def model_post_init(self, __context) -> None:
         if not self.embedding_batch_size and self.embedding_provider.lower() == "openai":
-            self.embedding_batch_size = 1024
+            self.embedding_batch_size = 36
         elif not self.embedding_batch_size:
-            self.embedding_batch_size = 100
+            self.embedding_batch_size = 36
 
     def to_dict(self) -> dict:
         """
