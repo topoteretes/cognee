@@ -185,14 +185,6 @@ class KuzuAdapter(GraphDBInterface):
         except FileNotFoundError:
             logger.warning(f"Kuzu S3 storage file not found: {self.db_path}")
 
-    async def count_edges(self) -> int:
-        query = """
-        MATCH ()-[r]->()
-        RETURN COUNT(r);
-        """
-        query_result = await self.query(query)
-        return query_result[0][0]
-
     async def count_nodes(self) -> int:
         query = """
         MATCH (n)

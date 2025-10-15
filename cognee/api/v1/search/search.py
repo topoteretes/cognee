@@ -177,10 +177,9 @@ async def search(
             raise DatasetNotFoundError(message="No datasets found.")
 
     graph_engine = await get_graph_engine()
-    edges_count = await graph_engine.count_edges()
     nodes_count = await graph_engine.count_nodes()
 
-    if nodes_count == 0 or edges_count == 0:
+    if nodes_count == 0:
         raise SearchOnEmptyGraphError(
             message="Knowledge graph is empty, please ensure data is added and cognified."
         )

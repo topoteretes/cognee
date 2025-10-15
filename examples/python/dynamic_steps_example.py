@@ -199,7 +199,7 @@ if __name__ == "__main__":
         "prune_data": rebuild_kg,
         "prune_system": rebuild_kg,
         "add_text": rebuild_kg,
-        "cognify": rebuild_kg,
+        "cognify": False,
         "graph_metrics": rebuild_kg,
         "retriever": retrieve,
     }
