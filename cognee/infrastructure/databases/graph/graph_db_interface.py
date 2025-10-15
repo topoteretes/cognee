@@ -161,7 +161,8 @@ class GraphDBInterface(ABC):
 
     @abstractmethod
     async def count_nodes(self) -> int:
-        raise NotImplementedError
+        logger.warning("count_nodes is not implemented")
+        return 1  # dummy value to not fail search()
 
     @abstractmethod
     async def query(self, query: str, params: dict) -> List[Any]:
