@@ -18,7 +18,7 @@ from cognee.modules.pipelines.tasks.task import Task
 # -----------------------------
 # STEP 1: Load ontology triples
 # -----------------------------
-async def load_ontology_data(ontology_file: Union[str, bytes, IOBase], format: str = "xml") -> list[dict]:
+async def load_ontology_data(ontology_file: Union[str, bytes, IOBase], format: str) -> list[dict]:
     """Parses RDF/OWL ontology into subject-predicate-object triples."""
     g = Graph()
     if isinstance(ontology_file, bytes):
@@ -116,7 +116,7 @@ async def ontology_to_datapoints(triples: list[dict]) -> list[DataPoint]:
 # -------------------------------------
 # STEP 3: Define the custom task function
 # -------------------------------------
-async def ontology_ingestion_task(inputs: list, format: str = "xml"):
+async def ontology_ingestion_task(inputs: list, format: str):
     """
     Custom Cognee Task: Ingest OWL/RDF ontology and store as structured DataPoints.
     """
@@ -147,7 +147,7 @@ async def run_ontology_pipeline(ontology_file: Union[str, bytes, IOBase], format
 
     # Define your pipeline with the new custom task
     tasks = [
-        Task(ontology_ingestion_task, task_config={"batch_size": 50}),
+        Task(ontology_ingestion_task,format=format, task_config={"batch_size": 50}),
     ]
 
     async for status in run_tasks(tasks, dataset.id, ontology_file, user, "ontology_ingestion_pipeline"):
