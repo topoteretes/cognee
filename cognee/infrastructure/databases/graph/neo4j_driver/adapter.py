@@ -87,6 +87,22 @@ class Neo4jAdapter(GraphDBInterface):
         async with self.driver.session(database=self.graph_database_name) as session:
             yield session
 
+    async def count_edges(self) -> int:
+        query = """
+        MATCH ()-[r]->()
+        RETURN COUNT(r) as total_edges;
+        """
+        query_result = await self.query(query)
+        return query_result[0]["total_edges"]
+
+    async def count_nodes(self) -> int:
+        query = """
+        MATCH (n)
+        RETURN COUNT(n) as total_nodes;
+        """
+        query_result = await self.query(query)
+        return query_result[0]["total_nodes"]
+
     @deadlock_retry()
     async def query(
         self,
