@@ -62,7 +62,9 @@ class SummariesRetriever(BaseRetriever):
         logger.info(f"Returning {len(summary_payloads)} summary payloads")
         return summary_payloads
 
-    async def get_completion(self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None, **kwargs) -> Any:
+    async def get_completion(
+        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None, **kwargs
+    ) -> Any:
         """
         Generates a completion using summaries context.
 

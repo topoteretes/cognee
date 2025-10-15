@@ -207,22 +207,24 @@ class CodeRetriever(BaseRetriever):
         logger.info(f"Returning {len(result)} code file contexts")
         return result
 
-    async def get_completion(self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None) -> Any:
+    async def get_completion(
+        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
+    ) -> Any:
         """
         Returns the code files context.
-        
+
         Parameters:
         -----------
-        
+
             - query (str): The query string to retrieve code context for.
             - context (Optional[Any]): Optional pre-fetched context; if None, it retrieves
               the context for the query. (default None)
             - session_id (Optional[str]): Optional session identifier for caching. If None,
               defaults to 'default_session'. (default None)
-        
+
         Returns:
         --------
-        
+
             - Any: The code files context, either provided or retrieved.
         """
         if context is None:

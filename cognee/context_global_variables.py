@@ -16,8 +16,10 @@ session_user = ContextVar("session_user", default=None)
 soup_crawler_config = ContextVar("soup_crawler_config", default=None)
 tavily_config = ContextVar("tavily_config", default=None)
 
+
 async def set_session_user_context_variable(user):
     session_user.set(user)
+
 
 async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):
     """

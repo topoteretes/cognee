@@ -43,13 +43,13 @@ class CacheDBInterface(ABC):
 
     @abstractmethod
     async def add_qa(
-            self,
-            user_id: str,
-            session_id: str,
-            question: str,
-            context: str,
-            answer: str,
-            ttl: int | None = 86400,
+        self,
+        user_id: str,
+        session_id: str,
+        question: str,
+        context: str,
+        answer: str,
+        ttl: int | None = 86400,
     ):
         """
         Add a Q/A/context triplet to a cache session.

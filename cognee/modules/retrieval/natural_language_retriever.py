@@ -125,7 +125,9 @@ class NaturalLanguageRetriever(BaseRetriever):
 
         return await self._execute_cypher_query(query, graph_engine)
 
-    async def get_completion(self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None) -> Any:
+    async def get_completion(
+        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
+    ) -> Any:
         """
         Returns a completion based on the query and context.
 

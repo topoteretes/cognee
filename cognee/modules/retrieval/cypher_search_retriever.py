@@ -50,7 +50,9 @@ class CypherSearchRetriever(BaseRetriever):
             raise CypherSearchError() from e
         return result
 
-    async def get_completion(self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None) -> Any:
+    async def get_completion(
+        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
+    ) -> Any:
         """
         Returns the graph connections context.
 

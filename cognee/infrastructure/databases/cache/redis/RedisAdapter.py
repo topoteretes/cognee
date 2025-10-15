@@ -166,7 +166,7 @@ async def main():
         session_id,
         "What is Redis?",
         "Database context",
-        "Redis is an in-memory data store."
+        "Redis is an in-memory data store.",
     )
 
     await adapter.add_qa(
@@ -174,7 +174,7 @@ async def main():
         session_id,
         "Who created Redis?",
         "History context",
-        "Salvatore Sanfilippo (antirez)."
+        "Salvatore Sanfilippo (antirez).",
     )
 
     print(await adapter.get_all_qas(user_id, session_id))

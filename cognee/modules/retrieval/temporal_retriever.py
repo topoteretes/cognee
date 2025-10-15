@@ -137,22 +137,24 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         return self.descriptions_to_string(top_k_events)
 
-    async def get_completion(self, query: str, context: Optional[str] = None, session_id: Optional[str] = None) -> List[str]:
+    async def get_completion(
+        self, query: str, context: Optional[str] = None, session_id: Optional[str] = None
+    ) -> List[str]:
         """
         Generates a response using the query and optional context.
-        
+
         Parameters:
         -----------
-        
+
             - query (str): The query string for which a completion is generated.
             - context (Optional[str]): Optional context to use; if None, it will be
               retrieved based on the query. (default None)
             - session_id (Optional[str]): Optional session identifier for caching. If None,
               defaults to 'default_session'. (default None)
-        
+
         Returns:
         --------
-        
+
             - List[str]: A list containing the generated completion.
         """
         if not context:

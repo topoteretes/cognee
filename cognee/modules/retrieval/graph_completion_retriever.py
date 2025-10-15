@@ -177,7 +177,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                     user_prompt_path=self.user_prompt_path,
                     system_prompt_path=self.system_prompt_path,
                     system_prompt=self.system_prompt,
-                )
+                ),
             )
         else:
             completion = await generate_completion(
@@ -195,11 +195,17 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
         if session_save:
             from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
+
             cache_engine = get_cache_engine()
             if session_id is None:
-                session_id = 'default_session'
-            await cache_engine.add_qa(str(user_id), session_id=session_id, question=query, context=context_summary, answer=completion)
-
+                session_id = "default_session"
+            await cache_engine.add_qa(
+                str(user_id),
+                session_id=session_id,
+                question=query,
+                context=context_summary,
+                answer=completion,
+            )
 
         return [completion]
 
