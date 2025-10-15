@@ -41,6 +41,7 @@ async def add(
     extraction_rules: Optional[Dict[str, Any]] = None,
     tavily_config: Optional[BaseModel] = None,
     soup_crawler_config: Optional[BaseModel] = None,
+    data_batch_size: Optional[int] = 20,
 ):
     """
     Add data to Cognee for knowledge graph processing.
@@ -235,6 +236,7 @@ async def add(
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
         incremental_loading=incremental_loading,
+        data_batch_size=data_batch_size,
     ):
         pipeline_run_info = run_info
 

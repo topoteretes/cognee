@@ -24,14 +24,11 @@ from cognee.modules.pipelines.operations import (
     log_pipeline_run_complete,
     log_pipeline_run_error,
 )
-from .run_tasks_with_telemetry import run_tasks_with_telemetry
 from .run_tasks_data_item import run_tasks_data_item
 from ..tasks.task import Task
 
 
 logger = get_logger("run_tasks(tasks: [Task], data)")
-# TODO: See if this parameter should be configurable as input for run_tasks itself
-DOCUMENT_BATCH_SIZE = 10
 
 
 def override_run_tasks(new_gen):
@@ -62,6 +59,7 @@ async def run_tasks(
     pipeline_name: str = "unknown_pipeline",
     context: dict = None,
     incremental_loading: bool = False,
+    data_batch_size: int = 20,
 ):
     if not user:
         user = await get_default_user()
@@ -93,12 +91,12 @@ async def run_tasks(
 
         # Create and gather batches of async tasks of data items that will run the pipeline for the data item
         results = []
-        for start in range(0, len(data), DOCUMENT_BATCH_SIZE):
-            document_batch = data[start : start + DOCUMENT_BATCH_SIZE]
+        for start in range(0, len(data), data_batch_size):
+            data_batch = data[start : start + data_batch_size]
 
             data_item_tasks = [
                 asyncio.create_task(
-                    _run_tasks_data_item(
+                    run_tasks_data_item(
                         data_item,
                         dataset,
                         tasks,
@@ -110,7 +108,7 @@ async def run_tasks(
                         incremental_loading,
                     )
                 )
-                for data_item in document_batch
+                for data_item in data_batch
             ]
 
             results.extend(await asyncio.gather(*data_item_tasks))
