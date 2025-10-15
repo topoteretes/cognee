@@ -72,7 +72,7 @@ class RedisAdapter(CacheDBInterface):
         question: str,
         context: str,
         answer: str,
-        ttl: int | None = None,
+        ttl: int | None = 86400,
     ):
         """
         Add a Q/A/context triplet to a Redis list for this session.
@@ -100,7 +100,7 @@ class RedisAdapter(CacheDBInterface):
         if ttl is not None:
             await self.async_redis.expire(session_key, ttl)
 
-    async def get_latest_qa(self, user_id: str, session_id: str, last_n: int = 1):
+    async def get_latest_qa(self, user_id: str, session_id: str, last_n: int = 10):
         """
         Retrieve the most recent Q/A/context triplet(s) for the given session.
         """
@@ -142,7 +142,6 @@ async def main():
         "What is Redis?",
         "Basic DB context",
         "Redis is an in-memory data store.",
-        ttl=10,
     )
     await adapter.add_qa(
         user_id,
@@ -150,7 +149,6 @@ async def main():
         "Who created Redis?",
         "Historical context",
         "Salvatore Sanfilippo (antirez).",
-        ttl=10,
     )
 
     print("\nLatest QA:")
@@ -168,8 +166,7 @@ async def main():
         session_id,
         "What is Redis?",
         "Database context",
-        "Redis is an in-memory data store.",
-        ttl=3600,
+        "Redis is an in-memory data store."
     )
 
     await adapter.add_qa(
@@ -177,8 +174,7 @@ async def main():
         session_id,
         "Who created Redis?",
         "History context",
-        "Salvatore Sanfilippo (antirez).",
-        ttl=3600,
+        "Salvatore Sanfilippo (antirez)."
     )
 
     print(await adapter.get_all_qas(user_id, session_id))
