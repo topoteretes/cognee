@@ -59,7 +59,7 @@ async def run_tasks(
     pipeline_name: str = "unknown_pipeline",
     context: dict = None,
     incremental_loading: bool = False,
-    data_batch_size: int = 20,
+    data_per_batch: int = 20,
 ):
     if not user:
         user = await get_default_user()
@@ -91,8 +91,8 @@ async def run_tasks(
 
         # Create and gather batches of async tasks of data items that will run the pipeline for the data item
         results = []
-        for start in range(0, len(data), data_batch_size):
-            data_batch = data[start : start + data_batch_size]
+        for start in range(0, len(data), data_per_batch):
+            data_batch = data[start : start + data_per_batch]
 
             data_item_tasks = [
                 asyncio.create_task(

@@ -51,7 +51,7 @@ async def cognify(
     incremental_loading: bool = True,
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
-    data_batch_size: int = 20,
+    data_per_batch: int = 20,
 ):
     """
     Transform ingested data into a structured knowledge graph.
@@ -229,7 +229,7 @@ async def cognify(
         graph_db_config=graph_db_config,
         incremental_loading=incremental_loading,
         pipeline_name="cognify_pipeline",
-        data_batch_size=data_batch_size,
+        data_per_batch=data_per_batch,
     )
 
 
