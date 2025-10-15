@@ -13,6 +13,8 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.tasks.storage import add_data_points
 from cognee.modules.pipelines import run_tasks
 from cognee.modules.pipelines.tasks.task import Task
+import hashlib
+from uuid import UUID
 
 
 # -----------------------------
@@ -87,17 +89,22 @@ async def ontology_to_datapoints(triples: list[dict]) -> list[DataPoint]:
         # Create or reuse entities
         if subj not in entities:
             entities[subj] = OntologyEntity(
-                id=uuid4(),
+                 id=UUID(hashlib.md5(subj.encode()).hexdigest()),
                 name=_extract_label(subj),
                 uri=subj,
             )
 
         if obj not in entities:
-            entities[obj] = OntologyEntity(
-                id=uuid4(),
-                name=_extract_label(obj),
-                uri=obj,
-            )
+            # Only create entities for URI references, not literals
+            if t.get("object_type") == "URIRef":
+                 entities[obj] = OntologyEntity(
+                     id=uuid4(),
+                     name=_extract_label(obj),
+                     uri=obj,
+                 )
+            else:
+                # Handle literals as edge properties or skip creating entity
+                continue
 
         predicate_label = _extract_label(pred)
         edge = Edge(
