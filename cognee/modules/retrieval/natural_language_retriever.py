@@ -125,7 +125,7 @@ class NaturalLanguageRetriever(BaseRetriever):
 
         return await self._execute_cypher_query(query, graph_engine)
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
+    async def get_completion(self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None) -> Any:
         """
         Returns a completion based on the query and context.
 
@@ -139,6 +139,8 @@ class NaturalLanguageRetriever(BaseRetriever):
             - query (str): The natural language query to get a completion from.
             - context (Optional[Any]): The context in which to base the completion; if not
               provided, it will be retrieved using the query. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
 
         Returns:
         --------

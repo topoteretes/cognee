@@ -47,6 +47,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         self,
         query: str,
         context: Optional[List[Edge]] = None,
+        session_id: Optional[str] = None,
         context_extension_rounds=4,
     ) -> List[str]:
         """
@@ -64,6 +65,8 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             - query (str): The input query for which the completion is generated.
             - context (Optional[Any]): The existing context to use for enhancing the query; if
               None, it will be initialized from triplets generated for the query. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
             - context_extension_rounds: The maximum number of rounds to extend the context with
               new triplets before halting. (default 4)
 

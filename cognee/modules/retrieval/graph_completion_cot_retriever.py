@@ -58,6 +58,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         self,
         query: str,
         context: Optional[List[Edge]] = None,
+        session_id: Optional[str] = None,
         max_iter=4,
     ) -> List[str]:
         """
@@ -74,6 +75,8 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             - query (str): The user's query to be processed and answered.
             - context (Optional[Any]): Optional context that may assist in answering the query.
               If not provided, it will be fetched based on the query. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
             - max_iter: The maximum number of iterations to refine the answer and generate
               follow-up questions. (default 4)
 

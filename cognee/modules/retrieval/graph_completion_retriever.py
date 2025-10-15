@@ -148,6 +148,8 @@ class GraphCompletionRetriever(BaseGraphRetriever):
             - query (str): The query string for which a completion is generated.
             - context (Optional[Any]): Optional context to use for generating the completion; if
               not provided, context is retrieved based on the query. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
 
         Returns:
         --------

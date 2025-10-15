@@ -67,7 +67,7 @@ class CompletionRetriever(BaseRetriever):
             logger.error("DocumentChunk_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> str:
+    async def get_completion(self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None) -> str:
         """
         Generates an LLM completion using the context.
 
@@ -80,6 +80,8 @@ class CompletionRetriever(BaseRetriever):
             - query (str): The query string to be used for generating a completion.
             - context (Optional[Any]): Optional pre-fetched context to use for generating the
               completion; if None, it retrieves the context for the query. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
 
         Returns:
         --------

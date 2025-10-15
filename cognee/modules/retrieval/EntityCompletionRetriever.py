@@ -77,7 +77,7 @@ class EntityCompletionRetriever(BaseRetriever):
             logger.error(f"Context retrieval failed: {str(e)}")
             return None
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> List[str]:
+    async def get_completion(self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None) -> List[str]:
         """
         Generate completion using provided context or fetch new context.
 
@@ -91,6 +91,8 @@ class EntityCompletionRetriever(BaseRetriever):
             - query (str): The query string for which completion is being generated.
             - context (Optional[Any]): Optional context to be used for generating completion;
               fetched if not provided. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
 
         Returns:
         --------
