@@ -95,16 +95,11 @@ async def ontology_to_datapoints(triples: list[dict]) -> list[DataPoint]:
             )
 
         if obj not in entities:
-            # Only create entities for URI references, not literals
-            if t.get("object_type") == "URIRef":
-                 entities[obj] = OntologyEntity(
-                     id=uuid4(),
-                     name=_extract_label(obj),
-                     uri=obj,
-                 )
-            else:
-                # Handle literals as edge properties or skip creating entity
-                continue
+            entities[obj] = OntologyEntity(
+                 id=UUID(hashlib.md5(obj.encode()).hexdigest()),
+                name=_extract_label(obj),
+                uri=obj,
+            )
 
         predicate_label = _extract_label(pred)
         edge = Edge(
