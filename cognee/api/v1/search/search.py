@@ -8,6 +8,7 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.exceptions import DatasetNotFoundError
+from cognee.context_global_variables import set_session_user_context_variable
 
 
 async def search(
@@ -167,6 +168,8 @@ async def search(
 
     if user is None:
         user = await get_default_user()
+
+    await set_session_user_context_variable(user)
 
     # Transform string based datasets to UUID - String based datasets can only be found for current user
     if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
