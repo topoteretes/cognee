@@ -4,14 +4,16 @@ from uuid import NAMESPACE_OID, uuid5
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.users.methods import get_default_user
 from cognee.tasks.storage import add_data_points
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_graph_retriever import BaseGraphRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
-from cognee.modules.retrieval.utils.session_cache import save_to_session_cache
+from cognee.modules.retrieval.utils.session_cache import (
+    save_to_session_cache,
+    get_conversation_history,
+)
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.utils.extract_uuid_from_node import extract_uuid_from_node
 from cognee.modules.retrieval.utils.models import CogneeUserInteraction
@@ -168,6 +170,8 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         session_save = user_id and cache_config.caching
 
         if session_save:
+            conversation_history = await get_conversation_history(session_id=session_id)
+
             context_summary, completion = await asyncio.gather(
                 summarize_text(context_text),
                 generate_completion(
@@ -176,6 +180,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                     user_prompt_path=self.user_prompt_path,
                     system_prompt_path=self.system_prompt_path,
                     system_prompt=self.system_prompt,
+                    conversation_history=conversation_history,
                 ),
             )
         else:
