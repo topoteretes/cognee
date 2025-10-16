@@ -26,6 +26,7 @@ async def search(
     last_k: Optional[int] = 1,
     only_context: bool = False,
     use_combined_context: bool = False,
+    session_id: Optional[str] = None,
 ) -> Union[List[SearchResult], CombinedSearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -114,6 +115,8 @@ async def search(
 
         save_interaction: Save interaction (query, context, answer connected to triplet endpoints) results into the graph or not
 
+        session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
+
     Returns:
         list: Search results in format determined by query_type:
 
@@ -192,6 +195,7 @@ async def search(
         last_k=last_k,
         only_context=only_context,
         use_combined_context=use_combined_context,
+        session_id=session_id,
     )
 
     return filtered_search_results
