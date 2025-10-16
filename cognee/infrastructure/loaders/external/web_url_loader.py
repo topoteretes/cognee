@@ -3,6 +3,7 @@ from typing import List
 
 from cognee.modules.ingestion.exceptions.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
+from cognee.tasks.web_scraper.config import TavilyConfig, SoupCrawlerConfig
 
 
 class WebUrlLoader(LoaderInterface):
@@ -77,8 +78,11 @@ class WebUrlLoader(LoaderInterface):
             from cognee.context_global_variables import tavily_config, soup_crawler_config
             from cognee.tasks.web_scraper import fetch_page_content
 
-            _tavily_config = web_url_loader_config.get("tavily_config")
-            _soup_config = web_url_loader_config.get("soup_config")
+            tavily_dict = web_url_loader_config.get("tavily_config")
+            _tavily_config = TavilyConfig(**tavily_dict) if tavily_dict else None
+
+            soup_dict = web_url_loader_config.get("soup_config")
+            _soup_config = SoupCrawlerConfig(**soup_dict) if soup_dict else None
 
             # Set global configs for downstream access
             tavily_config.set(_tavily_config)
@@ -109,4 +113,6 @@ class WebUrlLoader(LoaderInterface):
         except IngestionError:
             raise
         except Exception as e:
-            raise IngestionError(message=f"Error ingesting webpage from URL {file_path}: {str(e)}")
+            raise IngestionError(
+                message=f"Error ingesting webpage from URL {file_path}: {str(e)}"
+            ) from e
