@@ -75,5 +75,10 @@ async def data_item_to_text_file(
             else:
                 raise IngestionError(message="Local files are not accepted.")
 
+        elif data_item_path.startswith(("http://", "https://")):
+            loader = get_loader_engine()
+            return await loader.load_file(data_item_path, preferred_loaders), loader.get_loader(
+                data_item_path, preferred_loaders
+            )
     # data is not a supported type
     raise IngestionError(message=f"Data type not supported: {type(data_item_path)}")

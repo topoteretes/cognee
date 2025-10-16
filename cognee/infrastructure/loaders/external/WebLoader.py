@@ -11,7 +11,7 @@ class WebLoader(LoaderInterface):
         Returns:
             List of extensions including the dot (e.g., ['.txt', '.md'])
         """
-        raise NotImplementedError
+        return []  # N/A, we can safely return empty since it's used in register and get_loader_info, doesn't reflect on functionality
 
     @property
     def supported_mime_types(self) -> List[str]:
@@ -21,7 +21,7 @@ class WebLoader(LoaderInterface):
         Returns:
             List of MIME type strings (e.g., ['text/plain', 'application/pdf'])
         """
-        raise NotImplementedError
+        return []  # N/A, we can safely return empty since it's used in register and get_loader_info, doesn't reflect on functionality
 
     @property
     def loader_name(self) -> str:

@@ -38,6 +38,9 @@ def get_data_file_path(file_path: str):
 
         return normalized_url
 
+    elif file_path.startswith(("http://", "https://")):
+        return file_path
+
     else:
         # Regular file path - normalize separators
         normalized_path = os.path.normpath(file_path)
