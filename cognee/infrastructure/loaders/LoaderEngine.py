@@ -76,8 +76,15 @@ class LoaderEngine:
         Returns:
             LoaderInterface that can handle the file, or None if not found
         """
+        is_url = data_item_path.startswith(("http://", "https://"))
 
-        file_info = filetype.guess(data_item_path)
+        if is_url:
+            extension = None
+            mime_type = None
+        else:
+            file_info = filetype.guess(data_item_path)
+            extension = file_info.extension if file_info else None
+            mime_type = file_info.mime if file_info else None
 
         # Try preferred loaders first
         if preferred_loaders:
@@ -85,8 +92,8 @@ class LoaderEngine:
                 if loader_name in self._loaders:
                     loader = self._loaders[loader_name]
                     if loader.can_handle(
-                        extension=file_info.extension,
-                        mime_type=file_info.mime,
+                        extension=extension,
+                        mime_type=mime_type,
                         data_item_path=data_item_path,
                     ):  # TODO: I'd like to refactor this to be just one argument and let loaders get file_info inside, but I'll keep that until review time
                         return loader
@@ -99,7 +106,7 @@ class LoaderEngine:
         ):  # TODO: I'm in favor of adding WebUrlLoader to defaults, but keeping it for review
             if loader_name in self._loaders:
                 loader = self._loaders[loader_name]
-                if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
+                if loader.can_handle(extension=extension, mime_type=mime_type):
                     return loader
             else:
                 logger.info(

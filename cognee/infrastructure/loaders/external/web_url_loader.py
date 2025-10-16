@@ -1,4 +1,4 @@
-from cognee.infrastructure.loaders import LoaderInterface
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from typing import List
 
 from cognee.modules.ingestion.exceptions.exceptions import IngestionError
