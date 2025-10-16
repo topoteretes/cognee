@@ -58,7 +58,7 @@ class CacheDBInterface(ABC):
         pass
 
     @abstractmethod
-    async def get_latest_qa(self, user_id: str, session_id: str, last_n: int = 10):
+    async def get_latest_qa(self, user_id: str, session_id: str, last_n: int = 5):
         """
         Retrieve the most recent Q/A/context triplets for a session.
         """

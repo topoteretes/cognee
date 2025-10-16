@@ -157,7 +157,7 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
-    async def get_latest_qa(self, user_id: str, session_id: str, last_n: int = 10):
+    async def get_latest_qa(self, user_id: str, session_id: str, last_n: int = 5):
         """
         Retrieve the most recent Q/A/context triplet(s) for the given session.
         """
