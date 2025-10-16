@@ -5,10 +5,12 @@
 #include <stdexcept>
 #include <cmath>
 #include <algorithm>
+#include <map>
 #include "custom_types.h"
 #include "logger.h"
 
 namespace MathUtils {
+
     /**
      * Basic calculator class for testing C++ dependency extraction
      */
@@ -19,7 +21,6 @@ namespace MathUtils {
 
     public:
         Calculator(std::shared_ptr<Logger> log) : result(0), logger(log) {}
-
         virtual ~Calculator() {}
 
         /**
@@ -180,6 +181,7 @@ namespace MathUtils {
 }
 
 namespace DataStructures {
+
     /**
      * Interface for data storage operations
      */
@@ -235,6 +237,7 @@ namespace DataStructures {
 }
 
 namespace Utilities {
+
     /**
      * Static utility functions
      */
@@ -248,7 +251,7 @@ namespace Utilities {
             if (number <= 1) return false;
             if (number <= 3) return true;
             if (number % 2 == 0 || number % 3 == 0) return false;
-
+            
             for (int i = 5; i * i <= number; i += 6) {
                 if (number % i == 0 || number % (i + 2) == 0)
                     return false;
@@ -259,7 +262,7 @@ namespace Utilities {
         static std::vector<int> getFibonacci(int count) {
             std::vector<int> result;
             if (count <= 0) return result;
-
+            
             int a = 0, b = 1;
             for (int i = 0; i < count; i++) {
                 result.push_back(a);
