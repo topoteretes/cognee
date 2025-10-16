@@ -23,3 +23,10 @@ try:
     supported_loaders[AdvancedPdfLoader.loader_name] = AdvancedPdfLoader
 except ImportError:
     pass
+
+try:
+    from cognee.infrastructure.loaders.external import WebUrlLoader
+
+    supported_loaders[WebUrlLoader.loader_name] = WebUrlLoader
+except ImportError:
+    pass

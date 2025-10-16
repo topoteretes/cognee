@@ -44,7 +44,9 @@ class LoaderInterface(ABC):
         pass
 
     @abstractmethod
-    def can_handle(self, extension: str, mime_type: str) -> bool:
+    def can_handle(
+        self, extension: str, mime_type: str, data_item_path: str = None
+    ) -> bool:  # TODO: Temporarily set this to default to None so that I don't update other loaders unnecessarily yet, see TODO in LoaderEngine.py
         """
         Check if this loader can handle the given file.
 
