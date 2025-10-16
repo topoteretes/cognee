@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Set
 from typing import AsyncGenerator, Optional, List
 from uuid import NAMESPACE_OID, uuid5
-
 from cognee.infrastructure.engine import DataPoint
 from cognee.shared.CodeGraphEntities import CodeFile, Repository
 
@@ -34,210 +33,241 @@ async def get_source_code_files(
     Retrieve Python source code files from the specified repository path.
 
     This function scans the given repository path for files that have the .py extension
-    while excluding test files and files within a virtual environment. It returns a list of
-    absolute paths to the source code files that are not empty.
+    and yields those files as data points, along with their content, for further processing.
 
-    Parameters:
-    -----------
-    - repo_path: Root path of the repository to search
-    - language_config: dict mapping language names to file extensions, e.g.,
-            {'python': ['.py'], 'javascript': ['.js', '.jsx'], ...}
-    - excluded_paths: Optional list of path fragments or glob patterns to exclude
+    Args:
+        repo_path: The directory to search for source code files.
+        language_config: Dictionary mapping language names to file extensions.
+        excluded_paths: List of paths to exclude from scanning.
 
-    Returns:
-    --------
-        A list of (absolute_path, language) tuples for source code files.
+    Yields:
+        File information and content as DataPoints.
+
+    Example:
+        repo_path = Path("/path/to/repo")
+        async for files_data in get_source_code_files(repo_path):
+            print(files_data)
     """
-
-    def _get_language_from_extension(file, language_config):
-        for lang, exts in language_config.items():
-            for ext in exts:
-                if file.endswith(ext):
-                    return lang
-        return None
-
-    # Default config if not provided
+    # default language_config if none is provided
     if language_config is None:
-        language_config = {
-            "python": [".py"],
-            "javascript": [".js", ".jsx"],
-            "typescript": [".ts", ".tsx"],
-            "java": [".java"],
-            "csharp": [".cs"],
-            "go": [".go"],
-            "rust": [".rs"],
-            "cpp": [".cpp", ".c", ".h", ".hpp"],
-        }
+        language_config = {"Python": [".py"]}
 
-    if not os.path.exists(repo_path):
-        return []
+    repo_path = Path(repo_path).resolve()
 
-    source_code_files = set()
-    for root, _, files in os.walk(repo_path):
-        for file in files:
-            lang = _get_language_from_extension(file, language_config)
-            if lang is None:
+    # get the allowed extensions from the language_config
+    allowed_extensions = set()
+    for extensions in language_config.values():
+        allowed_extensions.update(extensions)
+
+    # build a set of user-specified excluded paths (absolute)
+    user_excluded = set()
+    if excluded_paths:
+        for ep in excluded_paths:
+            ep_abs = (repo_path / ep).resolve()
+            user_excluded.add(ep_abs)
+
+    # Default language configuration with all supported languages
+    language_config = {
+        "Python": [".py"],
+        "C#": [".cs"],
+        "C++": [".cpp", ".c", ".h", ".hpp", ".cc", ".cxx"],
+    }
+
+    def should_exclude_path(path: Path) -> bool:
+        """
+        Return True if the given path (file or dir) should be skipped.
+        Checks both standard EXCLUDED_DIRS and user-provided excluded_paths.
+        """
+        # check against user excluded paths
+        path_resolved = path.resolve()
+        if path_resolved in user_excluded:
+            return True
+
+        # check against standard EXCLUDED_DIRS
+        for part in path.parts:
+            if part in EXCLUDED_DIRS:
+                return True
+        return False
+
+    for root, dirs, files in os.walk(repo_path, topdown=True):
+        # Modify dirs in-place to skip excluded directories
+        dirs[:] = [d for d in dirs if not should_exclude_path(Path(root) / d)]
+
+        for file_name in files:
+            file_path = Path(root) / file_name
+
+            # skip if the file itself is in an excluded path
+            if should_exclude_path(file_path):
                 continue
-            # Exclude tests, common build/venv directories and files provided in exclude_paths
-            excluded_dirs = EXCLUDED_DIRS
-            excluded_paths = {Path(p).resolve() for p in (excluded_paths or [])}  # full paths
 
-            root_path = Path(root).resolve()
-            root_parts = set(root_path.parts)  # same as before
-            base_name, _ext = os.path.splitext(file)
-            if (
-                base_name.startswith("test_")
-                or base_name.endswith("_test")
-                or ".test." in file
-                or ".spec." in file
-                or (excluded_dirs & root_parts)  # name match
-                or any(
-                    root_path.is_relative_to(p)  # full-path match
-                    for p in excluded_paths
+            if not any(file_name.endswith(ext) for ext in allowed_extensions):
+                continue
+
+            try:
+                with open(file_path, "r", encoding="utf-8") as file:
+                    file_content = file.read()
+
+                yield DataPoint(
+                    data={
+                        "relative_path": str(file_path.relative_to(repo_path)),
+                        "file_name": file_name,
+                        "file_content": file_content,
+                    },
                 )
-            ):
-                continue
-            file_path = os.path.abspath(os.path.join(root, file))
-            if os.path.getsize(file_path) == 0:
-                continue
-            source_code_files.add((file_path, lang))
 
-    return sorted(list(source_code_files))
+            except (UnicodeDecodeError, FileNotFoundError, PermissionError) as e:
+                print(f"Skipping {file_path}: {e}")
 
 
-def run_coroutine(coroutine_func, *args, **kwargs):
+def get_repo_id(repo_name: str) -> str:
     """
-    Run a coroutine function until it completes.
+    Generate a unique repository ID using UUID5.
+    """
+    return str(uuid5(NAMESPACE_OID, repo_name))
 
-    This function creates a new asyncio event loop, sets it as the current loop, and
-    executes the given coroutine function with the provided arguments. Once the coroutine
-    completes, the loop is closed. Intended for use in environments where an existing event
-    loop is not available or desirable.
 
-    Parameters:
-    -----------
+async def process_files_in_chunks(
+    repo_name: str,
+    file_generator: AsyncGenerator[DataPoint, None],
+    chunk_size: int = 10,
+):
+    """
+    Processes files from the file_generator in chunks of chunk_size.
 
-        - coroutine_func: The coroutine function to be run.
-        - *args: Positional arguments to pass to the coroutine function.
-        - **kwargs: Keyword arguments to pass to the coroutine function.
+    Args:
+        repo_name: Name of the repository
+        file_generator: AsyncGenerator that yields DataPoints with file info
+        chunk_size: Number of files to process in each chunk
+
+    Yields:
+        Chunks of CodeFile objects (via DataPoint)
+    """
+    chunk = []
+    async for file_data_point in file_generator:
+        chunk.append(file_data_point)
+        if len(chunk) >= chunk_size:
+            yield DataPoint(
+                data=await process_file_chunk(repo_name, chunk),
+            )
+            chunk = []
+
+    # process remaining files in the last incomplete chunk
+    if chunk:
+        yield DataPoint(
+            data=await process_file_chunk(repo_name, chunk),
+        )
+
+
+async def process_file_chunk(repo_name: str, chunk: list[DataPoint]) -> list[CodeFile]:
+    """
+    Processes a single chunk of files, extracting dependencies.
+
+    Args:
+        repo_name: Name of the repository
+        chunk: List of DataPoints containing file information
 
     Returns:
-    --------
-
-        The result returned by the coroutine after completion.
+        List of CodeFile objects with extracted dependencies
     """
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    result = loop.run_until_complete(coroutine_func(*args, **kwargs))
-    loop.close()
-    return result
+    # Python dependency extractor
+    from .get_local_dependencies import get_local_script_dependencies
+    # C# dependency extractor
+    from .get_csharp_dependencies import get_csharp_script_dependencies
+    # C++ dependency extractor
+    from .get_cpp_dependencies import get_cpp_script_dependencies
+
+    tasks = []
+    for file_data_point in chunk:
+        file_data = file_data_point.data
+        file_path = Path(file_data["relative_path"])
+        file_name = file_data["file_name"]
+        file_content = file_data["file_content"]
+
+        # Determine file language based on extension
+        if file_name.endswith(".py"):
+            # Python file - use existing extractor
+            tasks.append(
+                get_local_script_dependencies(
+                    file_path=file_path,
+                    file_content=file_content,
+                )
+            )
+        elif file_name.endswith(".cs"):
+            # C# file - use new C# extractor
+            tasks.append(
+                asyncio.to_thread(
+                    get_csharp_script_dependencies,
+                    file_path=file_path,
+                    file_content=file_content,
+                )
+            )
+        elif any(file_name.endswith(ext) for ext in [".cpp", ".c", ".h", ".hpp", ".cc", ".cxx"]):
+            # C++ file - use new C++ extractor
+            tasks.append(
+                asyncio.to_thread(
+                    get_cpp_script_dependencies,
+                    file_path=file_path,
+                    file_content=file_content,
+                )
+            )
+        else:
+            # Unsupported language - create minimal CodeFile
+            tasks.append(
+                asyncio.to_thread(
+                    lambda fp=file_path, fn=file_name: CodeFile(
+                        file_path=str(fp),
+                        file_name=fn,
+                        code_parts=[],
+                        dependencies=[],
+                    )
+                )
+            )
+
+    results = await asyncio.gather(*tasks)
+    return results
 
 
 async def get_repo_file_dependencies(
-    repo_path: str,
-    detailed_extraction: bool = False,
-    supported_languages: list = None,
-    excluded_paths: Optional[List[str]] = None,
+    dataset: AsyncGenerator[DataPoint, None],
+    batch_size: int = 10,
 ) -> AsyncGenerator[DataPoint, None]:
     """
-    Generate a dependency graph for source files (multi-language) in the given repository path.
+    Extracts file dependencies from a dataset of repository files.
 
-    Check the validity of the repository path and yield a repository object followed by the
-    dependencies of source files within that repository. Raise a FileNotFoundError if the
-    provided path does not exist. The extraction of detailed dependencies can be controlled
-    via the `detailed_extraction` argument. Languages considered can be restricted via
-    the `supported_languages` argument.
+    Args:
+        dataset: AsyncGenerator of DataPoints, each containing repository metadata
+        batch_size: Number of files to process in each batch
 
-    Parameters:
-    -----------
-
-        - repo_path (str): The file path to the repository to process.
-        - detailed_extraction (bool): Whether to perform a detailed extraction of code parts.
-        - supported_languages (list | None): Subset of languages to include; if None, use defaults.
+    Yields:
+        DataPoint containing Repository object with processed files
     """
+    async for data_point in dataset:
+        # unpack data from the incoming data_point
+        repo_name = data_point.data["repo_name"]
+        repo_path = data_point.data["repo_path"]
+        excluded_paths = data_point.data.get("excluded_paths", None)
+        language_config = data_point.data.get("language_config", None)
 
-    if isinstance(repo_path, list) and len(repo_path) == 1:
-        repo_path = repo_path[0]
+        repo_id = get_repo_id(repo_name)
 
-    if not os.path.exists(repo_path):
-        raise FileNotFoundError(f"Repository path {repo_path} does not exist.")
-
-    # Build language config from supported_languages
-    default_language_config = {
-        "python": [".py"],
-        "javascript": [".js", ".jsx"],
-        "typescript": [".ts", ".tsx"],
-        "java": [".java"],
-        "csharp": [".cs"],
-        "go": [".go"],
-        "rust": [".rs"],
-        "cpp": [".cpp", ".c", ".h", ".hpp"],
-        "c": [".c", ".h"],
-    }
-    if supported_languages is not None:
-        language_config = {
-            k: v for k, v in default_language_config.items() if k in supported_languages
-        }
-    else:
-        language_config = default_language_config
-
-    source_code_files = await get_source_code_files(
-        repo_path, language_config=language_config, excluded_paths=excluded_paths
-    )
-
-    repo = Repository(
-        id=uuid5(NAMESPACE_OID, repo_path),
-        path=repo_path,
-    )
-
-    yield repo
-
-    chunk_size = 100
-    number_of_chunks = math.ceil(len(source_code_files) / chunk_size)
-    chunk_ranges = [
-        (
-            chunk_number * chunk_size,
-            min((chunk_number + 1) * chunk_size, len(source_code_files)) - 1,
+        file_generator = get_source_code_files(
+            repo_path,
+            language_config=language_config,
+            excluded_paths=excluded_paths,
         )
-        for chunk_number in range(number_of_chunks)
-    ]
 
-    # Import dependency extractors for each language (Python for now, extend later)
-    from cognee.tasks.repo_processor.get_local_dependencies import get_local_script_dependencies
-    import aiofiles
-    # TODO: Add other language extractors here
+        # process files in chunks
+        all_files = []
+        async for chunk_data_point in process_files_in_chunks(
+            repo_name, file_generator, batch_size
+        ):
+            all_files.extend(chunk_data_point.data)
 
-    for start_range, end_range in chunk_ranges:
-        tasks = []
-        for file_path, lang in source_code_files[start_range : end_range + 1]:
-            # For now, only Python is supported; extend with other languages
-            if lang == "python":
-                tasks.append(
-                    get_local_script_dependencies(repo_path, file_path, detailed_extraction)
-                )
-            else:
-                # Placeholder: create a minimal CodeFile for other languages
-                async def make_codefile_stub(file_path=file_path, lang=lang):
-                    async with aiofiles.open(
-                        file_path, "r", encoding="utf-8", errors="replace"
-                    ) as f:
-                        source = await f.read()
-                    return CodeFile(
-                        id=uuid5(NAMESPACE_OID, file_path),
-                        name=os.path.relpath(file_path, repo_path),
-                        file_path=file_path,
-                        language=lang,
-                        source_code=source,
-                    )
+        repository = Repository(
+            id=repo_id,
+            name=repo_name,
+            path=str(repo_path),
+            files=all_files,
+        )
 
-                tasks.append(make_codefile_stub())
-
-        results: list[CodeFile] = await asyncio.gather(*tasks)
-
-        for source_code_file in results:
-            source_code_file.part_of = repo
-            if getattr(
-                source_code_file, "language", None
-            ) is None and source_code_file.file_path.endswith(".py"):
-                source_code_file.language = "python"
-            yield source_code_file
+        yield DataPoint(data=repository)
