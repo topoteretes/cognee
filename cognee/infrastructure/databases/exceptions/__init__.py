@@ -11,4 +11,5 @@ from .exceptions import (
     EmbeddingException,
     MissingQueryParameterError,
     MutuallyExclusiveQueryParametersError,
+    CacheConnectionError,
 )

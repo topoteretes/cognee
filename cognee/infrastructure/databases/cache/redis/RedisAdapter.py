@@ -3,8 +3,12 @@ import redis
 import redis.asyncio as aioredis
 from contextlib import contextmanager
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
+from cognee.infrastructure.databases.exceptions import CacheConnectionError
+from cognee.shared.logging_utils import get_logger
 from datetime import datetime
 import json
+
+logger = get_logger("RedisAdapter")
 
 
 class RedisAdapter(CacheDBInterface):
@@ -17,15 +21,53 @@ class RedisAdapter(CacheDBInterface):
         password=None,
         timeout=240,
         blocking_timeout=300,
+        connection_timeout=30,
     ):
         super().__init__(host, port, lock_name)
 
-        self.sync_redis = redis.Redis(host=host, port=port, username=username, password=password)
-        self.async_redis = aioredis.Redis(
-            host=host, port=port, username=username, password=password, decode_responses=True
-        )
-        self.timeout = timeout
-        self.blocking_timeout = blocking_timeout
+        self.host = host
+        self.port = port
+        self.connection_timeout = connection_timeout
+        
+        try:
+            self.sync_redis = redis.Redis(
+                host=host, 
+                port=port, 
+                username=username, 
+                password=password,
+                socket_connect_timeout=connection_timeout,
+                socket_timeout=connection_timeout,
+            )
+            self.async_redis = aioredis.Redis(
+                host=host, 
+                port=port, 
+                username=username, 
+                password=password, 
+                decode_responses=True,
+                socket_connect_timeout=connection_timeout,
+            )
+            self.timeout = timeout
+            self.blocking_timeout = blocking_timeout
+            
+            # Validate connection on initialization
+            self._validate_connection()
+            logger.info(f"Successfully connected to Redis at {host}:{port}")
+            
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Failed to connect to Redis at {host}:{port}: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error initializing Redis adapter: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+    
+    def _validate_connection(self):
+        """Validate Redis connection is available."""
+        try:
+            self.sync_redis.ping()
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            raise CacheConnectionError(f"Cannot connect to Redis at {self.host}:{self.port}: {str(e)}") from e
 
     def acquire_lock(self):
         """
@@ -85,20 +127,33 @@ class RedisAdapter(CacheDBInterface):
             context: Context used to answer.
             answer: Assistant answer text.
             ttl: Optional time-to-live (seconds). If provided, the session expires after this time.
+            
+        Raises:
+            CacheConnectionError: If Redis connection fails or times out.
         """
-        session_key = f"agent_sessions:{user_id}:{session_id}"
+        try:
+            session_key = f"agent_sessions:{user_id}:{session_id}"
 
-        qa_entry = {
-            "time": datetime.utcnow().isoformat(),
-            "question": question,
-            "context": context,
-            "answer": answer,
-        }
+            qa_entry = {
+                "time": datetime.utcnow().isoformat(),
+                "question": question,
+                "context": context,
+                "answer": answer,
+            }
 
-        await self.async_redis.rpush(session_key, json.dumps(qa_entry))
+            await self.async_redis.rpush(session_key, json.dumps(qa_entry))
 
-        if ttl is not None:
-            await self.async_redis.expire(session_key, ttl)
+            if ttl is not None:
+                await self.async_redis.expire(session_key, ttl)
+                
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while adding Q&A: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while adding Q&A to Redis: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
 
     async def get_latest_qa(self, user_id: str, session_id: str, last_n: int = 10):
         """
