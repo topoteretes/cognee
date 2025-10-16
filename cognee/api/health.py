@@ -189,12 +189,12 @@ class HealthChecker:
         start_time = time.time()
         try:
             from cognee.infrastructure.llm.config import get_llm_config
-            from cognee.infrastructure.llm import LLMGateway
 
             config = get_llm_config()
 
-            # Test actual API connection with minimal request
-            LLMGateway.show_prompt("test", "test.txt")
+            from cognee.infrastructure.llm.utils import test_llm_connection
+
+            await test_llm_connection()
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
@@ -217,13 +217,9 @@ class HealthChecker:
         """Check embedding service health (non-critical)."""
         start_time = time.time()
         try:
-            from cognee.infrastructure.databases.vector.embeddings.get_embedding_engine import (
-                get_embedding_engine,
-            )
+            from cognee.infrastructure.llm.utils import test_embedding_connection
 
-            # Test actual embedding generation with minimal text
-            engine = get_embedding_engine()
-            await engine.embed_text(["test"])
+            await test_embedding_connection()
 
             response_time = int((time.time() - start_time) * 1000)
             return ComponentHealth(
@@ -244,16 +240,6 @@ class HealthChecker:
     async def get_health_status(self, detailed: bool = False) -> HealthResponse:
         """Get comprehensive health status."""
         components = {}
-
-        # Critical services
-        critical_components = [
-            "relational_db",
-            "vector_db",
-            "graph_db",
-            "file_storage",
-            "llm_provider",
-            "embedding_service",
-        ]
 
         critical_checks = [
             ("relational_db", self.check_relational_db()),
@@ -300,11 +286,11 @@ class HealthChecker:
                 else:
                     components[name] = result
 
+        critical_comps = [check[0] for check in critical_checks]
         # Determine overall status
         critical_unhealthy = any(
-            comp.status == HealthStatus.UNHEALTHY
+            comp.status == HealthStatus.UNHEALTHY and name in critical_comps
             for name, comp in components.items()
-            if name in critical_components
         )
 
         has_degraded = any(comp.status == HealthStatus.DEGRADED for comp in components.values())

@@ -6,8 +6,12 @@ on:
 permissions:
   contents: read
 
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+
 jobs:
-  test-gemini:
+  test-s3-storage:
     name: Run S3 File Storage Test
     runs-on: ubuntu-22.04
     steps:

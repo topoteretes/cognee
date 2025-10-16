@@ -54,6 +54,10 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
+
       - name: Run Neo4j Example
         env:
           ENV: dev
@@ -66,9 +70,9 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPH_DATABASE_PROVIDER: "neo4j"
-          GRAPH_DATABASE_URL: ${{ secrets.NEO4J_API_URL }}
-          GRAPH_DATABASE_USERNAME: "neo4j"
-          GRAPH_DATABASE_PASSWORD: ${{ secrets.NEO4J_API_KEY }}
+          GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
+          GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
+          GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
         run: |
           uv run python examples/database_examples/neo4j_example.py
 
