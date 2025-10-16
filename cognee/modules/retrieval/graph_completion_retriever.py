@@ -19,6 +19,7 @@ from cognee.modules.engine.models.node_set import NodeSet
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
+
 logger = get_logger("GraphCompletionRetriever")
 
 

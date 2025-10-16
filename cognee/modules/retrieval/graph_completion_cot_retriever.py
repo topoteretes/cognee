@@ -150,7 +150,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         cache_config = CacheConfig()
         user = session_user.get()
         user_id = getattr(user, "id", None)
-        
+
         if user_id and cache_config.caching:
             context_summary = await summarize_text(context_text)
             await save_to_session_cache(
