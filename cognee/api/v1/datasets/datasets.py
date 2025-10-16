@@ -13,7 +13,7 @@ from cognee.modules.users.models import User
 class datasets:
     @staticmethod
     async def list_datasets(user: Optional[User] = None):
-        if user == None:
+        if user is None:
             user = await get_default_user()
 
         return await get_authorized_existing_datasets([], "read", user)

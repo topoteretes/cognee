@@ -17,7 +17,6 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
     get_ontology_resolver_from_env,
 )
 from cognee.modules.users.models import User
-from cognee.modules.users.methods import get_default_user
 
 from cognee.tasks.documents import (
     check_permissions_on_dataset,

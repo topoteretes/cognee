@@ -8,6 +8,7 @@ from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.api.v1.datasets.datasets import datasets as cognee_datasets
 from cognee.modules.data.methods import get_datasets_by_name
 from cognee.modules.data.methods.get_deletion_counts import get_deletion_counts
+from cognee.modules.users.methods import get_default_user, get_user
 
 
 class DeleteCommand(SupportsCliCommand):
@@ -127,7 +128,12 @@ Be careful with deletion operations as they are irreversible.
                                 "No user ID provided for deletion. Please specify using --user-id param."
                             )
 
-                        await cognee_datasets.delete_dataset(dataset_id=dataset_id, user=args.user)
+                        if not args.user_id:
+                            user = await get_default_user()
+                        else:
+                            user = await get_user(args.user_id)
+
+                        await cognee_datasets.delete_dataset(dataset_id=dataset_id, user=user)
                     elif hasattr(args, "dataset_id") and hasattr(args, "data_id"):
                         await cognee_datasets.delete_data(args.dataset_id, args.data_id)
                 except Exception as e:
