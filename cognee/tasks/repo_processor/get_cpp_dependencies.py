@@ -4,13 +4,16 @@ from pathlib import Path
 from typing import Optional
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart, Dependency, DependencyType
 
-
 class CppFileParser:
     """Parse C++ files using tree-sitter."""
     
-    def __init__(self):
-        self.language = Language(tscpp.language())
-        self.parser = Parser(self.language)
+    def __init__(self, language_config=None):
+        if language_config is None:
+            self.language = Language(tscpp.language())
+        else:
+            self.language = language_config
+        self.parser = Parser()
+        self.parser.set_language(self.language)
     
     def parse_file(self, file_path: Path, file_content: str) -> Optional[Node]:
         """Parse C++ file and return AST root node."""
@@ -20,7 +23,6 @@ class CppFileParser:
         except Exception as e:
             print(f"Error parsing C++ file {file_path}: {e}")
             return None
-
 
 def extract_cpp_code_parts(root_node: Node, file_content: str, file_path: Path) -> tuple[list[CodePart], list[Dependency]]:
     """Extract includes, classes, functions, and namespaces from C++ AST."""
@@ -121,17 +123,18 @@ def extract_cpp_code_parts(root_node: Node, file_content: str, file_path: Path) 
     traverse(root_node)
     return code_parts, dependencies
 
-
-def get_cpp_script_dependencies(file_path: Path, file_content: str) -> CodeFile:
+def get_cpp_script_dependencies(file_path: Path, file_content: str, language_config=None) -> CodeFile:
     """Extract dependencies and code structure from C++ file."""
-    parser = CppFileParser()
+    parser = CppFileParser(language_config)
     root_node = parser.parse_file(file_path, file_content)
     
     if root_node is None:
         # Return minimal CodeFile if parsing fails
         return CodeFile(
+            name=file_path.name,
             file_path=str(file_path),
-            file_name=file_path.name,
+            language="cpp",
+            source_code=file_content,
             code_parts=[],
             dependencies=[],
         )
@@ -139,8 +142,10 @@ def get_cpp_script_dependencies(file_path: Path, file_content: str) -> CodeFile:
     code_parts, dependencies = extract_cpp_code_parts(root_node, file_content, file_path)
     
     return CodeFile(
+        name=file_path.name,
         file_path=str(file_path),
-        file_name=file_path.name,
+        language="cpp",
+        source_code=file_content,
         code_parts=code_parts,
         dependencies=dependencies,
     )
