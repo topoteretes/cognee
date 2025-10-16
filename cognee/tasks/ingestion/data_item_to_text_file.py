@@ -34,7 +34,9 @@ async def pull_from_s3(file_path, destination_file) -> None:
 
 
 async def data_item_to_text_file(
-    data_item_path: str, preferred_loaders: List[str]
+    data_item_path: str,
+    preferred_loaders: List[str],
+    loaders_config: dict[LoaderInterface, dict],
 ) -> Tuple[str, LoaderInterface]:
     if isinstance(data_item_path, str):
         parsed_url = urlparse(data_item_path)
@@ -77,8 +79,13 @@ async def data_item_to_text_file(
 
         elif data_item_path.startswith(("http://", "https://")):
             loader = get_loader_engine()
-            return await loader.load_file(data_item_path, preferred_loaders), loader.get_loader(
-                data_item_path, preferred_loaders
+            return (
+                await loader.load_file(
+                    data_item_path,
+                    preferred_loaders,
+                    loaders_config,  # TODO: right now loaders_config is only needed for web_url_loader, so keeping changes minimal
+                ),
+                loader.get_loader(data_item_path, preferred_loaders),
             )
     # data is not a supported type
     raise IngestionError(message=f"Data type not supported: {type(data_item_path)}")

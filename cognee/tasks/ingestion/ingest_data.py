@@ -3,6 +3,7 @@ import inspect
 from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 
+from cognee.infrastructure.loaders import LoaderInterface
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
@@ -28,6 +29,7 @@ async def ingest_data(
     node_set: Optional[List[str]] = None,
     dataset_id: UUID = None,
     preferred_loaders: List[str] = None,
+    loaders_config: dict[LoaderInterface, dict] = {},
 ):
     if not user:
         user = await get_default_user()
@@ -85,7 +87,9 @@ async def ingest_data(
 
             # Store all input data as text files in Cognee data storage
             cognee_storage_file_path, loader_engine = await data_item_to_text_file(
-                actual_file_path, preferred_loaders
+                actual_file_path,
+                preferred_loaders,
+                loaders_config,
             )
 
             # Find metadata from original file

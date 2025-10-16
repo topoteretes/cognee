@@ -48,7 +48,9 @@ class WebUrlLoader(LoaderInterface):
             True if this loader can process the file, False otherwise
         """
         if data_item_path is None:
-            raise  # TODO: Temporarily set this to default to None so that I don't update other loaders unnecessarily yet, see TODO in LoaderEngine.py
+            raise IngestionError(
+                "data_item_path should not be None"
+            )  # TODO: Temporarily set this to default to None so that I don't update other loaders unnecessarily yet, see TODO in LoaderEngine.py
         return data_item_path.startswith(("http://", "https://"))
 
     async def load(self, file_path: str, **kwargs):
@@ -63,18 +65,31 @@ class WebUrlLoader(LoaderInterface):
         Raises:
             Exception: If file cannot be processed
         """
+        loaders_config = kwargs.get("loaders_config")
+        if not isinstance(loaders_config, dict):
+            raise IngestionError("loaders_config must be a valid dictionary")
+
+        web_url_loader_config = loaders_config.get(self.loader_name)
+        if not isinstance(web_url_loader_config, dict):
+            raise IngestionError(f"{self.loader_name} configuration must be a valid dictionary")
+
         try:
             from cognee.context_global_variables import tavily_config, soup_crawler_config
             from cognee.tasks.web_scraper import fetch_page_content
 
-            tavily = tavily_config.get()
-            soup_crawler = soup_crawler_config.get()
-            preferred_tool = "beautifulsoup" if soup_crawler else "tavily"
-            if preferred_tool == "tavily" and tavily is None:
+            _tavily_config = web_url_loader_config.get("tavily_config")
+            _soup_config = web_url_loader_config.get("soup_config")
+
+            # Set global configs for downstream access
+            tavily_config.set(_tavily_config)
+            soup_crawler_config.set(_soup_config)
+
+            preferred_tool = "beautifulsoup" if _soup_config else "tavily"
+            if preferred_tool == "tavily" and _tavily_config is None:
                 raise IngestionError(
                     message="TavilyConfig must be set on the ingestion context when fetching HTTP URLs without a SoupCrawlerConfig."
                 )
-            if preferred_tool == "beautifulsoup" and soup_crawler is None:
+            if preferred_tool == "beautifulsoup" and _soup_config is None:
                 raise IngestionError(
                     message="SoupCrawlerConfig must be set on the ingestion context when using the BeautifulSoup scraper."
                 )
@@ -82,8 +97,8 @@ class WebUrlLoader(LoaderInterface):
             data = await fetch_page_content(
                 file_path,
                 preferred_tool=preferred_tool,
-                tavily_config=tavily,
-                soup_crawler_config=soup_crawler,
+                tavily_config=_tavily_config,
+                soup_crawler_config=_soup_config,
             )
             content = ""
             for key, value in data.items():
@@ -94,7 +109,4 @@ class WebUrlLoader(LoaderInterface):
         except IngestionError:
             raise
         except Exception as e:
-            raise IngestionError(
-                message=f"Error ingesting webpage results of url {file_path}: {str(e)}"
-            )
-        raise NotImplementedError
+            raise IngestionError(message=f"Error ingesting webpage from URL {file_path}: {str(e)}")

@@ -3,6 +3,7 @@ import os
 from typing import Union, BinaryIO, List, Optional, Dict, Any
 from pydantic import BaseModel
 from urllib.parse import urlparse
+from cognee.infrastructure.loaders import LoaderInterface
 from cognee.modules.users.models import User
 from cognee.modules.pipelines import Task, run_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
@@ -17,16 +18,6 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
-try:
-    from cognee.tasks.web_scraper.config import TavilyConfig, SoupCrawlerConfig
-    from cognee.context_global_variables import (
-        tavily_config as tavily,
-        soup_crawler_config as soup_crawler,
-    )
-except ImportError:
-    logger.debug(f"Unable to import {str(ImportError)}")
-    pass
-
 
 async def add(
     data: Union[BinaryIO, list[BinaryIO], str, list[str]],
@@ -38,10 +29,8 @@ async def add(
     dataset_id: Optional[UUID] = None,
     preferred_loaders: List[str] = None,
     incremental_loading: bool = True,
-    extraction_rules: Optional[Dict[str, Any]] = None,
-    tavily_config: Optional[BaseModel] = None,
-    soup_crawler_config: Optional[BaseModel] = None,
     data_per_batch: Optional[int] = 20,
+    loaders_config: dict[LoaderInterface, dict] = {},
 ):
     """
     Add data to Cognee for knowledge graph processing.
@@ -180,29 +169,6 @@ async def add(
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
 
     """
-
-    try:
-        if not soup_crawler_config and extraction_rules:
-            soup_crawler_config = SoupCrawlerConfig(extraction_rules=extraction_rules)
-        if not tavily_config and os.getenv("TAVILY_API_KEY"):
-            tavily_config = TavilyConfig(api_key=os.getenv("TAVILY_API_KEY"))
-
-        soup_crawler.set(soup_crawler_config)
-        tavily.set(tavily_config)
-
-        http_schemes = {"http", "https"}
-
-        def _is_http_url(item: Union[str, BinaryIO]) -> bool:
-            return isinstance(item, str) and urlparse(item).scheme in http_schemes
-
-        if _is_http_url(data):
-            node_set = ["web_content"] if not node_set else node_set + ["web_content"]
-        elif isinstance(data, list) and any(_is_http_url(item) for item in data):
-            node_set = ["web_content"] if not node_set else node_set + ["web_content"]
-    except NameError:
-        logger.debug(f"Unable to import {str(ImportError)}")
-        pass
-
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),
         Task(
@@ -212,6 +178,7 @@ async def add(
             node_set,
             dataset_id,
             preferred_loaders,
+            loaders_config,
         ),
     ]
 
