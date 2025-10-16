@@ -1,6 +1,5 @@
 [project]
 name = "cognee"
-
 version = "0.3.5"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
@@ -49,21 +48,18 @@ dependencies = [
     "onnxruntime<=1.22.1",
     "pylance>=0.22.0,<=0.36.0",
     "kuzu (==0.11.2)",
-    "python-magic-bin<0.5 ; platform_system == 'Windows'", # Only needed for Windows
+    "python-magic-bin<0.5 ; platform_system == 'Windows'",
     "fastembed<=0.6.0",
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
     "gunicorn>=20.1.0,<24",
     "websockets>=15.0.1,<16.0.0"
 ]
-
 [project.optional-dependencies]
 api=[]
-
 distributed = [
     "modal>=1.0.5,<2.0.0",
 ]
-
 neo4j = ["neo4j>=5.28.0,<6"]
 neptune = ["langchain_aws>=0.2.22"]
 postgres = [
@@ -99,6 +95,8 @@ codegraph = [
     "transformers>=4.46.3,<5",
     "tree-sitter>=0.24.0,<0.25",
     "tree-sitter-python>=0.23.6,<0.24",
+    "tree-sitter-c-sharp",
+    "tree-sitter-cpp",
 ]
 evals = [
     "plotly>=6.0.0,<7",
@@ -107,7 +105,6 @@ evals = [
     "matplotlib>=3.8.3,<4",
     "scikit-learn>=1.6.1,<2",
 ]
-
 graphiti = ["graphiti-core>=0.7.0,<0.8"]
 # Note: New s3fs and boto3 versions don't work well together
 # Always use comaptible fixed versions of these two dependencies
@@ -132,20 +129,15 @@ dev = [
     "mkdocstrings[python]>=0.26.2,<0.27",
 ]
 debug = ["debugpy>=1.8.9,<2.0.0"]
-
 monitoring = ["sentry-sdk[fastapi]>=2.9.0,<3", "langfuse>=2.32.0,<3"]
-
 [project.urls]
 Homepage = "https://www.cognee.ai"
 Repository = "https://github.com/topoteretes/cognee"
-
 [project.scripts]
 cognee-cli = "cognee.cli._cognee:main"
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
 [tool.hatch.build]
 exclude = [
   "/bin",
@@ -165,10 +157,8 @@ exclude = [
   "/tests",
   "/tools",
 ]
-
 [tool.hatch.build.targets.wheel]
 packages = ["cognee", "distributed"]
-
 [tool.ruff]
 line-length = 100
 exclude = [
@@ -181,6 +171,5 @@ exclude = [
     "cognee/modules/pipelines/models/Task.py",
     "cognee/modules/data/models/Dataset.py"
 ]
-
 [tool.ruff.lint]
 ignore = ["F401"]
