@@ -1,14 +1,14 @@
 import os
 import pathlib
 from typing import List
-from uuid import uuid4
+from uuid import UUID, uuid4
+from pydantic import BaseModel
 
 import cognee
 from cognee.api.v1.datasets import datasets
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.data.models import Data, Dataset
+from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.engine.operations.setup import setup
-from cognee.modules.graph.methods import delete_data_nodes_and_edges
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -60,9 +60,12 @@ async def main():
 
     user: User = await get_default_user()  # type: ignore
 
-    dataset = Dataset(id=uuid4())
-    data1 = Data(id=uuid4())
-    data2 = Data(id=uuid4())
+    class CustomData(BaseModel):
+        id: UUID
+
+    dataset = await create_authorized_dataset(dataset_name="test_dataset", user=user)
+    data1 = CustomData(id=uuid4())
+    data2 = CustomData(id=uuid4())
 
     await add_data_points(
         [person1],
@@ -91,12 +94,12 @@ async def main():
         "Nodes and edges are not correctly added to the graph."
     )
 
-    await datasets.delete_data(dataset.id, data1.id, user.id)  # type: ignore
+    await datasets.delete_data(dataset.id, data1.id, user)
 
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 2 and len(edges) == 1, "Nodes and edges are not deleted properly."
 
-    await datasets.delete_data(dataset.id, data2.id, user.id)  # type: ignore
+    await datasets.delete_data(dataset.id, data2.id, user)
 
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 0 and len(edges) == 0, "Nodes and edges are not deleted."

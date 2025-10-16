@@ -14,11 +14,11 @@ from pydantic import BaseModel
 
 from cognee import config, prune, search, SearchType, visualize_graph
 from cognee.low_level import setup, DataPoint
-from cognee.modules.data.models import Dataset
+from cognee.modules.data.methods import create_authorized_dataset
+from cognee.modules.pipelines.operations import run_pipeline
 from cognee.modules.users.models import User
-from cognee.pipelines import run_tasks, Task
+from cognee.pipelines import Task
 from cognee.tasks.storage import add_data_points
-from cognee.tasks.storage.index_graph_edges import index_graph_edges
 from cognee.modules.users.methods import get_default_user
 
 
@@ -224,12 +224,13 @@ async def execute_pipeline() -> None:
 
     # Get user and dataset
     user: User = await get_default_user()  # type: ignore
-    dataset = Dataset(id=uuid4(), name="demo_dataset")
+    dataset = await create_authorized_dataset("demo_dataset", user)
     data = load_default_payload()
 
     # Build and run pipeline
     tasks = [Task(ingest_payloads), Task(add_data_points)]
-    pipeline = run_tasks(tasks, dataset, [data], user, "demo_pipeline")
+    pipeline = run_pipeline(tasks, [data], [dataset.id], user, "demo_pipeline")
+
     async for status in pipeline:
         logging.info("Pipeline status: %s", status)
 

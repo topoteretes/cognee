@@ -15,6 +15,9 @@ from cognee.modules.graph.methods import (
 async def delete_dataset_nodes_and_edges(dataset_id: UUID) -> None:
     affected_nodes = await get_dataset_related_nodes(dataset_id)
 
+    if len(affected_nodes) == 0:
+        return
+
     graph_engine = await get_graph_engine()
     await graph_engine.delete_nodes([str(node.slug) for node in affected_nodes])
 

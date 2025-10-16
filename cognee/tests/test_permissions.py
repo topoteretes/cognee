@@ -192,7 +192,7 @@ async def main():
         await cognee.datasets.delete_data(
             dataset_id=test_user_dataset_id,
             data_id=text_data_id,
-            user_id=default_user.id,
+            user=default_user,
         )
     except UnauthorizedDataAccessError:
         delete_error = True
@@ -207,7 +207,7 @@ async def main():
     text_data_id = test_user_dataset_data[0].id
 
     await cognee.datasets.delete_data(
-        dataset_id=test_user_dataset_id, data_id=text_data_id, user_id=test_user.id
+        dataset_id=test_user_dataset_id, data_id=text_data_id, user=test_user
     )
 
     # Actually give permission to default_user to delete data for test_users dataset
@@ -226,7 +226,7 @@ async def main():
     await cognee.datasets.delete_data(
         dataset_id=test_user_dataset_id,
         data_id=explanation_file_data_id,
-        user_id=default_user.id,
+        user=default_user,
     )
 
 

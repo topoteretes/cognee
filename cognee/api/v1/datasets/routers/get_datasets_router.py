@@ -188,7 +188,7 @@ def get_datasets_router() -> APIRouter:
         No content returned on successful deletion.
         If no datasets exist for the users, nothing happens.
         """
-        await datasets.delete_all(user.id)
+        await datasets.delete_all(user)
 
     @router.delete(
         "/{dataset_id}", response_model=None, responses={404: {"model": ErrorResponseDTO}}
@@ -219,7 +219,7 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        await datasets.delete_dataset(dataset_id, user.id)
+        await datasets.delete_dataset(dataset_id, user)
 
     @router.delete(
         "/{dataset_id}/data/{data_id}",
@@ -257,7 +257,7 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        await datasets.delete_data(dataset_id, data_id, user.id)
+        await datasets.delete_data(dataset_id, data_id, user)
 
     @router.get("/{dataset_id}/graph", response_model=GraphDTO)
     async def get_dataset_graph(dataset_id: UUID, user: User = Depends(get_authenticated_user)):

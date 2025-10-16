@@ -79,7 +79,7 @@ async def update(
     await datasets.delete_data(
         dataset_id=dataset_id,
         data_id=data_id,
-        user_id=user.id,
+        user=user,
     )
 
     await add(

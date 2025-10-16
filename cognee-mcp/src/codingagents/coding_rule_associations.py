@@ -3,12 +3,14 @@ from uuid import NAMESPACE_OID, uuid5
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 
+from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.low_level import DataPoint
 from cognee.infrastructure.llm import LLMGateway
+from cognee.modules.graph.methods import upsert_edges
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.engine.models import NodeSet
 from cognee.tasks.storage import add_data_points, index_graph_edges
-from typing import Optional, List, Any
+from typing import Dict, Optional, List, Any
 from pydantic import Field
 
 logger = get_logger("coding_rule_association")
@@ -90,16 +92,14 @@ async def get_origin_edges(data: str, rules: List[Rule]) -> list[Any]:
     return relationships
 
 
-async def add_rule_associations(data: str, rules_nodeset_name: str):
+async def add_rule_associations(data: str, rules_nodeset_name: str, context: Dict):
     graph_engine = await get_graph_engine()
     existing_rules = await get_existing_rules(rules_nodeset_name=rules_nodeset_name)
 
     user_context = {"chat": data, "rules": existing_rules}
 
-    user_prompt = LLMGateway.render_prompt(
-        "coding_rule_association_agent_user.txt", context=user_context
-    )
-    system_prompt = LLMGateway.render_prompt("coding_rule_association_agent_system.txt", context={})
+    user_prompt = render_prompt("coding_rule_association_agent_user.txt", context=user_context)
+    system_prompt = render_prompt("coding_rule_association_agent_system.txt", context={})
 
     rule_list = await LLMGateway.acreate_structured_output(
         text_input=user_prompt, system_prompt=system_prompt, response_model=RuleSet
@@ -117,4 +117,10 @@ async def add_rule_associations(data: str, rules_nodeset_name: str):
 
     if len(edges_to_save) > 0:
         await graph_engine.add_edges(edges_to_save)
+        await upsert_edges(
+            edges_to_save,
+            user_id=context["user"].id,
+            dataset_id=context["dataset"].id,
+            data_id=context["data"].id,
+        )
         await index_graph_edges(edges_to_save)

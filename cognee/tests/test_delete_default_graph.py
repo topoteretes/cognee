@@ -6,11 +6,8 @@ from cognee.api.v1.datasets import datasets
 from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.data.methods import delete_data, get_dataset_data
+from cognee.modules.data.methods import get_dataset_data
 from cognee.modules.engine.operations.setup import setup
-from cognee.modules.graph.methods import (
-    delete_data_nodes_and_edges,
-)
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 
@@ -61,7 +58,7 @@ async def main():
     assert len(nodes) >= 12 and len(edges) >= 18, "Nodes and edges are not deleted."
 
     user = await get_default_user()
-    await datasets.delete_data(dataset_id, added_data.id, user.id)  # type: ignore
+    await datasets.delete_data(dataset_id, added_data.id, user)  # type: ignore
 
     file_path = os.path.join(
         pathlib.Path(__file__).parent, ".artifacts", "graph_visualization_after_delete.html"
@@ -69,7 +66,9 @@ async def main():
     await visualize_graph(file_path)
 
     nodes, edges = await graph_engine.get_graph_data()
-    assert len(nodes) >= 8 and len(edges) >= 10, "Nodes and edges are not deleted."
+    assert len(nodes) >= 8 and len(nodes) < 12 and len(edges) >= 10 and len(edges) < 18, (
+        "Nodes and edges are not deleted."
+    )
 
 
 if __name__ == "__main__":

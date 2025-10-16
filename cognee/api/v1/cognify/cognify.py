@@ -209,9 +209,6 @@ async def cognify(
                 "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
             }
 
-    if user is None:
-        user = await get_default_user()
-
     if temporal_cognify:
         tasks = await get_temporal_tasks(user, chunker, chunk_size)
     else:

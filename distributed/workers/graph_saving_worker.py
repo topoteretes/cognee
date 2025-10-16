@@ -95,6 +95,7 @@ async def graph_saving_worker():
                     async def save_graph_nodes(new_nodes):
                         try:
                             await graph_engine.add_nodes(new_nodes, distributed=False)
+                            # await upsert_nodes(new_nodes, user_id=user.id, dataset_id=dataset.id, data_id=data.id)
                         except Exception as error:
                             if is_deadlock_error(error):
                                 raise GraphDatabaseDeadlockError()
@@ -107,6 +108,7 @@ async def graph_saving_worker():
                     async def save_graph_edges(new_edges):
                         try:
                             await graph_engine.add_edges(new_edges, distributed=False)
+                            # await upsert_edges(new_edges, user_id=user.id, dataset_id=dataset.id, data_id=data.id)
                         except Exception as error:
                             if is_deadlock_error(error):
                                 raise GraphDatabaseDeadlockError()

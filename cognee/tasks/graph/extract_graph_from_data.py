@@ -3,6 +3,7 @@ from typing import Dict, Type, List, Optional
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.graph.methods import upsert_edges
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.modules.ontology.ontology_config import Config
@@ -89,6 +90,12 @@ async def integrate_chunk_graphs(
 
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
+        await upsert_edges(
+            graph_edges,
+            user_id=context["user"].id,
+            dataset_id=context["dataset"].id,
+            data_id=context["data"].id,
+        )
 
     return data_chunks
 
