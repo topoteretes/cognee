@@ -225,7 +225,7 @@ class KuzuAdapter(GraphDBInterface):
             lock_acquired = False
             try:
                 if cache_config.shared_kuzu_lock:
-                    self.redis_lock.acquire()
+                    self.redis_lock.acquire_lock()
                     lock_acquired = True
                 if not self.connection:
                     logger.info("Reconnecting to Kuzu database...")
@@ -252,7 +252,7 @@ class KuzuAdapter(GraphDBInterface):
                     try:
                         self.close()
                     finally:
-                        self.redis_lock.release()
+                        self.redis_lock.release_lock()
 
         if cache_config.shared_kuzu_lock:
             async with self._connection_change_lock:
