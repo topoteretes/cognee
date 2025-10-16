@@ -4,7 +4,7 @@ import os
 import json
 import asyncio
 import tempfile
-from uuid import UUID
+from uuid import UUID, uuid5, NAMESPACE_OID
 from kuzu import Connection
 from kuzu.database import Database
 from datetime import datetime, timezone
@@ -22,8 +22,13 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.tasks.temporal_graph.models import Timestamp
+from cognee.infrastructure.databases.cache.config import get_cache_config
 
 logger = get_logger()
+
+cache_config = get_cache_config()
+if cache_config.shared_kuzu_lock:
+    from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
 
 
 class KuzuAdapter(GraphDBInterface):
@@ -38,12 +43,20 @@ class KuzuAdapter(GraphDBInterface):
 
     def __init__(self, db_path: str):
         """Initialize Kuzu database connection and schema."""
+        self.open_connections = 0
+        self._is_closed = False
         self.db_path = db_path  # Path for the database directory
         self.db: Optional[Database] = None
         self.connection: Optional[Connection] = None
-        self.executor = ThreadPoolExecutor()
-        self._initialize_connection()
+        if cache_config.shared_kuzu_lock:
+            self.redis_lock = get_cache_engine(
+                lock_key="kuzu-lock-" + str(uuid5(NAMESPACE_OID, db_path))
+            )
+        else:
+            self.executor = ThreadPoolExecutor()
+            self._initialize_connection()
         self.KUZU_ASYNC_LOCK = asyncio.Lock()
+        self._connection_change_lock = asyncio.Lock()
 
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
@@ -208,9 +221,13 @@ class KuzuAdapter(GraphDBInterface):
         params = params or {}
 
         def blocking_query():
+            lock_acquired = False
             try:
+                if cache_config.shared_kuzu_lock:
+                    self.redis_lock.acquire_lock()
+                    lock_acquired = True
                 if not self.connection:
-                    logger.debug("Reconnecting to Kuzu database...")
+                    logger.info("Reconnecting to Kuzu database...")
                     self._initialize_connection()
 
                 result = self.connection.execute(query, params)
@@ -224,12 +241,47 @@ class KuzuAdapter(GraphDBInterface):
                             val = val.as_py()
                         processed_rows.append(val)
                     rows.append(tuple(processed_rows))
+
                 return rows
             except Exception as e:
                 logger.error(f"Query execution failed: {str(e)}")
                 raise
+            finally:
+                if cache_config.shared_kuzu_lock and lock_acquired:
+                    try:
+                        self.close()
+                    finally:
+                        self.redis_lock.release_lock()
 
-        return await loop.run_in_executor(self.executor, blocking_query)
+        if cache_config.shared_kuzu_lock:
+            async with self._connection_change_lock:
+                self.open_connections += 1
+                logger.info(f"Open connections after open: {self.open_connections}")
+                try:
+                    result = blocking_query()
+                finally:
+                    self.open_connections -= 1
+                    logger.info(f"Open connections after close: {self.open_connections}")
+                return result
+        else:
+            result = await loop.run_in_executor(self.executor, blocking_query)
+            return result
+
+    def close(self):
+        if self.connection:
+            del self.connection
+            self.connection = None
+        if self.db:
+            del self.db
+            self.db = None
+        self._is_closed = True
+        logger.info("Kuzu database closed successfully")
+
+    def reopen(self):
+        if self._is_closed:
+            self._is_closed = False
+            self._initialize_connection()
+            logger.info("Kuzu database re-opened successfully")
 
     @asynccontextmanager
     async def get_session(self):
@@ -1552,44 +1604,6 @@ class KuzuAdapter(GraphDBInterface):
 
         except Exception as e:
             logger.error(f"Failed to delete graph data: {e}")
-            raise
-
-    async def clear_database(self) -> None:
-        """
-        Clear all data from the database by deleting the database files and reinitializing.
-
-        This method removes all files associated with the database and reinitializes the Kuzu
-        database structure, ensuring a completely empty state. It handles exceptions that might
-        occur during file deletions or initializations carefully.
-        """
-        try:
-            if self.connection:
-                self.connection = None
-            if self.db:
-                self.db.close()
-                self.db = None
-
-            db_dir = os.path.dirname(self.db_path)
-            db_name = os.path.basename(self.db_path)
-            file_storage = get_file_storage(db_dir)
-
-            if await file_storage.file_exists(db_name):
-                await file_storage.remove_all()
-                logger.info(f"Deleted Kuzu database files at {self.db_path}")
-
-            # Reinitialize the database
-            self._initialize_connection()
-            # Verify the database is empty
-            result = self.connection.execute("MATCH (n:Node) RETURN COUNT(n)")
-            count = result.get_next()[0] if result.has_next() else 0
-            if count > 0:
-                logger.warning(
-                    f"Database still contains {count} nodes after clearing, forcing deletion"
-                )
-                self.connection.execute("MATCH (n:Node) DETACH DELETE n")
-            logger.info("Database cleared successfully")
-        except Exception as e:
-            logger.error(f"Error during database clearing: {e}")
             raise
 
     async def get_document_subgraph(self, data_id: str):

@@ -193,6 +193,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Path setup
+        if: ${{ matrix.os }} == 'windows-latest'
+        shell: bash
+        run: |
+          PATH=$(printf '%s' "$PATH" | tr ':' $'\n' | grep -vi '/git/usr/bin' | paste -sd: -)
+          export PATH
+
       - name: Run Deletion on Default Graph Tests
         env:
           ENV: 'dev'

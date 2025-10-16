@@ -129,6 +129,30 @@ services:
     networks:
       - cognee-network
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    profiles:
+      - redis
+    ports:
+      - "6379:6379"
+    networks:
+      - cognee-network
+    volumes:
+      - redis_data:/data
+    command: [ "redis-server", "--appendonly", "yes" ]
+
+
+  redisinsight:
+    image: redislabs/redisinsight:latest
+    container_name: redisinsight
+    restart: always
+    ports:
+      - "5540:5540"
+    networks:
+      - cognee-network
+
+
 networks:
   cognee-network:
     name: cognee-network
@@ -136,3 +160,4 @@ networks:
 volumes:
   chromadb_data:
   postgres_data:
+  redis_data:
