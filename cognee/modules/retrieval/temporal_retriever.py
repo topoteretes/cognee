@@ -6,7 +6,7 @@ from typing import Any, Optional, List, Type
 from operator import itemgetter
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
-from cognee.modules.retrieval.utils.session_cache import save_to_session_cache
+from cognee.modules.retrieval.utils.session_cache import save_to_session_cache, get_conversation_history
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
@@ -171,6 +171,8 @@ class TemporalRetriever(GraphCompletionRetriever):
             session_save = user_id and cache_config.caching
 
             if session_save:
+                conversation_history = await get_conversation_history(session_id=session_id)
+                
                 context_summary, completion = await asyncio.gather(
                     summarize_text(context),
                     generate_completion(
@@ -178,6 +180,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                         context=context,
                         user_prompt_path=self.user_prompt_path,
                         system_prompt_path=self.system_prompt_path,
+                        conversation_history=conversation_history,
                     ),
                 )
             else:

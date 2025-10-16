@@ -6,7 +6,7 @@ from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtract
 from cognee.infrastructure.context.BaseContextProvider import BaseContextProvider
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
-from cognee.modules.retrieval.utils.session_cache import save_to_session_cache
+from cognee.modules.retrieval.utils.session_cache import save_to_session_cache, get_conversation_history
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 
@@ -120,6 +120,8 @@ class EntityCompletionRetriever(BaseRetriever):
             session_save = user_id and cache_config.caching
 
             if session_save:
+                conversation_history = await get_conversation_history(session_id=session_id)
+                
                 context_summary, completion = await asyncio.gather(
                     summarize_text(str(context)),
                     generate_completion(
@@ -127,6 +129,7 @@ class EntityCompletionRetriever(BaseRetriever):
                         context=context,
                         user_prompt_path=self.user_prompt_path,
                         system_prompt_path=self.system_prompt_path,
+                        conversation_history=conversation_history,
                     ),
                 )
             else:

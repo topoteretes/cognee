@@ -5,7 +5,7 @@ from cognee.shared.logging_utils import get_logger
 
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
-from cognee.modules.retrieval.utils.session_cache import save_to_session_cache
+from cognee.modules.retrieval.utils.session_cache import save_to_session_cache, get_conversation_history
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.context_global_variables import session_user
@@ -92,6 +92,16 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         followup_question = ""
         triplets = []
         completion = ""
+        
+        # Retrieve conversation history if session saving is enabled
+        cache_config = CacheConfig()
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+        session_save = user_id and cache_config.caching
+        
+        conversation_history = ""
+        if session_save:
+            conversation_history = await get_conversation_history(session_id=session_id)
 
         for round_idx in range(max_iter + 1):
             if round_idx == 0:
@@ -110,6 +120,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
+                conversation_history=conversation_history if session_save else None,
             )
             logger.info(f"Chain-of-thought: round {round_idx} - answer: {completion}")
             if round_idx < max_iter:
@@ -147,11 +158,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             )
 
         # Save to session cache
-        cache_config = CacheConfig()
-        user = session_user.get()
-        user_id = getattr(user, "id", None)
-
-        if user_id and cache_config.caching:
+        if session_save:
             context_summary = await summarize_text(context_text)
             await save_to_session_cache(
                 query=query,
