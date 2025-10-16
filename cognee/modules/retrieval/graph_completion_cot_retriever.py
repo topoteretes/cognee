@@ -1,11 +1,15 @@
+import asyncio
 from typing import Optional, List, Type, Any
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.shared.logging_utils import get_logger
 
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
-from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
+from cognee.modules.retrieval.utils.session_cache import save_to_session_cache
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
+from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache.config import CacheConfig
 
 logger = get_logger()
 
@@ -140,6 +144,20 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         if self.save_interaction and context and triplets and completion:
             await self.save_qa(
                 question=query, answer=completion, context=context_text, triplets=triplets
+            )
+
+        # Save to session cache
+        cache_config = CacheConfig()
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+        
+        if user_id and cache_config.caching:
+            context_summary = await summarize_text(context_text)
+            await save_to_session_cache(
+                query=query,
+                context_summary=context_summary,
+                answer=completion,
+                session_id=session_id,
             )
 
         return [completion]

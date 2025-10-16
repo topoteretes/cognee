@@ -1,10 +1,14 @@
+import asyncio
 from typing import Any, Optional, List
 from cognee.shared.logging_utils import get_logger
 
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
 from cognee.infrastructure.context.BaseContextProvider import BaseContextProvider
 from cognee.modules.retrieval.base_retriever import BaseRetriever
-from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
+from cognee.modules.retrieval.utils.session_cache import save_to_session_cache
+from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache.config import CacheConfig
 
 
 logger = get_logger("entity_completion_retriever")
@@ -109,12 +113,38 @@ class EntityCompletionRetriever(BaseRetriever):
             if context is None:
                 return ["No relevant entities found for the query."]
 
-            completion = await generate_completion(
-                query=query,
-                context=context,
-                user_prompt_path=self.user_prompt_path,
-                system_prompt_path=self.system_prompt_path,
-            )
+            # Check if we need to generate context summary for caching
+            cache_config = CacheConfig()
+            user = session_user.get()
+            user_id = getattr(user, "id", None)
+            session_save = user_id and cache_config.caching
+
+            if session_save:
+                context_summary, completion = await asyncio.gather(
+                    summarize_text(str(context)),
+                    generate_completion(
+                        query=query,
+                        context=context,
+                        user_prompt_path=self.user_prompt_path,
+                        system_prompt_path=self.system_prompt_path,
+                    ),
+                )
+            else:
+                completion = await generate_completion(
+                    query=query,
+                    context=context,
+                    user_prompt_path=self.user_prompt_path,
+                    system_prompt_path=self.system_prompt_path,
+                )
+
+            if session_save:
+                await save_to_session_cache(
+                    query=query,
+                    context_summary=context_summary,
+                    answer=completion,
+                    session_id=session_id,
+                )
+
             return [completion]
 
         except Exception as e:

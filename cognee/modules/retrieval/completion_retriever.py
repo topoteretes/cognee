@@ -1,11 +1,15 @@
+import asyncio
 from typing import Any, Optional
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
+from cognee.modules.retrieval.utils.session_cache import save_to_session_cache
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache.config import CacheConfig
 
 logger = get_logger("CompletionRetriever")
 
@@ -93,11 +97,38 @@ class CompletionRetriever(BaseRetriever):
         if context is None:
             context = await self.get_context(query)
 
-        completion = await generate_completion(
-            query=query,
-            context=context,
-            user_prompt_path=self.user_prompt_path,
-            system_prompt_path=self.system_prompt_path,
-            system_prompt=self.system_prompt,
-        )
+        # Check if we need to generate context summary for caching
+        cache_config = CacheConfig()
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+        session_save = user_id and cache_config.caching
+
+        if session_save:
+            context_summary, completion = await asyncio.gather(
+                summarize_text(context),
+                generate_completion(
+                    query=query,
+                    context=context,
+                    user_prompt_path=self.user_prompt_path,
+                    system_prompt_path=self.system_prompt_path,
+                    system_prompt=self.system_prompt,
+                ),
+            )
+        else:
+            completion = await generate_completion(
+                query=query,
+                context=context,
+                user_prompt_path=self.user_prompt_path,
+                system_prompt_path=self.system_prompt_path,
+                system_prompt=self.system_prompt,
+            )
+
+        if session_save:
+            await save_to_session_cache(
+                query=query,
+                context_summary=context_summary,
+                answer=completion,
+                session_id=session_id,
+            )
+
         return completion
