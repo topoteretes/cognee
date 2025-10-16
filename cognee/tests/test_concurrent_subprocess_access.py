@@ -6,8 +6,16 @@ import subprocess
 
 from cognee.shared.logging_utils import get_logger
 
-
 logger = get_logger()
+
+"""
+Test: Redis-based Kùzu Locking Across Subprocesses
+
+This test ensures the Redis shared lock correctly serializes access to the Kùzu
+database when multiple subprocesses (writer/reader and cognify tasks) run in parallel.
+If this test fails, it indicates the locking mechanism is not properly handling
+concurrent subprocess access.
+"""
 
 
 async def concurrent_subprocess_access():
