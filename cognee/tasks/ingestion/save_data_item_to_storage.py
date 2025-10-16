@@ -18,13 +18,6 @@ class SaveDataSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
 
-class HTMLContent(str):
-    def __new__(cls, value: str):
-        if not ("<" in value and ">" in value):
-            raise ValueError("Not valid HTML-like content")
-        return super().__new__(cls, value)
-
-
 settings = SaveDataSettings()
 
 
