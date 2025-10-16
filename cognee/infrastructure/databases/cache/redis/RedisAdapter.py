@@ -27,7 +27,7 @@ class RedisAdapter(CacheDBInterface):
         self.timeout = timeout
         self.blocking_timeout = blocking_timeout
 
-    def acquire(self):
+    def acquire_lock(self):
         """
         Acquire the Redis lock manually. Raises if acquisition fails. (Sync because of Kuzu)
         """
@@ -43,7 +43,7 @@ class RedisAdapter(CacheDBInterface):
 
         return self.lock
 
-    def release(self):
+    def release_lock(self):
         """
         Release the Redis lock manually, if held. (Sync because of Kuzu)
         """
@@ -55,7 +55,7 @@ class RedisAdapter(CacheDBInterface):
                 pass
 
     @contextmanager
-    def hold(self):
+    def hold_lock(self):
         """
         Context manager for acquiring and releasing the Redis lock automatically. (Sync because of Kuzu)
         """

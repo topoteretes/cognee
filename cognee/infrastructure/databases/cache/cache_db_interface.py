@@ -15,7 +15,7 @@ class CacheDBInterface(ABC):
         self.lock = None
 
     @abstractmethod
-    def acquire(self):
+    def acquire_lock(self):
         """
         Acquire a lock on the given key.
         Must be implemented by subclasses.
@@ -23,7 +23,7 @@ class CacheDBInterface(ABC):
         pass
 
     @abstractmethod
-    def release(self):
+    def release_lock(self):
         """
         Release the lock if it is held.
         Must be implemented by subclasses.
@@ -31,7 +31,7 @@ class CacheDBInterface(ABC):
         pass
 
     @contextmanager
-    def hold(self):
+    def hold_lock(self):
         """
         Context manager for safely acquiring and releasing the lock.
         """
