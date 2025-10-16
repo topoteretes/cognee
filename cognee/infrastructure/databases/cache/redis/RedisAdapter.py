@@ -28,31 +28,31 @@ class RedisAdapter(CacheDBInterface):
         self.host = host
         self.port = port
         self.connection_timeout = connection_timeout
-        
+
         try:
             self.sync_redis = redis.Redis(
-                host=host, 
-                port=port, 
-                username=username, 
+                host=host,
+                port=port,
+                username=username,
                 password=password,
                 socket_connect_timeout=connection_timeout,
                 socket_timeout=connection_timeout,
             )
             self.async_redis = aioredis.Redis(
-                host=host, 
-                port=port, 
-                username=username, 
-                password=password, 
+                host=host,
+                port=port,
+                username=username,
+                password=password,
                 decode_responses=True,
                 socket_connect_timeout=connection_timeout,
             )
             self.timeout = timeout
             self.blocking_timeout = blocking_timeout
-            
+
             # Validate connection on initialization
             self._validate_connection()
             logger.info(f"Successfully connected to Redis at {host}:{port}")
-            
+
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Failed to connect to Redis at {host}:{port}: {str(e)}"
             logger.error(error_msg)
@@ -61,13 +61,15 @@ class RedisAdapter(CacheDBInterface):
             error_msg = f"Unexpected error initializing Redis adapter: {str(e)}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
-    
+
     def _validate_connection(self):
         """Validate Redis connection is available."""
         try:
             self.sync_redis.ping()
         except (redis.ConnectionError, redis.TimeoutError) as e:
-            raise CacheConnectionError(f"Cannot connect to Redis at {self.host}:{self.port}: {str(e)}") from e
+            raise CacheConnectionError(
+                f"Cannot connect to Redis at {self.host}:{self.port}: {str(e)}"
+            ) from e
 
     def acquire_lock(self):
         """
@@ -127,7 +129,7 @@ class RedisAdapter(CacheDBInterface):
             context: Context used to answer.
             answer: Assistant answer text.
             ttl: Optional time-to-live (seconds). If provided, the session expires after this time.
-            
+
         Raises:
             CacheConnectionError: If Redis connection fails or times out.
         """
@@ -145,7 +147,7 @@ class RedisAdapter(CacheDBInterface):
 
             if ttl is not None:
                 await self.async_redis.expire(session_key, ttl)
-                
+
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while adding Q&A: {str(e)}"
             logger.error(error_msg)

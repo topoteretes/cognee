@@ -137,7 +137,7 @@ class MutuallyExclusiveQueryParametersError(CogneeValidationError):
 class CacheConnectionError(CogneeConfigurationError):
     """
     Raised when connection to the cache database (e.g., Redis) fails.
-    
+
     This error indicates that the cache service is unavailable or misconfigured.
     """
 

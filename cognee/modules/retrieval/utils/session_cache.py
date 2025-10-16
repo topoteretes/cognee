@@ -15,7 +15,7 @@ async def save_to_session_cache(
 ) -> bool:
     """
     Saves Q&A interaction to the session cache if user is authenticated and caching is enabled.
-    
+
     Handles cache unavailability gracefully by logging warnings instead of failing.
 
     Parameters:
@@ -46,7 +46,7 @@ async def save_to_session_cache(
         from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
 
         cache_engine = get_cache_engine()
-        
+
         if cache_engine is None:
             logger.warning("Cache engine not available, skipping session save")
             return False
@@ -58,14 +58,18 @@ async def save_to_session_cache(
             context=context_summary,
             answer=answer,
         )
-        
-        logger.info(f"Successfully saved Q&A to session cache: user_id={user_id}, session_id={session_id}")
+
+        logger.info(
+            f"Successfully saved Q&A to session cache: user_id={user_id}, session_id={session_id}"
+        )
         return True
 
     except CacheConnectionError as e:
         logger.warning(f"Cache unavailable, continuing without session save: {e.message}")
         return False
-    
+
     except Exception as e:
-        logger.error(f"Unexpected error saving to session cache: {type(e).__name__}: {str(e)}. Continuing without caching.")
+        logger.error(
+            f"Unexpected error saving to session cache: {type(e).__name__}: {str(e)}. Continuing without caching."
+        )
         return False
