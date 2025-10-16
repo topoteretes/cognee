@@ -2,234 +2,258 @@
   <a href="https://github.com/topoteretes/cognee">
     <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/cognee-logo-transparent.png" alt="Cognee Logo" height="60">
   </a>
-
-  <br />
-
-  cognee - Memory for AI Agents in 6 lines of code
-
+  <h1>cognee - Memory for AI Agents in 6 lines of code</h1>
   <p align="center">
   <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
-  .
+  ·
   <a href="https://cognee.ai">Learn more</a>
   ·
   <a href="https://discord.gg/NQPKmU5CCg">Join Discord</a>
   ·
   <a href="https://www.reddit.com/r/AIMemory/">Join r/AIMemory</a>
-  .
+  ·
   <a href="https://docs.cognee.ai/">Docs</a>
-  .
+  ·
   <a href="https://github.com/topoteretes/cognee-community">cognee community repo</a>
   </p>
-
-
+  
   [![GitHub forks](https://img.shields.io/github/forks/topoteretes/cognee.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/network/)
-  [![GitHub stars](https://img.shields.io/github/stars/topoteretes/cognee.svg?style=social&label=Star&maxAge=2592000)](https://GitHub.com/topoteretes/cognee/stargazers/)
-  [![GitHub commits](https://badgen.net/github/commits/topoteretes/cognee)](https://GitHub.com/topoteretes/cognee/commit/)
-  [![Github tag](https://badgen.net/github/tag/topoteretes/cognee)](https://github.com/topoteretes/cognee/tags/)
-  [![Downloads](https://static.pepy.tech/badge/cognee)](https://pepy.tech/project/cognee)
-  [![License](https://img.shields.io/github/license/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/blob/main/LICENSE)
-  [![Contributors](https://img.shields.io/github/contributors/topoteretes/cognee?colorA=00C586&colorB=000000)](https://github.com/topoteretes/cognee/graphs/contributors)
-  <a href="https://github.com/sponsors/topoteretes"><img src="https://img.shields.io/badge/Sponsor-❤️-ff69b4.svg" alt="Sponsor"></a>
 
-<p>
-  <a href="https://www.producthunt.com/posts/cognee?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_souce=badge-cognee" target="_blank" style="display:inline-block; margin-right:10px;">
-    <img src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=946346&theme=light&period=daily&t=1744472480704" alt="cognee - Memory&#0032;for&#0032;AI&#0032;Agents&#0032;&#0032;in&#0032;5&#0032;lines&#0032;of&#0032;code | Product Hunt" width="250" height="54" />
-  </a>
-
-  <a href="https://trendshift.io/repositories/13955" target="_blank" style="display:inline-block;">
-    <img src="https://trendshift.io/api/badge/repositories/13955" alt="topoteretes%2Fcognee | Trendshift" width="250" height="55" />
-  </a>
-</p>
-
-
-
-
-
-Build dynamic memory for Agents and replace RAG using scalable, modular ECL (Extract, Cognify, Load) pipelines.
-
-  <p align="center">
-  🌐 Available Languages
-  :
-  <!-- Keep these links. Translations will automatically update with the README. -->
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=de">Deutsch</a> |
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=es">Español</a> |
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=fr">français</a> |
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ja">日本語</a> |
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ko">한국어</a> |
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=pt">Português</a> |
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ru">Русский</a> |
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=zh">中文</a>
-  </p>
-
-
-<div style="text-align: center">
-  <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/main/assets/cognee_benefits.png" alt="Why cognee?" width="50%" />
-</div>
 </div>
 
 
+<div align="center">
+  <a href="https://cognee.ai" target="_blank">
+    <img src="https://raw.githubusercontent.com/topoteretes/cognee/refs/heads/dev/assets/gifs/cognee_demo_small.gif">
+  </a>
+</div>
 
-## Get Started
 
-Get started quickly with a Google Colab  <a href="https://colab.research.google.com/drive/1jHbWVypDgCLwjE71GSXhRL3YxYhCZzG1?usp=sharing">notebook</a> , <a href="https://deepnote.com/workspace/cognee-382213d0-0444-4c89-8265-13770e333c02/project/cognee-demo-78ffacb9-5832-4611-bb1a-560386068b30/notebook/Notebook-1-75b24cda566d4c24ab348f7150792601?utm_source=share-modal&utm_medium=product-shared-content&utm_campaign=notebook&utm_content=78ffacb9-5832-4611-bb1a-560386068b30">Deepnote notebook</a> or  <a href="https://github.com/topoteretes/cognee/tree/main/cognee-starter-kit">starter repo</a>
+## What is cognee?
+**cognee** is a memory layer for AI applications. It offers production-ready deterministic context retrieval based on data graphs
+and LLM agents.
+
+**TL;DR** Cognee is like an OS for AI systems - it gives context and memory to your AI.
+
+## Quickstart - Get Started in 3 lines of code
+
+- add your data with `cognee.add()`
+- cognify your data with `cognee.cognify()` to turn unstructured text into structured knowledge graphs
+- search with `cognee.search()` to retrieve contextually relevant information
+
+
+Example:
+
+```python
+import cognee
+import os
+
+os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
+
+cognee.config.llm_api_key = os.environ.get("LLM_API_KEY", "")
+
+await cognee.add("https://www.youtube.com/watch?v=uge8XbjEde0") # Add data
+
+await cognee.cognify() # Get knowledge graph
+
+# Query cognee
+query_results = await cognee.search("UNIQUE", "What is the nature of light?")
+
+for result in query_results:
+    print(result)
+
+```
 
 
 ## About cognee
 
-cognee works locally and stores your data on your device.
-Our hosted solution is just our deployment of OSS cognee on Modal, with the goal of making development and productionization easier.
+- deterministic **graph-based RAG** - Get insights from connected, structured data
+- **Build LLM systems backed by graphs** - Create intelligent systems that maintain context and relationships across vast amounts of information
+- **make better systems with your own graphs** - Use graph architecture as the foundation of your AI systems
 
-Self-hosted package:
+One of the biggest issues with most current RAG systems is that they rely purely on semantic search, which tends to miss important context because it's just matching words. By using a **graph-based system**, we can keep the relationships between pieces of information intact, so your AI agents get the full picture and make smarter, more connected decisions.
 
-- Interconnects any kind of documents: past conversations, files, images, and audio transcriptions
-- Replaces RAG systems with a memory layer based on graphs and vectors
-- Reduces developer effort and cost, while increasing quality and precision
-- Provides Pythonic data pipelines that manage data ingestion from 30+ data sources
-- Is highly customizable with custom tasks, pipelines, and a set of built-in search endpoints
-
-Hosted platform:
-- Includes a managed UI and a [hosted solution](https://www.cognee.ai)
+Instead of just doing semantic search on chunks, cognee lets you:
+- **Create layered graph architectures** from unstructured text that explicitly map relationships between entities, concepts, and topics
+- **Build custom knowledge bases** that work alongside or instead of vector search
+- **Query your data as a graph** using semantic, keyword, or cypher queries to get precise, context-aware answers
+- **Give your AI agents memory and context** so they understand not just keywords but the actual connections between data points
 
 
+## Installation
 
-## Self-Hosted (Open Source)
-
-
-### 📦 Installation
-
-You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager.
-
-Cognee supports Python 3.10 to 3.12
-
-#### With uv
+### 1. Install cognee:
 
 ```bash
-uv pip install cognee
+pip install cognee
 ```
 
-Detailed instructions can be found in our [docs](https://docs.cognee.ai/getting-started/installation#environment-configuration)
+### 2. Set up environment variables
 
-### 💻 Basic Usage
+Create a .env file and configure it with your LLM provider API keys:
 
-#### Setup
-
-```
-import os
-os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
-
+```bash
+LLM_API_KEY="<YOUR_OPENAI_API_KEY>"
 ```
 
-You can also set the variables by creating .env file, using our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
-To use different LLM providers, for more info check out our <a href="https://docs.cognee.ai/setup-configuration/llm-providers">documentation</a>
+For alternative LLM providers (Ollama, Anthropic, etc), refer to [our LLM configuration guide](https://docs.cognee.ai/llms/overview/).
 
 
-#### Simple example
+## Basic Usage
 
-
-
-##### Python
-
-This script will run the default pipeline:
+### Working With Text
 
 ```python
 import cognee
-import asyncio
+import os
+os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 
+cognee.config.llm_api_key = os.environ.get("LLM_API_KEY", "")
 
-async def main():
-    # Add text to cognee
-    await cognee.add("Cognee turns documents into AI memory.")
+# Add text data
+text = """Natural language processing (NLP) is an interdisciplinary
+        subfield of computer science and information retrieval."""
+        
+await cognee.add([text], "example_dataset") # Add data to cognee
+await cognee.cognify() # Create knowledge graph
 
-    # Generate the knowledge graph
-    await cognee.cognify()
-
-    # Add memory algorithms to the graph
-    await cognee.memify()
-
-    # Query the knowledge graph
-    results = await cognee.search("What does cognee do?")
-
-    # Display the results
-    for result in results:
-        print(result)
-
-
-if __name__ == '__main__':
-    asyncio.run(main())
-
-```
-Example output:
-```
-  Cognee turns documents into AI memory.
-
-```
-##### Via CLI
-
-Let's get the basics covered
-
-```
-cognee-cli add "Cognee turns documents into AI memory."
-
-cognee-cli cognify
-
-cognee-cli search "What does cognee do?"
-cognee-cli delete --all
-
-```
-or run
-```
-cognee-cli -ui
+# Query
+search_results = await cognee.search("INSIGHTS", query_text="Tell me about NLP")
 ```
 
+### Working With Data Files
 
-</div>
+```python
+import cognee
+import os
 
+os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
+cognee.config.llm_api_key = os.environ.get("LLM_API_KEY", "")
 
-### Hosted Platform
+# Add a file
+await cognee.add("path/to/your/file.txt", "example_dataset")
+await cognee.cognify()
 
-Get up and running in minutes with automatic updates, analytics, and enterprise security.
+# Search
+search_results = await cognee.search("INSIGHTS", query_text="Summarize the key points")
+```
 
-1. Sign up on [cogwit](https://www.cognee.ai)
-2. Add your API key to local UI and sync your data to Cogwit
+## Codegraph Pipeline - Language Support
 
+### Supported Languages
 
+The cognee codegraph pipeline now supports multiple programming languages for code analysis:
 
+- **Python** - Full AST parsing and code structure analysis
+- **C#** - Class, method, and namespace extraction with tree-sitter
+- **C++** - Function, class, and template analysis with tree-sitter
+
+### C# Code Analysis Example
+
+```python
+import cognee
+import os
+
+os.environ["LLM_API_KEY"] = "YOUR_OPENAI_API_KEY"
+cognee.config.llm_api_key = os.environ.get("LLM_API_KEY", "")
+
+# Add C# code file
+await cognee.add("path/to/your/code.cs", "csharp_project")
+await cognee.cognify()
+
+# Query C# code structure
+search_results = await cognee.search(
+    "INSIGHTS", 
+    query_text="What classes and methods are defined in this codebase?"
+)
+
+for result in search_results:
+    print(result)
+```
+
+### C++ Code Analysis Example
+
+```python
+import cognee
+import os
+
+os.environ["LLM_API_KEY"] = "YOUR_OPENAI_API_KEY"
+cognee.config.llm_api_key = os.environ.get("LLM_API_KEY", "")
+
+# Add C++ code file
+await cognee.add("path/to/your/code.cpp", "cpp_project")
+await cognee.cognify()
+
+# Query C++ code structure
+search_results = await cognee.search(
+    "INSIGHTS", 
+    query_text="What are the main functions and classes in this C++ code?"
+)
+
+for result in search_results:
+    print(result)
+```
+
+### Test Coverage
+
+The C# and C++ support includes comprehensive test coverage:
+
+- **C# Tests**:
+  - Class declaration parsing
+  - Method extraction (including constructors, properties, async methods)
+  - Namespace handling
+  - Basic inheritance detection
+  - Verified with sample code including Calculator class with multiple method types
+
+- **C++ Tests**:
+  - Function declaration parsing
+  - Class structure extraction
+  - Template detection
+  - Namespace handling
+  - Verified with sample code including vector operations and template classes
+
+All tests validate that the tree-sitter parsers correctly extract code structures and that the codegraph pipeline processes C# (.cs) and C++ (.cpp) files alongside existing Python support.
+
+## Hosted Platform
+
+Try our **[hosted platform](https://platform.cognee.ai/)** which features:
+- No-code interface for building knowledge graphs
+- Pre-built integrations with popular data sources
+- Team collaboration features
+- Scalable infrastructure
 
 ## Demos
+- [**cognee-demo**](https://github.com/topoteretes/cognee-demo) - Build a simple AI Assistant with memory using Cognee and CrewAI
+- [**Cognee with LlamaIndex**](https://github.com/topoteretes/cognee-llamaindex-demo) - Add memory to LlamaIndex using cognee
 
-1. Cogwit Beta demo:
 
-[Cogwit Beta](https://github.com/user-attachments/assets/fa520cd2-2913-4246-a444-902ea5242cb0)
+## Documentation
 
-2. Simple GraphRAG demo
-
-[Simple GraphRAG demo](https://github.com/user-attachments/assets/d80b0776-4eb9-4b8e-aa22-3691e2d44b8f)
-
-3. cognee with Ollama
-
-[cognee with local models](https://github.com/user-attachments/assets/8621d3e8-ecb8-4860-afb2-5594f2ee17db)
-
+For more detailed information, check out our [documentation](https://docs.cognee.ai/).
 
 ## Contributing
-Your contributions are at the core of making this a true open source project. Any contributions you make are **greatly appreciated**. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for more information.
 
+We love contributions! Check out our [Contributing Guide](CONTRIBUTING.md) for more information.
 
-## Code of Conduct
+## Join Our Community
 
-We are committed to making open source an enjoyable and respectful experience for our community. See <a href="https://github.com/topoteretes/cognee/blob/main/CODE_OF_CONDUCT.md"><code>CODE_OF_CONDUCT</code></a> for more information.
+- [Discord](https://discord.gg/NQPKmU5CCg) - Chat with the community
+- [Reddit r/AIMemory](https://www.reddit.com/r/AIMemory/) - Discuss AI memory systems
+- [GitHub Discussions](https://github.com/topoteretes/cognee/discussions) - Ask questions and share ideas
+
+## License
+
+This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.
 
 ## Citation
 
-We now have a paper you can cite:
+If you use cognee in your research, please cite it:
 
 ```bibtex
-@misc{markovic2025optimizinginterfaceknowledgegraphs,
-      title={Optimizing the Interface Between Knowledge Graphs and LLMs for Complex Reasoning}, 
-      author={Vasilije Markovic and Lazar Obradovic and Laszlo Hajdu and Jovan Pavlovic},
-      year={2025},
-      eprint={2505.24478},
-      archivePrefix={arXiv},
-      primaryClass={cs.AI},
-      url={https://arxiv.org/abs/2505.24478}, 
+@software{cognee2024,
+  author = {Cognee Team},
+  title = {cognee: Memory Layer for AI Applications},
+  year = {2024},
+  url = {https://github.com/topoteretes/cognee}
 }
 ```
