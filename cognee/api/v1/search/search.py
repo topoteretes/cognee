@@ -1,6 +1,7 @@
 from uuid import UUID
 from typing import Union, Optional, List, Type
 
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.modules.search.types import SearchResult, SearchType, CombinedSearchResult
@@ -8,6 +9,9 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.exceptions import DatasetNotFoundError
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 async def search(
@@ -174,6 +178,13 @@ async def search(
         datasets = [dataset.id for dataset in datasets]
         if not datasets:
             raise DatasetNotFoundError(message="No datasets found.")
+
+    graph_engine = await get_graph_engine()
+    is_empty = await graph_engine.is_empty()
+
+    if is_empty:
+        logger.warning("Search attempt on an empty knowledge graph")
+        return []
 
     filtered_search_results = await search_function(
         query_text=query_text,
