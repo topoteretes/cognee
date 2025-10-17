@@ -9,6 +9,9 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.exceptions import DatasetNotFoundError
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 async def search(
@@ -180,6 +183,7 @@ async def search(
     is_empty = await graph_engine.is_empty()
 
     if is_empty:
+        logger.warning("Search attempt on an empty knowledge graph")
         return []
 
     filtered_search_results = await search_function(
