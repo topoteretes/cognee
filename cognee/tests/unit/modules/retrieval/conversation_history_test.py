@@ -64,15 +64,25 @@ class TestConversationHistoryUtils:
             "cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine",
             return_value=mock_cache,
         ):
-            from cognee.modules.retrieval.utils.session_cache import get_conversation_history
+            with patch(
+                "cognee.modules.retrieval.utils.session_cache.CacheConfig"
+            ) as MockCacheConfig:
+                # Enable caching
+                mock_config = MagicMock()
+                mock_config.caching = True
+                MockCacheConfig.return_value = mock_config
 
-            result = await get_conversation_history(session_id="test_session")
+                from cognee.modules.retrieval.utils.session_cache import (
+                    get_conversation_history,
+                )
 
-            assert "Previous conversation:" in result
-            assert "[2024-01-15 10:30:45]" in result
-            assert "QUESTION: What is AI?" in result
-            assert "CONTEXT: AI is artificial intelligence" in result
-            assert "ANSWER: AI stands for Artificial Intelligence" in result
+                result = await get_conversation_history(session_id="test_session")
+
+                assert "Previous conversation:" in result
+                assert "[2024-01-15 10:30:45]" in result
+                assert "QUESTION: What is AI?" in result
+                assert "CONTEXT: AI is artificial intelligence" in result
+                assert "ANSWER: AI stands for Artificial Intelligence" in result
 
     @pytest.mark.asyncio
     async def test_save_to_session_cache_saves_correctly(self):
@@ -86,23 +96,35 @@ class TestConversationHistoryUtils:
             "cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine",
             return_value=mock_cache,
         ):
-            from cognee.modules.retrieval.utils.session_cache import save_to_session_cache
+            with patch(
+                "cognee.modules.retrieval.utils.session_cache.CacheConfig"
+            ) as MockCacheConfig:
+                # Enable caching
+                mock_config = MagicMock()
+                mock_config.caching = True
+                MockCacheConfig.return_value = mock_config
 
-            result = await save_to_session_cache(
-                query="What is Python?",
-                context_summary="Python is a programming language",
-                answer="Python is a high-level programming language",
-                session_id="my_session",
-            )
+                from cognee.modules.retrieval.utils.session_cache import (
+                    save_to_session_cache,
+                )
 
-            assert result is True
-            mock_cache.add_qa.assert_called_once()
+                result = await save_to_session_cache(
+                    query="What is Python?",
+                    context_summary="Python is a programming language",
+                    answer="Python is a high-level programming language",
+                    session_id="my_session",
+                )
 
-            call_kwargs = mock_cache.add_qa.call_args.kwargs
-            assert call_kwargs["question"] == "What is Python?"
-            assert call_kwargs["context"] == "Python is a programming language"
-            assert call_kwargs["answer"] == "Python is a high-level programming language"
-            assert call_kwargs["session_id"] == "my_session"
+                assert result is True
+                mock_cache.add_qa.assert_called_once()
+
+                call_kwargs = mock_cache.add_qa.call_args.kwargs
+                assert call_kwargs["question"] == "What is Python?"
+                assert call_kwargs["context"] == "Python is a programming language"
+                assert (
+                    call_kwargs["answer"] == "Python is a high-level programming language"
+                )
+                assert call_kwargs["session_id"] == "my_session"
 
     @pytest.mark.asyncio
     async def test_save_to_session_cache_uses_default_session_when_none(self):
@@ -116,15 +138,25 @@ class TestConversationHistoryUtils:
             "cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine",
             return_value=mock_cache,
         ):
-            from cognee.modules.retrieval.utils.session_cache import save_to_session_cache
+            with patch(
+                "cognee.modules.retrieval.utils.session_cache.CacheConfig"
+            ) as MockCacheConfig:
+                # Enable caching
+                mock_config = MagicMock()
+                mock_config.caching = True
+                MockCacheConfig.return_value = mock_config
 
-            result = await save_to_session_cache(
-                query="Test question",
-                context_summary="Test context",
-                answer="Test answer",
-                session_id=None,
-            )
+                from cognee.modules.retrieval.utils.session_cache import (
+                    save_to_session_cache,
+                )
 
-            assert result is True
-            call_kwargs = mock_cache.add_qa.call_args.kwargs
-            assert call_kwargs["session_id"] == "default_session"
+                result = await save_to_session_cache(
+                    query="Test question",
+                    context_summary="Test context",
+                    answer="Test answer",
+                    session_id=None,
+                )
+
+                assert result is True
+                call_kwargs = mock_cache.add_qa.call_args.kwargs
+                assert call_kwargs["session_id"] == "default_session"
