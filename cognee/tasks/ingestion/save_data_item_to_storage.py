@@ -3,6 +3,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from typing import Union, BinaryIO, Any
 
+from cognee.infrastructure.files.exceptions import UnsupportedPathSchemeError
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
 from cognee.shared.logging_utils import get_logger
@@ -56,7 +57,9 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
         if parsed_url.scheme == "s3":
             return data_item
         elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
-            return data_item
+            raise UnsupportedPathSchemeError(
+                message=f"HTTP/HTTPS URLs should be handled by loader, not by save_data_item_to_storage. Received: {data_item}"
+            )
         # data is local file path
         elif parsed_url.scheme == "file":
             if settings.accept_local_file_path:

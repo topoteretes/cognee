@@ -3,6 +3,7 @@ import inspect
 from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 
+from cognee.infrastructure.files.exceptions import UnsupportedPathSchemeError
 from cognee.infrastructure.loaders import LoaderInterface
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -79,11 +80,16 @@ async def ingest_data(
         dataset_data_map = {str(data.id): True for data in dataset_data}
 
         for data_item in data:
-            # Get file path of data item or create a file it doesn't exist
-            original_file_path = await save_data_item_to_storage(data_item)
-
-            # Transform file path to be OS usable
-            actual_file_path = get_data_file_path(original_file_path)
+            try:
+                # Get file path of data item or create a file if it doesn't exist
+                original_file_path = await save_data_item_to_storage(data_item)
+                # Transform file path to be OS usable
+                actual_file_path = get_data_file_path(original_file_path)
+            except UnsupportedPathSchemeError:
+                # This data_item (e.g., HTTP/HTTPS URL) should be passed directly to the loader
+                # skip save_data_item_to_storage and get_data_file_path
+                actual_file_path = data_item
+                original_file_path = None  # we don't have an original file path
 
             # Store all input data as text files in Cognee data storage
             cognee_storage_file_path, loader_engine = await data_item_to_text_file(
@@ -93,17 +99,26 @@ async def ingest_data(
             )
 
             # Find metadata from original file
-            async with open_data_file(original_file_path) as file:
-                classified_data = ingestion.classify(file)
+            if original_file_path is not None:
+                # Standard flow: extract metadata from both original and stored files
+                async with open_data_file(original_file_path) as file:
+                    classified_data = ingestion.classify(file)
+                    data_id = ingestion.identify(classified_data, user)
+                    original_file_metadata = classified_data.get_metadata()
 
-                # data_id is the hash of original file contents + owner id to avoid duplicate data
-                data_id = ingestion.identify(classified_data, user)
-                original_file_metadata = classified_data.get_metadata()
-
-            # Find metadata from Cognee data storage text file
-            async with open_data_file(cognee_storage_file_path) as file:
-                classified_data = ingestion.classify(file)
-                storage_file_metadata = classified_data.get_metadata()
+                async with open_data_file(cognee_storage_file_path) as file:
+                    classified_data = ingestion.classify(file)
+                    storage_file_metadata = classified_data.get_metadata()
+            else:
+                # Alternative flow (e.g., URLs): extract metadata once from stored file
+                async with open_data_file(cognee_storage_file_path) as file:
+                    classified_data = ingestion.classify(file)
+                    data_id = ingestion.identify(classified_data, user)
+                    original_file_metadata = classified_data.get_metadata()
+                    # Override file_path to be the actual data_item (e.g., URL) ?
+                    # original_file_metadata["file_path"] = actual_file_path
+                    # Storage metadata is the same as original
+                    # storage_file_metadata = original_file_metadata.copy()
 
             from sqlalchemy import select
 

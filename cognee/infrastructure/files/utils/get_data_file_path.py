@@ -1,6 +1,8 @@
 import os
 from urllib.parse import urlparse
 
+from cognee.infrastructure.files.exceptions import UnsupportedPathSchemeError
+
 
 def get_data_file_path(file_path: str):
     # Check if this is a file URI BEFORE normalizing (which corrupts URIs)
@@ -39,7 +41,9 @@ def get_data_file_path(file_path: str):
         return normalized_url
 
     elif file_path.startswith(("http://", "https://")):
-        return file_path
+        raise UnsupportedPathSchemeError(
+            message=f"HTTP/HTTPS URLs are not supported by get_data_file_path(). Received: {file_path}"
+        )
 
     else:
         # Regular file path - normalize separators
