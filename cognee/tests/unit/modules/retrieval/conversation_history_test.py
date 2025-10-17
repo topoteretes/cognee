@@ -53,7 +53,7 @@ class TestConversationHistoryUtils:
         ]
         mock_cache = create_mock_cache_engine(mock_history)
 
-        # ✅ Import the real module to patch safely
+        # Import the real module to patch safely
         cache_module = importlib.import_module(
             "cognee.infrastructure.databases.cache.get_cache_engine"
         )
