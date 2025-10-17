@@ -156,10 +156,7 @@ class OpenAIAdapter(LLMInterface):
             InstructorRetryException,
         ) as e:
             if not (self.fallback_model and self.fallback_api_key):
-                raise ContentPolicyFilterError(
-                    f"The provided input contains content that is not aligned with our content policy: {text_input}"
-                ) from e
-
+                raise e
             try:
                 return await self.aclient.chat.completions.create(
                     model=self.fallback_model,
