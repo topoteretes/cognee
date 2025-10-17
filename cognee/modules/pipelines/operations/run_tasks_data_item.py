@@ -115,9 +115,8 @@ async def run_tasks_data_item_incremental(
             data_point = (
                 await session.execute(select(Data).filter(Data.id == data_id))
             ).scalar_one_or_none()
-            data_point.pipeline_status[pipeline_name] = {
-                str(dataset.id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-            }
+            status_for_pipeline = data_point.pipeline_status.setdefault(pipeline_name, {})
+            status_for_pipeline[str(dataset.id)] = DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
             await session.merge(data_point)
             await session.commit()
 
