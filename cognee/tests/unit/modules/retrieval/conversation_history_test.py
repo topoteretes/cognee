@@ -7,13 +7,13 @@ from cognee.context_global_variables import session_user
 def create_mock_cache_engine(qa_history=None):
     """Mocking cache engine as it is tested somewhere else"""
     mock_cache = AsyncMock()
-    
+
     if qa_history is None:
         qa_history = []
-    
+
     mock_cache.get_latest_qa = AsyncMock(return_value=qa_history)
     mock_cache.add_qa = AsyncMock(return_value=None)
-    
+
     return mock_cache
 
 
@@ -28,7 +28,10 @@ class TestConversationHistoryUtils:
 
         mock_cache = create_mock_cache_engine([])
 
-        with patch("cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine", return_value=mock_cache):
+        with patch(
+            "cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine",
+            return_value=mock_cache,
+        ):
             from cognee.modules.retrieval.utils.session_cache import get_conversation_history
 
             result = await get_conversation_history(session_id="test_session")
@@ -51,7 +54,10 @@ class TestConversationHistoryUtils:
         ]
         mock_cache = create_mock_cache_engine(mock_history)
 
-        with patch("cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine", return_value=mock_cache):
+        with patch(
+            "cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine",
+            return_value=mock_cache,
+        ):
             from cognee.modules.retrieval.utils.session_cache import get_conversation_history
 
             result = await get_conversation_history(session_id="test_session")
@@ -70,7 +76,10 @@ class TestConversationHistoryUtils:
 
         mock_cache = create_mock_cache_engine([])
 
-        with patch("cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine", return_value=mock_cache):
+        with patch(
+            "cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine",
+            return_value=mock_cache,
+        ):
             from cognee.modules.retrieval.utils.session_cache import save_to_session_cache
 
             result = await save_to_session_cache(
@@ -82,7 +91,7 @@ class TestConversationHistoryUtils:
 
             assert result is True
             mock_cache.add_qa.assert_called_once()
-            
+
             call_kwargs = mock_cache.add_qa.call_args.kwargs
             assert call_kwargs["question"] == "What is Python?"
             assert call_kwargs["context"] == "Python is a programming language"
