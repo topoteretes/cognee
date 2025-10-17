@@ -126,7 +126,7 @@ async def main():
 
     history_default = await cache_engine.get_latest_qa(str(user.id), "default_session", last_n=10)
     our_qa_default = [h for h in history_default if h["question"] == "Test default session"]
-    assert len(our_qa_default) == 1, f"Should find 'Test default session' in default_session"
+    assert len(our_qa_default) == 1, "Should find 'Test default session' in default_session"
 
     session_id_rag = "test_session_rag"
 
@@ -142,7 +142,7 @@ async def main():
 
     history_rag = await cache_engine.get_latest_qa(str(user.id), session_id_rag, last_n=10)
     our_qa_rag = [h for h in history_rag if h["question"] == "What companies are mentioned?"]
-    assert len(our_qa_rag) == 1, f"Should find RAG question in history"
+    assert len(our_qa_rag) == 1, "Should find RAG question in history"
 
     session_id_cot = "test_session_cot"
 
@@ -158,7 +158,7 @@ async def main():
 
     history_cot = await cache_engine.get_latest_qa(str(user.id), session_id_cot, last_n=10)
     our_qa_cot = [h for h in history_cot if h["question"] == "What do you know about TechCorp?"]
-    assert len(our_qa_cot) == 1, f"Should find CoT question in history"
+    assert len(our_qa_cot) == 1, "Should find CoT question in history"
 
     session_id_ext = "test_session_ext"
 
@@ -174,7 +174,7 @@ async def main():
 
     history_ext = await cache_engine.get_latest_qa(str(user.id), session_id_ext, last_n=10)
     our_qa_ext = [h for h in history_ext if h["question"] == "Tell me about DataCo"]
-    assert len(our_qa_ext) == 1, f"Should find Context Extension question in history"
+    assert len(our_qa_ext) == 1, "Should find Context Extension question in history"
 
     session_id_summary = "test_session_summary"
 
@@ -193,7 +193,7 @@ async def main():
     our_qa_summary = [
         h for h in history_summary if h["question"] == "What are the key points about TechCorp?"
     ]
-    assert len(our_qa_summary) == 1, f"Should find Summary question in history"
+    assert len(our_qa_summary) == 1, "Should find Summary question in history"
 
     session_id_temporal = "test_session_temporal"
 
@@ -213,7 +213,7 @@ async def main():
     our_qa_temporal = [
         h for h in history_temporal if h["question"] == "Tell me about the companies"
     ]
-    assert len(our_qa_temporal) == 1, f"Should find Temporal question in history"
+    assert len(our_qa_temporal) == 1, "Should find Temporal question in history"
 
     from cognee.modules.retrieval.utils.session_cache import (
         get_conversation_history,
