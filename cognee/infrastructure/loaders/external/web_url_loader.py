@@ -4,6 +4,9 @@ from typing import List
 from cognee.modules.ingestion.exceptions.exceptions import IngestionError
 from cognee.modules.ingestion import save_data_to_file
 from cognee.tasks.web_scraper.config import TavilyConfig, SoupCrawlerConfig
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 class WebUrlLoader(LoaderInterface):
@@ -100,16 +103,26 @@ class WebUrlLoader(LoaderInterface):
                     message="SoupCrawlerConfig must be set on the ingestion context when using the BeautifulSoup scraper."
                 )
 
+            logger.info(f"Starting web URL crawling for: {file_path}")
+            logger.info(f"Using scraping tool: {preferred_tool}")
+
             data = await fetch_page_content(
                 file_path,
                 preferred_tool=preferred_tool,
                 tavily_config=_tavily_config,
                 soup_crawler_config=_soup_config,
             )
+
+            logger.info(f"Successfully fetched content from {len(data)} URL(s)")
+            logger.info("Processing and concatenating fetched content")
+
             content = ""
             for key, value in data.items():
                 content += f"{key}:\n{value}\n\n"
+
+            logger.info(f"Saving content to file (total size: {len(content)} characters)")
             stored_path = await save_data_to_file(content)
+            logger.info(f"Successfully saved content to: {stored_path}")
 
             return stored_path
         except IngestionError:

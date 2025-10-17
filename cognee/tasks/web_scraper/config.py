@@ -13,6 +13,9 @@ class TavilyConfig(BaseModel):
 class SoupCrawlerConfig(BaseModel):
     concurrency: int = 5
     crawl_delay: float = 0.5
+    max_crawl_delay: Optional[float] = (
+        10.0  # Maximum crawl delay to respect from robots.txt (None = no limit)
+    )
     timeout: float = 15.0
     max_retries: int = 2
     retry_delay_factor: float = 0.5

@@ -75,6 +75,7 @@ class BeautifulSoupCrawler:
     Attributes:
         concurrency: Number of concurrent requests allowed.
         crawl_delay: Minimum seconds between requests to the same domain.
+        max_crawl_delay: Maximum crawl delay to respect from robots.txt (None = no limit).
         timeout: Per-request timeout in seconds.
         max_retries: Number of retries for failed requests.
         retry_delay_factor: Multiplier for exponential backoff on retries.
@@ -87,6 +88,7 @@ class BeautifulSoupCrawler:
         *,
         concurrency: int = 5,
         crawl_delay: float = 0.5,
+        max_crawl_delay: Optional[float] = 10.0,
         timeout: float = 15.0,
         max_retries: int = 2,
         retry_delay_factor: float = 0.5,
@@ -98,6 +100,7 @@ class BeautifulSoupCrawler:
         Args:
             concurrency: Number of concurrent requests allowed.
             crawl_delay: Minimum seconds between requests to the same domain.
+            max_crawl_delay: Maximum crawl delay to respect from robots.txt (None = no limit).
             timeout: Per-request timeout in seconds.
             max_retries: Number of retries for failed requests.
             retry_delay_factor: Multiplier for exponential backoff on retries.
@@ -107,6 +110,7 @@ class BeautifulSoupCrawler:
         self.concurrency = concurrency
         self._sem = asyncio.Semaphore(concurrency)
         self.crawl_delay = crawl_delay
+        self.max_crawl_delay = max_crawl_delay
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay_factor = retry_delay_factor
@@ -183,7 +187,11 @@ class BeautifulSoupCrawler:
         elapsed = time.time() - last
         wait_for = delay - elapsed
         if wait_for > 0:
+            logger.info(
+                f"Rate limiting: waiting {wait_for:.2f}s before requesting {url} (crawl_delay={delay}s from robots.txt)"
+            )
             await asyncio.sleep(wait_for)
+            logger.info(f"Rate limit wait completed for {url}")
         self._last_request_time_per_domain[domain] = time.time()
 
     async def _get_robots_cache(self, domain_root: str) -> Optional[RobotsTxtCache]:
@@ -236,7 +244,16 @@ class BeautifulSoupCrawler:
             crawl_delay = self.crawl_delay
             if protego:
                 delay = protego.crawl_delay(agent) or protego.crawl_delay("*")
-                crawl_delay = delay if delay else self.crawl_delay
+                if delay:
+                    # Apply max_crawl_delay cap if configured
+                    if self.max_crawl_delay is not None and delay > self.max_crawl_delay:
+                        logger.warning(
+                            f"robots.txt specifies crawl_delay={delay}s for {domain_root}, "
+                            f"capping to max_crawl_delay={self.max_crawl_delay}s"
+                        )
+                        crawl_delay = self.max_crawl_delay
+                    else:
+                        crawl_delay = delay
 
             cache_entry = RobotsTxtCache(protego=protego, crawl_delay=crawl_delay)
             self._robots_cache[domain_root] = cache_entry
@@ -307,12 +324,16 @@ class BeautifulSoupCrawler:
 
         attempt = 0
         crawl_delay = await self._get_crawl_delay(url)
+        logger.info(f"Fetching URL with httpx (crawl_delay={crawl_delay}s): {url}")
 
         while True:
             try:
                 await self._respect_rate_limit(url, crawl_delay)
                 resp = await self._client.get(url)
                 resp.raise_for_status()
+                logger.info(
+                    f"Successfully fetched {url} (status={resp.status_code}, size={len(resp.text)} bytes)"
+                )
                 return resp.text
             except Exception as exc:
                 attempt += 1
@@ -347,22 +368,35 @@ class BeautifulSoupCrawler:
             raise RuntimeError(
                 "Playwright is not installed. Install with `pip install playwright` and run `playwright install`."
             )
+
+        timeout_val = timeout or self.timeout
+        logger.info(
+            f"Rendering URL with Playwright (js_wait={js_wait}s, timeout={timeout_val}s): {url}"
+        )
+
         attempt = 0
         while True:
             try:
                 async with async_playwright() as p:
+                    logger.info(f"Launching headless Chromium browser for {url}")
                     browser = await p.chromium.launch(headless=True)
                     try:
                         context = await browser.new_context()
                         page = await context.new_page()
+                        logger.info(f"Navigating to {url} and waiting for network idle")
                         await page.goto(
                             url,
                             wait_until="networkidle",
-                            timeout=int((timeout or self.timeout) * 1000),
+                            timeout=int(timeout_val * 1000),
                         )
                         if js_wait:
+                            logger.info(f"Waiting {js_wait}s for JavaScript to execute")
                             await asyncio.sleep(js_wait)
-                        return await page.content()
+                        content = await page.content()
+                        logger.info(
+                            f"Successfully rendered {url} with Playwright (size={len(content)} bytes)"
+                        )
+                        return content
                     finally:
                         await browser.close()
             except Exception as exc:
@@ -498,6 +532,10 @@ class BeautifulSoupCrawler:
         else:
             raise ValueError(f"Invalid urls type: {type(urls)}")
 
+        logger.info(
+            f"Preparing to fetch {len(url_rules_map)} URL(s) with {len(extraction_rules) if extraction_rules else 0} extraction rule(s)"
+        )
+
         normalized_url_rules: Dict[str, List[ExtractionRule]] = {}
         for url, rules in url_rules_map.items():
             normalized_rules = []
@@ -508,21 +546,36 @@ class BeautifulSoupCrawler:
                 normalized_rules.append(r)
             normalized_url_rules[url] = normalized_rules
 
+        logger.info(f"Normalized extraction rules for {len(normalized_url_rules)} URL(s)")
+
         async def _task(url: str):
             async with self._sem:
                 try:
+                    logger.info(f"Processing URL: {url}")
+
+                    # Check robots.txt
                     allowed = await self._is_url_allowed(url)
                     if not allowed:
                         logger.warning(f"URL disallowed by robots.txt: {url}")
                         return url, ""
 
+                    logger.info(f"Robots.txt check passed for {url}")
+
+                    # Fetch HTML
                     if use_playwright:
+                        logger.info(
+                            f"Rendering {url} with Playwright (JS wait: {playwright_js_wait}s)"
+                        )
                         html = await self._render_with_playwright(
                             url, js_wait=playwright_js_wait, timeout=self.timeout
                         )
                     else:
+                        logger.info(f"Fetching {url} with httpx")
                         html = await self._fetch_httpx(url)
 
+                    logger.info(f"Successfully fetched HTML from {url} ({len(html)} bytes)")
+
+                    # Extract content
                     pieces = []
                     for rule in normalized_url_rules[url]:
                         text = self._extract_with_bs4(html, rule)
@@ -530,17 +583,24 @@ class BeautifulSoupCrawler:
                             pieces.append(text)
 
                     concatenated = " ".join(pieces).strip()
+                    logger.info(f"Extracted {len(concatenated)} characters from {url}")
                     return url, concatenated
 
                 except Exception as e:
                     logger.error(f"Error processing {url}: {e}")
                     return url, ""
 
+        logger.info(f"Creating {len(url_rules_map)} async tasks for concurrent fetching")
         tasks = [asyncio.create_task(_task(u)) for u in url_rules_map.keys()]
         results = {}
+        completed = 0
+        total = len(tasks)
 
         for coro in asyncio.as_completed(tasks):
             url, text = await coro
             results[url] = text
+            completed += 1
+            logger.info(f"Progress: {completed}/{total} URLs processed")
 
+        logger.info(f"Completed fetching all {len(results)} URL(s)")
         return results
