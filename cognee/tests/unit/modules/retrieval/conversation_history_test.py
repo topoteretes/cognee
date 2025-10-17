@@ -1,48 +1,41 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from cognee.context_global_variables import session_user
+import importlib
 
 
 def create_mock_cache_engine(qa_history=None):
-    """Mocking cache engine as it is tested somewhere else"""
     mock_cache = AsyncMock()
-
     if qa_history is None:
         qa_history = []
-
     mock_cache.get_latest_qa = AsyncMock(return_value=qa_history)
     mock_cache.add_qa = AsyncMock(return_value=None)
-
     return mock_cache
 
 
 def create_mock_user():
-    """Create a mock user without database access"""
     mock_user = MagicMock()
     mock_user.id = "test-user-id-123"
     return mock_user
 
 
 class TestConversationHistoryUtils:
-    """Test the two utility functions: get_conversation_history and save_to_session_cache"""
-
     @pytest.mark.asyncio
     async def test_get_conversation_history_returns_empty_when_no_history(self):
-        """Test get_conversation_history returns empty string when no history exists."""
         user = create_mock_user()
         session_user.set(user)
-
         mock_cache = create_mock_cache_engine([])
 
-        with patch(
-            "cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine",
-            return_value=mock_cache,
-        ):
+        cache_module = importlib.import_module(
+            "cognee.infrastructure.databases.cache.get_cache_engine"
+        )
+
+        with patch.object(cache_module, "get_cache_engine", return_value=mock_cache):
             from cognee.modules.retrieval.utils.session_cache import get_conversation_history
 
             result = await get_conversation_history(session_id="test_session")
 
-            assert result == ""
+        assert result == ""
 
     @pytest.mark.asyncio
     async def test_get_conversation_history_formats_history_correctly(self):
@@ -60,14 +53,15 @@ class TestConversationHistoryUtils:
         ]
         mock_cache = create_mock_cache_engine(mock_history)
 
-        with patch(
-            "cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine",
-            return_value=mock_cache,
-        ):
+        # ✅ Import the real module to patch safely
+        cache_module = importlib.import_module(
+            "cognee.infrastructure.databases.cache.get_cache_engine"
+        )
+
+        with patch.object(cache_module, "get_cache_engine", return_value=mock_cache):
             with patch(
                 "cognee.modules.retrieval.utils.session_cache.CacheConfig"
             ) as MockCacheConfig:
-                # Enable caching
                 mock_config = MagicMock()
                 mock_config.caching = True
                 MockCacheConfig.return_value = mock_config
@@ -92,14 +86,14 @@ class TestConversationHistoryUtils:
 
         mock_cache = create_mock_cache_engine([])
 
-        with patch(
-            "cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine",
-            return_value=mock_cache,
-        ):
+        cache_module = importlib.import_module(
+            "cognee.infrastructure.databases.cache.get_cache_engine"
+        )
+
+        with patch.object(cache_module, "get_cache_engine", return_value=mock_cache):
             with patch(
                 "cognee.modules.retrieval.utils.session_cache.CacheConfig"
             ) as MockCacheConfig:
-                # Enable caching
                 mock_config = MagicMock()
                 mock_config.caching = True
                 MockCacheConfig.return_value = mock_config
@@ -132,14 +126,14 @@ class TestConversationHistoryUtils:
 
         mock_cache = create_mock_cache_engine([])
 
-        with patch(
-            "cognee.infrastructure.databases.cache.get_cache_engine.get_cache_engine",
-            return_value=mock_cache,
-        ):
+        cache_module = importlib.import_module(
+            "cognee.infrastructure.databases.cache.get_cache_engine"
+        )
+
+        with patch.object(cache_module, "get_cache_engine", return_value=mock_cache):
             with patch(
                 "cognee.modules.retrieval.utils.session_cache.CacheConfig"
             ) as MockCacheConfig:
-                # Enable caching
                 mock_config = MagicMock()
                 mock_config.caching = True
                 MockCacheConfig.return_value = mock_config
