@@ -121,9 +121,7 @@ class TestConversationHistoryUtils:
                 call_kwargs = mock_cache.add_qa.call_args.kwargs
                 assert call_kwargs["question"] == "What is Python?"
                 assert call_kwargs["context"] == "Python is a programming language"
-                assert (
-                    call_kwargs["answer"] == "Python is a high-level programming language"
-                )
+                assert call_kwargs["answer"] == "Python is a high-level programming language"
                 assert call_kwargs["session_id"] == "my_session"
 
     @pytest.mark.asyncio
