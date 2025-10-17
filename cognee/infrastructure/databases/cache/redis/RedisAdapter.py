@@ -164,7 +164,7 @@ class RedisAdapter(CacheDBInterface):
         session_key = f"agent_sessions:{user_id}:{session_id}"
         if last_n == 1:
             data = await self.async_redis.lindex(session_key, -1)
-            return json.loads(data) if data else None
+            return [json.loads(data)] if data else None
         else:
             data = await self.async_redis.lrange(session_key, -last_n, -1)
             return [json.loads(d) for d in data] if data else []
