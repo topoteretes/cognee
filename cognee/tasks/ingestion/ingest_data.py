@@ -116,9 +116,9 @@ async def ingest_data(
                     data_id = ingestion.identify(classified_data, user)
                     original_file_metadata = classified_data.get_metadata()
                     # Override file_path to be the actual data_item (e.g., URL) ?
-                    # original_file_metadata["file_path"] = actual_file_path
+                    original_file_metadata["file_path"] = actual_file_path
                     # Storage metadata is the same as original
-                    # storage_file_metadata = original_file_metadata.copy()
+                    storage_file_metadata = original_file_metadata.copy()
 
             from sqlalchemy import select
 

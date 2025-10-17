@@ -4,6 +4,9 @@ import cognee
 
 @pytest.mark.asyncio
 async def test_add_fails_when_preferred_loader_not_specified():
+    from cognee.shared.logging_utils import setup_logging, ERROR
+
+    setup_logging(log_level=ERROR)
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     with pytest.raises(ValueError):

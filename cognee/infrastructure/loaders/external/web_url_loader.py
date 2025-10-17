@@ -63,6 +63,8 @@ class WebUrlLoader(LoaderInterface):
             file_stream: If file stream is provided it will be used to process file instead
             **kwargs: Additional loader-specific configuration
 
+        Returns:
+            file path to the stored file
         Raises:
             Exception: If file cannot be processed
         """
@@ -107,9 +109,9 @@ class WebUrlLoader(LoaderInterface):
             content = ""
             for key, value in data.items():
                 content += f"{key}:\n{value}\n\n"
-            await save_data_to_file(content)
+            stored_path = await save_data_to_file(content)
 
-            return content
+            return stored_path
         except IngestionError:
             raise
         except Exception as e:
