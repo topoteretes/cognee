@@ -75,7 +75,7 @@ async def main():
     history1 = await cache_engine.get_latest_qa(str(user.id), session_id_1, last_n=10)
     assert len(history1) == 1, f"Expected at least 1 Q&A in history, got {len(history1)}"
     our_qa = [h for h in history1 if h["question"] == "What is TechCorp?"]
-    assert len(our_qa) >= 1, f"Expected to find 'What is TechCorp?' in history"
+    assert len(our_qa) >= 1, "Expected to find 'What is TechCorp?' in history"
     assert "answer" in our_qa[0] and "context" in our_qa[0], (
         "Q&A should contain answer and context fields"
     )
@@ -112,7 +112,7 @@ async def main():
 
     history3 = await cache_engine.get_latest_qa(str(user.id), session_id_2, last_n=10)
     our_qa_session2 = [h for h in history3 if h["question"] == "What is DataCo?"]
-    assert len(our_qa_session2) == 1, f"Session 2 should have 'What is DataCo?' question"
+    assert len(our_qa_session2) == 1, "Session 2 should have 'What is DataCo?' question"
 
     result4 = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
