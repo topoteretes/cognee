@@ -1,7 +1,6 @@
 import asyncio
 
 import cognee
-from cognee.shared.logging_utils import setup_logging, ERROR
 
 
 async def main():
@@ -11,10 +10,14 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
 
     extraction_rules = {
-        "title": {"selector": "title", "attr": "text"},
-        "headings": {"selector": "h1, h2, h3", "attr": "text", "all": True},
-        "links": {"selector": "a", "attr": "href", "all": True},
-        "paragraphs": {"selector": "p", "attr": "text", "all": True},
+        "title": {"selector": "title"},
+        "headings": {"selector": "h1, h2, h3", "all": True},
+        "links": {
+            "selector": "a",
+            "attr": "href",
+            "all": True,
+        },
+        "paragraphs": {"selector": "p", "all": True},
     }
 
     loaders_config = {
@@ -42,5 +45,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    logger = setup_logging(log_level=ERROR)
     asyncio.run(main())

@@ -22,10 +22,10 @@ async def test_add_succesfully_adds_url_when_preferred_loader_specified():
     await cognee.prune.prune_system(metadata=True)
 
     extraction_rules = {
-        "title": {"selector": "title", "attr": "text"},
-        "headings": {"selector": "h1, h2, h3", "attr": "text", "all": True},
+        "title": {"selector": "title"},
+        "headings": {"selector": "h1, h2, h3", "all": True},
         "links": {"selector": "a", "attr": "href", "all": True},
-        "paragraphs": {"selector": "p", "attr": "text", "all": True},
+        "paragraphs": {"selector": "p", "all": True},
     }
 
     loaders_config = {
