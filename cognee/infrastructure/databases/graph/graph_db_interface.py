@@ -160,9 +160,9 @@ class GraphDBInterface(ABC):
     """
 
     @abstractmethod
-    async def count_nodes(self) -> int:
-        logger.warning("count_nodes is not implemented")
-        return 1  # dummy value to not fail search()
+    async def is_empty(self) -> bool:
+        logger.warning("is_empty() is not implemented")
+        return True
 
     @abstractmethod
     async def query(self, query: str, params: dict) -> List[Any]:

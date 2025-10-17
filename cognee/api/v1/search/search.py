@@ -8,7 +8,7 @@ from cognee.modules.search.types import SearchResult, SearchType, CombinedSearch
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
-from cognee.modules.data.exceptions import DatasetNotFoundError, SearchOnEmptyGraphError
+from cognee.modules.data.exceptions import DatasetNotFoundError
 
 
 async def search(
@@ -177,12 +177,10 @@ async def search(
             raise DatasetNotFoundError(message="No datasets found.")
 
     graph_engine = await get_graph_engine()
-    nodes_count = await graph_engine.count_nodes()
+    is_empty = await graph_engine.is_empty()
 
-    if nodes_count == 0:
-        raise SearchOnEmptyGraphError(
-            message="Knowledge graph is empty, please ensure data is added and cognified."
-        )
+    if is_empty:
+        return []
 
     filtered_search_results = await search_function(
         query_text=query_text,

@@ -51,21 +51,21 @@ async def main():
 
         graph_engine = await get_graph_engine()
 
-        nodes_count = await graph_engine.count_nodes()
+        is_empty = await graph_engine.is_empty()
 
-        assert nodes_count == 0, "Kuzu graph database is not empty"
+        assert is_empty, "Kuzu graph database is not empty"
 
         await cognee.add([explanation_file_path_quantum], dataset_name)
 
-        nodes_count = await graph_engine.count_nodes()
+        is_empty = await graph_engine.is_empty()
 
-        assert nodes_count == 0, "Kuzu graph database should be empty before cognify"
+        assert is_empty, "Kuzu graph database should be empty before cognify"
 
         await cognee.cognify([dataset_name])
 
-        nodes_count = await graph_engine.count_nodes()
+        is_empty = await graph_engine.is_empty()
 
-        assert nodes_count != 0, "Kuzu graph database should not be empty"
+        assert not is_empty, "Kuzu graph database should not be empty"
 
         from cognee.infrastructure.databases.vector import get_vector_engine
 
@@ -131,9 +131,9 @@ async def main():
 
         await cognee.prune.prune_system(metadata=True)
 
-        nodes_count = await graph_engine.count_nodes()
+        is_empty = await graph_engine.is_empty()
 
-        assert nodes_count == 0, "Kuzu graph database is not empty"
+        assert is_empty, "Kuzu graph database is not empty"
 
     finally:
         # Ensure cleanup even if tests fail

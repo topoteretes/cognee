@@ -87,13 +87,14 @@ class Neo4jAdapter(GraphDBInterface):
         async with self.driver.session(database=self.graph_database_name) as session:
             yield session
 
-    async def count_nodes(self) -> int:
+    async def is_empty(self) -> bool:
         query = """
+        RETURN EXISTS {
         MATCH (n)
-        RETURN COUNT(n) as total_nodes;
+        } AS node_exists;
         """
         query_result = await self.query(query)
-        return query_result[0]["total_nodes"]
+        return not query_result[0]["node_exists"]
 
     @deadlock_retry()
     async def query(

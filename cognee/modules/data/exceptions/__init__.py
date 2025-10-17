@@ -9,5 +9,4 @@ from .exceptions import (
     UnauthorizedDataAccessError,
     DatasetNotFoundError,
     DatasetTypeError,
-    SearchOnEmptyGraphError,
 )

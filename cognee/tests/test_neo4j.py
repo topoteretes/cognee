@@ -39,9 +39,9 @@ async def main():
 
     graph_engine = await get_graph_engine()
 
-    nodes_count = await graph_engine.count_nodes()
+    is_empty = await graph_engine.is_empty()
 
-    assert nodes_count == 0, "Graph has to be empty"
+    assert is_empty, "Graph has to be empty"
 
     await cognee.add([explanation_file_path_nlp], dataset_name)
 
@@ -50,15 +50,15 @@ async def main():
     )
 
     await cognee.add([explanation_file_path_quantum], dataset_name)
-    nodes_count = await graph_engine.count_nodes()
+    is_empty = await graph_engine.is_empty()
 
-    assert nodes_count == 0, "Graph has to be empty before cognify"
+    assert is_empty, "Graph has to be empty before cognify"
 
     await cognee.cognify([dataset_name])
 
-    nodes_count = await graph_engine.count_nodes()
+    is_empty = await graph_engine.is_empty()
 
-    assert nodes_count != 0, "Graph shouldn't be empty"
+    assert not is_empty, "Graph shouldn't be empty"
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
@@ -132,8 +132,8 @@ async def main():
     assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
     await cognee.prune.prune_system(metadata=True)
-    nodes_count = await graph_engine.count_nodes()
-    assert nodes_count == 0, "Neo4j graph database is not empty"
+    is_empty = await graph_engine.is_empty()
+    assert is_empty, "Neo4j graph database is not empty"
 
 
 if __name__ == "__main__":

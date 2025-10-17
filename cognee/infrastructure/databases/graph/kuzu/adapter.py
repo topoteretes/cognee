@@ -185,13 +185,14 @@ class KuzuAdapter(GraphDBInterface):
         except FileNotFoundError:
             logger.warning(f"Kuzu S3 storage file not found: {self.db_path}")
 
-    async def count_nodes(self) -> int:
+    async def is_empty(self) -> bool:
         query = """
         MATCH (n)
-        RETURN COUNT(n);
+        RETURN true
+        LIMIT 1;
         """
         query_result = await self.query(query)
-        return query_result[0][0]
+        return len(query_result) == 0
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
