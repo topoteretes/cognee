@@ -24,7 +24,6 @@ from cognee.modules.pipelines.operations import (
     log_pipeline_run_complete,
     log_pipeline_run_error,
 )
-from .run_tasks_with_telemetry import run_tasks_with_telemetry
 from .run_tasks_data_item import run_tasks_data_item
 from ..tasks.task import Task
 
@@ -60,6 +59,7 @@ async def run_tasks(
     pipeline_name: str = "unknown_pipeline",
     context: dict = None,
     incremental_loading: bool = False,
+    data_per_batch: int = 20,
 ):
     if not user:
         user = await get_default_user()
@@ -89,24 +89,29 @@ async def run_tasks(
         if incremental_loading:
             data = await resolve_data_directories(data)
 
-        # Create async tasks per data item that will run the pipeline for the data item
-        data_item_tasks = [
-            asyncio.create_task(
-                run_tasks_data_item(
-                    data_item,
-                    dataset,
-                    tasks,
-                    pipeline_name,
-                    pipeline_id,
-                    pipeline_run_id,
-                    context,
-                    user,
-                    incremental_loading,
+        # Create and gather batches of async tasks of data items that will run the pipeline for the data item
+        results = []
+        for start in range(0, len(data), data_per_batch):
+            data_batch = data[start : start + data_per_batch]
+
+            data_item_tasks = [
+                asyncio.create_task(
+                    run_tasks_data_item(
+                        data_item,
+                        dataset,
+                        tasks,
+                        pipeline_name,
+                        pipeline_id,
+                        pipeline_run_id,
+                        context,
+                        user,
+                        incremental_loading,
+                    )
                 )
-            )
-            for data_item in data
-        ]
-        results = await asyncio.gather(*data_item_tasks)
+                for data_item in data_batch
+            ]
+
+            results.extend(await asyncio.gather(*data_item_tasks))
 
         # Remove skipped data items from results
         results = [result for result in results if result]
