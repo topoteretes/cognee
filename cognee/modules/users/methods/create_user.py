@@ -42,6 +42,10 @@ async def create_user(
                     if auto_login:
                         await session.refresh(user)
 
+                    # Update tenants and roles information for User object
+                    _ = await user.awaitable_attrs.tenants
+                    _ = await user.awaitable_attrs.roles
+
                     return user
     except UserAlreadyExists as error:
         print(f"User {email} already exists")
