@@ -101,7 +101,7 @@ chromadb = [
     "chromadb>=0.6,<0.7",
     "pypika==0.48.9",
 ]
-docs = ["lxml=6.0.2, unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19"]
+docs = ["lxml==6.0.2, unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19"]
 codegraph = [
     "fastembed<=0.6.0 ; python_version < '3.13'",
     "transformers>=4.46.3,<5",
