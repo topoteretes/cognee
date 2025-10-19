@@ -220,4 +220,36 @@ def get_permissions_router() -> APIRouter:
             status_code=200, content={"message": "Tenant created.", "tenant_id": str(tenant_id)}
         )
 
+    @permissions_router.post("/tenants/{tenant_id}")
+    async def select_tenant(tenant_id: UUID, user: User = Depends(get_authenticated_user)):
+        """
+        Select current tenant.
+
+        This endpoint selects a tenant with the specified UUID. Tenants are used
+        to organize users and resources in multi-tenant environments, providing
+        isolation and access control between different groups or organizations.
+
+        ## Request Parameters
+        - **tenant_id** (UUID): UUID of the tenant to create
+
+        ## Response
+        Returns a success message indicating the tenant was created.
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"POST /v1/permissions/tenants/{str(tenant_id)}",
+                "tenant_id": tenant_id,
+            },
+        )
+
+        from cognee.modules.users.tenants.methods import select_tenant as select_tenant_method
+
+        await select_tenant_method(user_id=user.id, tenant_id=tenant_id)
+
+        return JSONResponse(
+            status_code=200, content={"message": "Tenant selected.", "tenant_id": str(tenant_id)}
+        )
+
     return permissions_router

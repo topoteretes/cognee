@@ -30,6 +30,8 @@ async def create_tenant(tenant_name: str, user_id: UUID) -> UUID:
             await session.flush()
 
             user.tenant_id = tenant.id
+            await session.merge(user)
+            await session.commit()
 
             try:
                 # Add association directly to the association table
@@ -37,11 +39,10 @@ async def create_tenant(tenant_name: str, user_id: UUID) -> UUID:
                     user_id=user_id, tenant_id=tenant.id
                 )
                 await session.execute(create_user_tenant_statement)
+                await session.commit()
             except IntegrityError:
-                raise EntityAlreadyExistsError(message="User is already part of group.")
+                raise EntityAlreadyExistsError(message="User is already part of tenant.")
 
-            await session.merge(user)
-            await session.commit()
             return tenant.id
         except IntegrityError as e:
             raise EntityAlreadyExistsError(message="Tenant already exists.") from e
