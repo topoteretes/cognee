@@ -51,6 +51,7 @@ async def cognify(
     incremental_loading: bool = True,
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
+    data_per_batch: int = 20,
 ):
     """
     Transform ingested data into a structured knowledge graph.
@@ -148,7 +149,7 @@ async def cognify(
         # 2. Get entity relationships and connections
         relationships = await cognee.search(
             "connections between concepts",
-            query_type=SearchType.INSIGHTS
+            query_type=SearchType.GRAPH_COMPLETION
         )
 
         # 3. Find relevant document chunks
@@ -228,6 +229,7 @@ async def cognify(
         graph_db_config=graph_db_config,
         incremental_loading=incremental_loading,
         pipeline_name="cognify_pipeline",
+        data_per_batch=data_per_batch,
     )
 
 

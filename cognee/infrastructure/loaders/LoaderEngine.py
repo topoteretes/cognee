@@ -27,11 +27,11 @@ class LoaderEngine:
 
         self.default_loader_priority = [
             "text_loader",
-            "advanced_pdf_loader",
             "pypdf_loader",
             "image_loader",
             "audio_loader",
             "unstructured_loader",
+            "advanced_pdf_loader",
         ]
 
     def register_loader(self, loader: LoaderInterface) -> bool:
@@ -105,7 +105,6 @@ class LoaderEngine:
     async def load_file(
         self,
         file_path: str,
-        file_stream: Optional[Any],
         preferred_loaders: Optional[List[str]] = None,
         **kwargs,
     ):
