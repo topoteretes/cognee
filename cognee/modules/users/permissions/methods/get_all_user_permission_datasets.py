@@ -40,5 +40,6 @@ async def get_all_user_permission_datasets(user: User, permission_type: str) -> 
         # If the dataset id key already exists, leave the dictionary unchanged.
         unique.setdefault(dataset.id, dataset)
 
-    # TODO: Add filtering out of datasets that aren't currently selected tenant of user
+    # TODO: Add filtering out of datasets that aren't currently selected tenant of user (currently selected tenant is the tenant_id value in the User model)
+    # TODO: Add endpoint/method to select current Tenant for a user (This UUID value should be stored in tenant_id of User model)
     return list(unique.values())
