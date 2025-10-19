@@ -48,22 +48,18 @@ async def add_user_to_tenant(
                 message="Only tenant owner can add other users to organization."
             )
 
-        try:
-            try:
-                # Add association directly to the association table
-                create_user_tenant_statement = insert(UserTenant).values(
-                    user_id=user_id, tenant_id=tenant_id
-                )
-                await session.execute(create_user_tenant_statement)
-            except IntegrityError:
-                raise EntityAlreadyExistsError(message="User is already part of group.")
-
-            if set_active_tenant:
-                user.tenant_id = tenant_id
-
+        if set_active_tenant:
+            user.tenant_id = tenant_id
             await session.merge(user)
             await session.commit()
-        except IntegrityError:
-            raise EntityAlreadyExistsError(
-                message="User is already part of a tenant. Only one tenant can be assigned to user."
+
+        try:
+            # Add association directly to the association table
+            create_user_tenant_statement = insert(UserTenant).values(
+                user_id=user_id, tenant_id=tenant_id
             )
+            await session.execute(create_user_tenant_statement)
+            await session.commit()
+
+        except IntegrityError:
+            raise EntityAlreadyExistsError(message="User is already part of group.")
