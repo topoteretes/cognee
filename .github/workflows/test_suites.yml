@@ -85,7 +85,7 @@ jobs:
     needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
-      python-versions: '["3.10.x", "3.11.x", "3.12.x"]'
+      python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x"]'
     secrets: inherit
 
   # Matrix-based vector database tests
