@@ -65,10 +65,10 @@ distributed = [
     "modal>=1.0.5,<2.0.0",
 ]
 scraping = [
-    "tavily-python>=0.7.0",
+    "tavily-python>=0.7.12",
     "beautifulsoup4>=4.13.1",
     "playwright>=1.9.0",
-    "lxml>=4.9.3,<5.0.0",
+    "lxml>=4.9.3",
     "protego>=0.1",
     "APScheduler>=3.10.0,<=3.11.0"
 ]
