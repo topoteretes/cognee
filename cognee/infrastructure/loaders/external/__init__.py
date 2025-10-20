@@ -10,7 +10,6 @@ These loaders are optional and only available if their dependencies are installe
 """
 
 from .pypdf_loader import PyPdfLoader
-from .web_url_loader import WebUrlLoader
 
 __all__ = ["PyPdfLoader"]
 
