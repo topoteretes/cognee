@@ -68,16 +68,12 @@ async def _generate_enrichment_report(
 async def _create_enrichment_datapoint(
     improved_answer_item: Dict,
     report_text: str,
+    nodeset: NodeSet,
 ) -> Optional[FeedbackEnrichment]:
     """Create a single FeedbackEnrichment DataPoint with proper ID and nodeset assignment."""
     try:
         question = improved_answer_item["question"]
         improved_answer = improved_answer_item["improved_answer"]
-
-        # Create nodeset following UserQAFeedback pattern
-        nodeset = NodeSet(
-            id=uuid5(NAMESPACE_OID, name="FeedbackEnrichment"), name="FeedbackEnrichment"
-        )
 
         enrichment = FeedbackEnrichment(
             id=str(uuid5(NAMESPACE_OID, f"{question}_{improved_answer}")),
@@ -87,7 +83,7 @@ async def _create_enrichment_datapoint(
             improved_answer=improved_answer,
             feedback_id=improved_answer_item["feedback_id"],
             interaction_id=improved_answer_item["interaction_id"],
-            belongs_to_set=nodeset,
+            belongs_to_set=[nodeset],
         )
 
         return enrichment
@@ -119,6 +115,9 @@ async def create_enrichments(
 
     logger.info("Creating enrichments", count=len(improved_answers))
 
+    # Create nodeset once for all enrichments
+    nodeset = NodeSet(id=uuid5(NAMESPACE_OID, name="FeedbackEnrichment"), name="FeedbackEnrichment")
+
     enrichments: List[FeedbackEnrichment] = []
 
     for improved_answer_item in improved_answers:
@@ -130,7 +129,7 @@ async def create_enrichments(
             question, improved_answer, new_context, report_prompt_location
         )
 
-        enrichment = await _create_enrichment_datapoint(improved_answer_item, report_text)
+        enrichment = await _create_enrichment_datapoint(improved_answer_item, report_text, nodeset)
 
         if enrichment:
             enrichments.append(enrichment)

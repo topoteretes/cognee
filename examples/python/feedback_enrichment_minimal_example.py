@@ -3,6 +3,9 @@ import asyncio
 import cognee
 from cognee.api.v1.search import SearchType
 from cognee.modules.pipelines.tasks.task import Task
+from cognee.tasks.graph import extract_graph_from_data
+from cognee.tasks.storage import add_data_points
+from cognee.shared.data_models import KnowledgeGraph
 
 from cognee.tasks.feedback.extract_feedback_interactions import extract_feedback_interactions
 from cognee.tasks.feedback.generate_improved_answers import generate_improved_answers
@@ -49,12 +52,14 @@ async def run_question_and_submit_feedback(question_text: str) -> bool:
 
 
 async def run_feedback_enrichment_memify(last_n: int = 5):
-    """Execute memify with extraction, answer improvement, and enrichment creation tasks."""
+    """Execute memify with extraction, answer improvement, enrichment creation, and graph processing tasks."""
     # Instantiate tasks with their own kwargs
     extraction_tasks = [Task(extract_feedback_interactions, last_n=last_n)]
     enrichment_tasks = [
         Task(generate_improved_answers, retriever_name="graph_completion_cot", top_k=20),
         Task(create_enrichments),
+        Task(extract_graph_from_data, graph_model=KnowledgeGraph, task_config={"batch_size": 10}),
+        Task(add_data_points, task_config={"batch_size": 10}),
     ]
     await cognee.memify(
         extraction_tasks=extraction_tasks,
@@ -65,9 +70,9 @@ async def run_feedback_enrichment_memify(last_n: int = 5):
 
 
 async def main():
-    await initialize_conversation_and_graph(CONVERSATION)
-    is_correct = await run_question_and_submit_feedback("Who told Bob to bring the donuts?")
-    # is_correct = False
+    # await initialize_conversation_and_graph(CONVERSATION)
+    # is_correct = await run_question_and_submit_feedback("Who told Bob to bring the donuts?")
+    is_correct = False
     if not is_correct:
         await run_feedback_enrichment_memify(last_n=5)
 

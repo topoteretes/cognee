@@ -18,4 +18,4 @@ class FeedbackEnrichment(DataPoint):
     improved_answer: str
     feedback_id: UUID
     interaction_id: UUID
-    belongs_to_set: Optional[NodeSet] = None
+    belongs_to_set: Optional[List[NodeSet]] = None
