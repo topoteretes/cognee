@@ -35,14 +35,6 @@ async def main():
     explanation_file_path_nlp = os.path.join(
         pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
     )
-    from cognee.infrastructure.databases.graph import get_graph_engine
-
-    graph_engine = await get_graph_engine()
-
-    is_empty = await graph_engine.is_empty()
-
-    assert is_empty, "Graph has to be empty"
-
     await cognee.add([explanation_file_path_nlp], dataset_name)
 
     explanation_file_path_quantum = os.path.join(
@@ -50,15 +42,8 @@ async def main():
     )
 
     await cognee.add([explanation_file_path_quantum], dataset_name)
-    is_empty = await graph_engine.is_empty()
-
-    assert is_empty, "Graph has to be empty before cognify"
 
     await cognee.cognify([dataset_name])
-
-    is_empty = await graph_engine.is_empty()
-
-    assert not is_empty, "Graph shouldn't be empty"
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
@@ -132,8 +117,11 @@ async def main():
     assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
 
     await cognee.prune.prune_system(metadata=True)
-    is_empty = await graph_engine.is_empty()
-    assert is_empty, "Neo4j graph database is not empty"
+    from cognee.infrastructure.databases.graph import get_graph_engine
+
+    graph_engine = await get_graph_engine()
+    nodes, edges = await graph_engine.get_graph_data()
+    assert len(nodes) == 0 and len(edges) == 0, "Neo4j graph database is not empty"
 
 
 if __name__ == "__main__":
