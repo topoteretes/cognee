@@ -20,7 +20,7 @@ async def main():
         "paragraphs": {"selector": "p", "all": True},
     }
 
-    loaders_config = {
+    fetchers_config = {
         "web_url_loader": {
             "soup_config": {
                 "max_depth": 1,
@@ -32,9 +32,8 @@ async def main():
 
     await cognee.add(
         "https://en.wikipedia.org/wiki/Large_language_model",
-        preferred_loaders=["web_url_loader"],
-        incremental_loading=False,  # TODO: incremental loading bypasses regular data ingestion, which breaks. Will fix
-        loaders_config=loaders_config,
+        incremental_loading=False,
+        fetchers_config=fetchers_config,
     )
 
     await cognee.cognify()

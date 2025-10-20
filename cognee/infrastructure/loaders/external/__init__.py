@@ -27,10 +27,3 @@ try:
     __all__.append("AdvancedPdfLoader")
 except ImportError:
     pass
-
-try:
-    from .web_url_loader import WebUrlLoader
-
-    __all__.append("WebUrlLoader")
-except ImportError:
-    pass
