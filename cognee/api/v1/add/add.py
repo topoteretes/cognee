@@ -30,7 +30,6 @@ async def add(
     preferred_loaders: List[str] = None,
     incremental_loading: bool = True,
     data_per_batch: Optional[int] = 20,
-    loaders_config: dict[LoaderInterface, dict] = {},
     fetchers_config: dict[str, Any] = {},
 ):
     """
@@ -179,7 +178,6 @@ async def add(
             node_set,
             dataset_id,
             preferred_loaders,
-            loaders_config,
             fetchers_config,
         ),
     ]

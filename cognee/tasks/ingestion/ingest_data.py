@@ -30,7 +30,6 @@ async def ingest_data(
     node_set: Optional[List[str]] = None,
     dataset_id: UUID = None,
     preferred_loaders: List[str] = None,
-    loaders_config: dict[LoaderInterface, dict] = {},
     fetchers_config: dict[str, Any] = {},
 ):
     if not user:
@@ -90,7 +89,6 @@ async def ingest_data(
             cognee_storage_file_path, loader_engine = await data_item_to_text_file(
                 actual_file_path,
                 preferred_loaders,
-                loaders_config,
             )
 
             # Find metadata from original file

@@ -36,7 +36,6 @@ async def pull_from_s3(file_path, destination_file) -> None:
 async def data_item_to_text_file(
     data_item_path: str,
     preferred_loaders: List[str],
-    loaders_config: dict[LoaderInterface, dict],
 ) -> Tuple[str, LoaderInterface]:
     if isinstance(data_item_path, str):
         parsed_url = urlparse(data_item_path)
