@@ -3,8 +3,6 @@ import inspect
 from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 
-from cognee.infrastructure.files.exceptions import UnsupportedPathSchemeError
-from cognee.infrastructure.loaders import LoaderInterface
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data

@@ -9,7 +9,6 @@ import os
 from typing import Any, Dict, AsyncGenerator, Optional
 from sqlalchemy import select
 
-from cognee.infrastructure.files.exceptions import UnsupportedPathSchemeError
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
