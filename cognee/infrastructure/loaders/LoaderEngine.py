@@ -64,7 +64,7 @@ class LoaderEngine:
         return True
 
     def get_loader(
-        self, data_item_path: str, preferred_loaders: List[str] = None
+        self, file_path: str, preferred_loaders: List[str] = None
     ) -> Optional[LoaderInterface]:
         """
         Get appropriate loader for a file.
@@ -76,37 +76,24 @@ class LoaderEngine:
         Returns:
             LoaderInterface that can handle the file, or None if not found
         """
-        is_url = data_item_path.startswith(("http://", "https://"))
 
-        if is_url:
-            extension = None
-            mime_type = None
-        else:
-            file_info = filetype.guess(data_item_path)
-            extension = file_info.extension if file_info else None
-            mime_type = file_info.mime if file_info else None
+        file_info = filetype.guess(file_path)
 
         # Try preferred loaders first
         if preferred_loaders:
             for loader_name in preferred_loaders:
                 if loader_name in self._loaders:
                     loader = self._loaders[loader_name]
-                    if loader.can_handle(
-                        extension=extension,
-                        mime_type=mime_type,
-                        data_item_path=data_item_path,
-                    ):  # TODO: I'd like to refactor this to be just one argument and let loaders get file_info inside, but I'll keep that until review time
+                    if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
                         return loader
                 else:
                     logger.info(f"Skipping {loader_name}: Preferred Loader not registered")
 
         # Try default priority order
-        for loader_name in (
-            self.default_loader_priority
-        ):  # TODO: I'm in favor of adding WebUrlLoader to defaults, but keeping it for review
+        for loader_name in self.default_loader_priority:
             if loader_name in self._loaders:
                 loader = self._loaders[loader_name]
-                if loader.can_handle(extension=extension, mime_type=mime_type):
+                if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
                     return loader
             else:
                 logger.info(
