@@ -179,13 +179,6 @@ async def search(
         if not datasets:
             raise DatasetNotFoundError(message="No datasets found.")
 
-    graph_engine = await get_graph_engine()
-    is_empty = await graph_engine.is_empty()
-
-    if is_empty:
-        logger.warning("Search attempt on an empty knowledge graph")
-        return []
-
     filtered_search_results = await search_function(
         query_text=query_text,
         query_type=query_type,
