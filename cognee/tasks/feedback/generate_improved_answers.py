@@ -9,6 +9,7 @@ from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.shared.logging_utils import get_logger
 
 from .utils import create_retriever
+from .models import FeedbackEnrichment
 
 
 class ImprovedAnswerResponse(BaseModel):
@@ -21,19 +22,16 @@ class ImprovedAnswerResponse(BaseModel):
 logger = get_logger("generate_improved_answers")
 
 
-def _validate_input_data(feedback_interactions: List[Dict]) -> bool:
-    """Validate that input contains required fields for all items."""
-    required_fields = [
-        "question",
-        "answer",
-        "context",
-        "feedback_text",
-        "feedback_id",
-        "interaction_id",
-    ]
+def _validate_input_data(enrichments: List[FeedbackEnrichment]) -> bool:
+    """Validate that input contains required fields for all enrichments."""
     return all(
-        all(item.get(field) is not None for field in required_fields)
-        for item in feedback_interactions
+        enrichment.question is not None
+        and enrichment.original_answer is not None
+        and enrichment.context is not None
+        and enrichment.feedback_text is not None
+        and enrichment.feedback_id is not None
+        and enrichment.interaction_id is not None
+        for enrichment in enrichments
     )
 
 
@@ -51,17 +49,15 @@ def _render_reaction_prompt(
 
 
 async def _generate_improved_answer_for_single_interaction(
-    feedback_interaction: Dict, retriever, reaction_prompt_location: str
-) -> Optional[Dict]:
-    """Generate improved answer for a single feedback-interaction pair using structured retriever completion."""
+    enrichment: FeedbackEnrichment, retriever, reaction_prompt_location: str
+) -> Optional[FeedbackEnrichment]:
+    """Generate improved answer for a single enrichment using structured retriever completion."""
     try:
-        question_text = feedback_interaction["question"]
-        original_answer_text = feedback_interaction["answer"]
-        context_text = feedback_interaction["context"]
-        feedback_text = feedback_interaction["feedback_text"]
-
         query_text = _render_reaction_prompt(
-            question_text, context_text, original_answer_text, feedback_text
+            enrichment.question,
+            enrichment.context,
+            enrichment.original_answer,
+            enrichment.feedback_text,
         )
 
         retrieved_context = await retriever.get_context(query_text)
@@ -69,20 +65,18 @@ async def _generate_improved_answer_for_single_interaction(
             query=query_text,
             context=retrieved_context,
             response_model=ImprovedAnswerResponse,
-            max_iter=1,
+            max_iter=4,
         )
         new_context_text = await retriever.resolve_edges_to_text(retrieved_context)
 
         if completion:
-            return {
-                **feedback_interaction,
-                "improved_answer": completion.answer,
-                "new_context": new_context_text,
-                "explanation": completion.explanation,
-            }
+            enrichment.improved_answer = completion.answer
+            enrichment.new_context = new_context_text
+            enrichment.explanation = completion.explanation
+            return enrichment
         else:
             logger.warning(
-                "Failed to get structured completion from retriever", question=question_text
+                "Failed to get structured completion from retriever", question=enrichment.question
             )
             return None
 
@@ -90,23 +84,23 @@ async def _generate_improved_answer_for_single_interaction(
         logger.error(
             "Failed to generate improved answer",
             error=str(exc),
-            question=feedback_interaction.get("question"),
+            question=enrichment.question,
         )
         return None
 
 
 async def generate_improved_answers(
-    feedback_interactions: List[Dict],
+    enrichments: List[FeedbackEnrichment],
     retriever_name: str = "graph_completion_cot",
     top_k: int = 20,
     reaction_prompt_location: str = "feedback_reaction_prompt.txt",
-) -> List[Dict]:
+) -> List[FeedbackEnrichment]:
     """Generate improved answers using configurable retriever and LLM."""
-    if not feedback_interactions:
-        logger.info("No feedback interactions provided; returning empty list")
+    if not enrichments:
+        logger.info("No enrichments provided; returning empty list")
         return []
 
-    if not _validate_input_data(feedback_interactions):
+    if not _validate_input_data(enrichments):
         logger.error("Input data validation failed; missing required fields")
         return []
 
@@ -117,11 +111,11 @@ async def generate_improved_answers(
         system_prompt_path="answer_simple_question.txt",
     )
 
-    improved_answers: List[Dict] = []
+    improved_answers: List[FeedbackEnrichment] = []
 
-    for feedback_interaction in feedback_interactions:
+    for enrichment in enrichments:
         result = await _generate_improved_answer_for_single_interaction(
-            feedback_interaction, retriever, reaction_prompt_location
+            enrichment, retriever, reaction_prompt_location
         )
 
         if result:
@@ -129,8 +123,8 @@ async def generate_improved_answers(
         else:
             logger.warning(
                 "Failed to generate improved answer",
-                question=feedback_interaction.get("question"),
-                interaction_id=feedback_interaction.get("interaction_id"),
+                question=enrichment.question,
+                interaction_id=enrichment.interaction_id,
             )
 
     logger.info("Generated improved answers", count=len(improved_answers))

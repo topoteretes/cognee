@@ -7,8 +7,10 @@ from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts.read_query_prompt import read_query_prompt
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
+from uuid import uuid5, NAMESPACE_OID
 
 from .utils import filter_negative_feedback
+from .models import FeedbackEnrichment
 
 
 logger = get_logger("extract_feedback_interactions")
@@ -49,11 +51,8 @@ def _match_feedback_nodes_to_interactions_by_edges(
     feedback_nodes: List, interaction_nodes: List, graph_edges: List
 ) -> List[Tuple[Tuple, Tuple]]:
     """Match feedback to interactions using gives_feedback_to edges."""
-    # Build single lookup maps using normalized Cognee IDs
     interaction_by_id = {node_id: (node_id, props) for node_id, props in interaction_nodes}
     feedback_by_id = {node_id: (node_id, props) for node_id, props in feedback_nodes}
-
-    # Filter to only gives_feedback_to edges
     feedback_edges = [
         (source_id, target_id)
         for source_id, target_id, rel, _ in graph_edges
@@ -103,23 +102,22 @@ async def _generate_human_readable_context_summary(
         return raw_context_text or ""
 
 
-def _has_required_feedback_fields(record: Dict) -> bool:
-    """Validate required fields exist in the item dict."""
-    required_fields = [
-        "question",
-        "answer",
-        "context",
-        "feedback_text",
-        "feedback_id",
-        "interaction_id",
-    ]
-    return all(record.get(field_name) is not None for field_name in required_fields)
+def _has_required_feedback_fields(enrichment: FeedbackEnrichment) -> bool:
+    """Validate required fields exist in the FeedbackEnrichment DataPoint."""
+    return (
+        enrichment.question is not None
+        and enrichment.original_answer is not None
+        and enrichment.context is not None
+        and enrichment.feedback_text is not None
+        and enrichment.feedback_id is not None
+        and enrichment.interaction_id is not None
+    )
 
 
 async def _build_feedback_interaction_record(
     feedback_node_id: str, feedback_props: Dict, interaction_node_id: str, interaction_props: Dict
-) -> Optional[Dict]:
-    """Build a single feedback-interaction record with context summary."""
+) -> Optional[FeedbackEnrichment]:
+    """Build a single FeedbackEnrichment DataPoint with context summary."""
     try:
         question_text = interaction_props.get("question")
         original_answer_text = interaction_props.get("answer")
@@ -130,17 +128,23 @@ async def _build_feedback_interaction_record(
             question_text or "", raw_context_text
         )
 
-        feedback_interaction_record = {
-            "question": question_text,
-            "answer": original_answer_text,
-            "context": context_summary_text,
-            "feedback_text": feedback_text,
-            "feedback_id": UUID(str(feedback_node_id)),
-            "interaction_id": UUID(str(interaction_node_id)),
-        }
+        enrichment = FeedbackEnrichment(
+            id=str(uuid5(NAMESPACE_OID, f"{question_text}_{interaction_node_id}")),
+            text="",
+            question=question_text,
+            original_answer=original_answer_text,
+            improved_answer="",
+            feedback_id=UUID(str(feedback_node_id)),
+            interaction_id=UUID(str(interaction_node_id)),
+            belongs_to_set=None,
+            context=context_summary_text,
+            feedback_text=feedback_text,
+            new_context="",
+            explanation="",
+        )
 
-        if _has_required_feedback_fields(feedback_interaction_record):
-            return feedback_interaction_record
+        if _has_required_feedback_fields(enrichment):
+            return enrichment
         else:
             logger.warning("Skipping invalid feedback item", interaction=str(interaction_node_id))
             return None
@@ -151,9 +155,9 @@ async def _build_feedback_interaction_record(
 
 async def _build_feedback_interaction_records(
     matched_feedback_interaction_pairs: List[Tuple[Tuple, Tuple]],
-) -> List[Dict]:
-    """Build all feedback-interaction records from matched pairs."""
-    feedback_interaction_records: List[Dict] = []
+) -> List[FeedbackEnrichment]:
+    """Build all FeedbackEnrichment DataPoints from matched pairs."""
+    feedback_interaction_records: List[FeedbackEnrichment] = []
     for (feedback_node_id, feedback_props), (
         interaction_node_id,
         interaction_props,
@@ -168,8 +172,8 @@ async def _build_feedback_interaction_records(
 
 async def extract_feedback_interactions(
     subgraphs: List, last_n: Optional[int] = None
-) -> List[Dict]:
-    """Extract negative feedback-interaction pairs; fetch internally and use last_n param for limiting."""
+) -> List[FeedbackEnrichment]:
+    """Extract negative feedback-interaction pairs and create FeedbackEnrichment DataPoints."""
     graph_nodes, graph_edges = await _fetch_feedback_and_interaction_graph_data()
     if not graph_nodes:
         return []

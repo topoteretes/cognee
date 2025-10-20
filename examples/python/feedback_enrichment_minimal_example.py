@@ -10,6 +10,7 @@ from cognee.shared.data_models import KnowledgeGraph
 from cognee.tasks.feedback.extract_feedback_interactions import extract_feedback_interactions
 from cognee.tasks.feedback.generate_improved_answers import generate_improved_answers
 from cognee.tasks.feedback.create_enrichments import create_enrichments
+from cognee.tasks.feedback.link_enrichments_to_feedback import link_enrichments_to_feedback
 
 
 CONVERSATION = [
@@ -60,6 +61,7 @@ async def run_feedback_enrichment_memify(last_n: int = 5):
         Task(create_enrichments),
         Task(extract_graph_from_data, graph_model=KnowledgeGraph, task_config={"batch_size": 10}),
         Task(add_data_points, task_config={"batch_size": 10}),
+        Task(link_enrichments_to_feedback),
     ]
     await cognee.memify(
         extraction_tasks=extraction_tasks,
@@ -70,9 +72,8 @@ async def run_feedback_enrichment_memify(last_n: int = 5):
 
 
 async def main():
-    # await initialize_conversation_and_graph(CONVERSATION)
-    # is_correct = await run_question_and_submit_feedback("Who told Bob to bring the donuts?")
-    is_correct = False
+    await initialize_conversation_and_graph(CONVERSATION)
+    is_correct = await run_question_and_submit_feedback("Who told Bob to bring the donuts?")
     if not is_correct:
         await run_feedback_enrichment_memify(last_n=5)
 

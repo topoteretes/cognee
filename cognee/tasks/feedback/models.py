@@ -19,3 +19,8 @@ class FeedbackEnrichment(DataPoint):
     feedback_id: UUID
     interaction_id: UUID
     belongs_to_set: Optional[List[NodeSet]] = None
+
+    context: str = ""
+    feedback_text: str = ""
+    new_context: str = ""
+    explanation: str = ""

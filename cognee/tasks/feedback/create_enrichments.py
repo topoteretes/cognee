@@ -14,34 +14,17 @@ from .models import FeedbackEnrichment
 logger = get_logger("create_enrichments")
 
 
-def _validate_improved_answers(improved_answers: List[Dict]) -> bool:
-    """Validate that all items contain required fields for enrichment creation."""
-    required_fields = [
-        "question",
-        "answer",  # This is the original answer field from feedback_interaction
-        "improved_answer",
-        "new_context",
-        "feedback_id",
-        "interaction_id",
-    ]
+def _validate_enrichments(enrichments: List[FeedbackEnrichment]) -> bool:
+    """Validate that all enrichments contain required fields for completion."""
     return all(
-        all(item.get(field) is not None for field in required_fields) for item in improved_answers
+        enrichment.question is not None
+        and enrichment.original_answer is not None
+        and enrichment.improved_answer is not None
+        and enrichment.new_context is not None
+        and enrichment.feedback_id is not None
+        and enrichment.interaction_id is not None
+        for enrichment in enrichments
     )
-
-
-def _validate_uuid_fields(improved_answers: List[Dict]) -> bool:
-    """Validate that feedback_id and interaction_id are valid UUID objects."""
-    try:
-        for item in improved_answers:
-            feedback_id = item.get("feedback_id")
-            interaction_id = item.get("interaction_id")
-            if not isinstance(feedback_id, type(feedback_id)) or not isinstance(
-                interaction_id, type(interaction_id)
-            ):
-                return False
-        return True
-    except Exception:
-        return False
 
 
 async def _generate_enrichment_report(
@@ -65,80 +48,37 @@ async def _generate_enrichment_report(
         return f"Educational content for: {question} - {improved_answer}"
 
 
-async def _create_enrichment_datapoint(
-    improved_answer_item: Dict,
-    report_text: str,
-    nodeset: NodeSet,
-) -> Optional[FeedbackEnrichment]:
-    """Create a single FeedbackEnrichment DataPoint with proper ID and nodeset assignment."""
-    try:
-        question = improved_answer_item["question"]
-        improved_answer = improved_answer_item["improved_answer"]
-
-        enrichment = FeedbackEnrichment(
-            id=str(uuid5(NAMESPACE_OID, f"{question}_{improved_answer}")),
-            text=report_text,
-            question=question,
-            original_answer=improved_answer_item["answer"],  # Use "answer" field
-            improved_answer=improved_answer,
-            feedback_id=improved_answer_item["feedback_id"],
-            interaction_id=improved_answer_item["interaction_id"],
-            belongs_to_set=[nodeset],
-        )
-
-        return enrichment
-    except Exception as exc:
-        logger.error(
-            "Failed to create enrichment datapoint",
-            error=str(exc),
-            question=improved_answer_item.get("question"),
-        )
-        return None
-
-
 async def create_enrichments(
-    improved_answers: List[Dict],
+    enrichments: List[FeedbackEnrichment],
     report_prompt_location: str = "feedback_report_prompt.txt",
 ) -> List[FeedbackEnrichment]:
-    """Create FeedbackEnrichment DataPoint instances from improved answers."""
-    if not improved_answers:
-        logger.info("No improved answers provided; returning empty list")
+    """Fill text and belongs_to_set fields of existing FeedbackEnrichment DataPoints."""
+    if not enrichments:
+        logger.info("No enrichments provided; returning empty list")
         return []
 
-    if not _validate_improved_answers(improved_answers):
+    if not _validate_enrichments(enrichments):
         logger.error("Input validation failed; missing required fields")
         return []
 
-    if not _validate_uuid_fields(improved_answers):
-        logger.error("UUID validation failed; invalid feedback_id or interaction_id")
-        return []
+    logger.info("Completing enrichments", count=len(enrichments))
 
-    logger.info("Creating enrichments", count=len(improved_answers))
-
-    # Create nodeset once for all enrichments
     nodeset = NodeSet(id=uuid5(NAMESPACE_OID, name="FeedbackEnrichment"), name="FeedbackEnrichment")
 
-    enrichments: List[FeedbackEnrichment] = []
+    completed_enrichments: List[FeedbackEnrichment] = []
 
-    for improved_answer_item in improved_answers:
-        question = improved_answer_item["question"]
-        improved_answer = improved_answer_item["improved_answer"]
-        new_context = improved_answer_item["new_context"]
-
+    for enrichment in enrichments:
         report_text = await _generate_enrichment_report(
-            question, improved_answer, new_context, report_prompt_location
+            enrichment.question,
+            enrichment.improved_answer,
+            enrichment.new_context,
+            report_prompt_location,
         )
 
-        enrichment = await _create_enrichment_datapoint(improved_answer_item, report_text, nodeset)
+        enrichment.text = report_text
+        enrichment.belongs_to_set = [nodeset]
 
-        if enrichment:
-            enrichments.append(enrichment)
-        else:
-            logger.warning(
-                "Failed to create enrichment",
-                question=question,
-                interaction_id=improved_answer_item.get("interaction_id"),
-            )
+        completed_enrichments.append(enrichment)
 
-    logger.info("Created enrichments", successful=len(enrichments))
-    return enrichments
+    logger.info("Completed enrichments", successful=len(completed_enrichments))
+    return completed_enrichments
