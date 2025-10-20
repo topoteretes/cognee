@@ -1,4 +1,5 @@
 from uuid import UUID
+from typing import Union
 
 import sqlalchemy.exc
 from sqlalchemy import select
@@ -10,9 +11,11 @@ from cognee.modules.users.permissions.methods import get_tenant
 from cognee.modules.users.exceptions import UserNotFoundError, TenantNotFoundError
 
 
-async def select_tenant(user_id: UUID, tenant_id: UUID):
+async def select_tenant(user_id: UUID, tenant_id: Union[UUID, None]):
     """
         Set the users active tenant to provided tenant.
+
+        If None tenant_id is provided set current Tenant to the default single user-tenant
     Args:
         user_id: Id of the user.
         tenant_id: Id of the tenant.
@@ -24,6 +27,14 @@ async def select_tenant(user_id: UUID, tenant_id: UUID):
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         user = await get_user(user_id)
+
+        if tenant_id is None:
+            # If no tenant_id is provided set current Tenant to the single user-tenant
+            user.tenant_id = None
+            await session.merge(user)
+            await session.commit()
+            return
+
         tenant = await get_tenant(tenant_id)
 
         if not user:
