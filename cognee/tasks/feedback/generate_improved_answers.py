@@ -66,7 +66,10 @@ async def _generate_improved_answer_for_single_interaction(
 
         retrieved_context = await retriever.get_context(query_text)
         completion = await retriever.get_structured_completion(
-            query=query_text, context=retrieved_context, response_model=ImprovedAnswerResponse
+            query=query_text,
+            context=retrieved_context,
+            response_model=ImprovedAnswerResponse,
+            max_iter=1,
         )
         new_context_text = await retriever.resolve_edges_to_text(retrieved_context)
 
