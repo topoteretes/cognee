@@ -338,7 +338,19 @@ async def search_in_datasets_context(
 
         if is_empty:
             # TODO: we can log here, but not all search types use graph. Still keeping this here for reviewer input
-            logger.warning("Search attempt on an empty knowledge graph")
+            from cognee.modules.data.methods import get_dataset_data
+
+            dataset_data = await get_dataset_data(dataset.id)
+
+            if len(dataset_data) > 0:
+                logger.warning(
+                    f"Dataset '{dataset.name}' has {len(dataset_data)} data item(s) but the knowledge graph is empty. "
+                    "Please run cognify to process the data before searching."
+                )
+            else:
+                logger.warning(
+                    "Search attempt on an empty knowledge graph - no data has been added to this dataset"
+                )
 
         specific_search_tools = await get_search_type_tools(
             query_type=query_type,
