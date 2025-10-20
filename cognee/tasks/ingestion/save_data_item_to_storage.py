@@ -9,6 +9,8 @@ from cognee.modules.ingestion import save_data_to_file
 from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from cognee.tasks.ingestion.data_fetchers.web_url_fetcher import WebUrlFetcher
+
 
 logger = get_logger()
 
@@ -22,7 +24,9 @@ class SaveDataSettings(BaseSettings):
 settings = SaveDataSettings()
 
 
-async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str:
+async def save_data_item_to_storage(
+    data_item: Union[BinaryIO, str, Any], fetchers_config: dict[str, Any] = {}
+) -> str:
     if "llama_index" in str(type(data_item)):
         # Dynamic import is used because the llama_index module is optional.
         from .transform_data import get_data_from_llama_index
@@ -57,9 +61,8 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
         if parsed_url.scheme == "s3":
             return data_item
         elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
-            raise UnsupportedPathSchemeError(
-                message=f"HTTP/HTTPS URLs should be handled by loader, not by save_data_item_to_storage. Received: {data_item}"
-            )
+            fetcher = WebUrlFetcher()
+            return await fetcher.fetch(data_item, fetchers_config)
         # data is local file path
         elif parsed_url.scheme == "file":
             if settings.accept_local_file_path:

@@ -39,6 +39,7 @@ async def run_tasks_data_item_incremental(
     pipeline_run_id: str,
     context: Optional[Dict[str, Any]],
     user: User,
+    fetchers_config: dict[str, Any],
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Process a single data item with incremental loading support.
@@ -64,51 +65,36 @@ async def run_tasks_data_item_incremental(
 
     # If incremental_loading of data is set to True don't process documents already processed by pipeline
     # If data is being added to Cognee for the first time calculate the id of the data
-    try:
-        if not isinstance(data_item, Data):
-            file_path = await save_data_item_to_storage(data_item)
-            # Ingest data and add metadata
-            async with open_data_file(file_path) as file:
-                classified_data = ingestion.classify(file)
-                # data_id is the hash of file contents + owner id to avoid duplicate data
-                data_id = ingestion.identify(classified_data, user)
-        else:
-            # If data was already processed by Cognee get data id
-            data_id = data_item.id
+    if not isinstance(data_item, Data):
+        file_path = await save_data_item_to_storage(data_item, fetchers_config)
+        # Ingest data and add metadata
+        async with open_data_file(file_path) as file:
+            classified_data = ingestion.classify(file)
+            # data_id is the hash of file contents + owner id to avoid duplicate data
+            data_id = ingestion.identify(classified_data, user)
+    else:
+        # If data was already processed by Cognee get data id
+        data_id = data_item.id
 
-        # Check pipeline status, if Data already processed for pipeline before skip current processing
-        async with db_engine.get_async_session() as session:
-            data_point = (
-                await session.execute(select(Data).filter(Data.id == data_id))
-            ).scalar_one_or_none()
-            if data_point:
-                if (
-                    data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
-                    == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
-                ):
-                    yield {
-                        "run_info": PipelineRunAlreadyCompleted(
-                            pipeline_run_id=pipeline_run_id,
-                            dataset_id=dataset.id,
-                            dataset_name=dataset.name,
-                        ),
-                        "data_id": data_id,
-                    }
-                    return
-    except UnsupportedPathSchemeError as e:
-        logger.warning(f"data_item does not support incremental loading: {str(e)}")
-        # Fall back to regular processing since incremental loading is not supported
-        async for result in run_tasks_data_item_regular(
-            data_item=data_item,
-            dataset=dataset,
-            tasks=tasks,
-            pipeline_id=pipeline_id,
-            pipeline_run_id=pipeline_run_id,
-            context=context,
-            user=user,
-        ):
-            yield result
-        return
+    # Check pipeline status, if Data already processed for pipeline before skip current processing
+    async with db_engine.get_async_session() as session:
+        data_point = (
+            await session.execute(select(Data).filter(Data.id == data_id))
+        ).scalar_one_or_none()
+        if data_point:
+            if (
+                data_point.pipeline_status.get(pipeline_name, {}).get(str(dataset.id))
+                == DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED
+            ):
+                yield {
+                    "run_info": PipelineRunAlreadyCompleted(
+                        pipeline_run_id=pipeline_run_id,
+                        dataset_id=dataset.id,
+                        dataset_name=dataset.name,
+                    ),
+                    "data_id": data_id,
+                }
+                return
 
     try:
         # Process data based on data_item and list of tasks
@@ -225,6 +211,7 @@ async def run_tasks_data_item(
     context: Optional[Dict[str, Any]],
     user: User,
     incremental_loading: bool,
+    fetchers_config: dict[str, Any] = {},
 ) -> Optional[Dict[str, Any]]:
     """
     Process a single data item, choosing between incremental and regular processing.
@@ -259,6 +246,7 @@ async def run_tasks_data_item(
             pipeline_run_id=pipeline_run_id,
             context=context,
             user=user,
+            fetchers_config=fetchers_config,
         ):
             pass
     else:

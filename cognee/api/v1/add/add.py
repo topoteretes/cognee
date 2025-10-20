@@ -31,6 +31,7 @@ async def add(
     incremental_loading: bool = True,
     data_per_batch: Optional[int] = 20,
     loaders_config: dict[LoaderInterface, dict] = {},
+    fetchers_config: dict[str, Any] = {},
 ):
     """
     Add data to Cognee for knowledge graph processing.
@@ -179,6 +180,7 @@ async def add(
             dataset_id,
             preferred_loaders,
             loaders_config,
+            fetchers_config,
         ),
     ]
 
@@ -204,6 +206,7 @@ async def add(
         graph_db_config=graph_db_config,
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
+        fetchers_config=fetchers_config,
     ):
         pipeline_run_info = run_info
 

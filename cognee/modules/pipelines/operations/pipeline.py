@@ -20,6 +20,7 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 from cognee.modules.pipelines.layers.check_pipeline_run_qualification import (
     check_pipeline_run_qualification,
 )
+from typing import Any
 
 logger = get_logger("cognee.pipeline")
 
@@ -36,6 +37,7 @@ async def run_pipeline(
     graph_db_config: dict = None,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
+    fetchers_config: dict[str, Any] = {},
 ):
     validate_pipeline_tasks(tasks)
     await setup_and_check_environment(vector_db_config, graph_db_config)
@@ -52,6 +54,7 @@ async def run_pipeline(
             context={"dataset": dataset},
             incremental_loading=incremental_loading,
             data_per_batch=data_per_batch,
+            fetchers_config=fetchers_config,
         ):
             yield run_info
 
@@ -65,6 +68,7 @@ async def run_pipeline_per_dataset(
     context: dict = None,
     incremental_loading=False,
     data_per_batch: int = 20,
+    fetchers_config: dict[str, Any] = {},
 ):
     # Will only be used if ENABLE_BACKEND_ACCESS_CONTROL is set to True
     await set_database_global_context_variables(dataset.id, dataset.owner_id)
@@ -80,7 +84,15 @@ async def run_pipeline_per_dataset(
         return
 
     pipeline_run = run_tasks(
-        tasks, dataset.id, data, user, pipeline_name, context, incremental_loading, data_per_batch
+        tasks,
+        dataset.id,
+        data,
+        user,
+        pipeline_name,
+        context,
+        incremental_loading,
+        data_per_batch,
+        fetchers_config,
     )
 
     async for pipeline_run_info in pipeline_run:
