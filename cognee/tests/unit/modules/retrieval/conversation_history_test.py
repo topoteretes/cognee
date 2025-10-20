@@ -80,7 +80,7 @@ class TestConversationHistoryUtils:
 
     @pytest.mark.asyncio
     async def test_save_to_session_cache_saves_correctly(self):
-        """Test save_to_session_cache calls add_qa with correct parameters."""
+        """Test save_conversation_history calls add_qa with correct parameters."""
         user = create_mock_user()
         session_user.set(user)
 
@@ -99,10 +99,10 @@ class TestConversationHistoryUtils:
                 MockCacheConfig.return_value = mock_config
 
                 from cognee.modules.retrieval.utils.session_cache import (
-                    save_to_session_cache,
+                    save_conversation_history,
                 )
 
-                result = await save_to_session_cache(
+                result = await save_conversation_history(
                     query="What is Python?",
                     context_summary="Python is a programming language",
                     answer="Python is a high-level programming language",
@@ -120,7 +120,7 @@ class TestConversationHistoryUtils:
 
     @pytest.mark.asyncio
     async def test_save_to_session_cache_uses_default_session_when_none(self):
-        """Test save_to_session_cache uses 'default_session' when session_id is None."""
+        """Test save_conversation_history uses 'default_session' when session_id is None."""
         user = create_mock_user()
         session_user.set(user)
 
@@ -139,10 +139,10 @@ class TestConversationHistoryUtils:
                 MockCacheConfig.return_value = mock_config
 
                 from cognee.modules.retrieval.utils.session_cache import (
-                    save_to_session_cache,
+                    save_conversation_history,
                 )
 
-                result = await save_to_session_cache(
+                result = await save_conversation_history(
                     query="Test question",
                     context_summary="Test context",
                     answer="Test answer",

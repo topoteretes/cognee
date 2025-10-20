@@ -5,7 +5,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
 from cognee.modules.retrieval.utils.session_cache import (
-    save_to_session_cache,
+    save_conversation_history,
     get_conversation_history,
 )
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -130,7 +130,7 @@ class CompletionRetriever(BaseRetriever):
             )
 
         if session_save:
-            await save_to_session_cache(
+            await save_conversation_history(
                 query=query,
                 context_summary=context_summary,
                 answer=completion,

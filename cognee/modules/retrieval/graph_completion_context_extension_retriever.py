@@ -5,7 +5,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
 from cognee.modules.retrieval.utils.session_cache import (
-    save_to_session_cache,
+    save_conversation_history,
     get_conversation_history,
 )
 from cognee.context_global_variables import session_user
@@ -160,7 +160,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             )
 
         if session_save:
-            await save_to_session_cache(
+            await save_conversation_history(
                 query=query,
                 context_summary=context_summary,
                 answer=completion,

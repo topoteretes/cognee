@@ -7,7 +7,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("session_cache")
 
 
-async def save_to_session_cache(
+async def save_conversation_history(
     query: str,
     context_summary: str,
     answer: str,
