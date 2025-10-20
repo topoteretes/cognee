@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
 from pydantic import BaseModel
 
 from cognee.infrastructure.llm import LLMGateway
@@ -8,7 +8,7 @@ from cognee.infrastructure.llm.prompts.read_query_prompt import read_query_promp
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.shared.logging_utils import get_logger
 
-from .utils import create_retriever
+from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 from .models import FeedbackEnrichment
 
 
@@ -91,11 +91,10 @@ async def _generate_improved_answer_for_single_interaction(
 
 async def generate_improved_answers(
     enrichments: List[FeedbackEnrichment],
-    retriever_name: str = "graph_completion_cot",
     top_k: int = 20,
     reaction_prompt_location: str = "feedback_reaction_prompt.txt",
 ) -> List[FeedbackEnrichment]:
-    """Generate improved answers using configurable retriever and LLM."""
+    """Generate improved answers using CoT retriever and LLM."""
     if not enrichments:
         logger.info("No enrichments provided; returning empty list")
         return []
@@ -104,9 +103,9 @@ async def generate_improved_answers(
         logger.error("Input data validation failed; missing required fields")
         return []
 
-    retriever = create_retriever(
-        retriever_name=retriever_name,
+    retriever = GraphCompletionCotRetriever(
         top_k=top_k,
+        save_interaction=False,
         user_prompt_path="graph_context_for_question.txt",
         system_prompt_path="answer_simple_question.txt",
     )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import List
 from uuid import NAMESPACE_OID, uuid5
 
 from cognee.infrastructure.llm import LLMGateway

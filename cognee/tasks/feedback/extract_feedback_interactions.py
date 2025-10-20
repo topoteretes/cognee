@@ -1,19 +1,26 @@
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
-from uuid import UUID
+from uuid import UUID, uuid5, NAMESPACE_OID
 
 from cognee.infrastructure.llm import LLMGateway
 from cognee.infrastructure.llm.prompts.read_query_prompt import read_query_prompt
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
-from uuid import uuid5, NAMESPACE_OID
 
-from .utils import filter_negative_feedback
 from .models import FeedbackEnrichment
 
 
 logger = get_logger("extract_feedback_interactions")
+
+
+def _filter_negative_feedback(feedback_nodes):
+    """Filter for negative sentiment feedback using precise sentiment classification."""
+    return [
+        (node_id, props)
+        for node_id, props in feedback_nodes
+        if (props.get("sentiment", "").casefold() == "negative" or props.get("score", 0) < 0)
+    ]
 
 
 def _get_normalized_id(node_id, props) -> str:
@@ -179,7 +186,7 @@ async def extract_feedback_interactions(
         return []
 
     feedback_nodes, interaction_nodes = _separate_feedback_and_interaction_nodes(graph_nodes)
-    negative_feedback_nodes = filter_negative_feedback(feedback_nodes)
+    negative_feedback_nodes = _filter_negative_feedback(feedback_nodes)
     if not negative_feedback_nodes:
         logger.info("No negative feedback found; returning empty list")
         return []

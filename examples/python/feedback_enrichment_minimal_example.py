@@ -57,7 +57,7 @@ async def run_feedback_enrichment_memify(last_n: int = 5):
     # Instantiate tasks with their own kwargs
     extraction_tasks = [Task(extract_feedback_interactions, last_n=last_n)]
     enrichment_tasks = [
-        Task(generate_improved_answers, retriever_name="graph_completion_cot", top_k=20),
+        Task(generate_improved_answers, top_k=20),
         Task(create_enrichments),
         Task(extract_graph_from_data, graph_model=KnowledgeGraph, task_config={"batch_size": 10}),
         Task(add_data_points, task_config={"batch_size": 10}),
