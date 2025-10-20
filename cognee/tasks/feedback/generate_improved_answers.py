@@ -65,9 +65,10 @@ async def _generate_improved_answer_for_single_interaction(
         )
 
         retrieved_context = await retriever.get_context(query_text)
-        completion, new_context_text = await retriever.get_structured_completion(
+        completion = await retriever.get_structured_completion(
             query=query_text, context=retrieved_context, response_model=ImprovedAnswerResponse
         )
+        new_context_text = await retriever.resolve_edges_to_text(retrieved_context)
 
         if completion:
             return {
@@ -114,8 +115,6 @@ async def generate_improved_answers(
     )
 
     improved_answers: List[Dict] = []
-    successful_count = 0
-    failed_count = 0
 
     for feedback_interaction in feedback_interactions:
         result = await _generate_improved_answer_for_single_interaction(
@@ -124,9 +123,12 @@ async def generate_improved_answers(
 
         if result:
             improved_answers.append(result)
-            successful_count += 1
         else:
-            failed_count += 1
+            logger.warning(
+                "Failed to generate improved answer",
+                question=feedback_interaction.get("question"),
+                interaction_id=feedback_interaction.get("interaction_id"),
+            )
 
-    logger.info("Generated improved answers", successful=successful_count, failed=failed_count)
+    logger.info("Generated improved answers", count=len(improved_answers))
     return improved_answers
