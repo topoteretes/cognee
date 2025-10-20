@@ -5,6 +5,8 @@ from uuid import UUID
 from fastapi.encoders import jsonable_encoder
 from typing import Any, List, Optional, Tuple, Type, Union
 
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 from cognee.context_global_variables import set_database_global_context_variables
 
@@ -26,6 +28,8 @@ from cognee.modules.data.methods.get_authorized_existing_datasets import (
 from .get_search_type_tools import get_search_type_tools
 from .no_access_control_search import no_access_control_search
 from ..utils.prepare_search_result import prepare_search_result
+
+logger = get_logger()
 
 
 async def search(
@@ -328,6 +332,13 @@ async def search_in_datasets_context(
     ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)
+
+        graph_engine = await get_graph_engine()
+        is_empty = await graph_engine.is_empty()
+
+        if is_empty:
+            # TODO: we can log here, but not all search types use graph. Still keeping this here for reviewer input
+            logger.warning("Search attempt on an empty knowledge graph")
 
         specific_search_tools = await get_search_type_tools(
             query_type=query_type,

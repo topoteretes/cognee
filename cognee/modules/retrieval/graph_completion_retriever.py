@@ -124,6 +124,13 @@ class GraphCompletionRetriever(BaseGraphRetriever):
             - str: A string representing the resolved context from the retrieved triplets, or an
               empty string if no triplets are found.
         """
+        graph_engine = await get_graph_engine()
+        is_empty = await graph_engine.is_empty()
+
+        if is_empty:
+            logger.warning("Search attempt on an empty knowledge graph")
+            return []
+
         triplets = await self.get_triplets(query)
 
         if len(triplets) == 0:
