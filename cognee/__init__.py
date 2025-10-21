@@ -16,7 +16,6 @@ from cognee.shared.logging_utils import setup_logging
 logger = setup_logging()
 
 from .api.v1.add import add
-from .api.v1.delete import delete
 from .api.v1.cognify import cognify
 from .modules.memify import memify
 from .api.v1.update import update

@@ -25,7 +25,6 @@ from cognee.api.v1.cognify.routers import get_code_pipeline_router, get_cognify_
 from cognee.api.v1.search.routers import get_search_router
 from cognee.api.v1.memify.routers import get_memify_router
 from cognee.api.v1.add.routers import get_add_router
-from cognee.api.v1.delete.routers import get_delete_router
 from cognee.api.v1.responses.routers import get_responses_router
 from cognee.api.v1.sync.routers import get_sync_router
 from cognee.api.v1.update.routers import get_update_router
@@ -261,8 +260,6 @@ app.include_router(get_datasets_router(), prefix="/api/v1/datasets", tags=["data
 app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["settings"])
 
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
-
-app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])
 
 app.include_router(get_update_router(), prefix="/api/v1/update", tags=["update"])
 
