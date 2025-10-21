@@ -27,3 +27,10 @@ try:
     __all__.append("AdvancedPdfLoader")
 except ImportError:
     pass
+
+try:
+    from .beautiful_soup_loader import BeautifulSoupLoader
+
+    __all__.append("BeautifulSoupLoader")
+except ImportError:
+    pass
