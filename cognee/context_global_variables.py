@@ -14,6 +14,7 @@ vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
 session_user = ContextVar("session_user", default=None)
 
+
 async def set_session_user_context_variable(user):
     session_user.set(user)
 
