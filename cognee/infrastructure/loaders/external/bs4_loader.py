@@ -5,9 +5,10 @@ from web pages using BeautifulSoup or Playwright for JavaScript-rendered pages. 
 supports robots.txt handling, rate limiting, and custom extraction rules.
 """
 
-from typing import Union, List, Dict, Any, Optional
+from typing import Union, Dict, Any, Optional, List
 from dataclasses import dataclass
 from bs4 import BeautifulSoup
+from cognee.infrastructure.loaders import LoaderInterface
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -32,8 +33,7 @@ class ExtractionRule:
     join_with: str = " "
 
 
-# TODO(daulet) refactor: This is no longer BeautifulSoup, rather just a crawler
-class BeautifulSoupCrawler:
+class BeautifulSoupLoader(LoaderInterface):
     """Crawler for fetching and extracting web content using BeautifulSoup.
 
     Supports asynchronous HTTP requests, Playwright for JavaScript rendering, robots.txt
@@ -49,6 +49,24 @@ class BeautifulSoupCrawler:
         headers: HTTP headers for requests (e.g., User-Agent).
         robots_cache_ttl: Time-to-live for robots.txt cache in seconds.
     """
+
+    @property
+    def supported_extensions(self) -> List[str]:
+        return ["html"]
+
+    @property
+    def supported_mime_types(self) -> List[str]:
+        pass
+
+    @property
+    def loader_name(self) -> str:
+        return "beautiful_soup_loader"
+
+    def can_handle(self, extension: str, mime_type: str) -> bool:
+        pass
+
+    async def load(self, file_path: str, **kwargs):
+        pass
 
     def _normalize_rule(self, rule: Union[str, Dict[str, Any]]) -> ExtractionRule:
         """Normalize an extraction rule to an ExtractionRule dataclass.

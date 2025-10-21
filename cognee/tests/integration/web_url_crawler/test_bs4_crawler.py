@@ -1,10 +1,10 @@
 import pytest
-from cognee.tasks.web_scraper import BeautifulSoupCrawler
+from cognee.tasks.web_scraper import DefaultUrlCrawler
 
 
 @pytest.mark.asyncio
 async def test_fetch():
-    crawler = BeautifulSoupCrawler()
+    crawler = DefaultUrlCrawler()
     url = "https://en.wikipedia.org/wiki/Large_language_model"
     results = await crawler.fetch_urls(url)
     assert len(results) == 1

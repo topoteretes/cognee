@@ -9,7 +9,6 @@ from re import L
 from typing import List, Union, TypeAlias
 from cognee.shared.logging_utils import get_logger
 from .default_url_crawler import DefaultUrlCrawler
-from .bs4_crawler import BeautifulSoupCrawler
 from .config import DefaultCrawlerConfig, TavilyConfig
 
 logger = get_logger(__name__)
@@ -48,7 +47,7 @@ async def fetch_page_content(urls: Union[str, List[str]]) -> UrlsToHtmls:
 
     if os.getenv("TAVILY_API_KEY"):
         logger.info("Using Tavily API for url fetching")
-        return await fetch_with_tavily(urls, tavily_config)
+        return await fetch_with_tavily(urls)
     else:
         logger.info("Using default crawler for content extraction")
 
@@ -89,9 +88,7 @@ async def fetch_page_content(urls: Union[str, List[str]]) -> UrlsToHtmls:
             await crawler.close()
 
 
-async def fetch_with_tavily(
-    urls: Union[str, List[str]], tavily_config: TavilyConfig
-) -> UrlsToHtmls:
+async def fetch_with_tavily(urls: Union[str, List[str]]) -> UrlsToHtmls:
     """Fetch content from URLs using the Tavily API.
 
     Args:
@@ -112,6 +109,7 @@ async def fetch_with_tavily(
         )
         raise
 
+    tavily_config = TavilyConfig()
     url_list = [urls] if isinstance(urls, str) else urls
     extract_depth = tavily_config.extract_depth if tavily_config else "basic"
     timeout = tavily_config.timeout if tavily_config else 10
