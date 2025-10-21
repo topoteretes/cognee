@@ -20,7 +20,6 @@ class DefaultCrawlerConfig(BaseModel):
     max_retries: int = 2
     retry_delay_factor: float = 0.5
     headers: Optional[Dict[str, str]] = None
-    extraction_rules: Dict[str, Any]
     use_playwright: bool = False
     playwright_js_wait: float = 0.8
     robots_cache_ttl: float = 3600.0

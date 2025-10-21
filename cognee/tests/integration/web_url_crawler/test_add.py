@@ -1,37 +1,76 @@
-from sys import exc_info
 import pytest
 import cognee
-from cognee.modules.ingestion.exceptions.exceptions import IngestionError
+from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
+from cognee.infrastructure.loaders.LoaderEngine import LoaderEngine
+from cognee.infrastructure.loaders.external.beautiful_soup_loader import BeautifulSoupLoader
+from cognee.tasks.ingestion import save_data_item_to_storage
+from pathlib import Path
 
 
 @pytest.mark.asyncio
-async def test_add_fails_when_web_url_fetcher_config_not_specified():
-    from cognee.shared.logging_utils import setup_logging, ERROR
-
-    setup_logging(log_level=ERROR)
+async def test_url_saves_as_html_file():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
-    with pytest.raises(IngestionError) as excinfo:
-        await cognee.add(
-            "https://en.wikipedia.org/wiki/Large_language_model",
-            incremental_loading=False,
+
+    try:
+        original_file_path = await save_data_item_to_storage(
+            "https://en.wikipedia.org/wiki/Large_language_model"
         )
-    assert excinfo.value.message.startswith(
-        "web_url_fetcher configuration must be a valid dictionary"
-    )
+        file_path = get_data_file_path(original_file_path)
+        assert file_path.endswith(".html")
+        file = Path(file_path)
+        assert file.exists()
+        assert file.stat().st_size > 0
+    except Exception as e:
+        pytest.fail(f"Failed to save data item to storage: {e}")
 
 
 @pytest.mark.asyncio
-async def test_add_succesfully_adds_url_when_fetcher_config_specified():
+async def test_saved_html_is_valid():
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        pytest.fail("Test case requires bs4 installed")
+
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    extraction_rules = {
-        "title": {"selector": "title"},
-        "headings": {"selector": "h1, h2, h3", "all": True},
-        "links": {"selector": "a", "attr": "href", "all": True},
-        "paragraphs": {"selector": "p", "all": True},
-    }
+    try:
+        original_file_path = await save_data_item_to_storage(
+            "https://en.wikipedia.org/wiki/Large_language_model"
+        )
+        file_path = get_data_file_path(original_file_path)
+        content = Path(file_path).read_text()
+
+        soup = BeautifulSoup(content, "html.parser")
+        assert soup.find() is not None, "File should contain parseable HTML"
+
+        has_html_elements = any(
+            [
+                soup.find("html"),
+                soup.find("head"),
+                soup.find("body"),
+                soup.find("div"),
+                soup.find("p"),
+            ]
+        )
+        assert has_html_elements, "File should contain common HTML elements"
+    except Exception as e:
+        pytest.fail(f"Failed to save data item to storage: {e}")
+
+
+@pytest.mark.asyncio
+async def test_add_url():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    await cognee.add("https://en.wikipedia.org/wiki/Large_language_model")
+
+
+@pytest.mark.asyncio
+async def test_add_url_without_incremental_loading():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
 
     try:
         await cognee.add(
@@ -43,16 +82,9 @@ async def test_add_succesfully_adds_url_when_fetcher_config_specified():
 
 
 @pytest.mark.asyncio
-async def test_add_with_incremental_loading_works():
+async def test_add_url_with_incremental_loading():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
-
-    extraction_rules = {
-        "title": {"selector": "title"},
-        "headings": {"selector": "h1, h2, h3", "all": True},
-        "links": {"selector": "a", "attr": "href", "all": True},
-        "paragraphs": {"selector": "p", "all": True},
-    }
 
     try:
         await cognee.add(
@@ -64,7 +96,7 @@ async def test_add_with_incremental_loading_works():
 
 
 @pytest.mark.asyncio
-async def test_add_without_incremental_loading_works():
+async def test_add_url_with_extraction_rules():  # TODO: this'll fail due to not implemented `load()` yet
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
@@ -78,7 +110,75 @@ async def test_add_without_incremental_loading_works():
     try:
         await cognee.add(
             "https://en.wikipedia.org/wiki/Large_language_model",
-            incremental_loading=False,
+            preferred_loaders={"beautiful_soup_loader": {"extraction_rules": extraction_rules}},
         )
     except Exception as e:
         pytest.fail(f"Failed to add url: {e}")
+
+
+@pytest.mark.asyncio
+async def test_loader_is_none_by_default():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    extraction_rules = {
+        "title": {"selector": "title"},
+        "headings": {"selector": "h1, h2, h3", "all": True},
+        "links": {"selector": "a", "attr": "href", "all": True},
+        "paragraphs": {"selector": "p", "all": True},
+    }
+
+    try:
+        original_file_path = await save_data_item_to_storage(
+            "https://en.wikipedia.org/wiki/Large_language_model"
+        )
+        file_path = get_data_file_path(original_file_path)
+        assert file_path.endswith(".html")
+        file = Path(file_path)
+        assert file.exists()
+        assert file.stat().st_size > 0
+
+        loader_engine = LoaderEngine()
+        preferred_loaders = {"beautiful_soup_loader": {"extraction_rules": extraction_rules}}
+        loader = loader_engine.get_loader(
+            file_path,
+            preferred_loaders=preferred_loaders,
+        )
+
+        assert loader is None
+    except Exception as e:
+        pytest.fail(f"Failed to save data item to storage: {e}")
+
+
+@pytest.mark.asyncio
+async def test_beautiful_soup_loader_is_selected_loader_if_preferred_loader_provided():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    extraction_rules = {
+        "title": {"selector": "title"},
+        "headings": {"selector": "h1, h2, h3", "all": True},
+        "links": {"selector": "a", "attr": "href", "all": True},
+        "paragraphs": {"selector": "p", "all": True},
+    }
+
+    try:
+        original_file_path = await save_data_item_to_storage(
+            "https://en.wikipedia.org/wiki/Large_language_model"
+        )
+        file_path = get_data_file_path(original_file_path)
+        assert file_path.endswith(".html")
+        file = Path(file_path)
+        assert file.exists()
+        assert file.stat().st_size > 0
+
+        loader_engine = LoaderEngine()
+        bs_loader = BeautifulSoupLoader()
+        loader_engine.register_loader(bs_loader)
+        preferred_loaders = {"beautiful_soup_loader": {"extraction_rules": extraction_rules}}
+        loader = loader_engine.get_loader(
+            file_path,
+            preferred_loaders=preferred_loaders,
+        )
+
+        assert loader == bs_loader
+    except Exception as e:
+        pytest.fail(f"Failed to save data item to storage: {e}")

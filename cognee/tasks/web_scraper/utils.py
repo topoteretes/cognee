@@ -5,15 +5,13 @@ both BeautifulSoup for custom extraction rules and Tavily for API-based scraping
 """
 
 import os
-from re import L
-from typing import List, Union, TypeAlias
+from typing import List, Union
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.web_scraper.types import UrlsToHtmls
 from .default_url_crawler import DefaultUrlCrawler
 from .config import DefaultCrawlerConfig, TavilyConfig
 
 logger = get_logger(__name__)
-
-UrlsToHtmls: TypeAlias = dict[str, str]
 
 
 async def fetch_page_content(urls: Union[str, List[str]]) -> UrlsToHtmls:

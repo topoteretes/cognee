@@ -8,7 +8,7 @@ from cognee.modules.ingestion import save_data_to_file
 from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from cognee.tasks.ingestion.data_fetchers.web_url_fetcher import WebUrlFetcher
+from cognee.tasks.web_scraper.utils import fetch_page_content
 
 
 logger = get_logger()
@@ -58,8 +58,8 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
         if parsed_url.scheme == "s3":
             return data_item
         elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
-            fetcher = WebUrlFetcher()
-            return await fetcher.fetch(data_item)
+            urls_to_page_contents = await fetch_page_content(data_item)
+            return await save_data_to_file(urls_to_page_contents[data_item], file_extension="html")
         # data is local file path
         elif parsed_url.scheme == "file":
             if settings.accept_local_file_path:

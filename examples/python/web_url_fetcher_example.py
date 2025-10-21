@@ -23,6 +23,7 @@ async def main():
     await cognee.add(
         "https://en.wikipedia.org/wiki/Large_language_model",
         incremental_loading=False,
+        preferred_loaders={"beautiful_soup_loader": {"extraction_rules": extraction_rules}},
     )
 
     await cognee.cognify()

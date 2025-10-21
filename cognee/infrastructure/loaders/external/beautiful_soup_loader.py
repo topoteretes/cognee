@@ -8,7 +8,7 @@ supports robots.txt handling, rate limiting, and custom extraction rules.
 from typing import Union, Dict, Any, Optional, List
 from dataclasses import dataclass
 from bs4 import BeautifulSoup
-from cognee.infrastructure.loaders import LoaderInterface
+from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -56,17 +56,30 @@ class BeautifulSoupLoader(LoaderInterface):
 
     @property
     def supported_mime_types(self) -> List[str]:
-        return ["text/html"]
+        return ["text/html", "text/plain"]
 
     @property
     def loader_name(self) -> str:
         return "beautiful_soup_loader"
 
     def can_handle(self, extension: str, mime_type: str) -> bool:
-        return extension in self.supported_extensions() and mime_type in self.supported_mime_types()
+        can = extension in self.supported_extensions and mime_type in self.supported_mime_types
+        return can
 
     async def load(self, file_path: str, **kwargs):
-        pass
+        """Load an HTML file and return its path.
+
+        For HTML files stored on disk, we simply return the file path
+        since the content is already in text format and can be processed directly.
+
+        Args:
+            file_path: Path to the HTML file
+            **kwargs: Additional arguments
+
+        Returns:
+            The file path to the HTML file
+        """
+        raise NotImplementedError
 
     def _normalize_rule(self, rule: Union[str, Dict[str, Any]]) -> ExtractionRule:
         """Normalize an extraction rule to an ExtractionRule dataclass.

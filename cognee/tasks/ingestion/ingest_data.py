@@ -6,6 +6,7 @@ from typing import Union, BinaryIO, Any, List, Optional
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
+from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.permissions.methods import get_specific_user_permission_datasets
@@ -87,6 +88,9 @@ async def ingest_data(
                 actual_file_path,
                 preferred_loaders,
             )
+
+            if loader_engine is None:
+                raise IngestionError("Loader cannot be None")
 
             # Find metadata from original file
             # Standard flow: extract metadata from both original and stored files

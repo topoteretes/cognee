@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 import httpx
 
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.web_scraper.utils import UrlsToHtmls
+from cognee.tasks.web_scraper.types import UrlsToHtmls
 
 logger = get_logger()
 

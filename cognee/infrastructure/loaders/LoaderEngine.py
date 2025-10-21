@@ -78,14 +78,21 @@ class LoaderEngine:
         Returns:
             LoaderInterface that can handle the file, or None if not found
         """
+        from pathlib import Path
 
         file_info = filetype.guess(file_path)
+
+        path_extension = Path(file_path).suffix.lstrip(".")
 
         # Try preferred loaders first
         if preferred_loaders:
             for loader_name in preferred_loaders:
                 if loader_name in self._loaders:
                     loader = self._loaders[loader_name]
+                    # Try with path extension first (for text formats like html)
+                    if loader.can_handle(extension=path_extension, mime_type=file_info.mime):
+                        return loader
+                    # Fall back to content-detected extension
                     if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
                         return loader
                 else:
@@ -95,6 +102,10 @@ class LoaderEngine:
         for loader_name in self.default_loader_priority:
             if loader_name in self._loaders:
                 loader = self._loaders[loader_name]
+                # Try with path extension first (for text formats like html)
+                if loader.can_handle(extension=path_extension, mime_type=file_info.mime):
+                    return loader
+                # Fall back to content-detected extension
                 if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
                     return loader
             else:
