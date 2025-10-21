@@ -19,6 +19,7 @@ async def no_access_control_search(
     save_interaction: bool = False,
     last_k: Optional[int] = None,
     only_context: bool = False,
+    session_id: Optional[str] = None,
 ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
     search_tools = await get_search_type_tools(
         query_type=query_type,
@@ -38,7 +39,7 @@ async def no_access_control_search(
             return None, await get_context(query_text), []
 
         context = await get_context(query_text)
-        result = await get_completion(query_text, context)
+        result = await get_completion(query_text, context, session_id=session_id)
     else:
         unknown_tool = search_tools[0]
         result = await unknown_tool(query_text)

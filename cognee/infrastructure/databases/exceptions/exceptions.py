@@ -132,3 +132,19 @@ class MutuallyExclusiveQueryParametersError(CogneeValidationError):
     ):
         message = "The search function accepts either text or embedding as input, but not both."
         super().__init__(message, name, status_code)
+
+
+class CacheConnectionError(CogneeConfigurationError):
+    """
+    Raised when connection to the cache database (e.g., Redis) fails.
+
+    This error indicates that the cache service is unavailable or misconfigured.
+    """
+
+    def __init__(
+        self,
+        message: str = "Failed to connect to cache database. Please check your cache configuration.",
+        name: str = "CacheConnectionError",
+        status_code: int = status.HTTP_503_SERVICE_UNAVAILABLE,
+    ):
+        super().__init__(message, name, status_code)
