@@ -1,4 +1,6 @@
 name: Reusable Integration Tests
+permissions:
+  contents: read
 
 on:
   workflow_call:
