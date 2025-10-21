@@ -1,21 +1,20 @@
 """Periodic data cleanup functionality for Cognee.
 
-This module implements automatic deletion of unused data in the memify pipeline
-that hasn't been accessed for a specified period.
+This module implements automatic deletion of unused Data entries that haven't
+been accessed for a specified period. By working at the Data level, it ensures
+proper cleanup of related graph and vector database entries.
 
 Issue: #1335 - Task to automatically delete data not accessed for specified time period
 """
-
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, Optional, Any
 from dataclasses import dataclass
 import logging
 
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.cleanup_unused_data import (
-    delete_unused_data,
-    get_unused_data_counts,
-    get_table_statistics
+    cleanup_unused_data as cleanup_data_module,
+    get_cleanup_statistics
 )
 
 logger = logging.getLogger(__name__)
@@ -24,146 +23,125 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CleanupResult:
     """Result of cleanup operation."""
-    status: str
-    deleted_counts: Dict[str, int]
+    success: bool
+    deleted_count: int
     dry_run: bool
     timestamp: datetime
-    errors: List[str]
+    errors: list[str]
 
 
 async def cleanup_unused_data(
     days_threshold: int = 30,
     dry_run: bool = True,
-    adapter=None,
-    schema: Optional[str] = None
+    adapter=None
 ) -> CleanupResult:
-    """Clean up data that hasn't been accessed within the threshold period.
+    """
+    Clean up Data entries that haven't been accessed within the threshold.
     
-    This function identifies and optionally deletes data from any graph database,
-    including both default and custom graphs. It dynamically discovers tables
-    with access tracking enabled.
+    This is the main task function that wraps the Data-level cleanup module.
+    It works at the Data model level, ensuring proper cascade deletion of
+    related graph and vector database entries through existing deletion infrastructure.
     
     Args:
-        days_threshold: Number of days without access to trigger deletion
-        dry_run: If True, only report what would be deleted without deleting
+        days_threshold: Number of days without access to consider for deletion (default: 30)
+        dry_run: If True, only preview deletions without making changes (default: True)
         adapter: Database adapter to use (defaults to relational engine)
-        schema: Optional schema name for custom graphs (e.g., 'my_custom_graph')
     
     Returns:
-        CleanupResult containing deletion counts and status information
+        CleanupResult with operation details
     
-    Example:
-        # Clean up default graph (dry run)
-        result = await cleanup_unused_data(days_threshold=30, dry_run=True)
-        
-        # Clean up custom graph (actual deletion)
-        result = await cleanup_unused_data(
-            days_threshold=60,
-            dry_run=False,
-            schema='my_custom_graph'
-        )
+    Raises:
+        ValueError: If days_threshold is negative
+    
+    Examples:
+        >>> # Preview what would be deleted
+        >>> result = await cleanup_unused_data(days_threshold=30, dry_run=True)
+        >>> print(f"Would delete {result.deleted_count} Data entries")
+        >>>
+        >>> # Actually perform cleanup
+        >>> result = await cleanup_unused_data(days_threshold=30, dry_run=False)
+        >>> if result.success:
+        >>>     print(f"Successfully deleted {result.deleted_count} Data entries")
     """
-    errors = []
-    deleted_counts = {}
-    
     try:
-        logger.info(
-            f"Starting {'DRY RUN' if dry_run else 'actual'} cleanup "
-            f"for data older than {days_threshold} days"
-            f"{f' in schema: {schema}' if schema else ''}"
-        )
-        
-        # Get database adapter
         if adapter is None:
             adapter = get_relational_engine()
         
         async with adapter.get_async_session() as session:
-            # Perform the cleanup using the schema-agnostic module
-            deleted_counts = await delete_unused_data(
+            # Call the Data-level cleanup module
+            result_dict = await cleanup_data_module(
                 session=session,
                 days_threshold=days_threshold,
-                schema=schema,
                 dry_run=dry_run
             )
-        
-        total_deleted = sum(deleted_counts.values())
-        status = "success"
-        
-        logger.info(
-            f"Cleanup {'simulation' if dry_run else 'operation'} completed. "
-            f"Total records {'would be deleted' if dry_run else 'deleted'}: {total_deleted}"
-        )
-        
-    except Exception as e:
-        logger.error(f"Error during cleanup operation: {e}", exc_info=True)
-        errors.append(str(e))
-        status = "error"
-    
-    return CleanupResult(
-        status=status,
-        deleted_counts=deleted_counts,
-        dry_run=dry_run,
-        timestamp=datetime.now(timezone.utc),
-        errors=errors
-    )
-
-
-async def get_cleanup_preview(
-    days_threshold: int = 30,
-    adapter=None,
-    schema: Optional[str] = None
-) -> Dict[str, int]:
-    """Preview how many records would be deleted without actually deleting.
-    
-    Args:
-        days_threshold: Number of days without access to consider for deletion
-        adapter: Database adapter to use (defaults to relational engine)
-        schema: Optional schema name for custom graphs
-    
-    Returns:
-        Dictionary mapping table names to count of records that would be deleted
-    """
-    try:
-        if adapter is None:
-            adapter = get_relational_engine()
-        
-        async with adapter.get_async_session() as session:
-            counts = await get_unused_data_counts(
-                session=session,
-                days_threshold=days_threshold,
-                schema=schema
+            
+            # Convert module result to CleanupResult dataclass
+            return CleanupResult(
+                success=result_dict['success'],
+                deleted_count=result_dict['deleted_count'],
+                dry_run=result_dict['dry_run'],
+                timestamp=result_dict['timestamp'],
+                errors=result_dict['errors']
             )
-        
-        return counts
+    
     except Exception as e:
-        logger.error(f"Error getting cleanup preview: {e}", exc_info=True)
-        return {}
+        logger.error(f"Cleanup operation failed: {e}", exc_info=True)
+        return CleanupResult(
+            success=False,
+            deleted_count=0,
+            dry_run=dry_run,
+            timestamp=datetime.now(timezone.utc),
+            errors=[str(e)]
+        )
 
 
 async def get_data_usage_statistics(
-    adapter=None,
-    schema: Optional[str] = None
-) -> Dict[str, Dict]:
-    """Get statistics about data usage across all tracked tables.
+    days_threshold: int = 30,
+    adapter=None
+) -> Dict[str, Any]:
+    """
+    Get statistics about Data entries and their access patterns.
+    
+    Useful for monitoring data usage and determining appropriate cleanup thresholds.
     
     Args:
+        days_threshold: Threshold for considering data as unused (default: 30)
         adapter: Database adapter to use (defaults to relational engine)
-        schema: Optional schema name for custom graphs
     
     Returns:
-        Dictionary with statistics for each tracked table
+        Dictionary with statistics:
+        {
+            'total_data_count': int,        # Total number of Data entries
+            'tracked_count': int,           # Number of Data entries with access tracking
+            'untracked_count': int,         # Number of Data entries never accessed
+            'unused_count': int,            # Number of Data entries exceeding threshold
+            'active_count': int             # Number of Data entries within threshold
+        }
+    
+    Example:
+        >>> stats = await get_data_usage_statistics(days_threshold=30)
+        >>> print(f"Total Data: {stats['total_data_count']}")
+        >>> print(f"Unused Data: {stats['unused_count']}")
+        >>> print(f"Active Data: {stats['active_count']}")
     """
     try:
         if adapter is None:
             adapter = get_relational_engine()
         
         async with adapter.get_async_session() as session:
-            statistics = await get_table_statistics(
+            statistics = await get_cleanup_statistics(
                 session=session,
-                schema=schema
+                days_threshold=days_threshold
             )
         
         return statistics
+    
     except Exception as e:
         logger.error(f"Error getting data usage statistics: {e}", exc_info=True)
-        return {}
+        return {
+            'total_data_count': 0,
+            'tracked_count': 0,
+            'untracked_count': 0,
+            'unused_count': 0,
+            'active_count': 0
+        }
