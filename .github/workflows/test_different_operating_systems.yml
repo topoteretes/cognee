@@ -9,7 +9,7 @@ on:
       python-versions:
         required: false
         type: string
-        default: '["3.10.x", "3.11.x", "3.12.x"]'
+        default: '["3.10.x", "3.12.x", "3.13.x"]'
     secrets:
       LLM_PROVIDER:
         required: true

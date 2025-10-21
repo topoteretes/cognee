@@ -88,6 +88,7 @@ async def run_tasks_distributed(
     pipeline_name: str = "unknown_pipeline",
     context: Optional[dict] = None,
     incremental_loading: bool = False,
+    data_per_batch: int = 20,
 ):
     if not user:
         user = await get_default_user()

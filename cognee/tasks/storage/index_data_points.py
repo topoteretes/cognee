@@ -1,6 +1,6 @@
-from cognee.shared.logging_utils import get_logger
+import asyncio
 
-from cognee.infrastructure.databases.exceptions import EmbeddingException
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.engine import DataPoint
 
@@ -33,18 +33,23 @@ async def index_data_points(data_points: list[DataPoint]):
             indexed_data_point.metadata["index_fields"] = [field_name]
             index_points[index_name].append(indexed_data_point)
 
-    for index_name_and_field, indexable_points in index_points.items():
-        first_occurence = index_name_and_field.index("_")
-        index_name = index_name_and_field[:first_occurence]
-        field_name = index_name_and_field[first_occurence + 1 :]
-        try:
-            # In case the amount of indexable points is too large we need to send them in batches
-            batch_size = vector_engine.embedding_engine.get_batch_size()
-            for i in range(0, len(indexable_points), batch_size):
-                batch = indexable_points[i : i + batch_size]
-                await vector_engine.index_data_points(index_name, field_name, batch)
-        except EmbeddingException as e:
-            logger.warning(f"Failed to index data points for {index_name}.{field_name}: {e}")
+    tasks: list[asyncio.Task] = []
+    batch_size = vector_engine.embedding_engine.get_batch_size()
+
+    for index_name_and_field, points in index_points.items():
+        first = index_name_and_field.index("_")
+        index_name = index_name_and_field[:first]
+        field_name = index_name_and_field[first + 1 :]
+
+        # Create embedding requests per batch to run in parallel later
+        for i in range(0, len(points), batch_size):
+            batch = points[i : i + batch_size]
+            tasks.append(
+                asyncio.create_task(vector_engine.index_data_points(index_name, field_name, batch))
+            )
+
+    # Run all embedding requests in parallel
+    await asyncio.gather(*tasks)
 
     return data_points
 

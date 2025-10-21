@@ -40,11 +40,6 @@ class GraphDBInterface(ABC):
     """
 
     @abstractmethod
-    async def is_empty(self) -> bool:
-        logger.warning("is_empty() is not implemented")
-        return True
-
-    @abstractmethod
     async def query(self, query: str, params: dict) -> List[Any]:
         """
         Execute a raw database query and return the results.

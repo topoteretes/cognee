@@ -197,15 +197,6 @@ class KuzuAdapter(GraphDBInterface):
         except FileNotFoundError:
             logger.warning(f"Kuzu S3 storage file not found: {self.db_path}")
 
-    async def is_empty(self) -> bool:
-        query = """
-        MATCH (n)
-        RETURN true
-        LIMIT 1;
-        """
-        query_result = await self.query(query)
-        return len(query_result) == 0
-
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
         Execute a Kuzu query asynchronously with automatic reconnection.
