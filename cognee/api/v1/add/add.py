@@ -23,7 +23,7 @@ async def add(
     vector_db_config: dict = None,
     graph_db_config: dict = None,
     dataset_id: Optional[UUID] = None,
-    preferred_loaders: List[str] = None,
+    preferred_loaders: dict[str, dict[str, Any]] = None,
     incremental_loading: bool = True,
     data_per_batch: Optional[int] = 20,
 ):

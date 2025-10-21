@@ -64,7 +64,9 @@ class LoaderEngine:
         return True
 
     def get_loader(
-        self, file_path: str, preferred_loaders: List[str] = None
+        self,
+        file_path: str,
+        preferred_loaders: dict[str, dict[str, Any]],
     ) -> Optional[LoaderInterface]:
         """
         Get appropriate loader for a file.
@@ -105,7 +107,7 @@ class LoaderEngine:
     async def load_file(
         self,
         file_path: str,
-        preferred_loaders: Optional[List[str]] = None,
+        preferred_loaders: dict[str, dict[str, Any]] = None,
         **kwargs,
     ):
         """

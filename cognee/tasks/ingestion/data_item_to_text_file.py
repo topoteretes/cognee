@@ -1,6 +1,6 @@
 import os
 from urllib.parse import urlparse
-from typing import List, Tuple
+from typing import Any, List, Tuple
 from pathlib import Path
 import tempfile
 
@@ -35,7 +35,7 @@ async def pull_from_s3(file_path, destination_file) -> None:
 
 async def data_item_to_text_file(
     data_item_path: str,
-    preferred_loaders: List[str],
+    preferred_loaders: dict[str, dict[str, Any]] = None,
 ) -> Tuple[str, LoaderInterface]:
     if isinstance(data_item_path, str):
         parsed_url = urlparse(data_item_path)

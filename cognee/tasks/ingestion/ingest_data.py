@@ -27,7 +27,7 @@ async def ingest_data(
     user: User,
     node_set: Optional[List[str]] = None,
     dataset_id: UUID = None,
-    preferred_loaders: List[str] = None,
+    preferred_loaders: dict[str, dict[str, Any]] = None,
 ):
     if not user:
         user = await get_default_user()
@@ -44,7 +44,7 @@ async def ingest_data(
         user: User,
         node_set: Optional[List[str]] = None,
         dataset_id: UUID = None,
-        preferred_loaders: List[str] = None,
+        preferred_loaders: dict[str, dict[str, Any]] = None,
     ):
         new_datapoints = []
         existing_data_points = []
