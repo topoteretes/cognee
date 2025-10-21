@@ -1,213 +1,222 @@
-"""Schema-agnostic data cleanup operations.
+"""Data-level cleanup operations.
 
-This module provides functions to clean up unused data from any graph database,
-including both default and custom graphs. It dynamically discovers tables using
-SQLAlchemy metadata and performs cleanup based on last_accessed timestamps.
+This module provides functions to clean up unused Data entries based on access
+tracking. By working at the Data level, it ensures proper cleanup of related
+graph and vector database entries through existing deletion infrastructure.
 """
-
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Any
+from datetime import datetime, timedelta, timezone
+from typing import List, Dict, Optional
 import logging
-from sqlalchemy import MetaData, Table, select, delete, inspect, Column
+
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql import text
 
 logger = logging.getLogger(__name__)
 
 
-def discover_tracked_tables(metadata: MetaData, schema: Optional[str] = None) -> List[Table]:
-    """Dynamically discover all tables that have last_accessed column.
+async def get_unused_data_ids(
+    session: AsyncSession,
+    days_threshold: int = 30,
+) -> List[str]:
+    """
+    Get IDs of Data entries that haven't been accessed within the threshold.
     
     Args:
-        metadata: SQLAlchemy MetaData instance with reflected tables
-        schema: Optional schema name for custom graphs
+        session: Database session
+        days_threshold: Number of days to consider data as unused
     
     Returns:
-        List of Table objects that have last_accessed column
-    """
-    tracked_tables = []
+        List of Data UUIDs as strings that should be deleted
     
-    for table_name, table in metadata.tables.items():
-        # Filter by schema if specified
-        if schema and table.schema != schema:
-            continue
+    Example:
+        >>> unused_ids = await get_unused_data_ids(session, days_threshold=30)
+    """
+    try:
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_threshold)
         
-        # Check if table has last_accessed column
-        if 'last_accessed' in table.columns:
-            tracked_tables.append(table)
-            logger.debug(f"Found tracked table: {table_name}")
-    
-    return tracked_tables
+        # Query to find Data entries with old access timestamps
+        # LEFT JOIN to include Data entries that have never been tracked
+        from sqlalchemy import text
+        
+        query = text("""
+            SELECT d.id::text
+            FROM data d
+            LEFT JOIN data_access_tracking dat ON d.id = dat.data_id
+            WHERE 
+                (dat.last_accessed IS NULL AND d.created_at < :cutoff_date)
+                OR (dat.last_accessed < :cutoff_date)
+        """)
+        
+        result = await session.execute(query, {'cutoff_date': cutoff_date})
+        unused_ids = [row[0] for row in result.fetchall()]
+        
+        logger.info(f"Found {len(unused_ids)} unused Data entries (threshold: {days_threshold} days)")
+        return unused_ids
+        
+    except Exception as e:
+        logger.error(f"Failed to get unused Data IDs: {e}")
+        return []
 
 
-async def get_unused_data_counts(
+async def cleanup_unused_data(
     session: AsyncSession,
     days_threshold: int = 30,
-    schema: Optional[str] = None
-) -> Dict[str, int]:
-    """Get count of unused records per table.
+    dry_run: bool = True,
+) -> Dict[str, any]:
+    """
+    Clean up Data entries that haven't been accessed within the threshold.
+    
+    This function works at the Data level, allowing the existing deletion
+    infrastructure to properly clean up related graph and vector database entries.
     
     Args:
         session: Database session
-        days_threshold: Number of days to consider data unused
-        schema: Optional schema name for custom graphs
+        days_threshold: Number of days to consider data as unused (default: 30)
+        dry_run: If True, only report what would be deleted (default: True)
     
     Returns:
-        Dictionary mapping table names to count of unused records
+        Dictionary with cleanup results:
+        {
+            'success': bool,
+            'dry_run': bool,
+            'deleted_count': int,
+            'unused_data_ids': List[str],
+            'errors': List[str],
+            'timestamp': datetime
+        }
+    
+    Example:
+        >>> # Preview what would be deleted
+        >>> result = await cleanup_unused_data(session, days_threshold=30, dry_run=True)
+        >>> print(f"Would delete {result['deleted_count']} Data entries")
+        >>>
+        >>> # Actually perform cleanup
+        >>> result = await cleanup_unused_data(session, days_threshold=30, dry_run=False)
     """
-    cutoff_date = datetime.utcnow() - timedelta(days=days_threshold)
-    counts = {}
+    result = {
+        'success': False,
+        'dry_run': dry_run,
+        'deleted_count': 0,
+        'unused_data_ids': [],
+        'errors': [],
+        'timestamp': datetime.now(timezone.utc)
+    }
     
-    # Reflect database metadata
-    metadata = MetaData(schema=schema)
-    await session.run_sync(lambda sync_session: metadata.reflect(bind=sync_session.bind))
-    
-    # Discover tables with tracking
-    tracked_tables = discover_tracked_tables(metadata, schema)
-    
-    for table in tracked_tables:
-        try:
-            # Build query to count unused records
-            query = select(table.c.id).where(
-                (table.c.last_accessed < cutoff_date) |
-                (table.c.last_accessed == None)
-            )
-            result = await session.execute(query)
-            count = len(result.all())
-            counts[table.name] = count
-            logger.info(f"Table {table.name}: {count} unused records")
-        except Exception as e:
-            logger.error(f"Error counting unused data in {table.name}: {e}")
-            counts[table.name] = 0
-    
-    return counts
+    try:
+        # Validate threshold
+        if days_threshold < 0:
+            raise ValueError("days_threshold must be non-negative")
+        
+        # Get unused Data IDs
+        unused_ids = await get_unused_data_ids(session, days_threshold)
+        result['unused_data_ids'] = unused_ids
+        result['deleted_count'] = len(unused_ids)
+        
+        if not unused_ids:
+            logger.info("No unused Data entries found")
+            result['success'] = True
+            return result
+        
+        if dry_run:
+            logger.info(f"DRY RUN: Would delete {len(unused_ids)} Data entries")
+            result['success'] = True
+            return result
+        
+        # Actually delete the Data entries
+        # Note: The existing delete_data function should handle cascading
+        # deletions to graph and vector databases
+        from cognee.modules.data.deletion import delete_data_by_id
+        
+        deleted_count = 0
+        for data_id in unused_ids:
+            try:
+                await delete_data_by_id(data_id, session)
+                deleted_count += 1
+            except Exception as e:
+                error_msg = f"Failed to delete Data {data_id}: {e}"
+                logger.error(error_msg)
+                result['errors'].append(error_msg)
+        
+        await session.commit()
+        
+        result['deleted_count'] = deleted_count
+        result['success'] = True
+        logger.info(f"Successfully cleaned up {deleted_count} unused Data entries")
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"Cleanup operation failed: {e}"
+        logger.error(error_msg)
+        result['errors'].append(error_msg)
+        
+        # Rollback on error
+        await session.rollback()
+        
+        return result
 
 
-async def delete_unused_data(
+async def get_cleanup_statistics(
     session: AsyncSession,
     days_threshold: int = 30,
-    schema: Optional[str] = None,
-    dry_run: bool = False
-) -> Dict[str, int]:
-    """Delete unused data from all tracked tables.
+) -> Dict[str, any]:
+    """
+    Get statistics about Data entries and their access patterns.
+    
+    Useful for determining appropriate cleanup thresholds and monitoring
+    data usage patterns.
     
     Args:
         session: Database session
-        days_threshold: Number of days to consider data unused
-        schema: Optional schema name for custom graphs
-        dry_run: If True, only count records without deleting
+        days_threshold: Threshold for considering data as unused
     
     Returns:
-        Dictionary mapping table names to count of deleted records
+        Dictionary with statistics:
+        {
+            'total_data_count': int,
+            'tracked_count': int,
+            'untracked_count': int,
+            'unused_count': int,
+            'active_count': int
+        }
+    
+    Example:
+        >>> stats = await get_cleanup_statistics(session, days_threshold=30)
+        >>> print(f"Total: {stats['total_data_count']}, Unused: {stats['unused_count']}")
     """
-    cutoff_date = datetime.utcnow() - timedelta(days=days_threshold)
-    deleted_counts = {}
-    
-    # Reflect database metadata
-    metadata = MetaData(schema=schema)
-    await session.run_sync(lambda sync_session: metadata.reflect(bind=sync_session.bind))
-    
-    # Discover tables with tracking
-    tracked_tables = discover_tracked_tables(metadata, schema)
-    
-    logger.info(f"{'DRY RUN: ' if dry_run else ''}Cleaning up data older than {days_threshold} days")
-    
-    for table in tracked_tables:
-        try:
-            # Build delete query
-            delete_query = delete(table).where(
-                (table.c.last_accessed < cutoff_date) |
-                (table.c.last_accessed == None)
-            )
-            
-            if dry_run:
-                # Just count records that would be deleted
-                count_query = select(table.c.id).where(
-                    (table.c.last_accessed < cutoff_date) |
-                    (table.c.last_accessed == None)
-                )
-                result = await session.execute(count_query)
-                count = len(result.all())
-            else:
-                # Execute delete
-                result = await session.execute(delete_query)
-                count = result.rowcount
-                await session.commit()
-            
-            deleted_counts[table.name] = count
-            logger.info(
-                f"{'Would delete' if dry_run else 'Deleted'} {count} records from {table.name}"
-            )
-        except Exception as e:
-            logger.error(f"Error deleting unused data from {table.name}: {e}")
-            deleted_counts[table.name] = 0
-            if not dry_run:
-                await session.rollback()
-    
-    return deleted_counts
-
-
-async def get_table_statistics(
-    session: AsyncSession,
-    schema: Optional[str] = None
-) -> Dict[str, Dict[str, Any]]:
-    """Get statistics for all tracked tables.
-    
-    Args:
-        session: Database session
-        schema: Optional schema name for custom graphs
-    
-    Returns:
-        Dictionary mapping table names to their statistics
-    """
-    statistics = {}
-    
-    # Reflect database metadata
-    metadata = MetaData(schema=schema)
-    await session.run_sync(lambda sync_session: metadata.reflect(bind=sync_session.bind))
-    
-    # Discover tables with tracking
-    tracked_tables = discover_tracked_tables(metadata, schema)
-    
-    for table in tracked_tables:
-        try:
-            # Total count
-            total_query = select(table.c.id)
-            total_result = await session.execute(total_query)
-            total_count = len(total_result.all())
-            
-            # Never accessed count
-            never_accessed_query = select(table.c.id).where(
-                table.c.last_accessed == None
-            )
-            never_result = await session.execute(never_accessed_query)
-            never_accessed = len(never_result.all())
-            
-            # Recently accessed (last 7 days)
-            recent_date = datetime.utcnow() - timedelta(days=7)
-            recent_query = select(table.c.id).where(
-                table.c.last_accessed >= recent_date
-            )
-            recent_result = await session.execute(recent_query)
-            recently_accessed = len(recent_result.all())
-            
-            statistics[table.name] = {
-                'total_records': total_count,
-                'never_accessed': never_accessed,
-                'recently_accessed': recently_accessed,
-                'accessed_percentage': round(
-                    ((total_count - never_accessed) / total_count * 100) if total_count > 0 else 0,
-                    2
-                )
-            }
-            logger.info(f"Statistics for {table.name}: {statistics[table.name]}")
-        except Exception as e:
-            logger.error(f"Error getting statistics for {table.name}: {e}")
-            statistics[table.name] = {
-                'total_records': 0,
-                'never_accessed': 0,
-                'recently_accessed': 0,
-                'accessed_percentage': 0
-            }
-    
-    return statistics
+    try:
+        from sqlalchemy import text
+        
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_threshold)
+        
+        # Get total Data count
+        total_query = text("SELECT COUNT(*) FROM data")
+        total_result = await session.execute(total_query)
+        total_count = total_result.scalar()
+        
+        # Get tracked count
+        tracked_query = text("SELECT COUNT(*) FROM data_access_tracking")
+        tracked_result = await session.execute(tracked_query)
+        tracked_count = tracked_result.scalar()
+        
+        # Get unused count
+        unused_ids = await get_unused_data_ids(session, days_threshold)
+        unused_count = len(unused_ids)
+        
+        return {
+            'total_data_count': total_count,
+            'tracked_count': tracked_count,
+            'untracked_count': total_count - tracked_count,
+            'unused_count': unused_count,
+            'active_count': total_count - unused_count
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get cleanup statistics: {e}")
+        return {
+            'total_data_count': 0,
+            'tracked_count': 0,
+            'untracked_count': 0,
+            'unused_count': 0,
+            'active_count': 0
+        }
