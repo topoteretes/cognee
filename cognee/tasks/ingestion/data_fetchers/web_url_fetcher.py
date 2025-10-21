@@ -35,8 +35,6 @@ class WebUrlFetcher(DataFetcherInterface):
         data = await fetch_page_content(
             data_item_path,
             preferred_tool=preferred_tool,
-            soup_crawler_config=_soup_config,
-            tavily_config=_tavily_config,
         )
 
         logger.info(f"Successfully fetched content from URL {data_item_path}")

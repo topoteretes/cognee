@@ -66,6 +66,7 @@ class RobotsTxtCache:
     timestamp: float = field(default_factory=time.time)
 
 
+# TODO(daulet) refactor: This is no longer BeautifulSoup, rather just a crawler
 class BeautifulSoupCrawler:
     """Crawler for fetching and extracting web content using BeautifulSoup.
 
@@ -491,14 +492,12 @@ class BeautifulSoupCrawler:
                 return (val or "").strip()
             return el.get_text(strip=True)
 
-    async def fetch_with_bs4(
+    async def fetch_urls(
         self,
-        urls: Union[str, List[str], Dict[str, Dict[str, Any]]],
-        extraction_rules: Optional[Dict[str, Any]] = None,
+        urls: Union[str, List[str]],
         *,
         use_playwright: bool = False,
         playwright_js_wait: float = 0.8,
-        join_all_matches: bool = False,
     ) -> Dict[str, str]:
         """Fetch and extract content from URLs using BeautifulSoup or Playwright.
 
@@ -516,37 +515,10 @@ class BeautifulSoupCrawler:
             ValueError: If extraction_rules are missing when required or if urls is invalid.
             Exception: If fetching or extraction fails.
         """
-        url_rules_map: Dict[str, Dict[str, Any]] = {}
-
         if isinstance(urls, str):
-            if not extraction_rules:
-                raise ValueError("extraction_rules required when urls is a string")
-            url_rules_map[urls] = extraction_rules
-        elif isinstance(urls, list):
-            if not extraction_rules:
-                raise ValueError("extraction_rules required when urls is a list")
-            for url in urls:
-                url_rules_map[url] = extraction_rules
-        elif isinstance(urls, dict):
-            url_rules_map = urls
+            urls = [urls]
         else:
             raise ValueError(f"Invalid urls type: {type(urls)}")
-
-        logger.info(
-            f"Preparing to fetch {len(url_rules_map)} URL(s) with {len(extraction_rules) if extraction_rules else 0} extraction rule(s)"
-        )
-
-        normalized_url_rules: Dict[str, List[ExtractionRule]] = {}
-        for url, rules in url_rules_map.items():
-            normalized_rules = []
-            for _, rule in rules.items():
-                r = self._normalize_rule(rule)
-                if join_all_matches:
-                    r.all = True
-                normalized_rules.append(r)
-            normalized_url_rules[url] = normalized_rules
-
-        logger.info(f"Normalized extraction rules for {len(normalized_url_rules)} URL(s)")
 
         async def _task(url: str):
             async with self._sem:
@@ -575,30 +547,21 @@ class BeautifulSoupCrawler:
 
                     logger.info(f"Successfully fetched HTML from {url} ({len(html)} bytes)")
 
-                    # Extract content
-                    pieces = []
-                    for rule in normalized_url_rules[url]:
-                        text = self._extract_with_bs4(html, rule)
-                        if text:
-                            pieces.append(text)
-
-                    concatenated = " ".join(pieces).strip()
-                    logger.info(f"Extracted {len(concatenated)} characters from {url}")
-                    return url, concatenated
+                    return url, html
 
                 except Exception as e:
                     logger.error(f"Error processing {url}: {e}")
                     return url, ""
 
-        logger.info(f"Creating {len(url_rules_map)} async tasks for concurrent fetching")
-        tasks = [asyncio.create_task(_task(u)) for u in url_rules_map.keys()]
+        logger.info(f"Creating {len(urls)} async tasks for concurrent fetching")
+        tasks = [asyncio.create_task(_task(u)) for u in urls]
         results = {}
         completed = 0
         total = len(tasks)
 
         for coro in asyncio.as_completed(tasks):
-            url, text = await coro
-            results[url] = text
+            url, html = await coro
+            results[url] = html
             completed += 1
             logger.info(f"Progress: {completed}/{total} URLs processed")
 
