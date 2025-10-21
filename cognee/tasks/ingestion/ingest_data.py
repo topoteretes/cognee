@@ -96,9 +96,13 @@ async def ingest_data(
             # Standard flow: extract metadata from both original and stored files
             async with open_data_file(original_file_path) as file:
                 classified_data = ingestion.classify(file)
+
+                # data_id is the hash of original file contents + owner id to avoid duplicate data
+
                 data_id = ingestion.identify(classified_data, user)
                 original_file_metadata = classified_data.get_metadata()
 
+            # Find metadata from Cognee data storage text file
             async with open_data_file(cognee_storage_file_path) as file:
                 classified_data = ingestion.classify(file)
                 storage_file_metadata = classified_data.get_metadata()
