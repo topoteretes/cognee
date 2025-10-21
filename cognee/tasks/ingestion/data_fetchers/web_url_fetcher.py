@@ -1,8 +1,7 @@
+import os
 from cognee.modules.ingestion import save_data_to_file
 from cognee.tasks.ingestion.data_fetchers.data_fetcher_interface import DataFetcherInterface
-from typing import Any
 from cognee.tasks.web_scraper.config import TavilyConfig, SoupCrawlerConfig
-from cognee.modules.ingestion.exceptions.exceptions import IngestionError
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -14,33 +13,21 @@ class WebUrlFetcher(DataFetcherInterface):
     def fetcher_name(self):
         return "web_url_fetcher"
 
-    async def fetch(self, data_item_path: str, fetchers_config: dict[str, Any]):
+    async def fetch(self, data_item_path: str):
         from cognee.context_global_variables import tavily_config, soup_crawler_config
         from cognee.tasks.web_scraper import fetch_page_content
 
-        web_url_fetcher_config = fetchers_config.get(self.fetcher_name())
-        if not isinstance(web_url_fetcher_config, dict):
-            raise IngestionError(f"{self.fetcher_name()} configuration must be a valid dictionary")
+        if os.getenv("TAVILY_API_KEY"):
+            _tavily_config = TavilyConfig()
+            _soup_config = None
+            preferred_tool = "tavily"
+        else:
+            _tavily_config = None
+            _soup_config = SoupCrawlerConfig()
+            preferred_tool = "beautifulsoup"
 
-        tavily_dict = web_url_fetcher_config.get("tavily_config")
-        _tavily_config = TavilyConfig(**tavily_dict) if tavily_dict else None
-
-        soup_dict = web_url_fetcher_config.get("soup_config")
-        _soup_config = SoupCrawlerConfig(**soup_dict) if soup_dict else None
-
-        # Set global configs for downstream access
         tavily_config.set(_tavily_config)
         soup_crawler_config.set(_soup_config)
-
-        preferred_tool = "beautifulsoup" if _soup_config else "tavily"
-        if preferred_tool == "tavily" and _tavily_config is None:
-            raise IngestionError(
-                message="TavilyConfig must be set on the ingestion context when fetching HTTP URLs without a SoupCrawlerConfig."
-            )
-        if preferred_tool == "beautifulsoup" and _soup_config is None:
-            raise IngestionError(
-                message="SoupCrawlerConfig must be set on the ingestion context when using the BeautifulSoup scraper."
-            )
 
         logger.info(f"Starting web URL crawling for: {data_item_path}")
         logger.info(f"Using scraping tool: {preferred_tool}")

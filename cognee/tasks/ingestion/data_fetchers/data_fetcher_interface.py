@@ -8,7 +8,7 @@ class DataFetcherInterface(ABC):
         pass
 
     @abstractmethod
-    async def fetch(self, data_item_path: str, fetchers_config: dict[str, Any]) -> str:
+    async def fetch(self, data_item_path: str) -> str:
         """
         args: data_item_path - path to the data item
         """

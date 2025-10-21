@@ -38,7 +38,6 @@ async def run_tasks_data_item_incremental(
     pipeline_run_id: str,
     context: Optional[Dict[str, Any]],
     user: User,
-    fetchers_config: dict[str, Any],
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Process a single data item with incremental loading support.
@@ -65,7 +64,7 @@ async def run_tasks_data_item_incremental(
     # If incremental_loading of data is set to True don't process documents already processed by pipeline
     # If data is being added to Cognee for the first time calculate the id of the data
     if not isinstance(data_item, Data):
-        file_path = await save_data_item_to_storage(data_item, fetchers_config)
+        file_path = await save_data_item_to_storage(data_item)
         # Ingest data and add metadata
         async with open_data_file(file_path) as file:
             classified_data = ingestion.classify(file)
@@ -210,7 +209,6 @@ async def run_tasks_data_item(
     context: Optional[Dict[str, Any]],
     user: User,
     incremental_loading: bool,
-    fetchers_config: dict[str, Any] = {},
 ) -> Optional[Dict[str, Any]]:
     """
     Process a single data item, choosing between incremental and regular processing.
@@ -245,7 +243,6 @@ async def run_tasks_data_item(
             pipeline_run_id=pipeline_run_id,
             context=context,
             user=user,
-            fetchers_config=fetchers_config,
         ):
             pass
     else:

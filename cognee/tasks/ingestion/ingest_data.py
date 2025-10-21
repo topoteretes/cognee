@@ -28,7 +28,6 @@ async def ingest_data(
     node_set: Optional[List[str]] = None,
     dataset_id: UUID = None,
     preferred_loaders: List[str] = None,
-    fetchers_config: dict[str, Any] = {},
 ):
     if not user:
         user = await get_default_user()
@@ -79,7 +78,7 @@ async def ingest_data(
 
         for data_item in data:
             # Get file path of data item or create a file if it doesn't exist
-            original_file_path = await save_data_item_to_storage(data_item, fetchers_config)
+            original_file_path = await save_data_item_to_storage(data_item)
             # Transform file path to be OS usable
             actual_file_path = get_data_file_path(original_file_path)
 

@@ -23,9 +23,7 @@ class SaveDataSettings(BaseSettings):
 settings = SaveDataSettings()
 
 
-async def save_data_item_to_storage(
-    data_item: Union[BinaryIO, str, Any], fetchers_config: dict[str, Any] = {}
-) -> str:
+async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str:
     if "llama_index" in str(type(data_item)):
         # Dynamic import is used because the llama_index module is optional.
         from .transform_data import get_data_from_llama_index
@@ -61,7 +59,7 @@ async def save_data_item_to_storage(
             return data_item
         elif parsed_url.scheme == "http" or parsed_url.scheme == "https":
             fetcher = WebUrlFetcher()
-            return await fetcher.fetch(data_item, fetchers_config)
+            return await fetcher.fetch(data_item)
         # data is local file path
         elif parsed_url.scheme == "file":
             if settings.accept_local_file_path:

@@ -20,20 +20,9 @@ async def main():
         "paragraphs": {"selector": "p", "all": True},
     }
 
-    fetchers_config = {
-        "web_url_loader": {
-            "soup_config": {
-                "max_depth": 1,
-                "follow_links": False,
-                "extraction_rules": extraction_rules,
-            }
-        }
-    }
-
     await cognee.add(
         "https://en.wikipedia.org/wiki/Large_language_model",
         incremental_loading=False,
-        fetchers_config=fetchers_config,
     )
 
     await cognee.cognify()

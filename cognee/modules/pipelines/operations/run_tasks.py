@@ -60,7 +60,6 @@ async def run_tasks(
     context: dict = None,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
-    fetchers_config: dict[str, Any] = {},
 ):
     if not user:
         user = await get_default_user()
@@ -107,7 +106,6 @@ async def run_tasks(
                         context,
                         user,
                         incremental_loading,
-                        fetchers_config,
                     )
                 )
                 for data_item in data_batch
