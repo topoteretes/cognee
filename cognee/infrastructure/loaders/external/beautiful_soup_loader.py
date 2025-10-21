@@ -115,6 +115,23 @@ class BeautifulSoupLoader(LoaderInterface):
 
         full_content = " ".join(pieces).strip()
 
+        # Fallback: If no content extracted, check if the file is plain text (not HTML)
+        if not full_content:
+            from bs4 import BeautifulSoup
+
+            soup = BeautifulSoup(html, "html.parser")
+            # If there are no HTML tags, treat as plain text
+            if not soup.find():
+                logger.warning(
+                    f"No HTML tags found in {file_path}. Treating as plain text. "
+                    "This may happen when content is pre-extracted (e.g., via Tavily with text format)."
+                )
+                full_content = html.decode("utf-8") if isinstance(html, bytes) else html
+                full_content = full_content.strip()
+
+        if not full_content:
+            logger.warning(f"No content extracted from HTML file: {file_path}")
+
         # Store the extracted content
         storage_config = get_storage_config()
         data_root_directory = storage_config["data_root_directory"]
