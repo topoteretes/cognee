@@ -1,169 +1,196 @@
-"""Schema-agnostic access tracking utilities.
+"""Data-level access tracking utilities.
 
-This module provides functions to track when data entities are accessed,
-enabling efficient cleanup of unused data across all graph databases,
-including both default and custom graphs.
+This module provides functions to track when Data entries are accessed,
+enabling efficient cleanup of unused data. By working at the Data level,
+it ensures proper cleanup of related graph and vector database entries.
+
+The data_access_tracking reference table approach avoids frequent writes
+on the main Data table while maintaining efficient access tracking.
 """
-
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional, Union, Set
+from typing import List, Optional
 from uuid import UUID
-from sqlalchemy import MetaData, Table, update, inspect
+
+from sqlalchemy import select, update, insert, and_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
 
-def get_tracked_tables(metadata: MetaData, schema: Optional[str] = None) -> Set[str]:
-    """Get names of all tables that have last_accessed column.
-    
-    Args:
-        metadata: SQLAlchemy MetaData instance with reflected tables
-        schema: Optional schema name for custom graphs
-    
-    Returns:
-        Set of table names that support access tracking
-    """
-    tracked_tables = set()
-    
-    for table_name, table in metadata.tables.items():
-        # Filter by schema if specified
-        if schema and table.schema != schema:
-            continue
-        
-        # Check if table has last_accessed column
-        if 'last_accessed' in table.columns:
-            tracked_tables.add(table.name)
-    
-    return tracked_tables
-
-
-async def update_last_accessed(
+async def track_data_access(
     session: AsyncSession,
-    entity_ids: Union[UUID, List[UUID]],
-    table_name: str,
-    schema: Optional[str] = None
-) -> None:
-    """Update the last_accessed timestamp for specified entities.
-    
-    Args:
-        session: Database session
-        entity_ids: Single entity ID or list of entity IDs to update
-        table_name: Name of the table to update
-        schema: Optional schema name for custom graphs
-    
-    Returns:
-        None
-    
-    Raises:
-        ValueError: If table doesn't exist or doesn't have last_accessed column
-    """
-    # Normalize to list
-    if not isinstance(entity_ids, list):
-        entity_ids = [entity_ids]
-    
-    if not entity_ids:
-        return
-    
-    try:
-        # Reflect table metadata
-        metadata = MetaData(schema=schema)
-        await session.run_sync(lambda sync_session: metadata.reflect(bind=sync_session.bind))
-        
-        # Get the table
-        full_table_name = f"{schema}.{table_name}" if schema else table_name
-        if full_table_name not in metadata.tables:
-            raise ValueError(f"Table {full_table_name} not found")
-        
-        table = metadata.tables[full_table_name]
-        
-        # Verify table has last_accessed column
-        if 'last_accessed' not in table.columns:
-            raise ValueError(f"Table {full_table_name} does not have last_accessed column")
-        
-        # Build and execute update query
-        stmt = (
-            update(table)
-            .where(table.c.id.in_(entity_ids))
-            .values(last_accessed=datetime.now(timezone.utc))
-        )
-        
-        result = await session.execute(stmt)
-        await session.commit()
-        
-        logger.debug(
-            f"Updated last_accessed for {result.rowcount} records in {full_table_name}"
-        )
-    except Exception as e:
-        logger.error(f"Error updating last_accessed for {table_name}: {e}")
-        await session.rollback()
-        raise
-
-
-async def bulk_update_last_accessed(
-    session: AsyncSession,
-    updates: List[dict],
-    schema: Optional[str] = None
-) -> None:
-    """Perform bulk update of last_accessed timestamps across multiple tables.
-    
-    Args:
-        session: Database session
-        updates: List of dicts with 'table_name' and 'entity_ids' keys
-        schema: Optional schema name for custom graphs
-    
-    Example:
-        updates = [
-            {'table_name': 'document_chunks', 'entity_ids': [id1, id2]},
-            {'table_name': 'entities', 'entity_ids': [id3, id4]}
-        ]
-    """
-    for update_info in updates:
-        table_name = update_info.get('table_name')
-        entity_ids = update_info.get('entity_ids', [])
-        
-        if table_name and entity_ids:
-            try:
-                await update_last_accessed(
-                    session=session,
-                    entity_ids=entity_ids,
-                    table_name=table_name,
-                    schema=schema
-                )
-            except Exception as e:
-                logger.error(f"Error in bulk update for {table_name}: {e}")
-                # Continue with other updates even if one fails
-                continue
-
-
-async def mark_entity_accessed(
-    session: AsyncSession,
-    entity_id: UUID,
-    table_name: str,
-    schema: Optional[str] = None
+    data_id: UUID,
 ) -> bool:
-    """Mark a single entity as accessed.
+    """
+    Track access to a Data entry by updating/creating record in data_access_tracking.
     
-    Convenience function for updating a single entity.
+    Uses PostgreSQL's ON CONFLICT to efficiently update existing records or insert new ones.
+    This approach handles concurrent access and avoids race conditions.
     
     Args:
         session: Database session
-        entity_id: Entity ID to mark as accessed
-        table_name: Name of the table
-        schema: Optional schema name for custom graphs
+        data_id: ID of the Data entry being accessed
     
     Returns:
         True if successful, False otherwise
+    
+    Example:
+        >>> await track_data_access(session, data_id=uuid_obj)
     """
     try:
-        await update_last_accessed(
-            session=session,
-            entity_ids=[entity_id],
-            table_name=table_name,
-            schema=schema
+        # Use PostgreSQL's INSERT ... ON CONFLICT for efficient upsert
+        stmt = pg_insert(
+            'data_access_tracking'
+        ).values(
+            data_id=data_id,
+            last_accessed=datetime.now(timezone.utc),
+            access_count=1,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        ).on_conflict_do_update(
+            index_elements=['data_id'],
+            set_={
+                'last_accessed': datetime.now(timezone.utc),
+                'access_count': 'data_access_tracking.access_count + 1',
+                'updated_at': datetime.now(timezone.utc)
+            }
         )
+        
+        await session.execute(stmt)
         return True
+        
     except Exception as e:
-        logger.error(f"Failed to mark entity {entity_id} as accessed: {e}")
+        logger.error(f"Failed to track access for Data {data_id}: {e}")
         return False
+
+
+async def bulk_track_data_access(
+    session: AsyncSession,
+    data_ids: List[UUID],
+) -> int:
+    """
+    Track access to multiple Data entries efficiently.
+    
+    Uses batch processing with ON CONFLICT to handle multiple updates efficiently.
+    
+    Args:
+        session: Database session
+        data_ids: List of Data IDs to mark as accessed
+    
+    Returns:
+        Number of successfully tracked entries
+    
+    Example:
+        >>> count = await bulk_track_data_access(session, [id1, id2, id3])
+    """
+    if not data_ids:
+        return 0
+    
+    success_count = 0
+    
+    try:
+        # Process in batches to avoid overwhelming the database
+        batch_size = 100
+        for i in range(0, len(data_ids), batch_size):
+            batch = data_ids[i:i + batch_size]
+            
+            # Prepare values for bulk insert
+            values = []
+            current_time = datetime.now(timezone.utc)
+            
+            for data_id in batch:
+                values.append({
+                    'data_id': data_id,
+                    'last_accessed': current_time,
+                    'access_count': 1,
+                    'created_at': current_time,
+                    'updated_at': current_time
+                })
+            
+            # Use ON CONFLICT for efficient upsert
+            stmt = pg_insert('data_access_tracking').values(values)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=['data_id'],
+                set_={
+                    'last_accessed': current_time,
+                    'access_count': 'data_access_tracking.access_count + 1',
+                    'updated_at': current_time
+                }
+            )
+            
+            await session.execute(stmt)
+            success_count += len(batch)
+            
+        return success_count
+        
+    except Exception as e:
+        logger.error(f"Failed to bulk track Data access: {e}")
+        return success_count
+
+
+async def get_data_last_accessed(
+    session: AsyncSession,
+    data_id: UUID,
+) -> Optional[datetime]:
+    """
+    Get the last accessed timestamp for a Data entry.
+    
+    Args:
+        session: Database session
+        data_id: ID of the Data entry
+    
+    Returns:
+        Last accessed datetime or None if never accessed
+    
+    Example:
+        >>> last_access = await get_data_last_accessed(session, data_id)
+    """
+    try:
+        from sqlalchemy import text
+        
+        stmt = text(
+            "SELECT last_accessed FROM data_access_tracking WHERE data_id = :data_id"
+        )
+        result = await session.execute(stmt, {'data_id': data_id})
+        row = result.fetchone()
+        
+        return row[0] if row else None
+        
+    except Exception as e:
+        logger.error(f"Failed to get last accessed time for Data {data_id}: {e}")
+        return None
+
+
+async def get_data_access_count(
+    session: AsyncSession,
+    data_id: UUID,
+) -> int:
+    """
+    Get the access count for a Data entry.
+    
+    Args:
+        session: Database session
+        data_id: ID of the Data entry
+    
+    Returns:
+        Number of times the Data has been accessed (0 if never accessed)
+    
+    Example:
+        >>> count = await get_data_access_count(session, data_id)
+    """
+    try:
+        from sqlalchemy import text
+        
+        stmt = text(
+            "SELECT access_count FROM data_access_tracking WHERE data_id = :data_id"
+        )
+        result = await session.execute(stmt, {'data_id': data_id})
+        row = result.fetchone()
+        
+        return row[0] if row else 0
+        
+    except Exception as e:
+        logger.error(f"Failed to get access count for Data {data_id}: {e}")
+        return 0
