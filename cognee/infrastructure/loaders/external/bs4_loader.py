@@ -56,14 +56,14 @@ class BeautifulSoupLoader(LoaderInterface):
 
     @property
     def supported_mime_types(self) -> List[str]:
-        pass
+        return ["text/html"]
 
     @property
     def loader_name(self) -> str:
         return "beautiful_soup_loader"
 
     def can_handle(self, extension: str, mime_type: str) -> bool:
-        pass
+        return extension in self.supported_extensions() and mime_type in self.supported_mime_types()
 
     async def load(self, file_path: str, **kwargs):
         pass
