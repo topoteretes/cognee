@@ -8,6 +8,7 @@ BeautifulSoup or Tavily, defining data models, and handling scraping configurati
 from .bs4_crawler import BeautifulSoupCrawler
 from .utils import fetch_page_content
 from .web_scraper_task import cron_web_scraper_task, web_scraper_task
+from .default_url_crawler import DefaultUrlCrawler
 
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "fetch_page_content",
     "cron_web_scraper_task",
     "web_scraper_task",
+    "DefaultUrlCrawler",
 ]

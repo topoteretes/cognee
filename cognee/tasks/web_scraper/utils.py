@@ -4,19 +4,20 @@ This module provides functions to fetch and extract content from web pages, supp
 both BeautifulSoup for custom extraction rules and Tavily for API-based scraping.
 """
 
-from typing import Dict, List, Union, Optional, Literal
-from cognee.context_global_variables import soup_crawler_config, tavily_config
+import os
+from re import L
+from typing import List, Union, TypeAlias
 from cognee.shared.logging_utils import get_logger
+from .default_url_crawler import DefaultUrlCrawler
 from .bs4_crawler import BeautifulSoupCrawler
-from .config import TavilyConfig
+from .config import DefaultCrawlerConfig, TavilyConfig
 
 logger = get_logger(__name__)
 
+UrlsToHtmls: TypeAlias = dict[str, str]
 
-async def fetch_page_content(
-    urls: Union[str, List[str]],
-    preferred_tool: Optional[Literal["tavily", "beautifulsoup"]] = "beautifulsoup",
-) -> Dict[str, str]:
+
+async def fetch_page_content(urls: Union[str, List[str]]) -> UrlsToHtmls:
     """Fetch content from one or more URLs using the specified tool.
 
     This function retrieves web page content using either BeautifulSoup (with custom
@@ -29,7 +30,7 @@ async def fetch_page_content(
             Defaults to "beautifulsoup".
         tavily_config: Configuration for Tavily API, including API key.
             Required if preferred_tool is "tavily".
-        soup_crawler_config: Configuration for BeautifulSoup crawler, including
+        default_crawler_config: Configuration for BeautifulSoup crawler, including
             extraction rules. Required if preferred_tool is "beautifulsoup" and
             extraction_rules are needed.
 
@@ -44,51 +45,39 @@ async def fetch_page_content(
             installed.
     """
     url_list = [urls] if isinstance(urls, str) else urls
-    logger.info(f"Starting to fetch content from {len(url_list)} URL(s) using {preferred_tool}")
 
-    _tavily_config = tavily_config.get()
-    _soup_crawler_config = soup_crawler_config.get()
-
-    if preferred_tool == "tavily":
-        if not tavily_config or tavily_config.api_key is None:
-            raise ValueError("TAVILY_API_KEY must be set in TavilyConfig to use Tavily")
-        logger.info("Using Tavily API for content extraction")
+    if os.getenv("TAVILY_API_KEY"):
+        logger.info("Using Tavily API for url fetching")
         return await fetch_with_tavily(urls, tavily_config)
+    else:
+        logger.info("Using default crawler for content extraction")
 
-    if preferred_tool == "beautifulsoup":
-        try:
-            from bs4 import BeautifulSoup as _  # noqa: F401
-        except ImportError:
-            logger.error(
-                "Failed to import bs4, make sure to install using pip install beautifulsoup4>=4.13.1"
-            )
-            raise ImportError
-        if soup_crawler_config is None or soup_crawler_config.extraction_rules is None:
-            raise ValueError("soup_crawler_config must be provided when not using Tavily")
+        default_crawler_config = (
+            DefaultCrawlerConfig()
+        )  # We've decided to use defaults, and configure through env vars as needed
 
-        logger.info("Using BeautifulSoup for content extraction")
         logger.info(
-            f"Initializing BeautifulSoup crawler with concurrency={soup_crawler_config.concurrency}, timeout={soup_crawler_config.timeout}s, max_crawl_delay={soup_crawler_config.max_crawl_delay}s"
+            f"Initializing BeautifulSoup crawler with concurrency={default_crawler_config.concurrency}, timeout={default_crawler_config.timeout}s, max_crawl_delay={default_crawler_config.max_crawl_delay}s"
         )
 
-        crawler = BeautifulSoupCrawler(
-            concurrency=soup_crawler_config.concurrency,
-            crawl_delay=soup_crawler_config.crawl_delay,
-            max_crawl_delay=soup_crawler_config.max_crawl_delay,
-            timeout=soup_crawler_config.timeout,
-            max_retries=soup_crawler_config.max_retries,
-            retry_delay_factor=soup_crawler_config.retry_delay_factor,
-            headers=soup_crawler_config.headers,
-            robots_cache_ttl=soup_crawler_config.robots_cache_ttl,
+        crawler = DefaultUrlCrawler(
+            concurrency=default_crawler_config.concurrency,
+            crawl_delay=default_crawler_config.crawl_delay,
+            max_crawl_delay=default_crawler_config.max_crawl_delay,
+            timeout=default_crawler_config.timeout,
+            max_retries=default_crawler_config.max_retries,
+            retry_delay_factor=default_crawler_config.retry_delay_factor,
+            headers=default_crawler_config.headers,
+            robots_cache_ttl=default_crawler_config.robots_cache_ttl,
         )
         try:
             logger.info(
-                f"Starting to crawl {len(url_list)} URL(s) with BeautifulSoup (use_playwright={soup_crawler_config.use_playwright})"
+                f"Starting to crawl {len(url_list)} URL(s) with BeautifulSoup (use_playwright={default_crawler_config.use_playwright})"
             )
             results = await crawler.fetch_urls(
                 urls,
-                use_playwright=soup_crawler_config.use_playwright,
-                playwright_js_wait=soup_crawler_config.playwright_js_wait,
+                use_playwright=default_crawler_config.use_playwright,
+                playwright_js_wait=default_crawler_config.playwright_js_wait,
             )
             logger.info(f"Successfully fetched content from {len(results)} URL(s)")
             return results
@@ -102,7 +91,7 @@ async def fetch_page_content(
 
 async def fetch_with_tavily(
     urls: Union[str, List[str]], tavily_config: TavilyConfig
-) -> Dict[str, str]:
+) -> UrlsToHtmls:
     """Fetch content from URLs using the Tavily API.
 
     Args:

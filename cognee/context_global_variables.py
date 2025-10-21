@@ -7,18 +7,12 @@ from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.utils import get_or_create_dataset_database
 from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.modules.users.methods import get_user
-from cognee.tasks.web_scraper.config import SoupCrawlerConfig, TavilyConfig
 
 # Note: ContextVar allows us to use different graph db configurations in Cognee
 #       for different async tasks, threads and processes
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
 session_user = ContextVar("session_user", default=None)
-soup_crawler_config: ContextVar[SoupCrawlerConfig | None] = ContextVar(
-    "soup_crawler_config", default=None
-)
-tavily_config: ContextVar[TavilyConfig | None] = ContextVar("tavily_config", default=None)
-
 
 async def set_session_user_context_variable(user):
     session_user.set(user)

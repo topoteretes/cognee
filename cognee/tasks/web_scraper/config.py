@@ -10,7 +10,7 @@ class TavilyConfig(BaseModel):
     timeout: Optional[int] = Field(default=10, ge=1, le=60)
 
 
-class SoupCrawlerConfig(BaseModel):
+class DefaultCrawlerConfig(BaseModel):
     concurrency: int = 5
     crawl_delay: float = 0.5
     max_crawl_delay: Optional[float] = (
