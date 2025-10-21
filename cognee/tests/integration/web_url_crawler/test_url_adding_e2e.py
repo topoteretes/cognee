@@ -182,3 +182,129 @@ async def test_beautiful_soup_loader_is_selected_loader_if_preferred_loader_prov
         assert loader == bs_loader
     except Exception as e:
         pytest.fail(f"Failed to save data item to storage: {e}")
+
+
+@pytest.mark.asyncio
+async def test_beautiful_soup_loader_raises_if_required_args_are_missing():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    try:
+        original_file_path = await save_data_item_to_storage(
+            "https://en.wikipedia.org/wiki/Large_language_model"
+        )
+        file_path = get_data_file_path(original_file_path)
+        assert file_path.endswith(".html")
+        file = Path(file_path)
+        assert file.exists()
+        assert file.stat().st_size > 0
+
+        loader_engine = LoaderEngine()
+        bs_loader = BeautifulSoupLoader()
+        loader_engine.register_loader(bs_loader)
+        preferred_loaders = {"beautiful_soup_loader": {}}
+        with pytest.raises(ValueError):
+            await loader_engine.load_file(
+                file_path,
+                preferred_loaders=preferred_loaders,
+            )
+        extraction_rules = {
+            "title": {"selector": "title"},
+            "headings": {"selector": "h1, h2, h3", "all": True},
+            "links": {"selector": "a", "attr": "href", "all": True},
+            "paragraphs": {"selector": "p", "all": True},
+        }
+        preferred_loaders = {"beautiful_soup_loader": {"extraction_rules": extraction_rules}}
+        await loader_engine.load_file(
+            file_path,
+            preferred_loaders=preferred_loaders,
+        )
+    except Exception as e:
+        pytest.fail(f"Failed to save data item to storage: {e}")
+
+
+@pytest.mark.asyncio
+async def test_beautiful_soup_loader_successfully_loads_file_if_required_args_present():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    try:
+        original_file_path = await save_data_item_to_storage(
+            "https://en.wikipedia.org/wiki/Large_language_model"
+        )
+        file_path = get_data_file_path(original_file_path)
+        assert file_path.endswith(".html")
+        file = Path(file_path)
+        assert file.exists()
+        assert file.stat().st_size > 0
+
+        loader_engine = LoaderEngine()
+        bs_loader = BeautifulSoupLoader()
+        loader_engine.register_loader(bs_loader)
+        extraction_rules = {
+            "title": {"selector": "title"},
+            "headings": {"selector": "h1, h2, h3", "all": True},
+            "links": {"selector": "a", "attr": "href", "all": True},
+            "paragraphs": {"selector": "p", "all": True},
+        }
+        preferred_loaders = {"beautiful_soup_loader": {"extraction_rules": extraction_rules}}
+        await loader_engine.load_file(
+            file_path,
+            preferred_loaders=preferred_loaders,
+        )
+    except Exception as e:
+        pytest.fail(f"Failed to save data item to storage: {e}")
+
+
+@pytest.mark.asyncio
+async def test_beautiful_soup_loads_file_successfully():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    extraction_rules = {
+        "title": {"selector": "title"},
+        "headings": {"selector": "h1, h2, h3", "all": True},
+        "links": {"selector": "a", "attr": "href", "all": True},
+        "paragraphs": {"selector": "p", "all": True},
+    }
+
+    try:
+        original_file_path = await save_data_item_to_storage(
+            "https://en.wikipedia.org/wiki/Large_language_model"
+        )
+        file_path = get_data_file_path(original_file_path)
+        assert file_path.endswith(".html")
+        original_file = Path(file_path)
+        assert original_file.exists()
+        assert original_file.stat().st_size > 0
+
+        loader_engine = LoaderEngine()
+        bs_loader = BeautifulSoupLoader()
+        loader_engine.register_loader(bs_loader)
+        preferred_loaders = {"beautiful_soup_loader": {"extraction_rules": extraction_rules}}
+        loader = loader_engine.get_loader(
+            file_path,
+            preferred_loaders=preferred_loaders,
+        )
+
+        assert loader == bs_loader
+
+        cognee_loaded_txt_path = await loader_engine.load_file(
+            file_path=file_path, preferred_loaders=preferred_loaders
+        )
+
+        cognee_loaded_txt_path = get_data_file_path(cognee_loaded_txt_path)
+
+        assert cognee_loaded_txt_path.endswith(".txt")
+
+        extracted_file = Path(cognee_loaded_txt_path)
+
+        assert extracted_file.exists()
+        assert extracted_file.stat().st_size > 0
+
+        original_basename = original_file.stem
+        extracted_basename = extracted_file.stem
+        assert original_basename == extracted_basename, (
+            f"Expected same base name: {original_basename} vs {extracted_basename}"
+        )
+    except Exception as e:
+        pytest.fail(f"Failed to save data item to storage: {e}")

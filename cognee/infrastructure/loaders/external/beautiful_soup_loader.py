@@ -66,20 +66,64 @@ class BeautifulSoupLoader(LoaderInterface):
         can = extension in self.supported_extensions and mime_type in self.supported_mime_types
         return can
 
-    async def load(self, file_path: str, **kwargs):
-        """Load an HTML file and return its path.
-
-        For HTML files stored on disk, we simply return the file path
-        since the content is already in text format and can be processed directly.
+    async def load(
+        self,
+        file_path: str,
+        extraction_rules: dict[str, Any] = None,
+        join_all_matches: bool = False,
+        **kwargs,
+    ):
+        """Load an HTML file, extract content, and save to storage.
 
         Args:
             file_path: Path to the HTML file
+            extraction_rules: Dict of CSS selector rules for content extraction
+            join_all_matches: If True, extract all matching elements for each rule
             **kwargs: Additional arguments
 
         Returns:
-            The file path to the HTML file
+            Path to the stored extracted text file
         """
-        raise NotImplementedError
+        if extraction_rules is None:
+            raise ValueError("extraction_rules required for BeautifulSoupLoader")
+
+        logger.info(f"Processing HTML file: {file_path}")
+
+        from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
+        from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+
+        with open(file_path, "rb") as f:
+            file_metadata = await get_file_metadata(f)
+            f.seek(0)
+            html = f.read()
+
+        storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
+
+        # Normalize extraction rules
+        normalized_rules: List[ExtractionRule] = []
+        for _, rule in extraction_rules.items():
+            r = self._normalize_rule(rule)
+            if join_all_matches:
+                r.all = True
+            normalized_rules.append(r)
+
+        pieces = []
+        for rule in normalized_rules:
+            text = self._extract_from_html(html, rule)
+            if text:
+                pieces.append(text)
+
+        full_content = " ".join(pieces).strip()
+
+        # Store the extracted content
+        storage_config = get_storage_config()
+        data_root_directory = storage_config["data_root_directory"]
+        storage = get_file_storage(data_root_directory)
+
+        full_file_path = await storage.store(storage_file_name, full_content)
+
+        logger.info(f"Extracted {len(full_content)} characters from HTML")
+        return full_file_path
 
     def _normalize_rule(self, rule: Union[str, Dict[str, Any]]) -> ExtractionRule:
         """Normalize an extraction rule to an ExtractionRule dataclass.
@@ -105,7 +149,7 @@ class BeautifulSoupLoader(LoaderInterface):
             )
         raise ValueError(f"Invalid extraction rule: {rule}")
 
-    def extract(self, html: str, rule: ExtractionRule) -> str:
+    def _extract_from_html(self, html: str, rule: ExtractionRule) -> str:
         """Extract content from HTML using BeautifulSoup or lxml XPath.
 
         Args:
