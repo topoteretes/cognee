@@ -164,7 +164,7 @@ async def add(
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
 
     """
-    if preferred_loaders:
+    if preferred_loaders is not None:
         transformed = {}
         for item in preferred_loaders:
             if isinstance(item, dict):
