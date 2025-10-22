@@ -1,15 +1,20 @@
-from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
-from cognee.shared.logging_utils import get_logger, ERROR
-from collections import Counter
+import asyncio
 
+from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
+from cognee.shared.logging_utils import get_logger
+from collections import Counter
+from typing import Optional, Dict, Any, List, Tuple, Union
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.models.EdgeType import EdgeType
+from cognee.infrastructure.databases.graph.graph_db_interface import EdgeData
 
-logger = get_logger(level=ERROR)
+logger = get_logger()
 
 
-async def index_graph_edges():
+async def index_graph_edges(
+    edges_data: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]] = None,
+):
     """
     Indexes graph edges by creating and managing vector indexes for relationship types.
 
@@ -35,12 +40,16 @@ async def index_graph_edges():
         index_points = {}
 
         vector_engine = get_vector_engine()
-        graph_engine = await get_graph_engine()
+
+        if edges_data is None:
+            graph_engine = await get_graph_engine()
+            _, edges_data = await graph_engine.get_graph_data()
+            logger.warning(
+                "Your graph edge embedding is deprecated, please pass edges to the index_graph_edges directly."
+            )
     except Exception as e:
         logger.error("Failed to initialize engines: %s", e)
         raise RuntimeError("Initialization error") from e
-
-    _, edges_data = await graph_engine.get_graph_data()
 
     edge_types = Counter(
         item.get("relationship_name")
@@ -69,15 +78,20 @@ async def index_graph_edges():
             indexed_data_point.metadata["index_fields"] = [field_name]
             index_points[index_name].append(indexed_data_point)
 
+    # Get maximum batch size for embedding model
+    batch_size = vector_engine.embedding_engine.get_batch_size()
+    tasks: list[asyncio.Task] = []
+
     for index_name, indexable_points in index_points.items():
         index_name, field_name = index_name.split(".")
 
-        # Get maximum batch size for embedding model
-        batch_size = vector_engine.embedding_engine.get_batch_size()
-        # We save the data in batches of {batch_size} to not put a lot of pressure on the database
+        # Create embedding tasks to run in parallel later
         for start in range(0, len(indexable_points), batch_size):
             batch = indexable_points[start : start + batch_size]
 
-            await vector_engine.index_data_points(index_name, field_name, batch)
+            tasks.append(vector_engine.index_data_points(index_name, field_name, batch))
+
+    # Start all embedding tasks and wait for completion
+    await asyncio.gather(*tasks)
 
     return None

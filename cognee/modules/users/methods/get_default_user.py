@@ -27,12 +27,7 @@ async def get_default_user() -> SimpleNamespace:
             if user is None:
                 return await create_default_user()
 
-            # We return a SimpleNamespace to have the same user type as our SaaS
-            # SimpleNamespace is just a dictionary which can be accessed through attributes
-            auth_data = SimpleNamespace(
-                id=user.id, email=user.email, tenant_id=user.tenant_id, roles=[]
-            )
-            return auth_data
+            return user
     except Exception as error:
         if "principals" in str(error.args):
             raise DatabaseNotCreatedError() from error

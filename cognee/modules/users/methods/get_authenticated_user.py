@@ -37,6 +37,8 @@ async def get_authenticated_user(
         except Exception as e:
             # Convert any get_default_user failure into a proper HTTP 500 error
             logger.error(f"Failed to create default user: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Failed to create default user: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to create default user: {str(e)}"
+            ) from e
 
     return user

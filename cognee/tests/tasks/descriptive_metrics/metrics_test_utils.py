@@ -1,7 +1,6 @@
 from typing import List
 from cognee.infrastructure.engine import DataPoint
 from cognee.tasks.storage.add_data_points import add_data_points
-from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
 import json
@@ -64,7 +63,6 @@ async def create_connected_test_graph():
 
 
 async def get_metrics(provider: str, include_optional=True):
-    create_graph_engine.cache_clear()
     cognee.config.set_graph_database_provider(provider)
     graph_engine = await get_graph_engine()
     await graph_engine.delete_graph()

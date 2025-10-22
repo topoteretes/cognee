@@ -29,6 +29,3 @@ RUN poetry install --extras neo4j --extras postgres --extras aws --extras distri
 
 COPY cognee/ /app/cognee
 COPY distributed/ /app/distributed
-RUN chmod +x /app/distributed/entrypoint.sh
-
-ENTRYPOINT ["/app/distributed/entrypoint.sh"]

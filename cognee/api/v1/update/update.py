@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional
+from typing import Union, BinaryIO, List, Optional, Any
 
 from cognee.modules.users.models import User
 from cognee.api.v1.delete import delete
@@ -10,12 +10,12 @@ from cognee.api.v1.cognify import cognify
 async def update(
     data_id: UUID,
     data: Union[BinaryIO, list[BinaryIO], str, list[str]],
+    dataset_id: UUID,
     user: User = None,
     node_set: Optional[List[str]] = None,
-    dataset_id: Optional[UUID] = None,
     vector_db_config: dict = None,
     graph_db_config: dict = None,
-    preferred_loaders: List[str] = None,
+    preferred_loaders: dict[str, dict[str, Any]] = None,
     incremental_loading: bool = True,
 ):
     """

@@ -9,11 +9,16 @@ async def generate_completion(
     user_prompt_path: str,
     system_prompt_path: str,
     system_prompt: Optional[str] = None,
+    conversation_history: Optional[str] = None,
 ) -> str:
     """Generates a completion using LLM with given context and prompts."""
     args = {"question": query, "context": context}
     user_prompt = render_prompt(user_prompt_path, args)
     system_prompt = system_prompt if system_prompt else read_query_prompt(system_prompt_path)
+
+    if conversation_history:
+        #:TODO: I would separate the history and put it into the system prompt but we have to test what works best with longer convos
+        system_prompt = conversation_history + "\nTASK:" + system_prompt
 
     return await LLMGateway.acreate_structured_output(
         text_input=user_prompt,
