@@ -26,6 +26,13 @@ async def test_url_saves_as_html_file():
         pytest.fail(f"Failed to save data item to storage: {e}")
 
 
+skip_for_tavily = pytest.mark.skipif(
+    os.getenv("TAVILY_API_KEY") is not None,
+    reason="Skipping as Tavily already handles parsing and outputs text",
+)
+
+
+@skip_for_tavily
 @pytest.mark.asyncio
 async def test_saved_html_is_valid():
     try:
@@ -113,7 +120,18 @@ async def test_add_url_with_incremental_loading():
 
 
 @pytest.mark.asyncio
-async def test_add_url_with_extraction_rules():  # TODO: this'll fail due to not implemented `load()` yet
+async def test_add_url_can_define_preferred_loader_as_list_of_str():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    await cognee.add(
+        "https://en.wikipedia.org/wiki/Large_language_model",
+        preferred_loaders=["beautiful_soup_loader"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_add_url_with_extraction_rules():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
