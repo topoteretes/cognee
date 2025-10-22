@@ -1,21 +1,21 @@
-"""BeautifulSoup-based web crawler for extracting content from web pages.
-
-This module provides the BeautifulSoupCrawler class for fetching and extracting content
-from web pages using BeautifulSoup or Playwright for JavaScript-rendered pages. It
-supports robots.txt handling, rate limiting, and custom extraction rules.
-"""
-
 import asyncio
-import time
-from typing import Union, List, Dict, Any, Optional
-from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from functools import lru_cache
+import time
+from typing import Any, Union, List, Dict, Optional
+from urllib.parse import urlparse
 import httpx
-from bs4 import BeautifulSoup
-from cognee.shared.logging_utils import get_logger
 
-logger = get_logger(__name__)
+from cognee.shared.logging_utils import get_logger
+from cognee.tasks.web_scraper.types import UrlsToHtmls
+
+logger = get_logger()
+
+try:
+    from protego import Protego
+except ImportError:
+    logger.warning("Failed to import protego, make sure to install using pip install protego>=0.1")
+    Protego = None
 
 try:
     from playwright.async_api import async_playwright
@@ -24,31 +24,6 @@ except ImportError:
         "Failed to import playwright, make sure to install using pip install playwright>=1.9.0"
     )
     async_playwright = None
-
-try:
-    from protego import Protego
-except ImportError:
-    logger.warning("Failed to import protego, make sure to install using pip install protego>=0.1")
-    Protego = None
-
-
-@dataclass
-class ExtractionRule:
-    """Normalized extraction rule for web content.
-
-    Attributes:
-        selector: CSS selector for extraction (if any).
-        xpath: XPath expression for extraction (if any).
-        attr: HTML attribute to extract (if any).
-        all: If True, extract all matching elements; otherwise, extract first.
-        join_with: String to join multiple extracted elements.
-    """
-
-    selector: Optional[str] = None
-    xpath: Optional[str] = None
-    attr: Optional[str] = None
-    all: bool = False
-    join_with: str = " "
 
 
 @dataclass
@@ -66,27 +41,13 @@ class RobotsTxtCache:
     timestamp: float = field(default_factory=time.time)
 
 
-class BeautifulSoupCrawler:
-    """Crawler for fetching and extracting web content using BeautifulSoup.
-
-    Supports asynchronous HTTP requests, Playwright for JavaScript rendering, robots.txt
-    compliance, and rate limiting. Extracts content using CSS selectors or XPath rules.
-
-    Attributes:
-        concurrency: Number of concurrent requests allowed.
-        crawl_delay: Minimum seconds between requests to the same domain.
-        timeout: Per-request timeout in seconds.
-        max_retries: Number of retries for failed requests.
-        retry_delay_factor: Multiplier for exponential backoff on retries.
-        headers: HTTP headers for requests (e.g., User-Agent).
-        robots_cache_ttl: Time-to-live for robots.txt cache in seconds.
-    """
-
+class DefaultUrlCrawler:
     def __init__(
         self,
         *,
         concurrency: int = 5,
         crawl_delay: float = 0.5,
+        max_crawl_delay: Optional[float] = 10.0,
         timeout: float = 15.0,
         max_retries: int = 2,
         retry_delay_factor: float = 0.5,
@@ -98,6 +59,7 @@ class BeautifulSoupCrawler:
         Args:
             concurrency: Number of concurrent requests allowed.
             crawl_delay: Minimum seconds between requests to the same domain.
+            max_crawl_delay: Maximum crawl delay to respect from robots.txt (None = no limit).
             timeout: Per-request timeout in seconds.
             max_retries: Number of retries for failed requests.
             retry_delay_factor: Multiplier for exponential backoff on retries.
@@ -107,6 +69,7 @@ class BeautifulSoupCrawler:
         self.concurrency = concurrency
         self._sem = asyncio.Semaphore(concurrency)
         self.crawl_delay = crawl_delay
+        self.max_crawl_delay = max_crawl_delay
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay_factor = retry_delay_factor
@@ -183,7 +146,11 @@ class BeautifulSoupCrawler:
         elapsed = time.time() - last
         wait_for = delay - elapsed
         if wait_for > 0:
+            logger.info(
+                f"Rate limiting: waiting {wait_for:.2f}s before requesting {url} (crawl_delay={delay}s from robots.txt)"
+            )
             await asyncio.sleep(wait_for)
+            logger.info(f"Rate limit wait completed for {url}")
         self._last_request_time_per_domain[domain] = time.time()
 
     async def _get_robots_cache(self, domain_root: str) -> Optional[RobotsTxtCache]:
@@ -236,7 +203,16 @@ class BeautifulSoupCrawler:
             crawl_delay = self.crawl_delay
             if protego:
                 delay = protego.crawl_delay(agent) or protego.crawl_delay("*")
-                crawl_delay = delay if delay else self.crawl_delay
+                if delay:
+                    # Apply max_crawl_delay cap if configured
+                    if self.max_crawl_delay is not None and delay > self.max_crawl_delay:
+                        logger.warning(
+                            f"robots.txt specifies crawl_delay={delay}s for {domain_root}, "
+                            f"capping to max_crawl_delay={self.max_crawl_delay}s"
+                        )
+                        crawl_delay = self.max_crawl_delay
+                    else:
+                        crawl_delay = delay
 
             cache_entry = RobotsTxtCache(protego=protego, crawl_delay=crawl_delay)
             self._robots_cache[domain_root] = cache_entry
@@ -307,12 +283,16 @@ class BeautifulSoupCrawler:
 
         attempt = 0
         crawl_delay = await self._get_crawl_delay(url)
+        logger.info(f"Fetching URL with httpx (crawl_delay={crawl_delay}s): {url}")
 
         while True:
             try:
                 await self._respect_rate_limit(url, crawl_delay)
                 resp = await self._client.get(url)
                 resp.raise_for_status()
+                logger.info(
+                    f"Successfully fetched {url} (status={resp.status_code}, size={len(resp.text)} bytes)"
+                )
                 return resp.text
             except Exception as exc:
                 attempt += 1
@@ -347,22 +327,35 @@ class BeautifulSoupCrawler:
             raise RuntimeError(
                 "Playwright is not installed. Install with `pip install playwright` and run `playwright install`."
             )
+
+        timeout_val = timeout or self.timeout
+        logger.info(
+            f"Rendering URL with Playwright (js_wait={js_wait}s, timeout={timeout_val}s): {url}"
+        )
+
         attempt = 0
         while True:
             try:
                 async with async_playwright() as p:
+                    logger.info(f"Launching headless Chromium browser for {url}")
                     browser = await p.chromium.launch(headless=True)
                     try:
                         context = await browser.new_context()
                         page = await context.new_page()
+                        logger.info(f"Navigating to {url} and waiting for network idle")
                         await page.goto(
                             url,
                             wait_until="networkidle",
-                            timeout=int((timeout or self.timeout) * 1000),
+                            timeout=int(timeout_val * 1000),
                         )
                         if js_wait:
+                            logger.info(f"Waiting {js_wait}s for JavaScript to execute")
                             await asyncio.sleep(js_wait)
-                        return await page.content()
+                        content = await page.content()
+                        logger.info(
+                            f"Successfully rendered {url} with Playwright (size={len(content)} bytes)"
+                        )
+                        return content
                     finally:
                         await browser.close()
             except Exception as exc:
@@ -376,96 +369,13 @@ class BeautifulSoupCrawler:
                 )
                 await asyncio.sleep(backoff)
 
-    def _normalize_rule(self, rule: Union[str, Dict[str, Any]]) -> ExtractionRule:
-        """Normalize an extraction rule to an ExtractionRule dataclass.
-
-        Args:
-            rule: A string (CSS selector) or dict with extraction parameters.
-
-        Returns:
-            ExtractionRule: Normalized extraction rule.
-
-        Raises:
-            ValueError: If the rule is invalid.
-        """
-        if isinstance(rule, str):
-            return ExtractionRule(selector=rule)
-        if isinstance(rule, dict):
-            return ExtractionRule(
-                selector=rule.get("selector"),
-                xpath=rule.get("xpath"),
-                attr=rule.get("attr"),
-                all=bool(rule.get("all", False)),
-                join_with=rule.get("join_with", " "),
-            )
-        raise ValueError(f"Invalid extraction rule: {rule}")
-
-    def _extract_with_bs4(self, html: str, rule: ExtractionRule) -> str:
-        """Extract content from HTML using BeautifulSoup or lxml XPath.
-
-        Args:
-            html: The HTML content to extract from.
-            rule: The extraction rule to apply.
-
-        Returns:
-            str: The extracted content.
-
-        Raises:
-            RuntimeError: If XPath is used but lxml is not installed.
-        """
-        soup = BeautifulSoup(html, "html.parser")
-
-        if rule.xpath:
-            try:
-                from lxml import html as lxml_html
-            except ImportError:
-                raise RuntimeError(
-                    "XPath requested but lxml is not available. Install lxml or use CSS selectors."
-                )
-            doc = lxml_html.fromstring(html)
-            nodes = doc.xpath(rule.xpath)
-            texts = []
-            for n in nodes:
-                if hasattr(n, "text_content"):
-                    texts.append(n.text_content().strip())
-                else:
-                    texts.append(str(n).strip())
-            return rule.join_with.join(t for t in texts if t)
-
-        if not rule.selector:
-            return ""
-
-        if rule.all:
-            nodes = soup.select(rule.selector)
-            pieces = []
-            for el in nodes:
-                if rule.attr:
-                    val = el.get(rule.attr)
-                    if val:
-                        pieces.append(val.strip())
-                else:
-                    text = el.get_text(strip=True)
-                    if text:
-                        pieces.append(text)
-            return rule.join_with.join(pieces).strip()
-        else:
-            el = soup.select_one(rule.selector)
-            if el is None:
-                return ""
-            if rule.attr:
-                val = el.get(rule.attr)
-                return (val or "").strip()
-            return el.get_text(strip=True)
-
-    async def fetch_with_bs4(
+    async def fetch_urls(
         self,
-        urls: Union[str, List[str], Dict[str, Dict[str, Any]]],
-        extraction_rules: Optional[Dict[str, Any]] = None,
+        urls: Union[str, List[str]],
         *,
         use_playwright: bool = False,
         playwright_js_wait: float = 0.8,
-        join_all_matches: bool = False,
-    ) -> Dict[str, str]:
+    ) -> UrlsToHtmls:
         """Fetch and extract content from URLs using BeautifulSoup or Playwright.
 
         Args:
@@ -482,65 +392,55 @@ class BeautifulSoupCrawler:
             ValueError: If extraction_rules are missing when required or if urls is invalid.
             Exception: If fetching or extraction fails.
         """
-        url_rules_map: Dict[str, Dict[str, Any]] = {}
-
         if isinstance(urls, str):
-            if not extraction_rules:
-                raise ValueError("extraction_rules required when urls is a string")
-            url_rules_map[urls] = extraction_rules
-        elif isinstance(urls, list):
-            if not extraction_rules:
-                raise ValueError("extraction_rules required when urls is a list")
-            for url in urls:
-                url_rules_map[url] = extraction_rules
-        elif isinstance(urls, dict):
-            url_rules_map = urls
+            urls = [urls]
         else:
             raise ValueError(f"Invalid urls type: {type(urls)}")
-
-        normalized_url_rules: Dict[str, List[ExtractionRule]] = {}
-        for url, rules in url_rules_map.items():
-            normalized_rules = []
-            for _, rule in rules.items():
-                r = self._normalize_rule(rule)
-                if join_all_matches:
-                    r.all = True
-                normalized_rules.append(r)
-            normalized_url_rules[url] = normalized_rules
 
         async def _task(url: str):
             async with self._sem:
                 try:
+                    logger.info(f"Processing URL: {url}")
+
+                    # Check robots.txt
                     allowed = await self._is_url_allowed(url)
                     if not allowed:
                         logger.warning(f"URL disallowed by robots.txt: {url}")
                         return url, ""
 
+                    logger.info(f"Robots.txt check passed for {url}")
+
+                    # Fetch HTML
                     if use_playwright:
+                        logger.info(
+                            f"Rendering {url} with Playwright (JS wait: {playwright_js_wait}s)"
+                        )
                         html = await self._render_with_playwright(
                             url, js_wait=playwright_js_wait, timeout=self.timeout
                         )
                     else:
+                        logger.info(f"Fetching {url} with httpx")
                         html = await self._fetch_httpx(url)
 
-                    pieces = []
-                    for rule in normalized_url_rules[url]:
-                        text = self._extract_with_bs4(html, rule)
-                        if text:
-                            pieces.append(text)
+                    logger.info(f"Successfully fetched HTML from {url} ({len(html)} bytes)")
 
-                    concatenated = " ".join(pieces).strip()
-                    return url, concatenated
+                    return url, html
 
                 except Exception as e:
                     logger.error(f"Error processing {url}: {e}")
                     return url, ""
 
-        tasks = [asyncio.create_task(_task(u)) for u in url_rules_map.keys()]
+        logger.info(f"Creating {len(urls)} async tasks for concurrent fetching")
+        tasks = [asyncio.create_task(_task(u)) for u in urls]
         results = {}
+        completed = 0
+        total = len(tasks)
 
         for coro in asyncio.as_completed(tasks):
-            url, text = await coro
-            results[url] = text
+            url, html = await coro
+            results[url] = html
+            completed += 1
+            logger.info(f"Progress: {completed}/{total} URLs processed")
 
+        logger.info(f"Completed fetching all {len(results)} URL(s)")
         return results

@@ -13,8 +13,6 @@ from cognee.modules.users.methods import get_user
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
 session_user = ContextVar("session_user", default=None)
-soup_crawler_config = ContextVar("soup_crawler_config", default=None)
-tavily_config = ContextVar("tavily_config", default=None)
 
 
 async def set_session_user_context_variable(user):

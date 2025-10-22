@@ -19,7 +19,7 @@ from cognee.tasks.storage.index_graph_edges import index_graph_edges
 from cognee.modules.engine.operations.setup import setup
 
 from .models import WebPage, WebSite, ScrapingJob
-from .config import SoupCrawlerConfig, TavilyConfig
+from .config import DefaultCrawlerConfig, TavilyConfig
 from .utils import fetch_page_content
 
 try:
@@ -47,7 +47,7 @@ async def cron_web_scraper_task(
     schedule: str = None,
     extraction_rules: dict = None,
     tavily_api_key: str = os.getenv("TAVILY_API_KEY"),
-    soup_crawler_config: SoupCrawlerConfig = None,
+    soup_crawler_config: DefaultCrawlerConfig = None,
     tavily_config: TavilyConfig = None,
     job_name: str = "scraping",
 ):
@@ -121,7 +121,7 @@ async def web_scraper_task(
     schedule: str = None,
     extraction_rules: dict = None,
     tavily_api_key: str = os.getenv("TAVILY_API_KEY"),
-    soup_crawler_config: SoupCrawlerConfig = None,
+    soup_crawler_config: DefaultCrawlerConfig = None,
     tavily_config: TavilyConfig = None,
     job_name: str = None,
 ):
@@ -341,7 +341,7 @@ def check_arguments(tavily_api_key, extraction_rules, tavily_config, soup_crawle
         soup_crawler_config: Configuration for BeautifulSoup crawler.
 
     Returns:
-        Tuple[SoupCrawlerConfig, TavilyConfig, str]: Configured soup_crawler_config,
+        Tuple[DefaultCrawlerConfig, TavilyConfig, str]: Configured soup_crawler_config,
             tavily_config, and preferred_tool ("tavily" or "beautifulsoup").
 
     Raises:
@@ -350,7 +350,7 @@ def check_arguments(tavily_api_key, extraction_rules, tavily_config, soup_crawle
     preferred_tool = "beautifulsoup"
 
     if extraction_rules and not soup_crawler_config:
-        soup_crawler_config = SoupCrawlerConfig(extraction_rules=extraction_rules)
+        soup_crawler_config = DefaultCrawlerConfig(extraction_rules=extraction_rules)
 
     if tavily_api_key:
         if not tavily_config:

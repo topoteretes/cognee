@@ -1,6 +1,6 @@
 import asyncio
 import cognee
-from cognee.tasks.web_scraper.config import SoupCrawlerConfig
+from cognee.tasks.web_scraper.config import DefaultCrawlerConfig
 from cognee.tasks.web_scraper import cron_web_scraper_task
 
 
@@ -14,7 +14,7 @@ async def test_web_scraping_using_bs4():
         "authors": {"selector": ".quote small", "all": True},
     }
 
-    soup_config = SoupCrawlerConfig(
+    soup_config = DefaultCrawlerConfig(
         concurrency=5,
         crawl_delay=0.5,
         timeout=15.0,
@@ -47,7 +47,7 @@ async def test_web_scraping_using_bs4_and_incremental_loading():
     url = "https://books.toscrape.com/"
     rules = {"titles": "article.product_pod h3 a", "prices": "article.product_pod p.price_color"}
 
-    soup_config = SoupCrawlerConfig(
+    soup_config = DefaultCrawlerConfig(
         concurrency=1,
         crawl_delay=0.1,
         timeout=10.0,
