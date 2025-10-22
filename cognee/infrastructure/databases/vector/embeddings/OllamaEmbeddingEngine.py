@@ -111,7 +111,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                 self.endpoint, json=payload, headers=headers, timeout=60.0
             ) as response:
                 data = await response.json()
-                return data["embeddings"]
+                return data["embeddings"][0]
 
     def get_vector_size(self) -> int:
         """
