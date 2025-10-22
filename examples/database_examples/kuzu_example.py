@@ -55,7 +55,9 @@ async def main():
 
     # Now let's perform some searches
     # 1. Search for insights related to "KuzuDB"
-    insights_results = await cognee.search(query_type=SearchType.INSIGHTS, query_text="KuzuDB")
+    insights_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION, query_text="KuzuDB"
+    )
     print("\nInsights about KuzuDB:")
     for result in insights_results:
         print(f"- {result}")

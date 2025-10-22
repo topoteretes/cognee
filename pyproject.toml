@@ -7,7 +7,7 @@ authors = [
     { name = "Vasilije Markovic" },
     { name = "Boris Arzentar" },
 ]
-requires-python = ">=3.10,<=3.13"
+requires-python = ">=3.10,<3.14"
 readme = "README.md"
 license = "Apache-2.0"
 classifiers = [
@@ -54,7 +54,9 @@ dependencies = [
     "networkx>=3.4.2,<4",
     "uvicorn>=0.34.0,<1.0.0",
     "gunicorn>=20.1.0,<24",
-    "websockets>=15.0.1,<16.0.0"
+    "websockets>=15.0.1,<16.0.0",
+    "mistralai>=1.9.10",
+    "tenacity>=9.0.0",
 ]
 
 [project.optional-dependencies]
@@ -62,6 +64,15 @@ api=[]
 
 distributed = [
     "modal>=1.0.5,<2.0.0",
+]
+
+scraping = [
+    "tavily-python>=0.7.12",
+    "beautifulsoup4>=4.13.1",
+    "playwright>=1.9.0",
+    "lxml>=4.9.3",
+    "protego>=0.1",
+    "APScheduler>=3.10.0,<=3.11.0"
 ]
 
 neo4j = ["neo4j>=5.28.0,<6"]
@@ -93,7 +104,7 @@ chromadb = [
     "chromadb>=0.6,<0.7",
     "pypika==0.48.9",
 ]
-docs = ["unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19"]
+docs = ["lxml<6.0.0", "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19"]
 codegraph = [
     "fastembed<=0.6.0 ; python_version < '3.13'",
     "transformers>=4.46.3,<5",
@@ -132,14 +143,18 @@ dev = [
     "mkdocstrings[python]>=0.26.2,<0.27",
 ]
 debug = ["debugpy>=1.8.9,<2.0.0"]
+redis = ["redis>=5.0.3,<6.0.0"]
 
 monitoring = ["sentry-sdk[fastapi]>=2.9.0,<3", "langfuse>=2.32.0,<3"]
+
+docling = ["docling>=2.54", "transformers>=4.55"]
 
 [project.urls]
 Homepage = "https://www.cognee.ai"
 Repository = "https://github.com/topoteretes/cognee"
 
 [project.scripts]
+cognee = "cognee.cli._cognee:main"
 cognee-cli = "cognee.cli._cognee:main"
 
 [build-system]

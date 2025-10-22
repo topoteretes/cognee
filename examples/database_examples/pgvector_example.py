@@ -69,7 +69,9 @@ async def main():
 
     # Now let's perform some searches
     # 1. Search for insights related to "PGVector"
-    insights_results = await cognee.search(query_type=SearchType.INSIGHTS, query_text="PGVector")
+    insights_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION, query_text="PGVector"
+    )
     print("\nInsights about PGVector:")
     for result in insights_results:
         print(f"- {result}")

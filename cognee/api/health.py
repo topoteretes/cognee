@@ -241,16 +241,6 @@ class HealthChecker:
         """Get comprehensive health status."""
         components = {}
 
-        # Critical services
-        critical_components = [
-            "relational_db",
-            "vector_db",
-            "graph_db",
-            "file_storage",
-            "llm_provider",
-            "embedding_service",
-        ]
-
         critical_checks = [
             ("relational_db", self.check_relational_db()),
             ("vector_db", self.check_vector_db()),
@@ -296,11 +286,11 @@ class HealthChecker:
                 else:
                     components[name] = result
 
+        critical_comps = [check[0] for check in critical_checks]
         # Determine overall status
         critical_unhealthy = any(
-            comp.status == HealthStatus.UNHEALTHY
+            comp.status == HealthStatus.UNHEALTHY and name in critical_comps
             for name, comp in components.items()
-            if name in critical_components
         )
 
         has_degraded = any(comp.status == HealthStatus.DEGRADED for comp in components.values())

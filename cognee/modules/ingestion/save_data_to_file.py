@@ -1,10 +1,12 @@
-from typing import BinaryIO, Union
+from typing import BinaryIO, Union, Optional
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from .classify import classify
 import hashlib
 
 
-async def save_data_to_file(data: Union[str, BinaryIO], filename: str = None):
+async def save_data_to_file(
+    data: Union[str, BinaryIO], filename: str = None, file_extension: Optional[str] = None
+):
     storage_config = get_storage_config()
 
     data_root_directory = storage_config["data_root_directory"]
@@ -20,6 +22,11 @@ async def save_data_to_file(data: Union[str, BinaryIO], filename: str = None):
             file_metadata["name"] = "text_" + hash_contents + ".txt"
 
         file_name = file_metadata["name"]
+
+        if file_extension is not None:
+            extension = file_extension.lstrip(".")
+            file_name_without_ext = file_name.rsplit(".", 1)[0]
+            file_name = f"{file_name_without_ext}.{extension}"
 
         storage = get_file_storage(data_root_directory)
 
