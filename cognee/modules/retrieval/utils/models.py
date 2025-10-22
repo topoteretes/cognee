@@ -43,8 +43,6 @@ class UserFeedbackEvaluation(BaseModel):
 
 class CogneeSearchSentiment(DataPoint):
     """Cognee - Search Sentiment"""
-    prev_question: str
-    prev_answer: str
     current_question: str
     sentiment: str   # Positive / Neutral / Negative
     score: int       # -5 to 5

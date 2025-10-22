@@ -8,9 +8,6 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.exceptions import DatasetNotFoundError
-from cognee.modules.retrieval.utils.models import CogneeUserInteraction
-from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.tasks.sentiment_analysis.sentiment_analysis import run_sentiment_analysis
 from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 async def search(
@@ -180,33 +177,6 @@ async def search(
 
     if user is None:
         user = await get_default_user()
-
-    # Run sentiment analysis only when saving interactions and when we have a prior interaction
-    if save_interaction:
-        try:
-            graph_engine = await get_graph_engine()
-            last_interaction_ids = await graph_engine.get_last_user_interaction_ids(limit=1)
-            last = None
-            for interaction_id in last_interaction_ids:
-                interaction = await graph_engine.get_node(node_id=interaction_id)
-                if not interaction:
-                    continue
-                props = interaction.get("properties", interaction)
-                
-                if "user_id" in props and str(props["user_id"]) != str(user.id):
-                    continue
-                if "question" in props and "answer" in props:
-                    last = props
-                    break
-            if last:
-                await run_sentiment_analysis(
-                    prev_question=last["question"],
-                    prev_answer=last["answer"],
-                    current_question=query_text,
-                    user=user,
-                )
-        except Exception as e:
-            logger.error(f"Sentiment Analysis Failed: {e}")
 
     # Transform string based datasets to UUID - String based datasets can only be found for current user
     if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
