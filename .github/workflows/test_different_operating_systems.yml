@@ -9,7 +9,7 @@ on:
       python-versions:
         required: false
         type: string
-        default: '["3.10.x", "3.11.x", "3.12.x"]'
+        default: '["3.10.x", "3.12.x", "3.13.x"]'
     secrets:
       LLM_PROVIDER:
         required: true
@@ -192,6 +192,13 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Path setup
+        if: ${{ matrix.os }} == 'windows-latest'
+        shell: bash
+        run: |
+          PATH=$(printf '%s' "$PATH" | tr ':' $'\n' | grep -vi '/git/usr/bin' | paste -sd: -)
+          export PATH
 
       - name: Run Soft Deletion Tests
         env:

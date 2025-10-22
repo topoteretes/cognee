@@ -9,7 +9,6 @@ from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 # Retrievers
 from cognee.modules.retrieval.user_qa_feedback import UserQAFeedback
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
-from cognee.modules.retrieval.insights_retriever import InsightsRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -43,10 +42,6 @@ async def get_search_type_tools(
         SearchType.SUMMARIES: [
             SummariesRetriever(top_k=top_k).get_completion,
             SummariesRetriever(top_k=top_k).get_context,
-        ],
-        SearchType.INSIGHTS: [
-            InsightsRetriever(top_k=top_k).get_completion,
-            InsightsRetriever(top_k=top_k).get_context,
         ],
         SearchType.CHUNKS: [
             ChunksRetriever(top_k=top_k).get_completion,

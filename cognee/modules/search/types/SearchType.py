@@ -3,7 +3,6 @@ from enum import Enum
 
 class SearchType(Enum):
     SUMMARIES = "SUMMARIES"
-    INSIGHTS = "INSIGHTS"
     CHUNKS = "CHUNKS"
     RAG_COMPLETION = "RAG_COMPLETION"
     GRAPH_COMPLETION = "GRAPH_COMPLETION"

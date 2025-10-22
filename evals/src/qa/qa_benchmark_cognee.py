@@ -34,7 +34,7 @@ class CogneeConfig(QABenchmarkConfig):
     system_prompt_path: str = "answer_simple_question_benchmark2.txt"
 
     # Search parameters (fallback if not using eval framework)
-    search_type: SearchType = SearchType.INSIGHTS
+    search_type: SearchType = SearchType.GRAPH_COMPLETION
 
     # Clean slate on initialization
     clean_start: bool = True
