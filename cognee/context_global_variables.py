@@ -12,6 +12,11 @@ from cognee.modules.users.methods import get_user
 #       for different async tasks, threads and processes
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
+session_user = ContextVar("session_user", default=None)
+
+
+async def set_session_user_context_variable(user):
+    session_user.set(user)
 
 
 async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):

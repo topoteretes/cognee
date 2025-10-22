@@ -68,6 +68,7 @@ class Neo4jAdapter(GraphDBInterface):
             auth=auth,
             max_connection_lifetime=120,
             notifications_min_severity="OFF",
+            keep_alive=True,
         )
 
     async def initialize(self) -> None:
@@ -205,7 +206,7 @@ class Neo4jAdapter(GraphDBInterface):
             {
                 "node_id": str(node.id),
                 "label": type(node).__name__,
-                "properties": self.serialize_properties(node.model_dump()),
+                "properties": self.serialize_properties(dict(node)),
             }
             for node in nodes
         ]
@@ -1066,7 +1067,7 @@ class Neo4jAdapter(GraphDBInterface):
         query_nodes = f"""
         MATCH (n)
         WHERE {where_clause}
-        RETURN ID(n) AS id, labels(n) AS labels, properties(n) AS properties
+        RETURN n.id AS id, labels(n) AS labels, properties(n) AS properties
         """
         result_nodes = await self.query(query_nodes)
 
@@ -1081,7 +1082,7 @@ class Neo4jAdapter(GraphDBInterface):
         query_edges = f"""
         MATCH (n)-[r]->(m)
         WHERE {where_clause} AND {where_clause.replace("n.", "m.")}
-        RETURN ID(n) AS source, ID(m) AS target, TYPE(r) AS type, properties(r) AS properties
+        RETURN n.id AS source, n.id AS target, TYPE(r) AS type, properties(r) AS properties
         """
         result_edges = await self.query(query_edges)
 

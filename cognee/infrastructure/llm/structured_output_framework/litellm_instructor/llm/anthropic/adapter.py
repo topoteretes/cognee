@@ -1,18 +1,23 @@
+import logging
 from typing import Type
 from pydantic import BaseModel
+import litellm
 import instructor
+from cognee.shared.logging_utils import get_logger
+from tenacity import (
+    retry,
+    stop_after_delay,
+    wait_exponential_jitter,
+    retry_if_not_exception_type,
+    before_sleep_log,
+)
 
-from cognee.infrastructure.llm.exceptions import MissingSystemPromptPathError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
-    rate_limit_async,
-    sleep_and_retry_async,
-)
-
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.config import get_llm_config
+
+logger = get_logger()
 
 
 class AnthropicAdapter(LLMInterface):
@@ -35,8 +40,13 @@ class AnthropicAdapter(LLMInterface):
         self.model = model
         self.max_completion_tokens = max_completion_tokens
 
-    @sleep_and_retry_async()
-    @rate_limit_async
+    @retry(
+        stop=stop_after_delay(128),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        reraise=True,
+    )
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:

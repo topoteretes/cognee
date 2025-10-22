@@ -89,15 +89,6 @@ export default function useChat(dataset: Dataset) {
 }
 
 
-interface Node {
-  name: string;
-}
-
-interface Relationship {
-  relationship_name: string;
-}
-
-type InsightMessage = [Node, Relationship, Node];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function convertToSearchTypeOutput(systemMessage: any[] | any, searchType: string): string {
@@ -106,14 +97,6 @@ function convertToSearchTypeOutput(systemMessage: any[] | any, searchType: strin
   }
 
   switch (searchType) {
-    case "INSIGHTS":
-      return systemMessage.map((message: InsightMessage) => {
-        const [node1, relationship, node2] = message;
-        if (node1.name && node2.name) {
-          return `${node1.name} ${relationship.relationship_name} ${node2.name}.`;
-        }
-        return "";
-      }).join("\n");
     case "SUMMARIES":
       return systemMessage.map((message: { text: string }) => message.text).join("\n");
     case "CHUNKS":
