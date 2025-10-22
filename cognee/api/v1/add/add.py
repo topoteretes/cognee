@@ -23,7 +23,7 @@ async def add(
     vector_db_config: dict = None,
     graph_db_config: dict = None,
     dataset_id: Optional[UUID] = None,
-    preferred_loaders: dict[str, dict[str, Any]] = None,
+    preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
     incremental_loading: bool = True,
     data_per_batch: Optional[int] = 20,
 ):
@@ -164,6 +164,15 @@ async def add(
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
 
     """
+    if preferred_loaders is not None:
+        transformed = {}
+        for item in preferred_loaders:
+            if isinstance(item, dict):
+                transformed.update(item)
+            else:
+                transformed[item] = {}
+        preferred_loaders = transformed
+
     tasks = [
         Task(resolve_data_directories, include_subdirectories=True),
         Task(

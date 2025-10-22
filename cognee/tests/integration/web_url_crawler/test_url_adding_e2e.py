@@ -1,3 +1,4 @@
+import os
 import pytest
 import cognee
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
@@ -25,6 +26,13 @@ async def test_url_saves_as_html_file():
         pytest.fail(f"Failed to save data item to storage: {e}")
 
 
+skip_for_tavily = pytest.mark.skipif(
+    os.getenv("TAVILY_API_KEY") is not None,
+    reason="Skipping as Tavily already handles parsing and outputs text",
+)
+
+
+@skip_for_tavily
 @pytest.mark.asyncio
 async def test_saved_html_is_valid():
     try:
@@ -67,6 +75,22 @@ async def test_add_url():
     await cognee.add("https://en.wikipedia.org/wiki/Large_language_model")
 
 
+skip_in_ci = pytest.mark.skipif(
+    os.getenv("GITHUB_ACTIONS") == "true",
+    reason="Skipping in Github for now - before we get TAVILY_API_KEY",
+)
+
+
+@skip_in_ci
+@pytest.mark.asyncio
+async def test_add_url_with_tavily():
+    assert os.getenv("TAVILY_API_KEY") is not None
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    await cognee.add("https://en.wikipedia.org/wiki/Large_language_model")
+
+
 @pytest.mark.asyncio
 async def test_add_url_without_incremental_loading():
     await cognee.prune.prune_data()
@@ -96,7 +120,18 @@ async def test_add_url_with_incremental_loading():
 
 
 @pytest.mark.asyncio
-async def test_add_url_with_extraction_rules():  # TODO: this'll fail due to not implemented `load()` yet
+async def test_add_url_can_define_preferred_loader_as_list_of_str():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    await cognee.add(
+        "https://en.wikipedia.org/wiki/Large_language_model",
+        preferred_loaders=["beautiful_soup_loader"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_add_url_with_extraction_rules():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
@@ -185,7 +220,7 @@ async def test_beautiful_soup_loader_is_selected_loader_if_preferred_loader_prov
 
 
 @pytest.mark.asyncio
-async def test_beautiful_soup_loader_raises_if_required_args_are_missing():
+async def test_beautiful_soup_loader_works_with_and_without_arguments():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
@@ -203,11 +238,10 @@ async def test_beautiful_soup_loader_raises_if_required_args_are_missing():
         bs_loader = BeautifulSoupLoader()
         loader_engine.register_loader(bs_loader)
         preferred_loaders = {"beautiful_soup_loader": {}}
-        with pytest.raises(ValueError):
-            await loader_engine.load_file(
-                file_path,
-                preferred_loaders=preferred_loaders,
-            )
+        await loader_engine.load_file(
+            file_path,
+            preferred_loaders=preferred_loaders,
+        )
         extraction_rules = {
             "title": {"selector": "title"},
             "headings": {"selector": "h1, h2, h3", "all": True},
