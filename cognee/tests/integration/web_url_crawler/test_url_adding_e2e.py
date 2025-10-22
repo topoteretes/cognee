@@ -185,7 +185,7 @@ async def test_beautiful_soup_loader_is_selected_loader_if_preferred_loader_prov
 
 
 @pytest.mark.asyncio
-async def test_beautiful_soup_loader_raises_if_required_args_are_missing():
+async def test_beautiful_soup_loader_works_with_and_without_arguments():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
@@ -203,11 +203,10 @@ async def test_beautiful_soup_loader_raises_if_required_args_are_missing():
         bs_loader = BeautifulSoupLoader()
         loader_engine.register_loader(bs_loader)
         preferred_loaders = {"beautiful_soup_loader": {}}
-        with pytest.raises(ValueError):
-            await loader_engine.load_file(
-                file_path,
-                preferred_loaders=preferred_loaders,
-            )
+        await loader_engine.load_file(
+            file_path,
+            preferred_loaders=preferred_loaders,
+        )
         extraction_rules = {
             "title": {"selector": "title"},
             "headings": {"selector": "h1, h2, h3", "all": True},

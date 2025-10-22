@@ -148,12 +148,6 @@ class BeautifulSoupLoader(LoaderInterface):
                 "all": True,
                 "join_with": "\n\n",
             },
-            # Spans with data (fallback for inline content)
-            "data_spans": {
-                "selector": "span[data-*]",
-                "all": True,
-                "join_with": " ",
-            },
         }
 
     async def load(
