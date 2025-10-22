@@ -31,10 +31,6 @@ Search Types & Use Cases:
     Traditional RAG using document chunks without graph structure.
     Best for: Direct document retrieval, specific fact-finding.
 
-**INSIGHTS**:
-    Structured entity relationships and semantic connections.
-    Best for: Understanding concept relationships, knowledge mapping.
-
 **CHUNKS**:
     Raw text segments that match the query semantically.
     Best for: Finding specific passages, citations, exact content.
@@ -108,7 +104,7 @@ Search Types & Use Cases:
                     )
                     return results
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to search: {str(e)}")
+                    raise CliCommandInnerException(f"Failed to search: {str(e)}") from e
 
             results = asyncio.run(run_search())
 
@@ -145,5 +141,5 @@ Search Types & Use Cases:
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
-                raise CliCommandException(str(e), error_code=1)
-            raise CliCommandException(f"Error searching: {str(e)}", error_code=1)
+                raise CliCommandException(str(e), error_code=1) from e
+            raise CliCommandException(f"Error searching: {str(e)}", error_code=1) from e

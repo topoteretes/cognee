@@ -100,7 +100,7 @@ Be careful with deletion operations as they are irreversible.
                     else:
                         await cognee.delete(dataset_name=args.dataset_name, user_id=args.user_id)
                 except Exception as e:
-                    raise CliCommandInnerException(f"Failed to delete: {str(e)}")
+                    raise CliCommandInnerException(f"Failed to delete: {str(e)}") from e
 
             asyncio.run(run_delete())
             # This success message may be inaccurate due to the underlying bug, but we leave it for now.
@@ -108,5 +108,5 @@ Be careful with deletion operations as they are irreversible.
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):
-                raise CliCommandException(str(e), error_code=1)
-            raise CliCommandException(f"Error deleting data: {str(e)}", error_code=1)
+                raise CliCommandException(str(e), error_code=1) from e
+            raise CliCommandException(f"Error deleting data: {str(e)}", error_code=1) from e

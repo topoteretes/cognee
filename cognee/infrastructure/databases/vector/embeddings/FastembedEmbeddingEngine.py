@@ -1,8 +1,17 @@
-from cognee.shared.logging_utils import get_logger
+import os
+import logging
 from typing import List, Optional
 from fastembed import TextEmbedding
 import litellm
-import os
+from tenacity import (
+    retry,
+    stop_after_delay,
+    wait_exponential_jitter,
+    retry_if_not_exception_type,
+    before_sleep_log,
+)
+
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.llm.tokenizer.TikToken import (
@@ -57,6 +66,13 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
+    @retry(
+        stop=stop_after_delay(128),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        reraise=True,
+    )
     async def embed_text(self, text: List[str]) -> List[List[float]]:
         """
         Embed the given text into numerical vectors.
@@ -90,7 +106,9 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
 
         except Exception as error:
             logger.error(f"Embedding error in FastembedEmbeddingEngine: {str(error)}")
-            raise EmbeddingException(f"Failed to index data points using model {self.model}")
+            raise EmbeddingException(
+                f"Failed to index data points using model {self.model}"
+            ) from error
 
     def get_vector_size(self) -> int:
         """
