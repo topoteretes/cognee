@@ -164,7 +164,7 @@ jobs:
       BAML_LLM_PROVIDER: azure-openai
       BAML_LLM_MODEL: ${{ secrets.LLM_MODEL }}
       BAML_LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-      BAML_LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      BAML_LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       BAML_LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
       LLM_PROVIDER: openai
