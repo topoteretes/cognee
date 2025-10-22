@@ -1,6 +1,5 @@
 import os
 import json
-import networkx
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
@@ -9,6 +8,8 @@ logger = get_logger()
 
 
 async def cognee_network_visualization(graph_data, destination_file_path: str = None):
+    import networkx
+
     nodes_data, edges_data = graph_data
 
     G = networkx.DiGraph()
@@ -22,6 +23,9 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         "TableRow": "#f47710",
         "TableType": "#6510f4",
         "ColumnValue": "#13613a",
+        "SchemaTable": "#f47710",
+        "DatabaseSchema": "#6510f4",
+        "SchemaRelationship": "#13613a",
         "default": "#D3D3D3",
     }
 
@@ -104,7 +108,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
             .nodes circle { stroke: white; stroke-width: 0.5px; filter: drop-shadow(0 0 5px rgba(255,255,255,0.3)); }
             .node-label { font-size: 5px; font-weight: bold; fill: white; text-anchor: middle; dominant-baseline: middle; font-family: 'Inter', sans-serif; pointer-events: none; }
             .edge-label { font-size: 3px; fill: rgba(255, 255, 255, 0.7); text-anchor: middle; dominant-baseline: middle; font-family: 'Inter', sans-serif; pointer-events: none; }
-            
+
             .tooltip {
                 position: absolute;
                 text-align: left;
@@ -166,7 +170,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
                     // Create tooltip content for edge
                     var content = "<strong>Edge Information</strong><br/>";
                     content += "Relationship: " + d.relation + "<br/>";
-                    
+
                     // Show all weights
                     if (d.all_weights && Object.keys(d.all_weights).length > 0) {
                         content += "<strong>Weights:</strong><br/>";
@@ -176,23 +180,23 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
                     } else if (d.weight !== null && d.weight !== undefined) {
                         content += "Weight: " + d.weight + "<br/>";
                     }
-                    
+
                     if (d.relationship_type) {
                         content += "Type: " + d.relationship_type + "<br/>";
                     }
-                    
+
                     // Add other edge properties
                     if (d.edge_info) {
                         Object.keys(d.edge_info).forEach(function(key) {
-                            if (key !== 'weight' && key !== 'weights' && key !== 'relationship_type' && 
-                                key !== 'source_node_id' && key !== 'target_node_id' && 
-                                key !== 'relationship_name' && key !== 'updated_at' && 
+                            if (key !== 'weight' && key !== 'weights' && key !== 'relationship_type' &&
+                                key !== 'source_node_id' && key !== 'target_node_id' &&
+                                key !== 'relationship_name' && key !== 'updated_at' &&
                                 !key.startsWith('weight_')) {
                                 content += key + ": " + d.edge_info[key] + "<br/>";
                             }
                         });
                     }
-                    
+
                     tooltip.html(content)
                         .style("left", (d3.event.pageX + 10) + "px")
                         .style("top", (d3.event.pageY - 10) + "px")

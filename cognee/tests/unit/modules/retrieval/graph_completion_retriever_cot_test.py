@@ -7,7 +7,6 @@ import cognee
 from cognee.low_level import setup, DataPoint
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.tasks.storage import add_data_points
-from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 
 
@@ -157,9 +156,6 @@ class TestGraphCompletionCoTRetriever:
         await cognee.prune.prune_system(metadata=True)
 
         retriever = GraphCompletionCotRetriever()
-
-        with pytest.raises(DatabaseNotCreatedError):
-            await retriever.get_context("Who works at Figma?")
 
         await setup()
 

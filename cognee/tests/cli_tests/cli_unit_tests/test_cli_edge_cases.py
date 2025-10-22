@@ -13,6 +13,7 @@ from cognee.cli.commands.cognify_command import CognifyCommand
 from cognee.cli.commands.delete_command import DeleteCommand
 from cognee.cli.commands.config_command import ConfigCommand
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
+from cognee.modules.data.methods.get_deletion_counts import DeletionCountsPreview
 
 
 # Mock asyncio.run to properly handle coroutines
@@ -378,13 +379,18 @@ class TestCognifyCommandEdgeCases:
 class TestDeleteCommandEdgeCases:
     """Test edge cases for DeleteCommand"""
 
+    @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
-    def test_delete_all_with_user_id(self, mock_asyncio_run, mock_confirm):
+    def test_delete_all_with_user_id(
+        self, mock_asyncio_run, mock_confirm, mock_get_deletion_counts
+    ):
         """Test delete command with both --all and --user-id"""
         # Mock the cognee module
         mock_cognee = MagicMock()
         mock_cognee.delete = AsyncMock()
+        mock_get_deletion_counts = AsyncMock()
+        mock_get_deletion_counts.return_value = DeletionCountsPreview()
 
         with patch.dict(sys.modules, {"cognee": mock_cognee}):
             command = DeleteCommand()
@@ -396,13 +402,17 @@ class TestDeleteCommandEdgeCases:
             command.execute(args)
 
         mock_confirm.assert_called_once_with("Delete ALL data from cognee?")
-        mock_asyncio_run.assert_called_once()
+        assert mock_asyncio_run.call_count == 2
         assert asyncio.iscoroutine(mock_asyncio_run.call_args[0][0])
         mock_cognee.delete.assert_awaited_once_with(dataset_name=None, user_id="test_user")
 
+    @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
-    def test_delete_confirmation_keyboard_interrupt(self, mock_confirm):
+    def test_delete_confirmation_keyboard_interrupt(self, mock_confirm, mock_get_deletion_counts):
         """Test delete command when user interrupts confirmation"""
+        mock_get_deletion_counts = AsyncMock()
+        mock_get_deletion_counts.return_value = DeletionCountsPreview()
+
         command = DeleteCommand()
         args = argparse.Namespace(dataset_name="test_dataset", user_id=None, all=False, force=False)
 

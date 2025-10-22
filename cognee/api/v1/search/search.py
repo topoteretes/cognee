@@ -85,6 +85,9 @@ async def search(
             Best for: General-purpose queries or when you're unsure which search type is best.
             Returns: The results from the automatically selected search type.
 
+        **CHUNKS_LEXICAL**:
+            Token-based lexical chunk search (e.g., Jaccard). Best for: exact-term matching, stopword-aware lookups.
+            Returns: Ranked text chunks (optionally with scores).
 
     Args:
         query_text: Your question or search query in natural language.

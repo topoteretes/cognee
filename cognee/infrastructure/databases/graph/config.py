@@ -50,26 +50,26 @@ class GraphConfig(BaseSettings):
     # Model validator updates graph_filename and path dynamically after class creation based on current database provider
     # If no specific graph_filename or path are provided
     @pydantic.model_validator(mode="after")
-    def fill_derived(cls, values):
-        provider = values.graph_database_provider.lower()
+    def fill_derived(self):
+        provider = self.graph_database_provider.lower()
         base_config = get_base_config()
 
         # Set default filename if no filename is provided
-        if not values.graph_filename:
-            values.graph_filename = f"cognee_graph_{provider}"
+        if not self.graph_filename:
+            self.graph_filename = f"cognee_graph_{provider}"
 
         # Handle graph file path
-        if values.graph_file_path:
+        if self.graph_file_path:
             # Check if absolute path is provided
-            values.graph_file_path = ensure_absolute_path(
-                os.path.join(values.graph_file_path, values.graph_filename)
+            self.graph_file_path = ensure_absolute_path(
+                os.path.join(self.graph_file_path, self.graph_filename)
             )
         else:
             # Default path
             databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
-            values.graph_file_path = os.path.join(databases_directory_path, values.graph_filename)
+            self.graph_file_path = os.path.join(databases_directory_path, self.graph_filename)
 
-        return values
+        return self
 
     def to_dict(self) -> dict:
         """

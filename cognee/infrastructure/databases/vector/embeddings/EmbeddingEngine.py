@@ -34,3 +34,12 @@ class EmbeddingEngine(Protocol):
             - int: An integer representing the number of dimensions in the embedding vector.
         """
         raise NotImplementedError()
+
+    def get_batch_size(self) -> int:
+        """
+        Return the desired batch size for embedding calls
+
+        Returns:
+
+        """
+        raise NotImplementedError()

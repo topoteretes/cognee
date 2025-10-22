@@ -2,7 +2,7 @@ import asyncio
 from typing import Type, List
 from pydantic import BaseModel
 
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.tasks.storage import add_data_points
 
@@ -18,7 +18,7 @@ async def extract_graph_from_code(
         - Graph nodes are stored using the `add_data_points` function for later retrieval or analysis.
     """
     chunk_graphs = await asyncio.gather(
-        *[LLMGateway.extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
+        *[extract_content_graph(chunk.text, graph_model) for chunk in data_chunks]
     )
 
     for chunk_index, chunk in enumerate(data_chunks):

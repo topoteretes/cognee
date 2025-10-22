@@ -1,0 +1,12 @@
+# Core team GitHub logins (one per line). Lines may begin with @; case-insensitive.
+borisarzentar
+daukadolt
+dexters1
+hajdul88
+hande-k
+lxobr
+pazone
+siillee
+vasilije1990
+
+

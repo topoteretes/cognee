@@ -183,10 +183,20 @@ def main() -> int:
 
             for pid in spawned_pids:
                 try:
-                    pgid = os.getpgid(pid)
-                    os.killpg(pgid, signal.SIGTERM)
-                    fmt.success(f"✓ Process group {pgid} (PID {pid}) terminated.")
-                except (OSError, ProcessLookupError) as e:
+                    if hasattr(os, "killpg"):
+                        # Unix-like systems: Use process groups
+                        pgid = os.getpgid(pid)
+                        os.killpg(pgid, signal.SIGTERM)
+                        fmt.success(f"✓ Process group {pgid} (PID {pid}) terminated.")
+                    else:
+                        # Windows: Use taskkill to terminate process and its children
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(pid)],
+                            capture_output=True,
+                            check=False,
+                        )
+                        fmt.success(f"✓ Process {pid} and its children terminated.")
+                except (OSError, ProcessLookupError, subprocess.SubprocessError) as e:
                     fmt.warning(f"Could not terminate process {pid}: {e}")
 
             sys.exit(0)
@@ -204,19 +214,27 @@ def main() -> int:
                 nonlocal spawned_pids
                 spawned_pids.append(pid)
 
+            frontend_port = 3000
+            start_backend, backend_port = True, 8000
+            start_mcp, mcp_port = True, 8001
             server_process = start_ui(
-                host="localhost",
-                port=3000,
-                open_browser=True,
-                start_backend=True,
-                auto_download=True,
                 pid_callback=pid_callback,
+                port=frontend_port,
+                open_browser=True,
+                auto_download=True,
+                start_backend=start_backend,
+                backend_port=backend_port,
+                start_mcp=start_mcp,
+                mcp_port=mcp_port,
             )
 
             if server_process:
                 fmt.success("UI server started successfully!")
-                fmt.echo("The interface is available at: http://localhost:3000")
-                fmt.echo("The API backend is available at: http://localhost:8000")
+                fmt.echo(f"The interface is available at: http://localhost:{frontend_port}")
+                if start_backend:
+                    fmt.echo(f"The API backend is available at: http://localhost:{backend_port}")
+                if start_mcp:
+                    fmt.echo(f"The MCP server is available at: http://localhost:{mcp_port}")
                 fmt.note("Press Ctrl+C to stop the server...")
 
                 try:

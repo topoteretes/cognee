@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from cognee.eval_framework.evaluation.base_eval_adapter import BaseEvalAdapter
 from cognee.eval_framework.eval_config import EvalConfig
 
+from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.infrastructure.llm import LLMGateway
 
 
@@ -25,8 +26,8 @@ class DirectLLMEvalAdapter(BaseEvalAdapter):
     ) -> Dict[str, Any]:
         args = {"question": question, "answer": answer, "golden_answer": golden_answer}
 
-        user_prompt = LLMGateway.render_prompt(self.eval_prompt_path, args)
-        system_prompt = LLMGateway.read_query_prompt(self.system_prompt_path)
+        user_prompt = render_prompt(self.eval_prompt_path, args)
+        system_prompt = read_query_prompt(self.system_prompt_path)
 
         evaluation = await LLMGateway.acreate_structured_output(
             text_input=user_prompt,

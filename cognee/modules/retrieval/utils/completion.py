@@ -1,5 +1,6 @@
 from typing import Optional
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 
 
 async def generate_completion(
@@ -11,10 +12,8 @@ async def generate_completion(
 ) -> str:
     """Generates a completion using LLM with given context and prompts."""
     args = {"question": query, "context": context}
-    user_prompt = LLMGateway.render_prompt(user_prompt_path, args)
-    system_prompt = (
-        system_prompt if system_prompt else LLMGateway.read_query_prompt(system_prompt_path)
-    )
+    user_prompt = render_prompt(user_prompt_path, args)
+    system_prompt = system_prompt if system_prompt else read_query_prompt(system_prompt_path)
 
     return await LLMGateway.acreate_structured_output(
         text_input=user_prompt,
@@ -29,9 +28,7 @@ async def summarize_text(
     system_prompt: str = None,
 ) -> str:
     """Summarizes text using LLM with the specified prompt."""
-    system_prompt = (
-        system_prompt if system_prompt else LLMGateway.read_query_prompt(system_prompt_path)
-    )
+    system_prompt = system_prompt if system_prompt else read_query_prompt(system_prompt_path)
 
     return await LLMGateway.acreate_structured_output(
         text_input=text,
