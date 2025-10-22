@@ -181,7 +181,9 @@ class LanceDBAdapter(VectorDBInterface):
         def create_lance_data_point(data_point: DataPoint, vector: list[float]) -> LanceDataPoint:
             properties = get_own_properties(data_point)
             properties["id"] = str(properties["id"])
-
+            
+            if isinstance(vector, list) and len(vector) == 1 and isinstance(vector[0], list):
+                vector = vector[0]
             return LanceDataPoint[str, self.get_data_point_schema(type(data_point))](
                 id=str(data_point.id),
                 vector=vector,
@@ -324,7 +326,6 @@ class LanceDBAdapter(VectorDBInterface):
 
     def get_data_point_schema(self, model_type: BaseModel):
         related_models_fields = []
-
         for field_name, field_config in model_type.model_fields.items():
             if hasattr(field_config, "model_fields"):
                 related_models_fields.append(field_name)
