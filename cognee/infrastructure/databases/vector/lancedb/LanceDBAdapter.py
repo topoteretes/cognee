@@ -181,7 +181,7 @@ class LanceDBAdapter(VectorDBInterface):
         def create_lance_data_point(data_point: DataPoint, vector: list[float]) -> LanceDataPoint:
             properties = get_own_properties(data_point)
             properties["id"] = str(properties["id"])
-            
+
             return LanceDataPoint[str, self.get_data_point_schema(type(data_point))](
                 id=str(data_point.id),
                 vector=vector,
