@@ -182,8 +182,6 @@ class LanceDBAdapter(VectorDBInterface):
             properties = get_own_properties(data_point)
             properties["id"] = str(properties["id"])
             
-            if isinstance(vector, list) and len(vector) == 1 and isinstance(vector[0], list):
-                vector = vector[0]
             return LanceDataPoint[str, self.get_data_point_schema(type(data_point))](
                 id=str(data_point.id),
                 vector=vector,
