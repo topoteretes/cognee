@@ -1,3 +1,4 @@
+import os
 import pytest
 import cognee
 from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
@@ -61,6 +62,22 @@ async def test_saved_html_is_valid():
 
 @pytest.mark.asyncio
 async def test_add_url():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    await cognee.add("https://en.wikipedia.org/wiki/Large_language_model")
+
+
+skip_in_ci = pytest.mark.skipif(
+    os.getenv("GITHUB_ACTIONS") == "true",
+    reason="Skipping in Github for now - before we get TAVILY_API_KEY",
+)
+
+
+@skip_in_ci
+@pytest.mark.asyncio
+async def test_add_url_with_tavily():
+    assert os.getenv("TAVILY_API_KEY") is not None
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
