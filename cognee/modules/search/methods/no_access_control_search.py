@@ -1,11 +1,15 @@
 from typing import Any, List, Optional, Tuple, Type, Union
 
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.data.models.Dataset import Dataset
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.search.types import SearchType
+from cognee.shared.logging_utils import get_logger
 
 from .get_search_type_tools import get_search_type_tools
+
+logger = get_logger()
 
 
 async def no_access_control_search(
@@ -32,6 +36,12 @@ async def no_access_control_search(
         save_interaction=save_interaction,
         last_k=last_k,
     )
+    graph_engine = await get_graph_engine()
+    is_empty = await graph_engine.is_empty()
+
+    if is_empty:
+        # TODO: we can log here, but not all search types use graph. Still keeping this here for reviewer input
+        logger.warning("Search attempt on an empty knowledge graph")
     if len(search_tools) == 2:
         [get_completion, get_context] = search_tools
 
