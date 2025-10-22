@@ -203,7 +203,8 @@ async def get_repo_file_dependencies(
     ]
 
     # Import dependency extractors for each language (Python for now, extend later)
-    from cognee.tasks.repo_processor.get_local_dependencies import get_local_script_dependencies
+    from cognee.tasks.repo_processor.get_local_dependencies import get_local_script_dependencie
+    from cognee.tasks.repo_processor.get_local_dependencies import get_csharp_dependencies, get_cpp_dependenciess
     import aiofiles
     # TODO: Add other language extractors here
 
@@ -215,6 +216,14 @@ async def get_repo_file_dependencies(
                 tasks.append(
                     get_local_script_dependencies(repo_path, file_path, detailed_extraction)
                 )
+                                elif lang == "csharp":
+                    tasks.append(
+                        get_csharp_dependencies(repo_path, file_path, detailed_extraction)
+                    )
+                elif lang == "cpp":
+                    tasks.append(
+                        get_cpp_dependencies(repo_path, file_path, detailed_extraction)
+                    )
             else:
                 # Placeholder: create a minimal CodeFile for other languages
                 async def make_codefile_stub(file_path=file_path, lang=lang):
