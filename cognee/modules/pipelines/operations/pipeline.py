@@ -20,6 +20,7 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 from cognee.modules.pipelines.layers.check_pipeline_run_qualification import (
     check_pipeline_run_qualification,
 )
+from typing import Any
 
 logger = get_logger("cognee.pipeline")
 
@@ -80,7 +81,14 @@ async def run_pipeline_per_dataset(
         return
 
     pipeline_run = run_tasks(
-        tasks, dataset.id, data, user, pipeline_name, context, incremental_loading, data_per_batch
+        tasks,
+        dataset.id,
+        data,
+        user,
+        pipeline_name,
+        context,
+        incremental_loading,
+        data_per_batch,
     )
 
     async for pipeline_run_info in pipeline_run:

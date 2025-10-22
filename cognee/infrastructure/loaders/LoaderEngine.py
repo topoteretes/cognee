@@ -64,7 +64,9 @@ class LoaderEngine:
         return True
 
     def get_loader(
-        self, file_path: str, preferred_loaders: List[str] = None
+        self,
+        file_path: str,
+        preferred_loaders: dict[str, dict[str, Any]],
     ) -> Optional[LoaderInterface]:
         """
         Get appropriate loader for a file.
@@ -76,14 +78,21 @@ class LoaderEngine:
         Returns:
             LoaderInterface that can handle the file, or None if not found
         """
+        from pathlib import Path
 
         file_info = filetype.guess(file_path)
+
+        path_extension = Path(file_path).suffix.lstrip(".")
 
         # Try preferred loaders first
         if preferred_loaders:
             for loader_name in preferred_loaders:
                 if loader_name in self._loaders:
                     loader = self._loaders[loader_name]
+                    # Try with path extension first (for text formats like html)
+                    if loader.can_handle(extension=path_extension, mime_type=file_info.mime):
+                        return loader
+                    # Fall back to content-detected extension
                     if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
                         return loader
                 else:
@@ -93,6 +102,10 @@ class LoaderEngine:
         for loader_name in self.default_loader_priority:
             if loader_name in self._loaders:
                 loader = self._loaders[loader_name]
+                # Try with path extension first (for text formats like html)
+                if loader.can_handle(extension=path_extension, mime_type=file_info.mime):
+                    return loader
+                # Fall back to content-detected extension
                 if loader.can_handle(extension=file_info.extension, mime_type=file_info.mime):
                     return loader
             else:
@@ -105,7 +118,7 @@ class LoaderEngine:
     async def load_file(
         self,
         file_path: str,
-        preferred_loaders: Optional[List[str]] = None,
+        preferred_loaders: dict[str, dict[str, Any]] = None,
         **kwargs,
     ):
         """
@@ -113,7 +126,7 @@ class LoaderEngine:
 
         Args:
             file_path: Path to the file to be processed
-            preferred_loaders: List of preferred loader names to try first
+            preferred_loaders: Dict of loader names to their configurations
             **kwargs: Additional loader-specific configuration
 
         Raises:
@@ -125,8 +138,16 @@ class LoaderEngine:
             raise ValueError(f"No loader found for file: {file_path}")
 
         logger.debug(f"Loading {file_path} with {loader.loader_name}")
-        # TODO: loading needs to be reworked to work with both file streams and file locations
-        return await loader.load(file_path, **kwargs)
+
+        # Extract loader-specific config from preferred_loaders
+        loader_config = {}
+        if preferred_loaders and loader.loader_name in preferred_loaders:
+            loader_config = preferred_loaders[loader.loader_name]
+
+        # Merge with any additional kwargs (kwargs take precedence)
+        merged_kwargs = {**loader_config, **kwargs}
+
+        return await loader.load(file_path, **merged_kwargs)
 
     def get_available_loaders(self) -> List[str]:
         """

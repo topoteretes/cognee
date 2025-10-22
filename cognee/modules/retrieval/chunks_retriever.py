@@ -60,7 +60,9 @@ class ChunksRetriever(BaseRetriever):
 
         return chunk_payloads
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
+    async def get_completion(
+        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
+    ) -> Any:
         """
         Generates a completion using document chunks context.
 
@@ -72,6 +74,8 @@ class ChunksRetriever(BaseRetriever):
             - query (str): The query string to be used for generating a completion.
             - context (Optional[Any]): Optional pre-fetched context to use for generating the
               completion; if None, it retrieves the context for the query. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
 
         Returns:
         --------

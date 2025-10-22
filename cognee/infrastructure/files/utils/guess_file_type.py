@@ -124,6 +124,12 @@ def guess_file_type(file: BinaryIO) -> filetype.Type:
     """
     file_type = filetype.guess(file)
 
+    # If file type could not be determined consider it a plain text file as they don't have magic number encoding
+    if file_type is None:
+        from filetype.types.base import Type
+
+        file_type = Type("text/plain", "txt")
+
     if file_type is None:
         raise FileTypeException(f"Unknown file detected: {file.name}.")
 
