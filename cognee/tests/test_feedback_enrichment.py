@@ -75,7 +75,7 @@ async def main():
     await cognee.search(
         query_type=SearchType.FEEDBACK,
         query_text=feedback_text,
-        last_k=2,
+        last_k=1,
     )
 
     graph_engine = await get_graph_engine()
@@ -100,6 +100,18 @@ async def main():
     assert len(feedback_nodes_before) >= 1, (
         f"Expected at least 1 CogneeUserFeedback node, found {len(feedback_nodes_before)}"
     )
+
+    for node_id, props in feedback_nodes_before:
+        sentiment = props.get("sentiment", "")
+        score = props.get("score", 0)
+        feedback_text = props.get("feedback", "")
+        logger.info(
+            "Feedback node created",
+            feedback=feedback_text,
+            sentiment=sentiment,
+            score=score,
+        )
+
     assert edge_types_before.get("gives_feedback_to", 0) >= 1, (
         f"Expected at least 1 'gives_feedback_to' edge, found {edge_types_before.get('gives_feedback_to', 0)}"
     )
