@@ -189,10 +189,24 @@ async def extract_feedback_interactions(
 
     graph_nodes, graph_edges = await _fetch_feedback_and_interaction_graph_data()
     if not graph_nodes:
+        logger.warning("No graph nodes retrieved from database")
         return []
 
     feedback_nodes, interaction_nodes = _separate_feedback_and_interaction_nodes(graph_nodes)
+    logger.info(
+        "Retrieved nodes from graph",
+        total_nodes=len(graph_nodes),
+        feedback_nodes=len(feedback_nodes),
+        interaction_nodes=len(interaction_nodes),
+    )
+
     negative_feedback_nodes = _filter_negative_feedback(feedback_nodes)
+    logger.info(
+        "Filtered feedback nodes",
+        total_feedback=len(feedback_nodes),
+        negative_feedback=len(negative_feedback_nodes),
+    )
+
     if not negative_feedback_nodes:
         logger.info("No negative feedback found; returning empty list")
         return []
