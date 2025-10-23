@@ -71,7 +71,7 @@ async def main():
 
     assert len(result) > 0, "Search should return non-empty results"
 
-    feedback_text = "Negative feedback."
+    feedback_text = "This answer was completely useless, my feedback is definitely negative."
     await cognee.search(
         query_type=SearchType.FEEDBACK,
         query_text=feedback_text,
