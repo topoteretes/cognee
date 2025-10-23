@@ -47,7 +47,7 @@ async def run_question_and_submit_feedback(question_text: str) -> bool:
     await cognee.search(
         query_type=SearchType.FEEDBACK,
         query_text=feedback_text,
-        last_k=2,
+        last_k=1,
     )
     return mentions_mallory
 

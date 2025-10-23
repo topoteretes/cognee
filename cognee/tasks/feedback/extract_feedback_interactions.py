@@ -177,9 +177,7 @@ async def _build_feedback_interaction_records(
     return feedback_interaction_records
 
 
-async def extract_feedback_interactions(
-    subgraphs: List, last_n: Optional[int] = None
-) -> List[FeedbackEnrichment]:
+async def extract_feedback_interactions(last_n: Optional[int] = None) -> List[FeedbackEnrichment]:
     """Extract negative feedback-interaction pairs and create FeedbackEnrichment DataPoints."""
     graph_nodes, graph_edges = await _fetch_feedback_and_interaction_graph_data()
     if not graph_nodes:
