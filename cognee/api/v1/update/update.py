@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional
+from typing import Union, BinaryIO, List, Optional, Any
 
 from cognee.modules.users.models import User
 from cognee.api.v1.delete import delete
@@ -15,7 +15,7 @@ async def update(
     node_set: Optional[List[str]] = None,
     vector_db_config: dict = None,
     graph_db_config: dict = None,
-    preferred_loaders: List[str] = None,
+    preferred_loaders: dict[str, dict[str, Any]] = None,
     incremental_loading: bool = True,
 ):
     """

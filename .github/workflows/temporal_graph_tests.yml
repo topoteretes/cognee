@@ -34,10 +34,9 @@ jobs:
       - name: Run Temporal Graph with Kuzu (lancedb + sqlite)
         env:
           ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -73,10 +72,9 @@ jobs:
       - name: Run Temporal Graph with Neo4j (lancedb + sqlite)
         env:
           ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -125,10 +123,9 @@ jobs:
         - name: Run Temporal Graph with Kuzu (postgres + pgvector)
           env:
             ENV: dev
-            LLM_MODEL: ${{ secrets.LLM_MODEL }}
-            LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-            LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-            LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+            LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
+            LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
+            LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
             EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
             EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
             EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -192,10 +189,9 @@ jobs:
       - name: Run Temporal Graph with Neo4j (postgres + pgvector)
         env:
           ENV: dev
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}

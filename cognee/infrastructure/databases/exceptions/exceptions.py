@@ -15,7 +15,7 @@ class DatabaseNotCreatedError(CogneeSystemError):
         self,
         message: str = "The database has not been created yet. Please call `await setup()` first.",
         name: str = "DatabaseNotCreatedError",
-        status_code: int = status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)
 
@@ -99,7 +99,7 @@ class EmbeddingException(CogneeConfigurationError):
         self,
         message: str = "Embedding Exception.",
         name: str = "EmbeddingException",
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)
 
@@ -131,4 +131,20 @@ class MutuallyExclusiveQueryParametersError(CogneeValidationError):
         status_code: int = status.HTTP_400_BAD_REQUEST,
     ):
         message = "The search function accepts either text or embedding as input, but not both."
+        super().__init__(message, name, status_code)
+
+
+class CacheConnectionError(CogneeConfigurationError):
+    """
+    Raised when connection to the cache database (e.g., Redis) fails.
+
+    This error indicates that the cache service is unavailable or misconfigured.
+    """
+
+    def __init__(
+        self,
+        message: str = "Failed to connect to cache database. Please check your cache configuration.",
+        name: str = "CacheConnectionError",
+        status_code: int = status.HTTP_503_SERVICE_UNAVAILABLE,
+    ):
         super().__init__(message, name, status_code)
