@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid5, NAMESPACE_OID
 
 from cognee.infrastructure.llm import LLMGateway
@@ -177,8 +177,16 @@ async def _build_feedback_interaction_records(
     return feedback_interaction_records
 
 
-async def extract_feedback_interactions(last_n: Optional[int] = None) -> List[FeedbackEnrichment]:
+async def extract_feedback_interactions(
+    data: Any, last_n: Optional[int] = None
+) -> List[FeedbackEnrichment]:
     """Extract negative feedback-interaction pairs and create FeedbackEnrichment DataPoints."""
+    if not data or data == [{}]:
+        logger.info(
+            "No data passed to the extraction task (extraction task fetches data from graph directly)",
+            data=data,
+        )
+
     graph_nodes, graph_edges = await _fetch_feedback_and_interaction_graph_data()
     if not graph_nodes:
         return []
