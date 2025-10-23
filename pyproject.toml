@@ -57,6 +57,7 @@ dependencies = [
     "websockets>=15.0.1,<16.0.0",
     "mistralai>=1.9.10",
     "tenacity>=9.0.0",
+    "redislite>=6.2.912183",
 ]
 
 [project.optional-dependencies]
@@ -199,3 +200,8 @@ exclude = [
 
 [tool.ruff.lint]
 ignore = ["F401"]
+
+[dependency-groups]
+dev = [
+    "pytest-timeout>=2.4.0",
+]

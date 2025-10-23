@@ -420,6 +420,8 @@ def setup_logging(log_level=None, name=None):
             try:
                 msg = self.format(record)
                 stream = self.stream
+                if hasattr(stream, "closed") and stream.closed:
+                    return
                 stream.write("\n" + msg + self.terminator)
                 self.flush()
             except Exception:
