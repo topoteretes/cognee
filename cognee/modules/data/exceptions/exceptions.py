@@ -10,7 +10,7 @@ class UnstructuredLibraryImportError(CogneeConfigurationError):
         self,
         message: str = "Import error. Unstructured library is not installed.",
         name: str = "UnstructuredModuleImportError",
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)
 
