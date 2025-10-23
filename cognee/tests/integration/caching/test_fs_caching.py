@@ -63,6 +63,7 @@ def test_two_threads():
     assert 2 in lock_acquisitions, "Thread 2 did not acquire lock"
 
 
-def test_closing_connection():
+@pytest.mark.asyncio
+async def test_closing_connection():
     cache = FSCacheAdapter(timeout=1, blocking_timeout=10, lock_key="lock_key_name")
-    cache.close()
+    await cache.close()
