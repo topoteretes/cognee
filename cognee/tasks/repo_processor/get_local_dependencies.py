@@ -3,7 +3,9 @@ import aiofiles
 import importlib
 from typing import AsyncGenerator, Optional
 from uuid import NAMESPACE_OID, uuid5
-import tree_sitter_python as tspython
+import tree_sitter_python as tspytho
+import tree_sitter_c_sharp as tscsharp
+import tree_sitter_cpp as tscppn
 from tree_sitter import Language, Node, Parser, Tree
 from cognee.shared.logging_utils import get_logger
 
@@ -332,4 +334,112 @@ async def extract_code_parts(
                 )
                 existing_nodes[class_name_node_name] = class_definition_node
 
-            yield existing_nodes[class_name_node_name]
+            yield existing_nodes[class_name_node_name
+            
+            
+            async def get_csharp_dependencies(
+    repo_path: str,
+    script_path: str,
+    detailed_extraction: bool = False,
+) -> CodeFile:
+    """
+    Extract dependencies from C# source files using tree-sitter.
+    
+    Parameters:
+    - repo_path: Root path of the repository
+    - script_path: Path to the C# file
+    - detailed_extraction: Whether to extract detailed code components
+    
+    Returns:
+    - CodeFile object containing C# file information and dependencies
+    """
+    CSHARP_LANGUAGE = Language(tscsharp.language())
+    source_code_parser = Parser(CSHARP_LANGUAGE)
+    
+    code_file_parser = FileParser()
+    source_code, source_code_tree = await code_file_parser.parse_file(script_path)
+    
+    file_path_relative_to_repo = script_path[len(repo_path) + 1:]
+    
+    if not detailed_extraction:
+        code_file_node = CodeFile(
+            id=uuid5(NAMESPACE_OID, script_path),
+            name=file_path_relative_to_repo,
+            source_code=source_code,
+            file_path=script_path,
+            language="csharp",
+        )
+        return code_file_node
+    
+    code_file_node = CodeFile(
+        id=uuid5(NAMESPACE_OID, script_path),
+        name=file_path_relative_to_repo,
+        source_code=None,
+        file_path=script_path,
+        language="csharp",
+    )
+    
+    # Extract C# code parts (using namespaces, classes, methods)
+    for part in extract_csharp_code_parts(source_code_tree.root_node, script_path=script_path):
+        part.file_path = script_path
+        
+        if isinstance(part, FunctionOrMethodDefinition):
+            code_file_node.provides_function_definition.append(part)
+        if isinstance(part, ClassDefinition):
+            code_file_node.provides_class_definition.append(part)
+    
+    return code_file_node
+    
+    
+    async def get_cpp_dependencies(
+    repo_path: str,
+    script_path: str,
+    detailed_extraction: bool = False,
+) -> CodeFile:
+    """
+    Extract dependencies from C++ source files using tree-sitter.
+    
+    Parameters:
+    - repo_path: Root path of the repository
+    - script_path: Path to the C++ file
+    - detailed_extraction: Whether to extract detailed code components
+    
+    Returns:
+    - CodeFile object containing C++ file information and dependencies
+    """
+    CPP_LANGUAGE = Language(tscpp.language())
+    source_code_parser = Parser(CPP_LANGUAGE)
+    
+    code_file_parser = FileParser()
+    source_code, source_code_tree = await code_file_parser.parse_file(script_path)
+    
+    file_path_relative_to_repo = script_path[len(repo_path) + 1:]
+    
+    if not detailed_extraction:
+        code_file_node = CodeFile(
+            id=uuid5(NAMESPACE_OID, script_path),
+            name=file_path_relative_to_repo,
+            source_code=source_code,
+            file_path=script_path,
+            language="cpp",
+        )
+        return code_file_node
+    
+    code_file_node = CodeFile(
+        id=uuid5(NAMESPACE_OID, script_path),
+        name=file_path_relative_to_repo,
+        source_code=None,
+        file_path=script_path,
+        language="cpp",
+    )
+    
+    # Extract C++ code parts (namespaces, classes, functions)
+    for part in extract_cpp_code_parts(source_code_tree.root_node, script_path=script_path):
+        part.file_path = script_path
+        
+        if isinstance(part, FunctionOrMethodDefinition):
+            code_file_node.provides_function_definition.append(part)
+        if isinstance(part, ClassDefinition):
+            code_file_node.provides_class_definition.append(part)
+    
+    return code_file_node]
