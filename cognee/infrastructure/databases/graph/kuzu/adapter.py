@@ -1366,9 +1366,15 @@ class KuzuAdapter(GraphDBInterface):
                 params[param_name] = values
 
         where_clause = " AND ".join(where_clauses)
-        nodes_query = (
-            f"MATCH (n:Node) WHERE {where_clause} RETURN n.id, {{properties: n.properties}}"
-        )
+        nodes_query = f"""
+        MATCH (n:Node)
+        WHERE {where_clause}
+        RETURN n.id, {{
+            name: n.name,
+            type: n.type,
+            properties: n.properties
+        }}
+        """
         edges_query = f"""
         MATCH (n1:Node)-[r:EDGE]->(n2:Node)
         WHERE {where_clause.replace("n.", "n1.")} AND {where_clause.replace("n.", "n2.")}
