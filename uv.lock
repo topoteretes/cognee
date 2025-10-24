@@ -936,6 +936,7 @@ dependencies = [
     { name = "aiohttp" },
     { name = "aiosqlite" },
     { name = "alembic" },
+    { name = "fakeredis" },
     { name = "fastapi" },
     { name = "fastapi-users", extra = ["sqlalchemy"] },
     { name = "fastembed" },
@@ -964,7 +965,6 @@ dependencies = [
     { name = "python-magic-bin", marker = "sys_platform == 'win32'" },
     { name = "python-multipart" },
     { name = "rdflib" },
-    { name = "redislite" },
     { name = "sqlalchemy" },
     { name = "structlog" },
     { name = "tenacity" },
@@ -1122,6 +1122,7 @@ requires-dist = [
     { name = "deptry", marker = "extra == 'dev'", specifier = ">=0.20.0,<0.21" },
     { name = "dlt", extras = ["sqlalchemy"], marker = "extra == 'dlt'", specifier = ">=1.9.0,<2" },
     { name = "docling", marker = "extra == 'docling'", specifier = ">=2.54" },
+    { name = "fakeredis", specifier = ">=2.32.0" },
     { name = "fastapi", specifier = ">=0.116.2,<1.0.0" },
     { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=14.0.1,<15.0.0" },
     { name = "fastembed", specifier = "<=0.6.0" },
@@ -1186,7 +1187,6 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.20,<1.0.0" },
     { name = "rdflib", specifier = ">=7.1.4,<7.2.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.3,<6.0.0" },
-    { name = "redislite", specifier = ">=6.2.912183" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.2,<=0.13.1" },
     { name = "s3fs", extras = ["boto3"], marker = "extra == 'aws'", specifier = "==2025.3.2" },
     { name = "scikit-learn", marker = "extra == 'evals'", specifier = ">=1.6.1,<2" },
@@ -2055,6 +2055,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c9/4b/ca43f6bbcef63deb8ac01201af306388670a172587169aab3b192f7490f0/faker-37.11.0.tar.gz", hash = "sha256:22969803849ba0618be8eee2dd01d0d9e2cd3b75e6ff1a291fa9abcdb34da5e6", size = 1935301, upload-time = "2025-10-07T14:49:01.481Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a3/46/8f4097b55e43af39e8e71e1f7aec59ff7398bca54d975c30889bc844719d/faker-37.11.0-py3-none-any.whl", hash = "sha256:1508d2da94dfd1e0087b36f386126d84f8583b3de19ac18e392a2831a6676c57", size = 1975525, upload-time = "2025-10-07T14:48:58.29Z" },
+]
+
+[[package]]
+name = "fakeredis"
+version = "2.32.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "redis" },
+    { name = "sortedcontainers" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e1/2e/94ca3f2ff35f086d7d3eeb924054e328b2ac851f0a20302d942c8d29726c/fakeredis-2.32.0.tar.gz", hash = "sha256:63d745b40eb6c8be4899cf2a53187c097ccca3afbca04fdbc5edc8b936cd1d59", size = 171097, upload-time = "2025-10-07T10:46:58.876Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0e/1b/84ab7fd197eba5243b6625c78fbcffaa4cf6ac7dda42f95d22165f52187e/fakeredis-2.32.0-py3-none-any.whl", hash = "sha256:c9da8228de84060cfdb72c3cf4555c18c59ba7a5ae4d273f75e4822d6f01ecf8", size = 118422, upload-time = "2025-10-07T10:46:57.643Z" },
 ]
 
 [[package]]
@@ -7421,23 +7435,6 @@ wheels = [
 ]
 
 [[package]]
-name = "redislite"
-version = "6.2.912183"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "psutil" },
-    { name = "redis" },
-    { name = "setuptools" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/af/7d/b6fc82af45ed2aa31f6c8b2035df009ff9fd8be01ad8a691155cc167f1f2/redislite-6.2.912183.tar.gz", hash = "sha256:40642495cc53bd5ca3cc186355a7235795ef4b36dd167cb77c7e6837d23e5dd6", size = 2555087, upload-time = "2023-12-01T22:19:28.526Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/07/255f52ac6ed075f0ae9c9ecbdb7247853c30fc7bbbd3e78f5560085906b9/redislite-6.2.912183-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:830cdb0551ba54ebb3f7b846361a406297d83599b12d46cfab68943421adeac7", size = 6071180, upload-time = "2023-12-01T22:22:07.011Z" },
-    { url = "https://files.pythonhosted.org/packages/21/2f/13e658f12163e716557d057bd7975dcef3b048dc03424418cc1e7b5f6b63/redislite-6.2.912183-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d5ed8af4d03225a9b19e279d40f8d8feae872f87a9cd9f017751864fe7b224c6", size = 6071179, upload-time = "2023-12-01T22:22:10.733Z" },
-    { url = "https://files.pythonhosted.org/packages/0b/b9/95ce807b397428704bfc01769848d0caa8417e7d3753785ccc14c3b05097/redislite-6.2.912183-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6610f867c2c1b2022613c093d56cfe8293bdf6e081d2259d62b5f5318487c30e", size = 6071189, upload-time = "2023-12-01T22:22:13.983Z" },
-    { url = "https://files.pythonhosted.org/packages/00/1c/6b8eeab46b7e1928f88a1a35613a750221664083566d7150eefc0e751802/redislite-6.2.912183-pp310-pypy310_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:58617b4d5d57b8f799188178b069a41b64c19e970f733c68cdc92190b417884c", size = 6070821, upload-time = "2023-12-01T22:22:24.758Z" },
-]
-
-[[package]]
 name = "referencing"
 version = "0.37.0"
 source = { registry = "https://pypi.org/simple" }
@@ -8263,6 +8260,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
+]
+
+[[package]]
+name = "sortedcontainers"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/c4/ba2f8066cceb6f23394729afe52f3bf7adec04bf9ed2c820b39e19299111/sortedcontainers-2.4.0.tar.gz", hash = "sha256:25caa5a06cc30b6b83d11423433f65d1f9d76c4c6a0c90e3379eaa43b9bfdb88", size = 30594, upload-time = "2021-05-16T22:03:42.897Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl", hash = "sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0", size = 29575, upload-time = "2021-05-16T22:03:41.177Z" },
 ]
 
 [[package]]
