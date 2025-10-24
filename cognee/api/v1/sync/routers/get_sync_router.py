@@ -12,6 +12,7 @@ from cognee.modules.sync.methods import get_running_sync_operations_for_user, ge
 from cognee.shared.utils import send_telemetry
 from cognee.shared.logging_utils import get_logger
 from cognee.api.v1.sync import SyncResponse
+from cognee import __version__ as cognee_version
 from cognee.context_global_variables import set_database_global_context_variables
 
 logger = get_logger()
@@ -99,6 +100,7 @@ def get_sync_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "POST /v1/sync",
+                "cognee_version": cognee_version,
                 "dataset_ids": [str(id) for id in request.dataset_ids]
                 if request.dataset_ids
                 else "*",
@@ -205,6 +207,7 @@ def get_sync_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "GET /v1/sync/status",
+                "cognee_version": cognee_version
             },
         )
 

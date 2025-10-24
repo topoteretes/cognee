@@ -29,7 +29,7 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
 )
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
-
+from cognee import __version__ as cognee_version
 
 logger = get_logger("api.cognify")
 
@@ -98,6 +98,7 @@ def get_cognify_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "POST /v1/cognify",
+                "cognee_version": cognee_version
             },
         )
 

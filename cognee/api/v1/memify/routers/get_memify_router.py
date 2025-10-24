@@ -12,7 +12,7 @@ from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.shared.logging_utils import get_logger
-
+from cognee import __version__ as cognee_version
 logger = get_logger()
 
 
@@ -73,7 +73,7 @@ def get_memify_router() -> APIRouter:
         send_telemetry(
             "Memify API Endpoint Invoked",
             user.id,
-            additional_properties={"endpoint": "POST /v1/memify"},
+            additional_properties={"endpoint": "POST /v1/memify", "cognee_version": cognee_version},
         )
 
         if not payload.dataset_id and not payload.dataset_name:
