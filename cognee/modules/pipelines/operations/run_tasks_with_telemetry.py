@@ -4,6 +4,7 @@ from cognee.modules.settings import get_current_settings
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
+from cognee import __version__ as cognee_version
 
 from .run_tasks_base import run_tasks_base
 from ..tasks.task import Task
@@ -26,6 +27,7 @@ async def run_tasks_with_telemetry(
             user.id,
             additional_properties={
                 "pipeline_name": str(pipeline_name),
+                "cognee_version": cognee_version,
             }
             | config,
         )
@@ -39,6 +41,7 @@ async def run_tasks_with_telemetry(
             user.id,
             additional_properties={
                 "pipeline_name": str(pipeline_name),
+                "cognee_version": cognee_version,
             }
             | config,
         )
@@ -54,6 +57,7 @@ async def run_tasks_with_telemetry(
             user.id,
             additional_properties={
                 "pipeline_name": str(pipeline_name),
+                "cognee_version": cognee_version,
             }
             | config,
         )
