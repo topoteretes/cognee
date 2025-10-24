@@ -39,7 +39,8 @@ async def run_tasks_with_telemetry(
             user.id,
             additional_properties={
                 "pipeline_name": str(pipeline_name),
-            },
+            }
+            | config,
         )
     except Exception as error:
         logger.error(
