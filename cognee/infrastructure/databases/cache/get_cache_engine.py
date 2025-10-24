@@ -1,9 +1,11 @@
 """Factory to get the appropriate cache coordination engine (e.g., Redis)."""
 
 from functools import lru_cache
+import os
 from typing import Optional
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
+from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
 
 config = get_cache_config()
 
@@ -38,14 +40,19 @@ def create_cache_engine(
     if config.caching:
         from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 
-        return RedisAdapter(
-            host=cache_host,
-            port=cache_port,
-            username=cache_username,
-            password=cache_password,
-            lock_name=lock_key,
-            timeout=agentic_lock_expire,
-            blocking_timeout=agentic_lock_timeout,
+        if os.getenv("LETS_SAY_SOME_ENV_KEY", "false").lower() == "true":
+            return RedisAdapter(
+                host=cache_host,
+                port=cache_port,
+                username=cache_username,
+                password=cache_password,
+                lock_name=lock_key,
+                timeout=agentic_lock_expire,
+                blocking_timeout=agentic_lock_timeout,
+            )
+
+        return FSCacheAdapter(
+            timeout=agentic_lock_expire, blocking_timeout=agentic_lock_timeout, lock_key=lock_key
         )
     else:
         return None
