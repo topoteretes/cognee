@@ -98,7 +98,7 @@ def get_cognify_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "POST /v1/cognify",
-                "cognee_version": cognee_version
+                "cognee_version": cognee_version,
             },
         )
 

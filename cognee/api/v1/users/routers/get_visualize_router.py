@@ -47,7 +47,7 @@ def get_visualize_router() -> APIRouter:
             additional_properties={
                 "endpoint": "GET /v1/visualize",
                 "dataset_id": str(dataset_id),
-                "cognee_version": cognee_version
+                "cognee_version": cognee_version,
             },
         )
 

@@ -207,7 +207,7 @@ def get_sync_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "GET /v1/sync/status",
-                "cognee_version": cognee_version
+                "cognee_version": cognee_version,
             },
         )
 

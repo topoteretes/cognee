@@ -40,7 +40,7 @@ def get_delete_router() -> APIRouter:
                 "endpoint": "DELETE /v1/delete",
                 "dataset_id": str(dataset_id),
                 "data_id": str(data_id),
-                "cognee_version": cognee_version
+                "cognee_version": cognee_version,
             },
         )
 

@@ -65,7 +65,7 @@ def get_update_router() -> APIRouter:
                 "dataset_id": str(dataset_id),
                 "data_id": str(data_id),
                 "node_set": str(node_set),
-                "cognee_version": cognee_version
+                "cognee_version": cognee_version,
             },
         )
 

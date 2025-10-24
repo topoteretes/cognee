@@ -64,7 +64,11 @@ async def search(
         Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
     """
     query = await log_query(query_text, query_type.value, user.id)
-    send_telemetry("cognee.search EXECUTION STARTED", user.id, additional_properties={"cognee_version": cognee_version})
+    send_telemetry(
+        "cognee.search EXECUTION STARTED",
+        user.id,
+        additional_properties={"cognee_version": cognee_version},
+    )
 
     # Use search function filtered by permissions if access control is enabled
     if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
@@ -101,7 +105,11 @@ async def search(
             )
         ]
 
-    send_telemetry("cognee.search EXECUTION COMPLETED", user.id, additional_properties={"cognee_version": cognee_version})
+    send_telemetry(
+        "cognee.search EXECUTION COMPLETED",
+        user.id,
+        additional_properties={"cognee_version": cognee_version},
+    )
 
     await log_result(
         query.id,

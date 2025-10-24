@@ -50,6 +50,7 @@ def get_anonymous_id():
             anonymous_id = f.read()
     return anonymous_id
 
+
 def _sanitize_nested_properties(obj, property_names: list[str]):
     """
     Recursively replaces any property whose key matches one of `property_names`
@@ -77,7 +78,9 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
     env = os.getenv("ENV")
     if env in ["test", "dev"]:
         return
-    additional_properties = _sanitize_nested_properties(obj=additional_properties, property_names=['url'])
+    additional_properties = _sanitize_nested_properties(
+        obj=additional_properties, property_names=["url"]
+    )
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": str(get_anonymous_id()),

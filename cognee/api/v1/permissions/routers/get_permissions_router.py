@@ -9,6 +9,7 @@ from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
 
+
 def get_permissions_router() -> APIRouter:
     permissions_router = APIRouter()
 
@@ -48,7 +49,7 @@ def get_permissions_router() -> APIRouter:
                 "endpoint": f"POST /v1/permissions/datasets/{str(principal_id)}",
                 "dataset_ids": str(dataset_ids),
                 "principal_id": str(principal_id),
-                "cognee_version": cognee_version
+                "cognee_version": cognee_version,
             },
         )
 
@@ -90,7 +91,7 @@ def get_permissions_router() -> APIRouter:
             additional_properties={
                 "endpoint": "POST /v1/permissions/roles",
                 "role_name": role_name,
-                "cognee_version": cognee_version
+                "cognee_version": cognee_version,
             },
         )
 
@@ -135,7 +136,7 @@ def get_permissions_router() -> APIRouter:
                 "endpoint": f"POST /v1/permissions/users/{str(user_id)}/roles",
                 "user_id": str(user_id),
                 "role_id": str(role_id),
-                "cognee_version": cognee_version
+                "cognee_version": cognee_version,
             },
         )
 
@@ -178,7 +179,7 @@ def get_permissions_router() -> APIRouter:
                 "endpoint": f"POST /v1/permissions/users/{str(user_id)}/tenants",
                 "user_id": str(user_id),
                 "tenant_id": str(tenant_id),
-                "cognee_version": cognee_version
+                "cognee_version": cognee_version,
             },
         )
 
@@ -213,7 +214,7 @@ def get_permissions_router() -> APIRouter:
             additional_properties={
                 "endpoint": "POST /v1/permissions/tenants",
                 "tenant_name": tenant_name,
-                "cognee_version": cognee_version
+                "cognee_version": cognee_version,
             },
         )
 

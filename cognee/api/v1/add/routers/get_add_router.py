@@ -64,8 +64,11 @@ def get_add_router() -> APIRouter:
         send_telemetry(
             "Add API Endpoint Invoked",
             user.id,
-            additional_properties={"endpoint": "POST /v1/add", "node_set": node_set, "cognee_version": cognee_version},
-
+            additional_properties={
+                "endpoint": "POST /v1/add",
+                "node_set": node_set,
+                "cognee_version": cognee_version,
+            },
         )
 
         from cognee.api.v1.add import add as cognee_add

@@ -13,6 +13,7 @@ from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.shared.logging_utils import get_logger
 from cognee import __version__ as cognee_version
+
 logger = get_logger()
 
 
