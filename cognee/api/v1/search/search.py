@@ -169,7 +169,8 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
-    # We use lists from now on for datasets
+
+    ######################
     if isinstance(datasets, UUID) or isinstance(datasets, str):
         datasets = [datasets]
 
