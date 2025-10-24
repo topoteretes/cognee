@@ -8,7 +8,7 @@ import http.server
 import socketserver
 from threading import Thread
 import pathlib
-from uuid import uuid4
+from uuid import uuid4, uuid5, NAMESPACE_OID
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -50,6 +50,25 @@ def get_anonymous_id():
             anonymous_id = f.read()
     return anonymous_id
 
+def _sanitize_nested_properties(obj, property_names: list[str]):
+    """
+    Recursively replaces any property whose key matches one of `property_names`
+    (e.g., ['url', 'path']) in a nested dict or list with a uuid5 hash
+    of its string value. Returns a new sanitized copy.
+    """
+    if isinstance(obj, dict):
+        new_obj = {}
+        for k, v in obj.items():
+            if k in property_names and isinstance(v, str):
+                new_obj[k] = str(uuid5(NAMESPACE_OID, v))
+            else:
+                new_obj[k] = _sanitize_nested_properties(v, property_names)
+        return new_obj
+    elif isinstance(obj, list):
+        return [_sanitize_nested_properties(item, property_names) for item in obj]
+    else:
+        return obj
+
 
 def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
     if os.getenv("TELEMETRY_DISABLED"):
@@ -58,7 +77,7 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
     env = os.getenv("ENV")
     if env in ["test", "dev"]:
         return
-
+    additional_properties = _sanitize_nested_properties(obj=additional_properties, property_names=['url'])
     current_time = datetime.now(timezone.utc)
     payload = {
         "anonymous_id": str(get_anonymous_id()),
