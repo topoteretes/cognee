@@ -116,8 +116,26 @@ class LexicalRetriever(BaseRetriever):
         else:
             return [self.payloads[chunk_id] for chunk_id, _ in top_results]
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
-        """Returns context for the given query (retrieves if not provided)."""
+    async def get_completion(
+        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
+    ) -> Any:
+        """
+        Returns context for the given query (retrieves if not provided).
+
+        Parameters:
+        -----------
+
+            - query (str): The query string to retrieve context for.
+            - context (Optional[Any]): Optional pre-fetched context; if None, it retrieves
+              the context for the query. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
+
+        Returns:
+        --------
+
+            - Any: The context, either provided or retrieved.
+        """
         if context is None:
             context = await self.get_context(query)
         return context

@@ -1,0 +1,5 @@
+Question: {question}
+Context: {context}
+
+Provide a one paragraph human readable summary of this interaction context,
+listing all the relevant facts and information in a simple and direct way.

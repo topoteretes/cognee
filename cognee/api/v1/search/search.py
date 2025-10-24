@@ -1,6 +1,7 @@
 from uuid import UUID
 from typing import Union, Optional, List, Type
 
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.modules.search.types import SearchResult, SearchType, CombinedSearchResult
@@ -8,6 +9,10 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.exceptions import DatasetNotFoundError
+from cognee.context_global_variables import set_session_user_context_variable
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 async def search(
@@ -25,6 +30,7 @@ async def search(
     last_k: Optional[int] = 1,
     only_context: bool = False,
     use_combined_context: bool = False,
+    session_id: Optional[str] = None,
 ) -> Union[List[SearchResult], CombinedSearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -113,6 +119,8 @@ async def search(
 
         save_interaction: Save interaction (query, context, answer connected to triplet endpoints) results into the graph or not
 
+        session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
+
     Returns:
         list: Search results in format determined by query_type:
 
@@ -168,6 +176,8 @@ async def search(
     if user is None:
         user = await get_default_user()
 
+    await set_session_user_context_variable(user)
+
     # Transform string based datasets to UUID - String based datasets can only be found for current user
     if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
         datasets = await get_authorized_existing_datasets(datasets, "read", user)
@@ -189,6 +199,7 @@ async def search(
         last_k=last_k,
         only_context=only_context,
         use_combined_context=use_combined_context,
+        session_id=session_id,
     )
 
     return filtered_search_results

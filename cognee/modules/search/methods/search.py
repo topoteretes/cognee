@@ -5,6 +5,8 @@ from uuid import UUID
 from fastapi.encoders import jsonable_encoder
 from typing import Any, List, Optional, Tuple, Type, Union
 
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 from cognee.context_global_variables import set_database_global_context_variables
 
@@ -22,10 +24,12 @@ from cognee.modules.data.models import Dataset
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
-
+from cognee import __version__ as cognee_version
 from .get_search_type_tools import get_search_type_tools
 from .no_access_control_search import no_access_control_search
 from ..utils.prepare_search_result import prepare_search_result
+
+logger = get_logger()
 
 
 async def search(
@@ -42,6 +46,7 @@ async def search(
     last_k: Optional[int] = None,
     only_context: bool = False,
     use_combined_context: bool = False,
+    session_id: Optional[str] = None,
 ) -> Union[CombinedSearchResult, List[SearchResult]]:
     """
 
@@ -59,7 +64,11 @@ async def search(
         Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
     """
     query = await log_query(query_text, query_type.value, user.id)
-    send_telemetry("cognee.search EXECUTION STARTED", user.id)
+    send_telemetry(
+        "cognee.search EXECUTION STARTED",
+        user.id,
+        additional_properties={"cognee_version": cognee_version},
+    )
 
     # Use search function filtered by permissions if access control is enabled
     if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
@@ -77,6 +86,7 @@ async def search(
             last_k=last_k,
             only_context=only_context,
             use_combined_context=use_combined_context,
+            session_id=session_id,
         )
     else:
         search_results = [
@@ -91,10 +101,15 @@ async def search(
                 save_interaction=save_interaction,
                 last_k=last_k,
                 only_context=only_context,
+                session_id=session_id,
             )
         ]
 
-    send_telemetry("cognee.search EXECUTION COMPLETED", user.id)
+    send_telemetry(
+        "cognee.search EXECUTION COMPLETED",
+        user.id,
+        additional_properties={"cognee_version": cognee_version},
+    )
 
     await log_result(
         query.id,
@@ -195,6 +210,7 @@ async def authorized_search(
     last_k: Optional[int] = None,
     only_context: bool = False,
     use_combined_context: bool = False,
+    session_id: Optional[str] = None,
 ) -> Union[
     Tuple[Any, Union[List[Edge], str], List[Dataset]],
     List[Tuple[Any, Union[List[Edge], str], List[Dataset]]],
@@ -221,6 +237,7 @@ async def authorized_search(
             save_interaction=save_interaction,
             last_k=last_k,
             only_context=True,
+            session_id=session_id,
         )
 
         context = {}
@@ -263,7 +280,7 @@ async def authorized_search(
             return combined_context
 
         combined_context = prepare_combined_context(context)
-        completion = await get_completion(query_text, combined_context)
+        completion = await get_completion(query_text, combined_context, session_id=session_id)
 
         return completion, combined_context, datasets
 
@@ -280,6 +297,7 @@ async def authorized_search(
         save_interaction=save_interaction,
         last_k=last_k,
         only_context=only_context,
+        session_id=session_id,
     )
 
     return search_results
@@ -298,6 +316,7 @@ async def search_in_datasets_context(
     last_k: Optional[int] = None,
     only_context: bool = False,
     context: Optional[Any] = None,
+    session_id: Optional[str] = None,
 ) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
@@ -317,9 +336,29 @@ async def search_in_datasets_context(
         last_k: Optional[int] = None,
         only_context: bool = False,
         context: Optional[Any] = None,
+        session_id: Optional[str] = None,
     ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)
+
+        graph_engine = await get_graph_engine()
+        is_empty = await graph_engine.is_empty()
+
+        if is_empty:
+            # TODO: we can log here, but not all search types use graph. Still keeping this here for reviewer input
+            from cognee.modules.data.methods import get_dataset_data
+
+            dataset_data = await get_dataset_data(dataset.id)
+
+            if len(dataset_data) > 0:
+                logger.warning(
+                    f"Dataset '{dataset.name}' has {len(dataset_data)} data item(s) but the knowledge graph is empty. "
+                    "Please run cognify to process the data before searching."
+                )
+            else:
+                logger.warning(
+                    "Search attempt on an empty knowledge graph - no data has been added to this dataset"
+                )
 
         specific_search_tools = await get_search_type_tools(
             query_type=query_type,
@@ -340,7 +379,7 @@ async def search_in_datasets_context(
                 return None, await get_context(query_text), [dataset]
 
             search_context = context or await get_context(query_text)
-            search_result = await get_completion(query_text, search_context)
+            search_result = await get_completion(query_text, search_context, session_id=session_id)
 
             return search_result, search_context, [dataset]
         else:
@@ -365,6 +404,7 @@ async def search_in_datasets_context(
                 last_k=last_k,
                 only_context=only_context,
                 context=context,
+                session_id=session_id,
             )
         )
 

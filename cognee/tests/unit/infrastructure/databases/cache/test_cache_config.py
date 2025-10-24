@@ -53,6 +53,8 @@ def test_cache_config_to_dict():
         "shared_kuzu_lock": True,
         "cache_host": "test-host",
         "cache_port": 7000,
+        "cache_username": None,
+        "cache_password": None,
         "agentic_lock_expire": 100,
         "agentic_lock_timeout": 200,
     }

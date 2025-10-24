@@ -13531,4 +13531,4 @@ scraping = ["APScheduler", "beautifulsoup4", "lxml", "playwright", "protego", "t
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.14"
-content-hash = "bcab5420339473ec08b89cde588899b60999762fb8ca9a011240d47ea86198e3"
+content-hash = "9490de8c950400c004a87333eda35311109bc1708a98e053bc2f66d883f4f702"

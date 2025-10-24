@@ -1,11 +1,18 @@
+import asyncio
 from typing import Any, Optional
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
+from cognee.modules.retrieval.utils.session_cache import (
+    save_conversation_history,
+    get_conversation_history,
+)
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
+from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache.config import CacheConfig
 
 logger = get_logger("CompletionRetriever")
 
@@ -67,7 +74,9 @@ class CompletionRetriever(BaseRetriever):
             logger.error("DocumentChunk_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> str:
+    async def get_completion(
+        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
+    ) -> str:
         """
         Generates an LLM completion using the context.
 
@@ -80,6 +89,8 @@ class CompletionRetriever(BaseRetriever):
             - query (str): The query string to be used for generating a completion.
             - context (Optional[Any]): Optional pre-fetched context to use for generating the
               completion; if None, it retrieves the context for the query. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
 
         Returns:
         --------
@@ -89,11 +100,41 @@ class CompletionRetriever(BaseRetriever):
         if context is None:
             context = await self.get_context(query)
 
-        completion = await generate_completion(
-            query=query,
-            context=context,
-            user_prompt_path=self.user_prompt_path,
-            system_prompt_path=self.system_prompt_path,
-            system_prompt=self.system_prompt,
-        )
+        # Check if we need to generate context summary for caching
+        cache_config = CacheConfig()
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+        session_save = user_id and cache_config.caching
+
+        if session_save:
+            conversation_history = await get_conversation_history(session_id=session_id)
+
+            context_summary, completion = await asyncio.gather(
+                summarize_text(context),
+                generate_completion(
+                    query=query,
+                    context=context,
+                    user_prompt_path=self.user_prompt_path,
+                    system_prompt_path=self.system_prompt_path,
+                    system_prompt=self.system_prompt,
+                    conversation_history=conversation_history,
+                ),
+            )
+        else:
+            completion = await generate_completion(
+                query=query,
+                context=context,
+                user_prompt_path=self.user_prompt_path,
+                system_prompt_path=self.system_prompt_path,
+                system_prompt=self.system_prompt,
+            )
+
+        if session_save:
+            await save_conversation_history(
+                query=query,
+                context_summary=context_summary,
+                answer=completion,
+                session_id=session_id,
+            )
+
         return completion
