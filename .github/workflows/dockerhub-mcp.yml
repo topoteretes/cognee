@@ -7,7 +7,10 @@ on:
 
 jobs:
   docker-build-and-push:
-    runs-on: ubuntu-latest
+    runs-on:
+      group: Runners
+      labels:
+        - docker_build_runner
 
     steps:
       - name: Check and free disk space before build
