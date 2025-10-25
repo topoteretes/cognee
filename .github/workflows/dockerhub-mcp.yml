@@ -8,7 +8,7 @@ on:
 jobs:
   docker-build-and-push:
     runs-on:
-      group: Runners
+      group: Default
       labels:
         - docker_build_runner
 
