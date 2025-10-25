@@ -199,3 +199,9 @@ exclude = [
 
 [tool.ruff.lint]
 ignore = ["F401"]
+dependencies = [
+    # ... existing dependencies ...
+    "scikit-learn>=1.6.1,<2",  # 
+    "requests>=2.31.0,<3",      
+]
+
