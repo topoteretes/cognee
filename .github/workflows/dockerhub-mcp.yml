@@ -46,7 +46,7 @@ jobs:
 
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -56,6 +56,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=cognee/cognee-mcp:buildcache
           cache-to: type=registry,ref=cognee/cognee-mcp:buildcache,mode=max
+          provenance: false
+          sbom: false
 
       - name: Image digest
         run: echo ${{ steps.build.outputs.digest }}
