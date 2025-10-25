@@ -30,6 +30,7 @@ class LoaderEngine:
             "pypdf_loader",
             "image_loader",
             "audio_loader",
+            "csv_loader",
             "unstructured_loader",
             "advanced_pdf_loader",
         ]

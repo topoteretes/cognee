@@ -1,6 +1,8 @@
 from typing import BinaryIO
 import filetype
+
 from .is_text_content import is_text_content
+from .is_csv_content import is_csv_content
 
 
 class FileTypeException(Exception):
@@ -134,3 +136,44 @@ def guess_file_type(file: BinaryIO) -> filetype.Type:
         raise FileTypeException(f"Unknown file detected: {file.name}.")
 
     return file_type
+
+
+class CsvFileType(filetype.Type):
+    """
+    Match CSV file types based on MIME type and extension.
+
+    Public methods:
+    - match
+
+    Instance variables:
+    - MIME: The MIME type of the CSV.
+    - EXTENSION: The file extension of the CSV.
+    """
+
+    MIME = "text/csv"
+    EXTENSION = "csv"
+
+    def __init__(self):
+        super().__init__(mime=self.MIME, extension=self.EXTENSION)
+
+    def match(self, buf):
+        """
+        Determine if the given buffer contains csv content.
+
+        Parameters:
+        -----------
+
+            - buf: The buffer to check for csv content.
+
+        Returns:
+        --------
+
+            Returns True if the buffer is identified as csv content, otherwise False.
+        """
+
+        return is_csv_content(buf)
+
+
+csv_file_type = CsvFileType()
+
+filetype.add_type(csv_file_type)

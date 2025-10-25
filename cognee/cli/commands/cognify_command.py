@@ -22,7 +22,7 @@ relationships, and creates semantic connections for enhanced search and reasonin
 
 Processing Pipeline:
 1. **Document Classification**: Identifies document types and structures
-2. **Permission Validation**: Ensures user has processing rights  
+2. **Permission Validation**: Ensures user has processing rights
 3. **Text Chunking**: Breaks content into semantically meaningful segments
 4. **Entity Extraction**: Identifies key concepts, people, places, organizations
 5. **Relationship Detection**: Discovers connections between entities
@@ -97,6 +97,13 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                             chunker_class = LangchainChunker
                         except ImportError:
                             fmt.warning("LangchainChunker not available, using TextChunker")
+                    elif args.chunker == "CsvChunker":
+                        try:
+                            from cognee.modules.chunking.CsvChunker import CsvChunker
+
+                            chunker_class = CsvChunker
+                        except ImportError:
+                            fmt.warning("CsvChunker not available, using TextChunker")
 
                     result = await cognee.cognify(
                         datasets=datasets,

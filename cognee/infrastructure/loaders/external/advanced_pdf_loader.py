@@ -227,12 +227,3 @@ class AdvancedPdfLoader(LoaderInterface):
         if value is None:
             return ""
         return str(value).replace("\xa0", " ").strip()
-
-
-if __name__ == "__main__":
-    loader = AdvancedPdfLoader()
-    asyncio.run(
-        loader.load(
-            "/Users/xiaotao/work/cognee/cognee/infrastructure/loaders/external/attention_is_all_you_need.pdf"
-        )
-    )
