@@ -37,9 +37,7 @@ async def run():
 
             toolResult = await session.call_tool("prune", arguments={})
 
-            toolResult = await session.call_tool(
-                "cognify", arguments={}
-            )
+            toolResult = await session.call_tool("cognify", arguments={})
 
             toolResult = await session.call_tool(
                 "search", arguments={"search_type": "GRAPH_COMPLETION"}
