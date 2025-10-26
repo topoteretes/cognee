@@ -66,6 +66,90 @@ class BeautifulSoupLoader(LoaderInterface):
         can = extension in self.supported_extensions and mime_type in self.supported_mime_types
         return can
 
+    def _get_default_extraction_rules(self):
+        # Comprehensive default extraction rules for common HTML content
+        return {
+            # Meta information
+            "title": {"selector": "title", "all": False},
+            "meta_description": {
+                "selector": "meta[name='description']",
+                "attr": "content",
+                "all": False,
+            },
+            "meta_keywords": {
+                "selector": "meta[name='keywords']",
+                "attr": "content",
+                "all": False,
+            },
+            # Open Graph meta tags
+            "og_title": {
+                "selector": "meta[property='og:title']",
+                "attr": "content",
+                "all": False,
+            },
+            "og_description": {
+                "selector": "meta[property='og:description']",
+                "attr": "content",
+                "all": False,
+            },
+            # Main content areas (prioritized selectors)
+            "article": {"selector": "article", "all": True, "join_with": "\n\n"},
+            "main": {"selector": "main", "all": True, "join_with": "\n\n"},
+            # Semantic content sections
+            "headers_h1": {"selector": "h1", "all": True, "join_with": "\n"},
+            "headers_h2": {"selector": "h2", "all": True, "join_with": "\n"},
+            "headers_h3": {"selector": "h3", "all": True, "join_with": "\n"},
+            "headers_h4": {"selector": "h4", "all": True, "join_with": "\n"},
+            "headers_h5": {"selector": "h5", "all": True, "join_with": "\n"},
+            "headers_h6": {"selector": "h6", "all": True, "join_with": "\n"},
+            # Text content
+            "paragraphs": {"selector": "p", "all": True, "join_with": "\n\n"},
+            "blockquotes": {"selector": "blockquote", "all": True, "join_with": "\n\n"},
+            "preformatted": {"selector": "pre", "all": True, "join_with": "\n\n"},
+            # Lists
+            "ordered_lists": {"selector": "ol", "all": True, "join_with": "\n"},
+            "unordered_lists": {"selector": "ul", "all": True, "join_with": "\n"},
+            "list_items": {"selector": "li", "all": True, "join_with": "\n"},
+            "definition_lists": {"selector": "dl", "all": True, "join_with": "\n"},
+            # Tables
+            "tables": {"selector": "table", "all": True, "join_with": "\n\n"},
+            "table_captions": {
+                "selector": "caption",
+                "all": True,
+                "join_with": "\n",
+            },
+            # Code blocks
+            "code_blocks": {"selector": "code", "all": True, "join_with": "\n"},
+            # Figures and media descriptions
+            "figures": {"selector": "figure", "all": True, "join_with": "\n\n"},
+            "figcaptions": {"selector": "figcaption", "all": True, "join_with": "\n"},
+            "image_alts": {"selector": "img", "attr": "alt", "all": True, "join_with": " "},
+            # Links (text content, not URLs to avoid clutter)
+            "link_text": {"selector": "a", "all": True, "join_with": " "},
+            # Emphasized text
+            "strong": {"selector": "strong", "all": True, "join_with": " "},
+            "emphasis": {"selector": "em", "all": True, "join_with": " "},
+            "marked": {"selector": "mark", "all": True, "join_with": " "},
+            # Time and data elements
+            "time": {"selector": "time", "all": True, "join_with": " "},
+            "data": {"selector": "data", "all": True, "join_with": " "},
+            # Sections and semantic structure
+            "sections": {"selector": "section", "all": True, "join_with": "\n\n"},
+            "asides": {"selector": "aside", "all": True, "join_with": "\n\n"},
+            "details": {"selector": "details", "all": True, "join_with": "\n"},
+            "summary": {"selector": "summary", "all": True, "join_with": "\n"},
+            # Navigation (may contain important links/structure)
+            "nav": {"selector": "nav", "all": True, "join_with": "\n"},
+            # Footer information
+            "footer": {"selector": "footer", "all": True, "join_with": "\n"},
+            # Divs with specific content roles
+            "content_divs": {
+                "selector": "div[role='main'], div[role='article'], div.content, div#content",
+                "all": True,
+                "join_with": "\n\n",
+            },
+        }
+
     async def load(
         self,
         file_path: str,
@@ -85,7 +169,8 @@ class BeautifulSoupLoader(LoaderInterface):
             Path to the stored extracted text file
         """
         if extraction_rules is None:
-            raise ValueError("extraction_rules required for BeautifulSoupLoader")
+            extraction_rules = self._get_default_extraction_rules()
+            logger.info("Using default comprehensive extraction rules for HTML content")
 
         logger.info(f"Processing HTML file: {file_path}")
 
@@ -115,6 +200,7 @@ class BeautifulSoupLoader(LoaderInterface):
 
         full_content = " ".join(pieces).strip()
 
+        # remove after defaults for extraction rules
         # Fallback: If no content extracted, check if the file is plain text (not HTML)
         if not full_content:
             from bs4 import BeautifulSoup

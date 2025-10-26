@@ -122,6 +122,11 @@ class NaturalLanguageRetriever(BaseRetriever):
               query.
         """
         graph_engine = await get_graph_engine()
+        is_empty = await graph_engine.is_empty()
+
+        if is_empty:
+            logger.warning("Search attempt on an empty knowledge graph")
+            return []
 
         return await self._execute_cypher_query(query, graph_engine)
 
