@@ -11,6 +11,7 @@ class BaseConfig(BaseSettings):
     data_root_directory: str = get_absolute_path(".data_storage")
     system_root_directory: str = get_absolute_path(".cognee_system")
     cache_root_directory: str = get_absolute_path(".cognee_cache")
+    logs_root_directory: str = os.getenv("COGNEE_LOGS_DIR", "/tmp/cognee_logs")
     monitoring_tool: object = Observer.NONE
 
     @pydantic.model_validator(mode="after")
@@ -30,6 +31,14 @@ class BaseConfig(BaseSettings):
         # Require absolute paths for root directories
         self.data_root_directory = ensure_absolute_path(self.data_root_directory)
         self.system_root_directory = ensure_absolute_path(self.system_root_directory)
+        # logs_root_directory may be outside project root; keep as-is if absolute or make absolute if relative
+        try:
+            if not os.path.isabs(self.logs_root_directory):
+                # If relative, place under current working directory
+                self.logs_root_directory = os.path.abspath(self.logs_root_directory)
+        except Exception:
+            # If anything goes wrong, fall back to /tmp/cognee_logs
+            self.logs_root_directory = "/tmp/cognee_logs"
         # Set monitoring tool based on available keys
         if self.langfuse_public_key and self.langfuse_secret_key:
             self.monitoring_tool = Observer.LANGFUSE
@@ -49,6 +58,7 @@ class BaseConfig(BaseSettings):
             "system_root_directory": self.system_root_directory,
             "monitoring_tool": self.monitoring_tool,
             "cache_root_directory": self.cache_root_directory,
+            "logs_root_directory": self.logs_root_directory,
         }
 
 

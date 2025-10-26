@@ -76,9 +76,49 @@ log_levels = {
 # Track if structlog logging has been configured
 _is_structlog_configured = False
 
-# Path to logs directory
-LOGS_DIR = Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs"))
-LOGS_DIR.mkdir(exist_ok=True)  # Create logs dir if it doesn't exist
+# Logging directory resolution
+# Default writable location for most Unix-based systems
+DEFAULT_LOGS_DIR = "/tmp/cognee_logs"
+
+
+def _resolve_logs_dir():
+    """Resolve a writable logs directory.
+
+    Priority:
+    1) BaseConfig.logs_root_directory (respects COGNEE_LOGS_DIR)
+    2) /tmp/cognee_logs (default, best-effort create)
+    3) ./logs in current working directory (last resort)
+
+    Returns a Path or None if none are writable/creatable.
+    """
+    candidate_paths = []
+
+    # Prefer configuration from BaseConfig
+    try:
+        from cognee.base_config import get_base_config
+
+        base_config = get_base_config()
+        if getattr(base_config, "logs_root_directory", None):
+            candidate_paths.append(Path(base_config.logs_root_directory))
+    except Exception:
+        # If base config is unavailable during early imports, fall back to env
+        env_dir = os.environ.get("COGNEE_LOGS_DIR")
+        if env_dir:
+            candidate_paths.append(Path(env_dir))
+    candidate_paths.append(Path(DEFAULT_LOGS_DIR))
+    candidate_paths.append(Path.cwd() / "logs")
+
+    for candidate in candidate_paths:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            if os.access(candidate, os.W_OK):
+                return candidate
+        except Exception:
+            # Try next candidate
+            continue
+
+    return None
+
 
 # Maximum number of log files to keep
 MAX_LOG_FILES = 10
@@ -430,27 +470,37 @@ def setup_logging(log_level=None, name=None):
     stream_handler.setFormatter(console_formatter)
     stream_handler.setLevel(log_level)
 
+    # Resolve logs directory with env and safe fallbacks
+    logs_dir = _resolve_logs_dir()
+
     # Check if we already have a log file path from the environment
     # NOTE: environment variable must be used here as it allows us to
     # log to a single file with a name based on a timestamp in a multiprocess setting.
     # Without it, we would have a separate log file for every process.
     log_file_path = os.environ.get("LOG_FILE_NAME")
-    if not log_file_path:
+    if not log_file_path and logs_dir is not None:
         # Create a new log file name with the cognee start time
         start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        log_file_path = os.path.join(LOGS_DIR, f"{start_time}.log")
+        log_file_path = str((logs_dir / f"{start_time}.log").resolve())
         os.environ["LOG_FILE_NAME"] = log_file_path
 
-    # Create a file handler that uses our custom PlainFileHandler
-    file_handler = PlainFileHandler(log_file_path, encoding="utf-8")
-    file_handler.setLevel(DEBUG)
+    # Create a file handler that uses our custom PlainFileHandler if possible
+    file_handler = None
+    if log_file_path:
+        try:
+            file_handler = PlainFileHandler(log_file_path, encoding="utf-8")
+            file_handler.setLevel(DEBUG)
+        except Exception:
+            # If file handler cannot be created, fall back to console-only logging
+            file_handler = None
 
     # Configure root logger
     root_logger = logging.getLogger()
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
     root_logger.addHandler(stream_handler)
-    root_logger.addHandler(file_handler)
+    if file_handler is not None:
+        root_logger.addHandler(file_handler)
     root_logger.setLevel(log_level)
 
     if log_level > logging.DEBUG:
@@ -466,7 +516,8 @@ def setup_logging(log_level=None, name=None):
         )
 
     # Clean up old log files, keeping only the most recent ones
-    cleanup_old_logs(LOGS_DIR, MAX_LOG_FILES)
+    if logs_dir is not None:
+        cleanup_old_logs(logs_dir, MAX_LOG_FILES)
 
     # Mark logging as configured
     _is_structlog_configured = True
