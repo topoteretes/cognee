@@ -17,7 +17,9 @@ async def process_and_search(num_of_searches):
 
     await asyncio.gather(
         *[
-            cognee.search(query_text="Tell me about AI", query_type=SearchType.GRAPH_COMPLETION)
+            cognee.search(
+                query_text="Tell me about the document", query_type=SearchType.GRAPH_COMPLETION
+            )
             for _ in range(num_of_searches)
         ]
     )
@@ -28,9 +30,6 @@ async def process_and_search(num_of_searches):
 
 
 async def main():
-    file_path = os.path.join(
-        pathlib.Path(__file__).resolve().parent, "test_data/artificial-intelligence.pdf"
-    )
     data_directory_path = str(
         pathlib.Path(
             os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_load")
@@ -52,8 +51,8 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    for i in range(num_of_pdfs):
-        await cognee.add(file_path, dataset_name=f"dataset_{i}")
+    s3_input = "s3://cognee-load-test-s3-bucket"
+    await cognee.add(s3_input)
 
     recorded_times = await asyncio.gather(
         *[process_and_search(num_of_pdfs) for _ in range(num_of_reps)]
