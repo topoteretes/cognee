@@ -57,7 +57,7 @@ dependencies = [
     "websockets>=15.0.1,<16.0.0",
     "mistralai>=1.9.10",
     "tenacity>=9.0.0",
-    "fakeredis>=2.32.0",
+    "fakeredis[lua]>=2.32.0",
 ]
 
 [project.optional-dependencies]
