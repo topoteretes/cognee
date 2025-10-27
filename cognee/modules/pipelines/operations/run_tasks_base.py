@@ -27,6 +27,7 @@ async def handle_task(
         additional_properties={
             "task_name": running_task.executable.__name__,
             "cognee_version": cognee_version,
+            "tenant_id": str(user.tenant_id) if user.tenant_id else None,
         },
     )
 
@@ -49,6 +50,7 @@ async def handle_task(
             additional_properties={
                 "task_name": running_task.executable.__name__,
                 "cognee_version": cognee_version,
+                "tenant_id": str(user.tenant_id) if user.tenant_id else None,
             },
         )
     except Exception as error:
@@ -62,6 +64,7 @@ async def handle_task(
             additional_properties={
                 "task_name": running_task.executable.__name__,
                 "cognee_version": cognee_version,
+                "tenant_id": str(user.tenant_id) if user.tenant_id else None,
             },
         )
         raise error
