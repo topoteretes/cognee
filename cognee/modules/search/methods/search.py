@@ -67,7 +67,7 @@ async def search(
     send_telemetry(
         "cognee.search EXECUTION STARTED",
         user.id,
-        additional_properties={"cognee_version": cognee_version, "tenant_id": str(user.tenant_id) if user.tenant_id else None},
+        additional_properties={"cognee_version": cognee_version, "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant"},
     )
 
     # Use search function filtered by permissions if access control is enabled
@@ -108,7 +108,7 @@ async def search(
     send_telemetry(
         "cognee.search EXECUTION COMPLETED",
         user.id,
-        additional_properties={"cognee_version": cognee_version, "tenant_id": str(user.tenant_id) if user.tenant_id else None},
+        additional_properties={"cognee_version": cognee_version, "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant"},
     )
 
     await log_result(
