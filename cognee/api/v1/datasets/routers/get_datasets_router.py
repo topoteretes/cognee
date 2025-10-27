@@ -55,6 +55,7 @@ class DataDTO(OutDTO):
 class GraphNodeDTO(OutDTO):
     id: UUID
     label: str
+    type: str
     properties: dict
 
 
