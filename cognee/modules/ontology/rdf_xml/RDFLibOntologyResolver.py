@@ -32,7 +32,6 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
         super().__init__(matching_strategy)
         self.ontology_file = ontology_file
         try:
-            # Convert single file to list for uniform processing
             files_to_load = []
             if ontology_file is not None:
                 if isinstance(ontology_file, str):
@@ -42,7 +41,6 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                 else:
                     raise ValueError(f"ontology_file must be a string, list of strings, or None. Got: {type(ontology_file)}")
             
-            # Load ontology files into a single graph
             if files_to_load:
                 self.graph = Graph()
                 loaded_files = []
