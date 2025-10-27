@@ -1,5 +1,6 @@
 from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
+from cognee.infrastructure.databases.graph.config import get_graph_config
 
 from functools import lru_cache
 
@@ -45,6 +46,7 @@ def create_vector_engine(
             url=vector_db_url,
             api_key=vector_db_key,
             embedding_engine=embedding_engine,
+            graph_name=get_graph_config().graph_database_name
         )
 
     if vector_db_provider == "pgvector":
