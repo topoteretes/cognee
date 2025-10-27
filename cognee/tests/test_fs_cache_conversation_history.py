@@ -32,6 +32,9 @@ async def main():
         assert latest_qa[i]["question"] == q
         print(q)
 
+    latest_qa = await cache_engine.get_latest_qa(str(user.id), session_id=session_id)
+    print(latest_qa)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
