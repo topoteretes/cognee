@@ -36,7 +36,7 @@ def get_ontology_resolver_from_env(
             file_paths = [path.strip() for path in ontology_file_path.split(",")]
         else:
             file_paths = ontology_file_path
-        
+
         return RDFLibOntologyResolver(
             matching_strategy=FuzzyMatchingStrategy(), ontology_file=file_paths
         )

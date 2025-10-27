@@ -39,8 +39,10 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                 elif isinstance(ontology_file, list):
                     files_to_load = ontology_file
                 else:
-                    raise ValueError(f"ontology_file must be a string, list of strings, or None. Got: {type(ontology_file)}")
-            
+                    raise ValueError(
+                        f"ontology_file must be a string, list of strings, or None. Got: {type(ontology_file)}"
+                    )
+
             if files_to_load:
                 self.graph = Graph()
                 loaded_files = []
@@ -54,16 +56,20 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
                             "Ontology file '%s' not found. Skipping this file.",
                             file_path,
                         )
-                
+
                 if not loaded_files:
-                    logger.info("No valid ontology files found. No owl ontology will be attached to the graph.")
+                    logger.info(
+                        "No valid ontology files found. No owl ontology will be attached to the graph."
+                    )
                     self.graph = None
                 else:
                     logger.info("Total ontology files loaded: %d", len(loaded_files))
             else:
-                logger.info("No ontology file provided. No owl ontology will be attached to the graph.")
+                logger.info(
+                    "No ontology file provided. No owl ontology will be attached to the graph."
+                )
                 self.graph = None
-            
+
             self.build_lookup()
         except Exception as e:
             logger.error("Failed to load ontology", exc_info=e)
