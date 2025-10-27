@@ -1,7 +1,7 @@
 import asyncio
 import json
 from datetime import datetime
-from redislite import Redis
+import fakeredis
 
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
 from cognee.infrastructure.databases.exceptions.exceptions import CacheConnectionError
@@ -12,7 +12,7 @@ logger = get_logger("FSCacheAdapter")
 
 class FSCacheAdapter(CacheDBInterface):
     def __init__(self, timeout=240, blocking_timeout=300, lock_key: str = "default_lock"):
-        self.redis_connection = Redis()
+        self.redis_connection = fakeredis.FakeStrictRedis(server_type="redis")
         self.timeout = timeout
         self.blocking_timeout = blocking_timeout
         self.lock_key = lock_key
