@@ -81,7 +81,9 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         time_now = datetime.now().strftime("%d-%m-%Y")
 
-        system_prompt = render_prompt(prompt_path, {'time_now': time_now}, base_directory=base_directory)
+        system_prompt = render_prompt(
+            prompt_path, {"time_now": time_now}, base_directory=base_directory
+        )
 
         interval = await LLMGateway.acreate_structured_output(query, system_prompt, QueryInterval)
 
