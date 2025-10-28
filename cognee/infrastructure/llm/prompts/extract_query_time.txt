@@ -1,34 +1,13 @@
-You are tasked with identifying all relevant timestamps mentioned or implied in a natural language query.
-The current date (now) is `{{ time_now }}`.
-This value of now will always be dynamically provided at runtime.
+You are tasked with identifying relevant time periods where the answer to a given query should be searched.
+Current date is:  `{{ time_now }}`. Determine relevant period(s) and return structured intervals.
 
-Goal:
-Determine the time period(s) during which the requested information is relevant.
-Return these as structured intervals.
+Extraction rules:
 
-Extraction Rules:
-1.Explicit Time Intervals
--If the query specifies a range (e.g., from 2010 to 2020, between January and March 2023), extract both starts_at and ends_at.
-
-2.Single Timestamp
--If the query refers to one specific moment (e.g., in 2015, on March 5, 2022), set starts_at and ends_at to that same timestamp.
-
-3.Open-Ended Time References
--If the query is open-ended, represent the unspecified side as None:
---before 2009 → starts_at: None, ends_at: 2009
---after 2009 → starts_at: 2009, ends_at: None
-
-4. Current-Time References ("now")
--If the query refers to the present (e.g., who is, current, today, now), set both starts_at and ends_at to now (the ingestion timestamp).
-    Example: Who is the CEO at XY company? → { "starts_at": "2025-10-28", "ends_at": "2025-10-28" }
-
-5.Past/Present Distinction
--Use tense to guide extraction:
---“Who was…” → a past interval ending before now
---“Who is…” → a past interval ending now
-
-6.Ordering Rule
--Always assign the earlier date to starts_at and the later date to ends_at.
-
-7.No Temporal Information
--If no valid or inferable time reference is found, set both to None.
+1. Query without specific timestamp: use the time period with starts_at set to None and ends_at set to now.
+2. Explicit time intervals: If the query specifies a range (e.g., from 2010 to 2020, between January and March 2023), extract both start and end dates. Always assign the earlier date to starts_at and the later date to ends_at.
+3. Single timestamp: If the query refers to one specific moment (e.g., in 2015, on March 5, 2022), set starts_at and ends_at to that same timestamp.
+4. Open-ended time references: For phrases such as "before X" or "after X", represent the unspecified side as None. For example: before 2009 → starts_at: None, ends_at: 2009; after 2009 → starts_at: 2009, ends_at: None.
+5. Current-time references ("now", "current", "today"): If the query explicitly refers to the present, set both starts_at and ends_at to now (the ingestion timestamp).
+6. "Who is" and "Who was" questions: These imply a general identity or biographical inquiry without a specific temporal scope. Set both starts_at and ends_at to None.
+7. Ordering rule: Always ensure the earlier date is assigned to starts_at and the later date to ends_at.
+8. No temporal information: If no valid or inferable time reference is found, set both starts_at and ends_at to None.
