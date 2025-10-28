@@ -48,15 +48,15 @@ async def main():
     upper_boundary_minutes = 10
     average_minutes = 8
 
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
+    recorded_times = []
+    for _ in range(num_of_reps):
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
 
-    s3_input = "s3://cognee-load-test-s3-bucket"
-    await cognee.add(s3_input)
+        s3_input = "s3://cognee-test-load-s3-bucket"
+        await cognee.add(s3_input)
 
-    recorded_times = await asyncio.gather(
-        *[process_and_search(num_of_pdfs) for _ in range(num_of_reps)]
-    )
+        recorded_times.append(await process_and_search(num_of_pdfs))
 
     average_recorded_time = sum(recorded_times) / len(recorded_times)
 
