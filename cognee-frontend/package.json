@@ -14,14 +14,14 @@
     "culori": "^4.0.1",
     "d3-force-3d": "^3.0.6",
     "next": "15.3.3",
+    "ngraph.forcelayout": "^3.3.1",
+    "ngraph.graph": "^20.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-force-graph-2d": "^1.27.1",
-    "uuid": "^9.0.1",
-    "ngraph.forcelayout": "^3.3.1",
-    "ngraph.graph": "^20.1.0",
     "three": "^0.175.0",
-    "troika-three-text": "^0.52.4"
+    "troika-three-text": "^0.52.4",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
@@ -30,8 +30,8 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
-    "@types/uuid": "^9.0.8",
     "@types/three": "^0.175.0",
+    "@types/uuid": "^9.0.8",
     "eslint": "^9",
     "eslint-config-next": "^15.3.3",
     "eslint-config-prettier": "^10.1.5",
