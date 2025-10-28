@@ -150,7 +150,7 @@ class FSCacheAdapter(CacheDBInterface):
         session_key = f"agent_sessions:{user_id}:{session_id}"
         value = self.cache.get(session_key)
         if value is None:
-            raise ValueError(f"key {session_key} does not exist in the cache")
+            return []
         entries = json.loads(value)
         return entries[-last_n:] if len(entries) > last_n else entries
 
