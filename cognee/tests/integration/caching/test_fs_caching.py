@@ -92,6 +92,31 @@ def test_two_processes():
     assert process_2.exitcode == 0, f"Process 2 failed with exit code {process_2.exitcode}"
 
 
+def test_timeout_while_lock_held():
+    """Test that acquisition timeout works when lock is held by another process."""
+    lock_key = "test_timeout_held"
+
+    cache1 = FSCacheAdapter(timeout=10, blocking_timeout=None, lock_key=lock_key)
+    cache1.acquire_lock()
+
+    try:
+        cache2 = FSCacheAdapter(timeout=2, blocking_timeout=None, lock_key=lock_key)
+
+        start_time = time.time()
+        with pytest.raises(TimeoutError) as exc_info:
+            cache2.acquire_lock()
+
+        elapsed = time.time() - start_time
+
+        assert "Failed to acquire lock within 2 seconds" in str(exc_info.value)
+        assert 1.9 < elapsed < 2.5, f"Expected timeout ~2s, got {elapsed:.2f}s"
+
+        cache2.cache.close()
+    finally:
+        cache1.release_lock()
+        cache1.cache.close()
+
+
 @pytest.mark.asyncio
 async def test_closing_connection():
     cache = FSCacheAdapter(timeout=1, blocking_timeout=10, lock_key="test_closing")
