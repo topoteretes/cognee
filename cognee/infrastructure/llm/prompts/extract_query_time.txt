@@ -1,15 +1,34 @@
-For the purposes of identifying timestamps in a query, you are tasked with extracting relevant timestamps from the query.
-## Timestamp requirements
-- If the query contains interval extrack both starts_at and ends_at  properties
-- If the query contains an instantaneous timestamp, starts_at and ends_at should be the same
-- If the query its open-ended (before 2009 or after 2009), the corresponding non defined end of the time should be none
-    -For example: "before 2009" -- starts_at: None, ends_at: 2009 or  "after 2009" -- starts_at: 2009, ends_at: None
-- Put always the data that comes first in time as starts_at and the timestamps that comes second in time as ends_at
-- If starts_at or ends_at cannot be extracted both of them has to be None
-## Output Format
-Your reply should be a JSON: list of dictionaries with the following structure:
-```python
-class QueryInterval(BaseModel):
-    starts_at: Optional[Timestamp] = None
-    ends_at: Optional[Timestamp] = None
-```
+You are tasked with identifying all relevant timestamps mentioned or implied in a natural language query.
+The current date (now) is `{{ time_now }}`.
+This value of now will always be dynamically provided at runtime.
+
+Goal:
+Determine the time period(s) during which the requested information is relevant.
+Return these as structured intervals.
+
+Extraction Rules:
+1.Explicit Time Intervals
+-If the query specifies a range (e.g., from 2010 to 2020, between January and March 2023), extract both starts_at and ends_at.
+
+2.Single Timestamp
+-If the query refers to one specific moment (e.g., in 2015, on March 5, 2022), set starts_at and ends_at to that same timestamp.
+
+3.Open-Ended Time References
+-If the query is open-ended, represent the unspecified side as None:
+--before 2009 → starts_at: None, ends_at: 2009
+--after 2009 → starts_at: 2009, ends_at: None
+
+4. Current-Time References ("now")
+-If the query refers to the present (e.g., who is, current, today, now), set both starts_at and ends_at to now (the ingestion timestamp).
+    Example: Who is the CEO at XY company? → { "starts_at": "2025-10-28", "ends_at": "2025-10-28" }
+
+5.Past/Present Distinction
+-Use tense to guide extraction:
+--“Who was…” → a past interval ending before now
+--“Who is…” → a past interval ending now
+
+6.Ordering Rule
+-Always assign the earlier date to starts_at and the later date to ends_at.
+
+7.No Temporal Information
+-If no valid or inferable time reference is found, set both to None.
