@@ -40,7 +40,7 @@ def create_cache_engine(
     if config.caching:
         from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 
-        if os.getenv("LETS_SAY_SOME_ENV_KEY", "false").lower() == "true":
+        if os.getenv("CACHE_BACKEND", "fs").lower() == "redis":
             return RedisAdapter(
                 host=cache_host,
                 port=cache_port,
