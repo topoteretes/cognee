@@ -5,8 +5,7 @@ from cognee.tasks.storage.index_graph_edges import index_graph_edges
 
 @pytest.mark.asyncio
 async def test_index_graph_edges_success():
-    """Test that index_graph_edges uses the index datapoints and creates vector index."""
-    # Create the mocks for the graph and vector engines.
+    """Test that index_graph_edges retrieves edges and delegates to index_data_points."""
     mock_graph_engine = AsyncMock()
     mock_graph_engine.get_graph_data.return_value = (
         None,
@@ -15,26 +14,23 @@ async def test_index_graph_edges_success():
             [{"relationship_name": "rel2"}],
         ],
     )
-    mock_vector_engine = AsyncMock()
-    mock_vector_engine.embedding_engine.get_batch_size = MagicMock(return_value=100)
+    mock_index_data_points = AsyncMock()
 
-    # Patch the globals of the function so that when it does:
-    #   vector_engine = get_vector_engine()
-    #   graph_engine = await get_graph_engine()
-    # it uses the mocked versions.
     with patch.dict(
         index_graph_edges.__globals__,
         {
             "get_graph_engine": AsyncMock(return_value=mock_graph_engine),
-            "get_vector_engine": lambda: mock_vector_engine,
+            "index_data_points": mock_index_data_points,
         },
     ):
         await index_graph_edges()
 
-    # Assertions on the mock calls.
     mock_graph_engine.get_graph_data.assert_awaited_once()
-    assert mock_vector_engine.create_vector_index.await_count == 1
-    assert mock_vector_engine.index_data_points.await_count == 1
+    mock_index_data_points.assert_awaited_once()
+
+    call_args = mock_index_data_points.call_args[0][0]
+    assert len(call_args) == 2
+    assert all(hasattr(item, "relationship_name") for item in call_args)
 
 
 @pytest.mark.asyncio
@@ -42,20 +38,22 @@ async def test_index_graph_edges_no_relationships():
     """Test that index_graph_edges handles empty relationships correctly."""
     mock_graph_engine = AsyncMock()
     mock_graph_engine.get_graph_data.return_value = (None, [])
-    mock_vector_engine = AsyncMock()
+    mock_index_data_points = AsyncMock()
 
     with patch.dict(
         index_graph_edges.__globals__,
         {
             "get_graph_engine": AsyncMock(return_value=mock_graph_engine),
-            "get_vector_engine": lambda: mock_vector_engine,
+            "index_data_points": mock_index_data_points,
         },
     ):
         await index_graph_edges()
 
     mock_graph_engine.get_graph_data.assert_awaited_once()
-    mock_vector_engine.create_vector_index.assert_not_awaited()
-    mock_vector_engine.index_data_points.assert_not_awaited()
+    mock_index_data_points.assert_awaited_once()
+
+    call_args = mock_index_data_points.call_args[0][0]
+    assert len(call_args) == 0
 
 
 @pytest.mark.asyncio
