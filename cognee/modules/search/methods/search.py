@@ -24,7 +24,7 @@ from cognee.modules.data.models import Dataset
 from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
-
+from cognee import __version__ as cognee_version
 from .get_search_type_tools import get_search_type_tools
 from .no_access_control_search import no_access_control_search
 from ..utils.prepare_search_result import prepare_search_result
@@ -64,7 +64,14 @@ async def search(
         Searching by dataset is only available in ENABLE_BACKEND_ACCESS_CONTROL mode
     """
     query = await log_query(query_text, query_type.value, user.id)
-    send_telemetry("cognee.search EXECUTION STARTED", user.id)
+    send_telemetry(
+        "cognee.search EXECUTION STARTED",
+        user.id,
+        additional_properties={
+            "cognee_version": cognee_version,
+            "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
+        },
+    )
 
     # Use search function filtered by permissions if access control is enabled
     if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
@@ -101,7 +108,14 @@ async def search(
             )
         ]
 
-    send_telemetry("cognee.search EXECUTION COMPLETED", user.id)
+    send_telemetry(
+        "cognee.search EXECUTION COMPLETED",
+        user.id,
+        additional_properties={
+            "cognee_version": cognee_version,
+            "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
+        },
+    )
 
     await log_result(
         query.id,
