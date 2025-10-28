@@ -26,6 +26,7 @@ class FSCacheAdapter(CacheDBInterface):
         os.makedirs(cache_directory, exist_ok=True)
 
         self.cache = dc.Cache(directory=cache_directory)
+        self.cache.expire()
         self.lock = dc.Lock(self.cache, lock_key)
         self._auto_release_timer = None
         self._timeout_flag = threading.Event()
