@@ -59,32 +59,19 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     vector_config = {
         "vector_db_provider": dataset_database.vector_database_provider,
         "vector_db_url": dataset_database.vector_database_url,
-        # TODO: Maybe add key to dataset_database, and put it here??
-        "vector_db_key": "",
+        "vector_db_key": dataset_database.vector_database_key,
+        "vector_db_name": dataset_database.vector_database_name,
     }
-
-    # vector_config = {
-    #     "vector_db_url": os.path.join(
-    #         databases_directory_path, dataset_database.vector_database_name
-    #     ),
-    #     "vector_db_key": "",
-    #     "vector_db_provider": "lancedb",
-    # }
 
     graph_config = {
         "graph_database_provider": dataset_database.graph_database_provider,
         "graph_database_url": dataset_database.graph_database_url,
         "graph_database_name": dataset_database.graph_database_name,
+        "graph_database_key": dataset_database.graph_database_key,
         "graph_file_path": os.path.join(
             databases_directory_path, dataset_database.graph_database_name
         ),
     }
-    # graph_config = {
-    #     "graph_database_provider": "kuzu",
-    #     "graph_file_path": os.path.join(
-    #         databases_directory_path, dataset_database.graph_database_name
-    #     ),
-    # }
 
     storage_config = {
         "data_root_directory": data_root_directory,
