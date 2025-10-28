@@ -35,12 +35,12 @@ def create_cache_engine(
 
     Returns:
     --------
-    - CacheDBInterface: An instance of the appropriate cache adapter. :TODO: Now we support only Redis. later if we add more here we can split the logic
+    - CacheDBInterface: An instance of the appropriate cache adapter.
     """
     if config.caching:
         from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 
-        if os.getenv("CACHE_BACKEND", "fs").lower() == "redis":
+        if config.cache_backend == "redis":
             return RedisAdapter(
                 host=cache_host,
                 port=cache_port,
@@ -50,10 +50,17 @@ def create_cache_engine(
                 timeout=agentic_lock_expire,
                 blocking_timeout=agentic_lock_timeout,
             )
-
-        return FSCacheAdapter(
-            timeout=agentic_lock_expire, blocking_timeout=agentic_lock_timeout, lock_key=lock_key
-        )
+        elif config.cache_backend == "fs":
+            return FSCacheAdapter(
+                timeout=agentic_lock_expire,
+                blocking_timeout=agentic_lock_timeout,
+                lock_key=lock_key,
+            )
+        else:
+            raise ValueError(
+                f"Unsupported cache backend: '{config.cache_backend}'. "
+                f"Supported backends are: 'redis', 'fs'"
+            )
     else:
         return None
 
