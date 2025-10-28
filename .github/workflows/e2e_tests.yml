@@ -321,6 +321,7 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           CACHING: true
+          CACHE_BACKEND: 'redis'
           SHARED_KUZU_LOCK: true
           DB_PROVIDER: 'postgres'
           DB_NAME: 'cognee_db'
@@ -440,6 +441,7 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           CACHING: true
+          CACHE_BACKEND: 'redis'
           DB_PROVIDER: 'postgres'
           DB_NAME: 'cognee_db'
           DB_HOST: '127.0.0.1'
