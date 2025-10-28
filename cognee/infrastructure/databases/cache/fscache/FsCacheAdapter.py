@@ -19,8 +19,11 @@ class FSCacheAdapter(CacheDBInterface):
         self.timeout = timeout
         self.blocking_timeout = blocking_timeout
 
+        if lock_key is None:
+            lock_key = "default_lock"
+
         storage_config = get_storage_config()
-        data_root_directory = storage_config.get["data_root_directory"]
+        data_root_directory = storage_config["data_root_directory"]
         cache_directory = os.path.join(data_root_directory, ".cognee_fs_cache", lock_key)
 
         os.makedirs(cache_directory, exist_ok=True)
