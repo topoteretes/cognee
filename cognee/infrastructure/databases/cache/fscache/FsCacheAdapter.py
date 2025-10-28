@@ -146,7 +146,7 @@ class FSCacheAdapter(CacheDBInterface):
         session_key = f"agent_sessions:{user_id}:{session_id}"
         value = self.cache.get(session_key)
         if value is None:
-            raise ValueError(f"DAULET key {session_key} does not exist in the cache")
+            raise ValueError(f"key {session_key} does not exist in the cache")
         entries = json.loads(value)
         return entries[-last_n:] if len(entries) > last_n else entries
 
@@ -159,6 +159,7 @@ class FSCacheAdapter(CacheDBInterface):
 
     async def close(self):
         if self.cache is not None:
+            self.cache.expire()
             self.cache.close()
 
 
