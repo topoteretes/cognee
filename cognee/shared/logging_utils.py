@@ -430,6 +430,15 @@ def setup_logging(log_level=None, name=None):
     stream_handler.setFormatter(console_formatter)
     stream_handler.setLevel(log_level)
 
+    root_logger = logging.getLogger()
+    if root_logger.hasHandlers():
+        root_logger.handlers.clear()
+    root_logger.addHandler(stream_handler)
+
+    # Note: root logger needs to be set at NOTSET to allow all messages through and specific stream and file handlers
+    # can define their own levels.
+    root_logger.setLevel(logging.NOTSET)
+
     # Check if we already have a log file path from the environment
     # NOTE: environment variable must be used here as it allows us to
     # log to a single file with a name based on a timestamp in a multiprocess setting.
@@ -441,17 +450,15 @@ def setup_logging(log_level=None, name=None):
         log_file_path = os.path.join(LOGS_DIR, f"{start_time}.log")
         os.environ["LOG_FILE_NAME"] = log_file_path
 
-    # Create a file handler that uses our custom PlainFileHandler
-    file_handler = PlainFileHandler(log_file_path, encoding="utf-8")
-    file_handler.setLevel(DEBUG)
-
-    # Configure root logger
-    root_logger = logging.getLogger()
-    if root_logger.hasHandlers():
-        root_logger.handlers.clear()
-    root_logger.addHandler(stream_handler)
-    root_logger.addHandler(file_handler)
-    root_logger.setLevel(log_level)
+    try:
+        # Create a file handler that uses our custom PlainFileHandler
+        file_handler = PlainFileHandler(log_file_path, encoding="utf-8")
+        file_handler.setLevel(DEBUG)
+        root_logger.addHandler(file_handler)
+    except Exception as e:
+        # Note: Exceptions happen in case of read only file systems or log file path poiting to location where it does
+        # not have write permission. Logging to file is not mandatory so we just log a warning to console.
+        root_logger.warning(f"Warning: Could not create log file handler at {log_file_path}: {e}")
 
     if log_level > logging.DEBUG:
         import warnings
