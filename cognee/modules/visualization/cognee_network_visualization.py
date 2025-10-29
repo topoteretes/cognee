@@ -272,6 +272,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
 
             var currentTransform = d3.zoomIdentity;
             var densityZoomTimer = null;
+            var isInteracting = false;
             var labelBaseSize = 10;
             function getGroupKey(d){ return d && (d.type || d.category || d.group || d.color) || 'default'; }
 
@@ -473,7 +474,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
 
             // Add labels sparsely to reduce clutter (every ~50th node), and truncate long text
             nodeGroup
-                .filter(function(d, i){ return i % 15 === 0; })
+                .filter(function(d, i){ return i % 14 === 0; })
                 .append("text")
                 .attr("class", "node-label")
                 .attr("dy", 4)
@@ -486,9 +487,11 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
 
             function applyLabelSize() {
                 var k = (currentTransform && currentTransform.k) || 1;
-                // Keep labels readable across zoom levels: shrink slowly with zoom-in, grow slowly when zooming out
+                // Keep labels readable across zoom levels and hide when too small
                 labelBaseSize = Math.max(7, Math.min(18, 10 / Math.sqrt(k)));
-                nodeGroup.select("text").style("font-size", labelBaseSize + "px");
+                nodeGroup.select("text")
+                    .style("font-size", labelBaseSize + "px")
+                    .style("display", (k < 0.35 ? "none" : null));
             }
 
 
@@ -499,6 +502,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
             var MAX_POINTS_PER_GROUP = 400;
             function updateDensity() {
                 try {
+                    if (isInteracting) return; // skip during interaction for smoother UX
                     if (typeof d3 === 'undefined' || typeof d3.contourDensity !== 'function') {
                         return; // d3-contour not available; skip gracefully
                     }
@@ -619,18 +623,24 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
                 if (densityTick % 24 === 0) updateDensity();
             });
 
-            svg.call(d3.zoom().on("zoom", function() {
-                currentTransform = d3.event.transform;
-                container.attr("transform", currentTransform);
-                if (densityZoomTimer) clearTimeout(densityZoomTimer);
-                densityZoomTimer = setTimeout(updateDensity, 120);
-                applyLabelSize();
-            }));
+            var zoomBehavior = d3.zoom()
+                .on("start", function(){ isInteracting = true; densityLayer.style("opacity", 0.2); })
+                .on("zoom", function(){
+                    currentTransform = d3.event.transform;
+                    container.attr("transform", currentTransform);
+                })
+                .on("end", function(){
+                    if (densityZoomTimer) clearTimeout(densityZoomTimer);
+                    densityZoomTimer = setTimeout(function(){ isInteracting = false; densityLayer.style("opacity", 1); updateDensity(); }, 140);
+                });
+            svg.call(zoomBehavior);
 
             function dragstarted(d) {
                 if (!d3.event.active) simulation.alphaTarget(0.3).restart();
                 d.fx = d.x;
                 d.fy = d.y;
+                isInteracting = true;
+                densityLayer.style("opacity", 0.2);
             }
 
             function dragged(d) {
@@ -642,6 +652,8 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
                 if (!d3.event.active) simulation.alphaTarget(0);
                 d.fx = null;
                 d.fy = null;
+                if (densityZoomTimer) clearTimeout(densityZoomTimer);
+                densityZoomTimer = setTimeout(function(){ isInteracting = false; densityLayer.style("opacity", 1); updateDensity(); }, 140);
             }
 
             window.addEventListener("resize", function() {
