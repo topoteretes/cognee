@@ -28,6 +28,7 @@ async def run_tasks_with_telemetry(
             additional_properties={
                 "pipeline_name": str(pipeline_name),
                 "cognee_version": cognee_version,
+                "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
             }
             | config,
         )
@@ -42,6 +43,7 @@ async def run_tasks_with_telemetry(
             additional_properties={
                 "pipeline_name": str(pipeline_name),
                 "cognee_version": cognee_version,
+                "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
             }
             | config,
         )
@@ -58,6 +60,7 @@ async def run_tasks_with_telemetry(
             additional_properties={
                 "pipeline_name": str(pipeline_name),
                 "cognee_version": cognee_version,
+                "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
             }
             | config,
         )

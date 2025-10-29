@@ -21,7 +21,8 @@ def get_ontology_resolver_from_env(
             Supported value: "rdflib".
         matching_strategy (str): The matching strategy to apply.
             Supported value: "fuzzy".
-        ontology_file_path (str): Path to the ontology file required for the resolver.
+        ontology_file_path (str): Path to the ontology file(s) required for the resolver.
+            Can be a single path or comma-separated paths for multiple files.
 
     Returns:
         BaseOntologyResolver: An instance of the requested ontology resolver.
@@ -31,8 +32,13 @@ def get_ontology_resolver_from_env(
             or if required parameters are missing.
     """
     if ontology_resolver == "rdflib" and matching_strategy == "fuzzy" and ontology_file_path:
+        if "," in ontology_file_path:
+            file_paths = [path.strip() for path in ontology_file_path.split(",")]
+        else:
+            file_paths = ontology_file_path
+
         return RDFLibOntologyResolver(
-            matching_strategy=FuzzyMatchingStrategy(), ontology_file=ontology_file_path
+            matching_strategy=FuzzyMatchingStrategy(), ontology_file=file_paths
         )
     else:
         raise EnvironmentError(
