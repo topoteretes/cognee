@@ -1,19 +1,23 @@
-import asyncio
 from datetime import datetime, timezone
 from typing import List, Tuple
 import os
 
 from langdetect import detect_langs
-import openai
+from openai import AsyncOpenAI
 
 from cognee.tasks.translation.models import TranslatedContent, LanguageMetadata
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
-async def detect_language(text: str) -> Tuple[str, float]:
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    logger.warning("OPENAI_API_KEY not set; translation will fail")
+
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+def detect_language(text: str) -> Tuple[str, float]:
     try:
         langs = detect_langs(text)
         if langs:
@@ -26,36 +30,34 @@ async def detect_language(text: str) -> Tuple[str, float]:
 async def translate_text(text: str, source_lang: str, target_lang: str, provider: str) -> Tuple[str, float]:
     if provider.lower() == "openai":
         try:
-            response = await openai.ChatCompletion.acreate(
+            response = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {
                         "role": "user",
                         "content": f"Translate this text from {source_lang} to {target_lang}:\n\n{text}"
                     }
-                ]
+                ],
             )
             translated = response.choices[0].message.content.strip()
-            # OpenAI does not provide confidence score; assume high confidence
             confidence = 0.95
             return translated, confidence
         except Exception as e:
             logger.error(f"OpenAI translation failed: {e}")
-            return text, 0.0  # fallback to original text
-    # Handle other providers here if needed
+            return text, 0.0
     return text, 1.0
 
 async def translate_content(
     data_chunks: List[DocumentChunk],
     target_language: str = "en",
     translation_provider: str = "openai",
-    confidence_threshold: float = 0.8
+    confidence_threshold: float = 0.8,
 ) -> List[DocumentChunk]:
     translated_chunks = []
     for chunk in data_chunks:
         try:
             text = chunk.text
-            lang, lang_conf = await detect_language(text)
+            lang, lang_conf = detect_language(text)
             requires_translation = (lang != target_language and lang_conf >= confidence_threshold)
 
             language_metadata = LanguageMetadata(
@@ -63,7 +65,7 @@ async def translate_content(
                 detected_language=lang,
                 language_confidence=lang_conf,
                 requires_translation=requires_translation,
-                character_count=len(text)
+                character_count=len(text),
             )
 
             if requires_translation:
@@ -78,7 +80,7 @@ async def translate_content(
                     target_language=target_language,
                     translation_provider=translation_provider,
                     confidence_score=trans_conf,
-                    translation_timestamp=datetime.now(timezone.utc)
+                    translation_timestamp=datetime.now(timezone.utc),
                 )
                 chunk.translated = translation_info
                 logger.info(f"Translated chunk {chunk.id} from {lang} to {target_language}")
