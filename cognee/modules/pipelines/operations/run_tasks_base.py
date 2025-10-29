@@ -2,6 +2,7 @@ import inspect
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
+from cognee import __version__ as cognee_version
 
 from ..tasks.task import Task
 
@@ -25,6 +26,7 @@ async def handle_task(
         user_id=user.id,
         additional_properties={
             "task_name": running_task.executable.__name__,
+            "cognee_version": cognee_version,
         },
     )
 
@@ -46,6 +48,7 @@ async def handle_task(
             user_id=user.id,
             additional_properties={
                 "task_name": running_task.executable.__name__,
+                "cognee_version": cognee_version,
             },
         )
     except Exception as error:
@@ -58,6 +61,7 @@ async def handle_task(
             user_id=user.id,
             additional_properties={
                 "task_name": running_task.executable.__name__,
+                "cognee_version": cognee_version,
             },
         )
         raise error
