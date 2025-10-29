@@ -48,19 +48,23 @@ class SummariesRetriever(BaseRetriever):
             f"Starting summary retrieval for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
         )
 
-        vector_engine = get_vector_engine()  
-          
-        try:  
-            summaries_results = await vector_engine.search(  
-                "TextSummary_text", query, limit=self.top_k  
-            )  
-              
+        vector_engine = get_vector_engine()
+
+        try:
+            summaries_results = await vector_engine.search(
+                "TextSummary_text", query, limit=self.top_k
+            )
+            logger.info(f"Found {len(summaries_results)} summaries from vector search")
+            
             await update_node_access_timestamps(summaries_results, "TextSummary")
-              
-        except CollectionNotFoundError as error:  
-            raise NoDataError("No data found in the system, please add data first.") from error  
-          
-        return [summary.payload for summary in summaries_results]  
+        
+        except CollectionNotFoundError as error:
+            logger.error("TextSummary_text collection not found in vector database")
+            raise NoDataError("No data found in the system, please add data first.") from error
+
+        summary_payloads = [summary.payload for summary in summaries_results]
+        logger.info(f"Returning {len(summary_payloads)} summary payloads")
+        return summary_payloads
 
     async def get_completion(
         self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None, **kwargs
