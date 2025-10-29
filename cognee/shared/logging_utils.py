@@ -84,28 +84,28 @@ def resolve_logs_dir():
     Priority:
     1) BaseConfig.logs_root_directory (respects COGNEE_LOGS_DIR)
     2) /tmp/cognee_logs (default, best-effort create)
-    3) ./logs in current working directory (last resort)
 
     Returns a Path or None if none are writable/creatable.
     """
-    candidate_paths = []
-
     from cognee.base_config import get_base_config
 
     base_config = get_base_config()
-    candidate_paths.append(Path(base_config.logs_root_directory))
+    logs_root_directory = Path(base_config.logs_root_directory)
 
-    tmp_candidate_path = os.path.join(tempfile.gettempdir(), "cognee_logs")
-    candidate_paths.append(tmp_candidate_path)
+    try:
+        logs_root_directory.mkdir(parents=True, exist_ok=True)
+        if os.access(logs_root_directory, os.W_OK):
+            return logs_root_directory
+    except Exception:
+        pass
 
-    for candidate in candidate_paths:
-        try:
-            candidate.mkdir(parents=True, exist_ok=True)
-            if os.access(candidate, os.W_OK):
-                return candidate
-        except Exception:
-            # Try next candidate
-            continue
+    try:
+        tmp_log_path = Path(os.path.join("/tmp", "cognee_logs"))
+        tmp_log_path.mkdir(parents=True, exist_ok=True)
+        if os.access(tmp_log_path, os.W_OK):
+            return tmp_log_path
+    except Exception:
+        pass
 
     return None
 
