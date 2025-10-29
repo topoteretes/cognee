@@ -187,29 +187,6 @@ async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"detail": detail["message"]})
 
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """
-    Global exception handler for all unhandled exceptions.
-    Logs the full stack trace and returns a 500 error with details.
-    """
-    print(f"🔴 GLOBAL EXCEPTION HANDLER CALLED: {type(exc).__name__}")
-    logger.exception(
-        f"Unhandled exception in {request.method} {request.url.path}: "
-        f"{type(exc).__name__}: {str(exc)}"
-    )
-
-    return JSONResponse(
-        status_code=403,
-        content={
-            "error": str(exc),
-            "error_type": type(exc).__name__,
-            "message": "An internal server error occurred. Please check server logs for details.",
-            "path": request.url.path,
-        },
-    )
-
-
 @app.get("/")
 async def root():
     """
