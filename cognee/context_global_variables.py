@@ -4,6 +4,8 @@ from typing import Union
 from uuid import UUID
 
 from cognee.base_config import get_base_config
+from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
+from cognee.infrastructure.databases.graph.config import get_graph_context_config
 from cognee.infrastructure.databases.utils import get_or_create_dataset_database
 from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.modules.users.methods import get_user
@@ -14,9 +16,48 @@ vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
 session_user = ContextVar("session_user", default=None)
 
+vector_dbs_with_multi_user_support = ["lancedb"]
+graph_dbs_with_multi_user_support = ["kuzu"]
+
 
 async def set_session_user_context_variable(user):
     session_user.set(user)
+
+
+def check_multi_user_support():
+    graph_db_config = get_graph_context_config()
+    vector_db_config = get_vectordb_context_config()
+    if (
+        graph_db_config["graph_database_provider"] in graph_dbs_with_multi_user_support
+        and vector_db_config["vector_db_provider"] in vector_dbs_with_multi_user_support
+    ):
+        return True
+    else:
+        return False
+
+
+def check_backend_access_control_mode():
+    backend_access_control = os.environ.get("ENABLE_BACKEND_ACCESS_CONTROL", None)
+    if backend_access_control is None:
+        # If backend access control is not defined in environment variables,
+        # enable it by default if graph and vector DBs can support it, otherwise disable it
+        multi_user_support = check_multi_user_support()
+        if multi_user_support:
+            return "true"
+        else:
+            return "false"
+    elif backend_access_control.lower() == "true":
+        # If enabled, ensure that the current graph and vector DBs can support it
+        multi_user_support = check_multi_user_support()
+        if not multi_user_support:
+            raise EnvironmentError(
+                "ENABLE_BACKEND_ACCESS_CONTROL is set to true but the current graph and/or vector databases do not support multi-user access control. Please use supported databases or disable backend access control."
+            )
+        else:
+            return "true"
+    else:
+        # If explicitly disabled, return false
+        return "false"
 
 
 async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):
@@ -40,7 +81,7 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
 
     base_config = get_base_config()
 
-    if not os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
+    if not check_backend_access_control_mode() == "true":
         return
 
     user = await get_user(user_id)
