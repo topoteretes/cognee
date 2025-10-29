@@ -1,4 +1,3 @@
-from sys import exc_info
 from uuid import UUID
 
 from fastapi import APIRouter
@@ -95,7 +94,6 @@ def get_add_router() -> APIRouter:
                 f"Error during add operation for user {user.id}, "
                 f"dataset: {datasetName or datasetId}, "
                 f"error type: {type(error).__name__}",
-                exc_info=True,
             )
             return JSONResponse(
                 status_code=500,
