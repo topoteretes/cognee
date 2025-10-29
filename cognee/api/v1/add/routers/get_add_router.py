@@ -9,10 +9,7 @@ from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
-from cognee.shared.logging_utils import get_logger
 from cognee import __version__ as cognee_version
-
-logger = get_logger()
 
 
 def get_add_router() -> APIRouter:
@@ -77,31 +74,16 @@ def get_add_router() -> APIRouter:
         if not datasetId and not datasetName:
             raise ValueError("Either datasetId or datasetName must be provided.")
 
-        try:
-            add_run = await cognee_add(
-                data,
-                datasetName,
-                user=user,
-                dataset_id=datasetId,
-                node_set=node_set if node_set else None,
-            )
+        add_run = await cognee_add(
+            data,
+            datasetName,
+            user=user,
+            dataset_id=datasetId,
+            node_set=node_set if node_set else None,
+        )
 
-            if isinstance(add_run, PipelineRunErrored):
-                return JSONResponse(status_code=420, content=add_run.model_dump(mode="json"))
-            return add_run.model_dump()
-        except Exception as error:
-            logger.error(
-                f"Error during add operation for user {user.id}, "
-                f"dataset: {datasetName or datasetId}, "
-                f"error type: {type(error).__name__}",
-            )
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": str(error),
-                    "error_type": type(error).__name__,
-                    "message": "Failed to add data to dataset",
-                },
-            )
+        if isinstance(add_run, PipelineRunErrored):
+            return JSONResponse(status_code=420, content=add_run.model_dump(mode="json"))
+        return add_run.model_dump()
 
     return router

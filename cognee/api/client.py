@@ -80,6 +80,26 @@ async def lifespan(app: FastAPI):
 app = FastAPI(debug=app_environment != "prod", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def log_exceptions_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        logger.error(
+            f"Unhandled exception in {request.method} {request.url.path}: "
+            f"{type(exc).__name__}: {str(exc)}"
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+                "message": "An internal server error occurred. Please check server logs for details.",
+                "path": str(request.url.path),
+            },
+        )
+
+
 # Read allowed origins from environment variable (comma-separated)
 CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS")
 if CORS_ALLOWED_ORIGINS:
@@ -167,6 +187,29 @@ async def exception_handler(_: Request, exc: CogneeApiError) -> JSONResponse:
     # log the stack trace for easier serverside debugging
     logger.error(format_exc())
     return JSONResponse(status_code=status_code, content={"detail": detail["message"]})
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """
+    Global exception handler for all unhandled exceptions.
+    Logs the full stack trace and returns a 500 error with details.
+    """
+    print(f"🔴 GLOBAL EXCEPTION HANDLER CALLED: {type(exc).__name__}")
+    logger.exception(
+        f"Unhandled exception in {request.method} {request.url.path}: "
+        f"{type(exc).__name__}: {str(exc)}"
+    )
+
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+            "message": "An internal server error occurred. Please check server logs for details.",
+            "path": request.url.path,
+        },
+    )
 
 
 @app.get("/")
