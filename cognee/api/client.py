@@ -92,8 +92,6 @@ async def log_exceptions_middleware(request: Request, call_next):
         return JSONResponse(
             status_code=500,
             content={
-                "error": str(exc),
-                "error_type": type(exc).__name__,
                 "message": "An internal server error occurred. Please check server logs for details.",
                 "path": str(request.url.path),
             },
