@@ -22,42 +22,6 @@ class FileTypeException(Exception):
         self.message = message
 
 
-class TxtFileType(filetype.Type):
-    """
-    Represents a text file type with specific MIME and extension properties.
-
-    Public methods:
-    - match: Determines whether a given buffer matches the text file type.
-    """
-
-    MIME = "text/plain"
-    EXTENSION = "txt"
-
-    def __init__(self):
-        super(TxtFileType, self).__init__(mime=TxtFileType.MIME, extension=TxtFileType.EXTENSION)
-
-    def match(self, buf):
-        """
-        Determine if the given buffer contains text content.
-
-        Parameters:
-        -----------
-
-            - buf: The buffer to check for text content.
-
-        Returns:
-        --------
-
-            Returns True if the buffer is identified as text content, otherwise False.
-        """
-        return is_text_content(buf)
-
-
-txt_file_type = TxtFileType()
-
-filetype.add_type(txt_file_type)
-
-
 def guess_file_type(file: BinaryIO) -> filetype.Type:
     """
     Guess the file type from the given binary file stream.
