@@ -1,3 +1,4 @@
+from sys import exc_info
 from uuid import UUID
 
 from fastapi import APIRouter
@@ -54,7 +55,8 @@ def get_add_router() -> APIRouter:
 
         ## Error Codes
         - **400 Bad Request**: Neither datasetId nor datasetName provided
-        - **409 Conflict**: Error during add operation
+        - **500 Internal Server Error**: Error during add operation (check logs for details)
+        - **420 Pipeline Error**: Pipeline execution failed with structured error details
         - **403 Forbidden**: User doesn't have permission to add to dataset
 
         ## Notes
@@ -89,6 +91,19 @@ def get_add_router() -> APIRouter:
                 return JSONResponse(status_code=420, content=add_run.model_dump(mode="json"))
             return add_run.model_dump()
         except Exception as error:
-            return JSONResponse(status_code=409, content={"error": str(error)})
+            logger.error(
+                f"Error during add operation for user {user.id}, "
+                f"dataset: {datasetName or datasetId}, "
+                f"error type: {type(error).__name__}",
+                exc_info=True,
+            )
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": str(error),
+                    "error_type": type(error).__name__,
+                    "message": "Failed to add data to dataset",
+                },
+            )
 
     return router
