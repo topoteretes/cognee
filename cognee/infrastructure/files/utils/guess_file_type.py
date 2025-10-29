@@ -58,53 +58,6 @@ txt_file_type = TxtFileType()
 filetype.add_type(txt_file_type)
 
 
-class CustomPdfMatcher(filetype.Type):
-    """
-    Match PDF file types based on MIME type and extension.
-
-    Public methods:
-    - match
-
-    Instance variables:
-    - MIME: The MIME type of the PDF.
-    - EXTENSION: The file extension of the PDF.
-    """
-
-    MIME = "application/pdf"
-    EXTENSION = "pdf"
-
-    def __init__(self):
-        super(CustomPdfMatcher, self).__init__(
-            mime=CustomPdfMatcher.MIME, extension=CustomPdfMatcher.EXTENSION
-        )
-
-    def match(self, buf):
-        """
-        Determine if the provided buffer is a PDF file.
-
-        This method checks for the presence of the PDF signature in the buffer.
-
-        Raises:
-        - TypeError: If the buffer is not of bytes type.
-
-        Parameters:
-        -----------
-
-            - buf: The buffer containing the data to be checked.
-
-        Returns:
-        --------
-
-            Returns True if the buffer contains a PDF signature, otherwise returns False.
-        """
-        return b"PDF-" in buf
-
-
-custom_pdf_matcher = CustomPdfMatcher()
-
-filetype.add_type(custom_pdf_matcher)
-
-
 def guess_file_type(file: BinaryIO) -> filetype.Type:
     """
     Guess the file type from the given binary file stream.
