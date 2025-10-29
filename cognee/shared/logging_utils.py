@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+import tempfile
 import structlog
 import traceback
 import platform
@@ -76,9 +77,38 @@ log_levels = {
 # Track if structlog logging has been configured
 _is_structlog_configured = False
 
-# Path to logs directory
-LOGS_DIR = Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs"))
-LOGS_DIR.mkdir(exist_ok=True)  # Create logs dir if it doesn't exist
+
+def resolve_logs_dir():
+    """Resolve a writable logs directory.
+
+    Priority:
+    1) BaseConfig.logs_root_directory (respects COGNEE_LOGS_DIR)
+    2) /tmp/cognee_logs (default, best-effort create)
+
+    Returns a Path or None if none are writable/creatable.
+    """
+    from cognee.base_config import get_base_config
+
+    base_config = get_base_config()
+    logs_root_directory = Path(base_config.logs_root_directory)
+
+    try:
+        logs_root_directory.mkdir(parents=True, exist_ok=True)
+        if os.access(logs_root_directory, os.W_OK):
+            return logs_root_directory
+    except Exception:
+        pass
+
+    try:
+        tmp_log_path = Path(os.path.join("/tmp", "cognee_logs"))
+        tmp_log_path.mkdir(parents=True, exist_ok=True)
+        if os.access(tmp_log_path, os.W_OK):
+            return tmp_log_path
+    except Exception:
+        pass
+
+    return None
+
 
 # Maximum number of log files to keep
 MAX_LOG_FILES = 10
@@ -439,15 +469,18 @@ def setup_logging(log_level=None, name=None):
     # can define their own levels.
     root_logger.setLevel(logging.NOTSET)
 
+    # Resolve logs directory with env and safe fallbacks
+    logs_dir = resolve_logs_dir()
+
     # Check if we already have a log file path from the environment
     # NOTE: environment variable must be used here as it allows us to
     # log to a single file with a name based on a timestamp in a multiprocess setting.
     # Without it, we would have a separate log file for every process.
     log_file_path = os.environ.get("LOG_FILE_NAME")
-    if not log_file_path:
+    if not log_file_path and logs_dir is not None:
         # Create a new log file name with the cognee start time
         start_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        log_file_path = os.path.join(LOGS_DIR, f"{start_time}.log")
+        log_file_path = str((logs_dir / f"{start_time}.log").resolve())
         os.environ["LOG_FILE_NAME"] = log_file_path
 
     try:
@@ -473,7 +506,8 @@ def setup_logging(log_level=None, name=None):
         )
 
     # Clean up old log files, keeping only the most recent ones
-    cleanup_old_logs(LOGS_DIR, MAX_LOG_FILES)
+    if logs_dir is not None:
+        cleanup_old_logs(logs_dir, MAX_LOG_FILES)
 
     # Mark logging as configured
     _is_structlog_configured = True
@@ -497,6 +531,10 @@ def setup_logging(log_level=None, name=None):
 
     # Get a configured logger and log system information
     logger = structlog.get_logger(name if name else __name__)
+
+    if logs_dir is not None:
+        logger.info(f"Log file created at: {log_file_path}", log_file=log_file_path)
+
     # Detailed initialization for regular usage
     logger.info(
         "Logging initialized",
