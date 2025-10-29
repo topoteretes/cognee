@@ -74,7 +74,7 @@ async def search(
     )
 
     # Use search function filtered by permissions if access control is enabled
-    if check_backend_access_control_mode() == "true":
+    if check_backend_access_control_mode():
         search_results = await authorized_search(
             query_type=query_type,
             query_text=query_text,
@@ -156,7 +156,7 @@ async def search(
         )
     else:
         # This is for maintaining backwards compatibility
-        if check_backend_access_control_mode() == "true":
+        if check_backend_access_control_mode():
             return_value = []
             for search_result in search_results:
                 prepared_search_results = await prepare_search_result(search_result)

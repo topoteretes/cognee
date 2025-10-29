@@ -43,9 +43,9 @@ def check_backend_access_control_mode():
         # enable it by default if graph and vector DBs can support it, otherwise disable it
         multi_user_support = check_multi_user_support()
         if multi_user_support:
-            return "true"
+            return True
         else:
-            return "false"
+            return False
     elif backend_access_control.lower() == "true":
         # If enabled, ensure that the current graph and vector DBs can support it
         multi_user_support = check_multi_user_support()
@@ -54,10 +54,10 @@ def check_backend_access_control_mode():
                 "ENABLE_BACKEND_ACCESS_CONTROL is set to true but the current graph and/or vector databases do not support multi-user access control. Please use supported databases or disable backend access control."
             )
         else:
-            return "true"
+            return True
     else:
         # If explicitly disabled, return false
-        return "false"
+        return False
 
 
 async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):
@@ -81,7 +81,7 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
 
     base_config = get_base_config()
 
-    if not check_backend_access_control_mode() == "true":
+    if not check_backend_access_control_mode():
         return
 
     user = await get_user(user_id)
