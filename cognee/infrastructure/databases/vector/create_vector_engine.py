@@ -9,6 +9,7 @@ from functools import lru_cache
 def create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
+    vector_db_name: str,
     vector_db_port: str = "",
     vector_db_key: str = "",
 ):
@@ -28,6 +29,7 @@ def create_vector_engine(
         - vector_db_url (str): The URL for the vector database instance.
         - vector_db_port (str): The port for the vector database instance. Required for some
           providers.
+        - vector_db_name (str): The name of the vector database instance.
         - vector_db_key (str): The API key or access token for the vector database instance.
         - vector_db_provider (str): The name of the vector database provider to use (e.g.,
           'pgvector').
@@ -46,7 +48,7 @@ def create_vector_engine(
             url=vector_db_url,
             api_key=vector_db_key,
             embedding_engine=embedding_engine,
-            graph_name=get_graph_context_config()["graph_database_name"],
+            database_name=vector_db_name,
         )
 
     if vector_db_provider == "pgvector":
