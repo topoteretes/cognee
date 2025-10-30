@@ -1,6 +1,6 @@
 import io
 import os.path
-from typing import BinaryIO, TypedDict
+from typing import BinaryIO, TypedDict, Optional
 from pathlib import Path
 
 from cognee.shared.logging_utils import get_logger
@@ -27,7 +27,7 @@ class FileMetadata(TypedDict):
     file_size: int
 
 
-async def get_file_metadata(file: BinaryIO) -> FileMetadata:
+async def get_file_metadata(file: BinaryIO, name: Optional[str] = None) -> FileMetadata:
     """
     Retrieve metadata from a file object.
 
@@ -53,15 +53,15 @@ async def get_file_metadata(file: BinaryIO) -> FileMetadata:
     except io.UnsupportedOperation as error:
         logger.error(f"Error retrieving content hash for file: {file.name} \n{str(error)}\n\n")
 
-    file_type = guess_file_type(file)
+    file_type = guess_file_type(file, name=name)
 
     file_path = getattr(file, "name", None) or getattr(file, "full_name", None)
 
     if isinstance(file_path, str):
         file_name = Path(file_path).stem if file_path else None
     else:
-        # In case file_path does not exist or is a integer return None
-        file_name = None
+        # In case file_path does not exist try file_name
+        file_name = name
 
     # Get file size
     pos = file.tell()  # remember current pointer
