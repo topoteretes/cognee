@@ -77,6 +77,7 @@ async def main():
         "What happened between 2000 and 2006?",
         "What happened between 1903 and 1995, I am interested in the Selected Works of Arnulf Øverland Ole Peter Arnulf Øverland?",
         "Who is Attaphol Buspakom Attaphol Buspakom?",
+        "Who was Arnulf Øverland?",
     ]
 
     for query_text in queries:

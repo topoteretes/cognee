@@ -1,7 +1,7 @@
 import os
 import asyncio
 from typing import Any, Optional, List, Type
-
+from datetime import datetime
 
 from operator import itemgetter
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -79,7 +79,11 @@ class TemporalRetriever(GraphCompletionRetriever):
         else:
             base_directory = None
 
-        system_prompt = render_prompt(prompt_path, {}, base_directory=base_directory)
+        time_now = datetime.now().strftime("%d-%m-%Y")
+
+        system_prompt = render_prompt(
+            prompt_path, {"time_now": time_now}, base_directory=base_directory
+        )
 
         interval = await LLMGateway.acreate_structured_output(query, system_prompt, QueryInterval)
 
@@ -107,8 +111,6 @@ class TemporalRetriever(GraphCompletionRetriever):
         time_from, time_to = await self.extract_time_from_query(query)
 
         graph_engine = await get_graph_engine()
-
-        triplets = []
 
         if time_from and time_to:
             ids = await graph_engine.collect_time_ids(time_from=time_from, time_to=time_to)
