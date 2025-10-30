@@ -96,7 +96,7 @@ jobs:
     with:
       python-versions: '["3.13.x"]'
       os: '["macos-15", "windows-latest"]'
-    secrets: inherit  
+    secrets: inherit
 
   # Matrix-based vector database tests
   vector-db-tests:

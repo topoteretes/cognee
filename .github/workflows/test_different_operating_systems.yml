@@ -13,7 +13,7 @@ on:
       os: 
         required: false
         type: string
-        default: '["ubuntu-22.04", "macos-15", "windows-latest"]'        
+        default: '["ubuntu-22.04", "macos-15", "windows-latest"]'
     secrets:
       LLM_PROVIDER:
         required: true
@@ -119,7 +119,7 @@ jobs:
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: ${{ fromJSON(inputs.os) }}        
+        os: ${{ fromJSON(inputs.os) }}
       fail-fast: false
     steps:
       - name: Check out
