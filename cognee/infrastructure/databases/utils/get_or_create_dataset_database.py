@@ -47,7 +47,7 @@ async def get_or_create_dataset_database(
     if graph_config.graph_database_provider in HYBRID_DBS:
         vector_db_name = graph_db_name
     else:
-        if vector_config.vector_database_provider == "lancedb":
+        if vector_config.vector_db_provider == "lancedb":
             vector_db_name = f"{dataset_id}.lance.db"
         else:
             vector_db_name = f"{dataset_id}.db"
