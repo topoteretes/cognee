@@ -8,47 +8,58 @@ logger = get_logger("index_data_points")
 
 
 async def index_data_points(data_points: list[DataPoint]):
-    created_indexes = {}
-    index_points = {}
+    """Index data points in the vector engine by creating embeddings for specified fields.
+
+    Process:
+    1. Groups data points into a nested dict: {type_name: {field_name: [points]}}
+    2. Creates vector indexes for each (type, field) combination on first encounter
+    3. Batches points per (type, field) and creates async indexing tasks
+    4. Executes all indexing tasks in parallel for efficient embedding generation
+
+    Args:
+        data_points: List of DataPoint objects to index. Each DataPoint's metadata must
+                     contain an 'index_fields' list specifying which fields to embed.
+
+    Returns:
+        The original data_points list.
+    """
+    data_points_by_type = {}
 
     vector_engine = get_vector_engine()
 
     for data_point in data_points:
         data_point_type = type(data_point)
+        type_name = data_point_type.__name__
 
         for field_name in data_point.metadata["index_fields"]:
             if getattr(data_point, field_name, None) is None:
                 continue
 
-            index_name = f"{data_point_type.__name__}_{field_name}"
+            if type_name not in data_points_by_type:
+                data_points_by_type[type_name] = {}
 
-            if index_name not in created_indexes:
-                await vector_engine.create_vector_index(data_point_type.__name__, field_name)
-                created_indexes[index_name] = True
-
-            if index_name not in index_points:
-                index_points[index_name] = []
+            if field_name not in data_points_by_type[type_name]:
+                await vector_engine.create_vector_index(type_name, field_name)
+                data_points_by_type[type_name][field_name] = []
 
             indexed_data_point = data_point.model_copy()
             indexed_data_point.metadata["index_fields"] = [field_name]
-            index_points[index_name].append(indexed_data_point)
+            data_points_by_type[type_name][field_name].append(indexed_data_point)
 
-    tasks: list[asyncio.Task] = []
     batch_size = vector_engine.embedding_engine.get_batch_size()
 
-    for index_name_and_field, points in index_points.items():
-        first = index_name_and_field.index("_")
-        index_name = index_name_and_field[:first]
-        field_name = index_name_and_field[first + 1 :]
+    batches = (
+        (type_name, field_name, points[i : i + batch_size])
+        for type_name, fields in data_points_by_type.items()
+        for field_name, points in fields.items()
+        for i in range(0, len(points), batch_size)
+    )
 
-        # Create embedding requests per batch to run in parallel later
-        for i in range(0, len(points), batch_size):
-            batch = points[i : i + batch_size]
-            tasks.append(
-                asyncio.create_task(vector_engine.index_data_points(index_name, field_name, batch))
-            )
+    tasks = [
+        asyncio.create_task(vector_engine.index_data_points(type_name, field_name, batch_points))
+        for type_name, field_name, batch_points in batches
+    ]
 
-    # Run all embedding requests in parallel
     await asyncio.gather(*tasks)
 
     return data_points
