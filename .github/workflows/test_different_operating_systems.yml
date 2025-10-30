@@ -10,6 +10,10 @@ on:
         required: false
         type: string
         default: '["3.10.x", "3.12.x", "3.13.x"]'
+      os: 
+        required: false
+        type: string
+        default: '["ubuntu-22.04", "macos-15", "windows-latest"]'        
     secrets:
       LLM_PROVIDER:
         required: true
@@ -43,7 +47,7 @@ jobs:
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ubuntu-22.04, macos-15, windows-latest]
+        os: ${{ fromJSON(inputs.os) }}
       fail-fast: false
     steps:
       - name: Check out
@@ -79,7 +83,7 @@ jobs:
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ ubuntu-22.04, macos-15, windows-latest ]
+        os: ${{ fromJSON(inputs.os) }}
       fail-fast: false
     steps:
       - name: Check out
@@ -115,7 +119,7 @@ jobs:
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ ubuntu-22.04, macos-15, windows-latest ]
+        os: ${{ fromJSON(inputs.os) }}        
       fail-fast: false
     steps:
       - name: Check out
@@ -151,7 +155,7 @@ jobs:
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ ubuntu-22.04, macos-15, windows-latest ]
+        os: ${{ fromJSON(inputs.os) }}
       fail-fast: false
     steps:
       - name: Check out
@@ -180,7 +184,7 @@ jobs:
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ ubuntu-22.04, macos-15, windows-latest ]
+        os: ${{ fromJSON(inputs.os) }}
       fail-fast: false
     steps:
       - name: Check out
@@ -217,7 +221,7 @@ jobs:
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ ubuntu-22.04, macos-15, windows-latest ]
+        os: ${{ fromJSON(inputs.os) }}
       fail-fast: false
     steps:
       - name: Check out
