@@ -81,7 +81,7 @@ async def run_pipeline_per_dataset(
         return
 
     pipeline_run = run_tasks(
-        tasks, dataset, data, user, pipeline_name, context, incremental_loading, data_per_batch
+        tasks, dataset.id, data, user, pipeline_name, context, incremental_loading, data_per_batch
     )
 
     async for pipeline_run_info in pipeline_run:

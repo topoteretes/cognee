@@ -93,12 +93,14 @@ async def run_code_graph_pipeline(
     data = RepoData(id=uuid4(), repo_path=repo_path)
 
     if include_docs:
-        non_code_pipeline_run = run_tasks(non_code_tasks, dataset, data, user, "cognify_pipeline")
+        non_code_pipeline_run = run_tasks(
+            non_code_tasks, dataset.id, data, user, "cognify_pipeline"
+        )
         async for run_status in non_code_pipeline_run:
             yield run_status
 
     async for run_status in run_tasks(
-        tasks, dataset, data, user, "cognify_code_pipeline", incremental_loading=False
+        tasks, dataset.id, data, user, "cognify_code_pipeline", incremental_loading=False
     ):
         yield run_status
 

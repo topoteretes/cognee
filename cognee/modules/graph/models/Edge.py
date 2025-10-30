@@ -1,5 +1,7 @@
+from datetime import datetime, timezone
 from sqlalchemy import (
     # event,
+    DateTime,
     String,
     JSON,
     UUID,
@@ -25,10 +27,14 @@ class Edge(Base):
     source_node_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     destination_node_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
-    relationship_name: Mapped[str | None] = mapped_column(String(255))
+    relationship_name: Mapped[str | None] = mapped_column(String(255), nullable=False)
 
     label: Mapped[str | None] = mapped_column(String(255))
     props: Mapped[dict | None] = mapped_column(JSON)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
 
     # __table_args__ = (
     #     {"postgresql_partition_by": "HASH (user_id)"},  # partitioning by user

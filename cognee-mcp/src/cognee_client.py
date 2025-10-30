@@ -196,7 +196,7 @@ class CogneeClient:
                 )
                 return results
 
-    async def delete(self, data_id: UUID, dataset_id: UUID) -> Dict[str, Any]:
+    async def delete(self, data_id: UUID, dataset_id: UUID, mode: str = "soft") -> Dict[str, Any]:
         """
         Delete data from a dataset.
 

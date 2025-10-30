@@ -1,4 +1,6 @@
+from datetime import datetime, timezone
 from sqlalchemy import (
+    DateTime,
     Index,
     # event,
     String,
@@ -25,11 +27,15 @@ class Node(Base):
 
     dataset_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
 
-    label: Mapped[str] = mapped_column(String(255))
+    label: Mapped[str | None] = mapped_column(String(255))
     type: Mapped[str] = mapped_column(String(255), nullable=False)
-    indexed_fields: Mapped[list] = mapped_column(JSON)
+    indexed_fields: Mapped[list] = mapped_column(JSON, nullable=False)
 
     # props: Mapped[dict] = mapped_column(JSON)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
 
     __table_args__ = (
         Index("index_node_dataset_slug", "dataset_id", "slug"),

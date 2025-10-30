@@ -11,7 +11,7 @@ from cognee import prune
 # from cognee import visualize_graph
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.low_level import setup, DataPoint
-from cognee.modules.data.models import Dataset
+from cognee.modules.data.methods import create_dataset
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
 from cognee.pipelines import run_tasks, Task
@@ -27,7 +27,7 @@ products_aggregator_node = Products()
 
 class Product(DataPoint):
     name: str
-    type: str
+    type: str = "Product"
     price: float
     colors: list[str]
     is_type: Products = products_aggregator_node
@@ -115,7 +115,7 @@ async def main():
 
     # Get user and dataset
     user: User = await get_default_user()  # type: ignore
-    main_dataset = Dataset(id=uuid4(), name="demo_dataset")
+    main_dataset = await create_dataset("demo_dataset", user)
 
     customers_file_path = os.path.join(os.path.dirname(__file__), "customers.json")
     customers = json.loads(open(customers_file_path, "r").read())
@@ -131,7 +131,7 @@ async def main():
 
     pipeline = run_tasks(
         [Task(ingest_customers), Task(add_data_points)],
-        dataset=main_dataset,
+        dataset_id=main_dataset.id,
         data=[data],
         user=user,
     )

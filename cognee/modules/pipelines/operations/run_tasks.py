@@ -3,10 +3,11 @@ import os
 import asyncio
 from functools import wraps
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models import Dataset
+from cognee.modules.data.methods import get_dataset
 from cognee.modules.pipelines.operations.run_tasks_distributed import run_tasks_distributed
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -53,7 +54,7 @@ def override_run_tasks(new_gen):
 @override_run_tasks(run_tasks_distributed)
 async def run_tasks(
     tasks: List[Task],
-    dataset: Dataset,
+    dataset_id: UUID,
     data: Optional[List[Any]] = None,
     user: Optional[User] = None,
     pipeline_name: str = "unknown_pipeline",
@@ -64,6 +65,7 @@ async def run_tasks(
     if not user:
         user = await get_default_user()
 
+    dataset = await get_dataset(user.id, dataset_id)
     pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
     pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset.id, data)
     pipeline_run_id = pipeline_run.pipeline_run_id
