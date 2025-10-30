@@ -9,6 +9,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
+from cognee import __version__ as cognee_version
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunErrored,
 )
@@ -64,6 +65,7 @@ def get_update_router() -> APIRouter:
                 "dataset_id": str(dataset_id),
                 "data_id": str(data_id),
                 "node_set": str(node_set),
+                "cognee_version": cognee_version,
             },
         )
 

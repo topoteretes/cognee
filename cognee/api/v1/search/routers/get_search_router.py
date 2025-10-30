@@ -13,6 +13,7 @@ from cognee.modules.users.models import User
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
+from cognee import __version__ as cognee_version
 
 
 # Note: Datasets sent by name will only map to datasets owned by the request sender
@@ -61,9 +62,7 @@ def get_search_router() -> APIRouter:
         send_telemetry(
             "Search API Endpoint Invoked",
             user.id,
-            additional_properties={
-                "endpoint": "GET /v1/search",
-            },
+            additional_properties={"endpoint": "GET /v1/search", "cognee_version": cognee_version},
         )
 
         try:
@@ -118,6 +117,7 @@ def get_search_router() -> APIRouter:
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
                 "use_combined_context": payload.use_combined_context,
+                "cognee_version": cognee_version,
             },
         )
 

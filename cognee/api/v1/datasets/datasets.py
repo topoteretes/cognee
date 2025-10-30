@@ -1,13 +1,15 @@
-from typing import Optional
 from uuid import UUID
-from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
-from cognee.modules.data.methods import get_authorized_dataset, get_authorized_existing_datasets
-from cognee.modules.graph.methods import delete_data_nodes_and_edges, delete_dataset_nodes_and_edges
-from cognee.modules.users.exceptions import PermissionDeniedError
+from typing import Optional
+
+from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.data.methods import has_dataset_data
+from cognee.modules.data.methods import get_authorized_dataset, get_authorized_existing_datasets
+from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
+from cognee.modules.graph.methods import delete_data_nodes_and_edges, delete_dataset_nodes_and_edges
 from cognee.modules.ingestion import discover_directory_datasets
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
-from cognee.modules.users.models import User
 
 
 class datasets:
@@ -32,6 +34,16 @@ class datasets:
         dataset = await get_authorized_dataset(user, dataset_id)
 
         return await get_dataset_data(dataset.id)
+
+    @staticmethod
+    async def has_data(dataset_id: str) -> bool:
+        from cognee.modules.data.methods import get_dataset
+
+        user = await get_default_user()
+
+        dataset = await get_dataset(user.id, dataset_id)
+
+        return await has_dataset_data(dataset.id)
 
     @staticmethod
     async def get_status(dataset_ids: list[UUID]) -> dict:

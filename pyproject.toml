@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.3.6"
+version = "0.3.8"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -41,7 +41,7 @@ dependencies = [
     "nbformat>=5.7.0,<6.0.0",
     "alembic>=1.13.3,<2",
     "limits>=4.4.1,<5",
-    "fastapi>=0.115.7,<1.0.0",
+    "fastapi>=0.116.2,<1.0.0",
     "python-multipart>=0.0.20,<1.0.0",
     "fastapi-users[sqlalchemy]>=14.0.1,<15.0.0",
     "structlog>=25.2.0,<26",

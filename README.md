@@ -97,7 +97,7 @@ Hosted platform:
 
 ### 📦 Installation
 
-You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager.
+You can install Cognee using either **pip**, **poetry**, **uv** or any other python package manager..
 
 Cognee supports Python 3.10 to 3.12
 

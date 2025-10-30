@@ -25,6 +25,7 @@ from cognee.modules.users.permissions.methods import (
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.shared.utils import send_telemetry
+from cognee import __version__ as cognee_version
 
 logger = get_logger()
 
@@ -101,6 +102,7 @@ def get_datasets_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "GET /v1/datasets",
+                "cognee_version": cognee_version,
             },
         )
 
@@ -148,6 +150,7 @@ def get_datasets_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "POST /v1/datasets",
+                "cognee_version": cognee_version,
             },
         )
 
@@ -216,6 +219,7 @@ def get_datasets_router() -> APIRouter:
             additional_properties={
                 "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}",
                 "dataset_id": str(dataset_id),
+                "cognee_version": cognee_version,
             },
         )
 
@@ -254,6 +258,7 @@ def get_datasets_router() -> APIRouter:
                 "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}/data/{str(data_id)}",
                 "dataset_id": str(dataset_id),
                 "data_id": str(data_id),
+                "cognee_version": cognee_version,
             },
         )
 
@@ -321,6 +326,7 @@ def get_datasets_router() -> APIRouter:
             additional_properties={
                 "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data",
                 "dataset_id": str(dataset_id),
+                "cognee_version": cognee_version,
             },
         )
 
@@ -381,6 +387,7 @@ def get_datasets_router() -> APIRouter:
             additional_properties={
                 "endpoint": "GET /v1/datasets/status",
                 "datasets": [str(dataset_id) for dataset_id in datasets],
+                "cognee_version": cognee_version,
             },
         )
 
@@ -427,6 +434,7 @@ def get_datasets_router() -> APIRouter:
                 "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data/{str(data_id)}/raw",
                 "dataset_id": str(dataset_id),
                 "data_id": str(data_id),
+                "cognee_version": cognee_version,
             },
         )
 

@@ -325,7 +325,6 @@ class LanceDBAdapter(VectorDBInterface):
 
     def get_data_point_schema(self, model_type: BaseModel):
         related_models_fields = []
-
         for field_name, field_config in model_type.model_fields.items():
             if hasattr(field_config, "model_fields"):
                 related_models_fields.append(field_name)
