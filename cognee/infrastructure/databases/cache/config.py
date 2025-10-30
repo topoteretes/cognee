@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
-from typing import Optional
+from typing import Optional, Literal
 
 
 class CacheConfig(BaseSettings):
@@ -15,6 +15,7 @@ class CacheConfig(BaseSettings):
     - agentic_lock_timeout: Maximum time (in seconds) to wait for the lock release.
     """
 
+    cache_backend: Literal["redis", "fs"] = "fs"
     caching: bool = False
     shared_kuzu_lock: bool = False
     cache_host: str = "localhost"
@@ -28,6 +29,7 @@ class CacheConfig(BaseSettings):
 
     def to_dict(self) -> dict:
         return {
+            "cache_backend": self.cache_backend,
             "caching": self.caching,
             "shared_kuzu_lock": self.shared_kuzu_lock,
             "cache_host": self.cache_host,
