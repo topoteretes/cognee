@@ -288,13 +288,15 @@ class TestDeleteCommand:
         assert "all" in actions
         assert "force" in actions
 
-    @patch("cognee.modules.data.methods.get_deletion_counts.get_user")
-    @patch("cognee.cli.commands.delete_command.cognee_datasets.delete_dataset")
+    # @patch("cognee.modules.users.methods.get_user")
+    @patch("cognee.cli.commands.delete_command.get_user")
+    @patch("cognee.cli.commands.delete_command.cognee_datasets")
     @patch("cognee.cli.commands.delete_command.fmt.confirm")
+    @patch("cognee.cli.commands.delete_command.get_deletion_counts")
     @patch("cognee.cli.commands.delete_command.asyncio.run", side_effect=_mock_run)
     # @pytest.mark.asyncio
     def test_execute_delete_dataset_with_confirmation(
-        self, mock_asyncio_run, mock_confirm, delete_dataset_mock, get_user_mock
+        self, mock_asyncio_run, get_deletion_counts_mock, mock_confirm, datasets_mock, get_user_mock
     ):
         """Test execute delete dataset with user confirmation"""
         data_directory_path = os.path.join(
@@ -314,8 +316,15 @@ class TestDeleteCommand:
 
         expected_user_id = uuid4()
         expected_dataset_id = uuid4()
+        expected_user = User(id=expected_user_id)
 
-        get_user_mock.return_value = User(id=expected_user_id)
+        get_user_mock.return_value = expected_user
+
+        get_deletion_counts_mock = AsyncMock()
+        get_deletion_counts_mock.return_value = DeletionCountsPreview()
+
+        delete_dataset_mock = AsyncMock()
+        datasets_mock.delete_dataset = delete_dataset_mock
 
         command = DeleteCommand()
         args = argparse.Namespace(dataset_id=expected_dataset_id, user_id=expected_user_id)
@@ -325,7 +334,7 @@ class TestDeleteCommand:
         command.execute(args)
 
         delete_dataset_mock.assert_awaited_once_with(
-            dataset_id=expected_dataset_id, user_id=expected_user_id
+            dataset_id=expected_dataset_id, user=expected_user
         )
 
         asyncio.run(cognee.prune.prune_data())

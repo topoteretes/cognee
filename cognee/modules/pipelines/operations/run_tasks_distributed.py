@@ -6,10 +6,9 @@ except ModuleNotFoundError:
 from typing import Any, List, Optional
 from uuid import UUID
 
-from cognee.modules.data.methods import get_dataset
+from cognee.modules.data.methods import get_authorized_dataset
 from cognee.modules.data.models import Dataset
 from cognee.modules.pipelines.tasks.task import Task
-from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.pipelines.models import (
     PipelineRunStarted,
     PipelineRunCompleted,
@@ -94,7 +93,7 @@ async def run_tasks_distributed(
     if not user:
         user = await get_default_user()
 
-    dataset = await get_dataset(user.id, dataset_id)
+    dataset = await get_authorized_dataset(user, dataset_id, "write")
     pipeline_id: UUID = generate_pipeline_id(user.id, dataset.id, pipeline_name)
     pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset.id, data)
     pipeline_run_id: UUID = pipeline_run.pipeline_run_id
