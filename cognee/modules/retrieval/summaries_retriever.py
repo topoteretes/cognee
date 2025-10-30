@@ -56,7 +56,7 @@ class SummariesRetriever(BaseRetriever):
             )
             logger.info(f"Found {len(summaries_results)} summaries from vector search")
             
-            await update_node_access_timestamps(summaries_results, "TextSummary")
+            await update_node_access_timestamps(summaries_results)
         
         except CollectionNotFoundError as error:
             logger.error("TextSummary_text collection not found in vector database")

@@ -49,7 +49,7 @@ class ChunksRetriever(BaseRetriever):
         try:
             found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
             logger.info(f"Found {len(found_chunks)} chunks from vector search")
-            await update_node_access_timestamps(found_chunks, "DocumentChunk")
+            await update_node_access_timestamps(found_chunks)
 
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")
