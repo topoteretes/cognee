@@ -52,6 +52,33 @@ async def test_edge_ingestion():
 
     edge_type_counts = Counter(edge_type[2] for edge_type in graph[1])
 
+    "Tests edge_text presence and format"
+    contains_edges = [edge for edge in graph[1] if edge[2] == "contains"]
+    assert len(contains_edges) > 0, "Expected at least one contains edge for edge_text verification"
+
+    edge_properties = contains_edges[0][3]
+    assert "edge_text" in edge_properties, "Expected edge_text in edge properties"
+
+    edge_text = edge_properties["edge_text"]
+    assert "relationship_name: contains" in edge_text, (
+        f"Expected 'relationship_name: contains' in edge_text, got: {edge_text}"
+    )
+    assert "entity_name:" in edge_text, f"Expected 'entity_name:' in edge_text, got: {edge_text}"
+    assert "entity_description:" in edge_text, (
+        f"Expected 'entity_description:' in edge_text, got: {edge_text}"
+    )
+
+    all_edge_texts = [
+        edge[3].get("edge_text", "") for edge in contains_edges if "edge_text" in edge[3]
+    ]
+    expected_entities = ["dave", "ana", "bob", "dexter", "apples", "cognee"]
+    found_entity = any(
+        any(entity in text.lower() for entity in expected_entities) for text in all_edge_texts
+    )
+    assert found_entity, (
+        f"Expected to find at least one entity name in edge_text: {all_edge_texts[:3]}"
+    )
+
     "Tests the presence of basic nested edges"
     for basic_nested_edge in basic_nested_edges:
         assert edge_type_counts.get(basic_nested_edge, 0) >= 1, (
