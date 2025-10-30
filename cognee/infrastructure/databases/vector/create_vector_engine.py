@@ -133,6 +133,6 @@ def create_vector_engine(
 
     else:
         raise EnvironmentError(
-            f"Unsupported graph database provider: {vector_db_provider}. "
+            f"Unsupported vector database provider: {vector_db_provider}. "
             f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics', 'ChromaDB'])}"
         )
