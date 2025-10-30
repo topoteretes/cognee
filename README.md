@@ -99,8 +99,6 @@ To refine existing dataflow simulation or create new ones, follow the quick tuto
 <img width="1916" alt="CodeCanvas Screenshot" src="https://codecanvas-media-public.s3.amazonaws.com/images/codecanvas-readme-screenshot.png" />
 
 
-
-
 ## Self-Hosted (Open Source)
 
 
