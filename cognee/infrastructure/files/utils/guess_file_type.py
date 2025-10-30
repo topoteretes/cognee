@@ -1,6 +1,9 @@
-from typing import BinaryIO
+import io
+from pathlib import Path
+from typing import BinaryIO, Optional, Any
 import filetype
-from .is_text_content import is_text_content
+from tempfile import SpooledTemporaryFile
+from filetype.types.base import Type
 
 
 class FileTypeException(Exception):
@@ -22,7 +25,7 @@ class FileTypeException(Exception):
         self.message = message
 
 
-def guess_file_type(file: BinaryIO) -> filetype.Type:
+def guess_file_type(file: BinaryIO, name: Optional[str] = None) -> filetype.Type:
     """
     Guess the file type from the given binary file stream.
 
@@ -39,12 +42,23 @@ def guess_file_type(file: BinaryIO) -> filetype.Type:
 
         - filetype.Type: The guessed file type, represented as filetype.Type.
     """
+
+    # Note: If file has .txt or .text extension, consider it a plain text file as filetype.guess may not detect it properly
+    # as it contains no magic number encoding
+    ext = None
+    if isinstance(file, str):
+        ext = Path(file).suffix
+    elif name is not None:
+        ext = Path(name).suffix
+
+    if ext in [".txt", ".text"]:
+        file_type = Type("text/plain", "txt")
+        return file_type
+
     file_type = filetype.guess(file)
 
     # If file type could not be determined consider it a plain text file as they don't have magic number encoding
     if file_type is None:
-        from filetype.types.base import Type
-
         file_type = Type("text/plain", "txt")
 
     if file_type is None:
