@@ -35,9 +35,4 @@ class DocumentChunk(DataPoint):
     cut_type: str
     is_part_of: Document
     contains: List[Union[Entity, Event]] = None
-    
-    last_accessed_at: int = Field(  
-        default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000)  
-    )  
-
     metadata: dict = {"index_fields": ["text"]}

@@ -19,9 +19,6 @@ class TextSummary(DataPoint):
 
     text: str
     made_from: DocumentChunk
-    last_accessed_at: int = Field(  
-        default_factory=lambda: int(datetime.now(timezone.utc).timestamp() * 1000)  
-    )
     metadata: dict = {"index_fields": ["text"]}
 
 
