@@ -29,6 +29,10 @@ def load_class(model_file, model_name):
     """Dynamically load a class from a file."""
     model_file = os.path.abspath(model_file)
     spec = importlib.util.spec_from_file_location("graph_model", model_file)
+    if spec is None:
+        raise ValueError(f"Could not load specification for module from file: {model_file}")
+    if spec.loader is None:
+        raise ImportError(f"Spec loader is None for module file: {model_file}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     model_class = getattr(module, model_name)
