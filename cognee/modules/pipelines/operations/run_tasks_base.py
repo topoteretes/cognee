@@ -35,11 +35,13 @@ async def handle_task(
         [key == "context" for key in inspect.signature(running_task.executable).parameters.keys()]
     )
 
+    kwargs = {}
+
     if has_context:
-        args.append(context)
+        kwargs["context"] = context
 
     try:
-        async for result_data in running_task.execute(args, next_task_batch_size):
+        async for result_data in running_task.execute(args, kwargs, next_task_batch_size):
             async for result in run_tasks_base(leftover_tasks, result_data, user, context):
                 yield result
 

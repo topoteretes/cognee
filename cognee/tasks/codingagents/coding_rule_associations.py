@@ -126,7 +126,8 @@ async def add_rule_associations(
 
     if len(edges_to_save) > 0:
         await graph_engine.add_edges(edges_to_save)
-        if context:
+
+        if context and hasattr(context["data"], "id"):
             await upsert_edges(
                 edges_to_save,
                 user_id=context["user"].id,
