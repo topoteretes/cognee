@@ -17,6 +17,7 @@ import json
 logger = get_logger()
 
 
+# TODO(daulet) COG-3311: I'm exploring OpenAPI json client generation for backend
 class CogneeClient:
     """
     Unified client for interacting with Cognee via direct calls or HTTP API.
