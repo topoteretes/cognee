@@ -4,7 +4,7 @@ import sys
 from cognee.shared.logging_utils import get_logger, get_log_file_location
 import mcp.types as types
 
-from src.utils.context import cognee_client
+from src.utils import context
 
 logger = get_logger()
 
@@ -115,10 +115,12 @@ Args: {args or "Not provided"}
 
             try:
                 # Add to knowledge graph with special node set
-                await cognee_client.add(server_content, node_set=["mcp_servers", server_name])
+                await context.cognee_client.add(
+                    server_content, node_set=["mcp_servers", server_name]
+                )
 
                 # Process into knowledge graph
-                await cognee_client.cognify()
+                await context.cognee_client.cognify()
 
                 logger.info(f"Successfully stored MCP server: {server_name}")
             except Exception as e:

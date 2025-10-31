@@ -4,7 +4,7 @@ import sys
 from cognee.shared.logging_utils import get_logger
 import mcp.types as types
 
-from src.utils.context import cognee_client
+from src.utils import context
 
 logger = get_logger()
 
@@ -51,13 +51,13 @@ async def find_mcp_server(requirements: str, max_results: int = 5) -> list:
             logger.info(f"Searching for MCP servers matching: {requirements}")
 
             # Search using GRAPH_COMPLETION for intelligent matching
-            search_results = await cognee_client.search(
+            search_results = await context.cognee_client.search(
                 query_text=f"Find MCP servers that can: {requirements}. Include their capabilities, installation instructions, and documentation.",
                 query_type="GRAPH_COMPLETION",
             )
 
             # Format the results
-            if cognee_client.use_api:
+            if context.cognee_client.use_api:
                 if isinstance(search_results, str):
                     result_text = search_results
                 elif isinstance(search_results, list) and len(search_results) > 0:

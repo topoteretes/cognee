@@ -1,6 +1,6 @@
 from contextlib import redirect_stdout
 import sys
-from src.utils.context import cognee_client
+from src.utils import context
 from cognee.shared.logging_utils import get_logger
 import mcp.types as types
 
@@ -21,8 +21,8 @@ async def clear_registry() -> list:
 
     with redirect_stdout(sys.stderr):
         try:
-            await cognee_client.prune_data()
-            await cognee_client.prune_system(metadata=True)
+            await context.cognee_client.prune_data()
+            await context.cognee_client.prune_system(metadata=True)
             logger.info("MCP server registry cleared")
             return [
                 types.TextContent(
