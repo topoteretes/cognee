@@ -40,3 +40,11 @@ allow-direct-references = true
 [project.scripts]
 cognee = "src:main"
 cognee-mcp = "src:main_mcp"
+
+[tool.pyright]
+typeCheckingMode = "basic"
+reportMissingImports = "error"
+reportUndefinedVariable = "error"
+reportMissingModuleSource = "error"
+reportUnusedImport = "warning"
+reportUnusedVariable = "warning"
