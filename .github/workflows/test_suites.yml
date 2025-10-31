@@ -1,4 +1,6 @@
 name: Test Suites
+permissions:
+  contents: read
 
 on:
   push:
