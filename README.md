@@ -65,14 +65,14 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
 
 ## About Cognee
 
-Cognee is an open source tool and platform that transforms your raw data into intelligent, searchable AI memory for Agents. It combines vector search with graph databases to make your data both searchable by meaning and connected by relationships. 
+Cognee is an open source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your data both searchable by meaning and connected by relationships. 
 
 You can use Cognee in two ways:
 
 1. [Self-host Cognee Open Source](), which stores all data locally by default.
 2. [Connect to Cognee Cloud]((https://platform.cognee.ai/)), and get the same OSS stack on managed infrastructure for easier development and productionization. 
 
-Cognee Open Source (self-hosted):
+### Cognee Open Source (self-hosted):
 
 - Interconnects any type of data — including past conversations, files, images, and audio transcriptions
 - Replaces traditional RAG systems with a unified memory layer built on graphs and vectors
@@ -80,21 +80,21 @@ Cognee Open Source (self-hosted):
 - Provides Pythonic data pipelines for ingestion from 30+ data sources
 - Offers high customizability through user-defined tasks, modular pipelines, and built-in search endpoints
 
-Cognee Cloud (managed):
+### Cognee Cloud (managed):
 - Hosted web UI dashboard 
 - Automatic version updates 
 - Resource usage analytics
 - GDPR compliant, enterprise-grade security
 
-### Basic Usage & Feature Guide
+## Basic Usage & Feature Guide
 
-[Check out this short, end-to-end walkthrough]((https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing)) of Cognee's core features in Google Colab.
+To learn more, [check out this short, end-to-end Colab walkthrough]((https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing)) of Cognee's core features.
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing)
 
 ## Quickstart
 
-Let’s take a quick look at how Cognee works in just a few lines of code. For detailed setup and configuration, see the [Cognee Docs](https://docs.cognee.ai/getting-started/installation#environment-configuration).
+Let’s try Cognee in just a few lines of code. For detailed setup and configuration, see the [Cognee Docs](https://docs.cognee.ai/getting-started/installation#environment-configuration).
 
 ### Prerequisites
 
@@ -121,7 +121,7 @@ To integrate other LLM providers, see our [LLM Provider Documentation](https://d
 
 Cognee will take your documents, generate a knowledge graph from them and then query the graph based on combined relationships. 
 
-Let's run a minimal pipeline:
+Now, run a minimal pipeline:
 
 ```python
 import cognee
@@ -151,7 +151,8 @@ if __name__ == '__main__':
 
 ```
 
-Example output:
+As you can see, the output is generated from the document we previously stored in Cognee:
+
 ```
   Cognee turns documents into AI memory.
 ```
