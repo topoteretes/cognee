@@ -48,7 +48,7 @@ jobs:
       - name: Wait for Ollama to be ready
         run: |
           for i in {1..30}; do
-            if curl -s http://localhost:11434/api/tags > /dev/null; then
+            if curl -s http://localhost:11434/v1/models > /dev/null; then
               echo "Ollama is ready"
               exit 0
             fi
@@ -75,7 +75,7 @@ jobs:
                 { "role": "user", "content": "Whatever I say, answer with Yes." }
               ]
             }'
-          curl -X POST http://127.0.0.1:11434/api/embed \
+          curl -X POST http://127.0.0.1:11434/v1/embeddings \
             -H "Content-Type: application/json" \
              -d '{
               "model": "avr/sfr-embedding-mistral:latest",
@@ -98,7 +98,7 @@ jobs:
           LLM_MODEL: "phi4"
           EMBEDDING_PROVIDER: "ollama"
           EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
-          EMBEDDING_ENDPOINT: "http://localhost:11434/api/embed"
+          EMBEDDING_ENDPOINT: "http://localhost:11434/v1/embeddings"
           EMBEDDING_DIMENSIONS: "4096"
           HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
         run: uv run python ./examples/python/simple_example.py
