@@ -13,17 +13,12 @@ import uvicorn
 from src.shared import context
 from src.clients import CogneeClient
 from src.tools import (
-    cognee_add_developer_rules,
     cognify,
-    save_interaction,
-    codify,
     search,
-    get_developer_rules,
     list_data,
     delete,
     prune,
     cognify_status,
-    codify_status,
 )
 
 
@@ -31,17 +26,12 @@ mcp = FastMCP("Cognee")
 
 logger = get_logger()
 
-mcp.tool()(cognee_add_developer_rules)
 mcp.tool()(cognify)
-mcp.tool()(save_interaction)
-mcp.tool()(codify)
 mcp.tool()(search)
-mcp.tool()(get_developer_rules)
 mcp.tool()(list_data)
 mcp.tool()(delete)
 mcp.tool()(prune)
 mcp.tool()(cognify_status)
-mcp.tool()(codify_status)
 
 
 async def run_sse_with_cors():
