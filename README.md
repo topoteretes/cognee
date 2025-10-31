@@ -5,7 +5,7 @@
 
   <br />
 
-  Cognee - Graph and Vector Memory for AI Agents
+  Cognee turns your data into memory for AI agents.
 
   <p align="center">
   <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
@@ -18,7 +18,7 @@
   ·
   <a href="https://www.reddit.com/r/AIMemory/">Join r/AIMemory</a>
   .
-  <a href="https://github.com/topoteretes/cognee-community">Integrations</a>
+  <a href="https://github.com/topoteretes/cognee-community">Community Plugins & Add-ons</a>
   </p>
 
 
@@ -41,8 +41,7 @@
   </a>
 </p>
 
-
-Persistent and accurate memory for AI agents. With Cognee, your AI agent understands, reasons, and adapts.
+Use your data to build personalized and dynamic memory for AI Agents. Cognee lets you replace RAG with scalable and modular ECL (Extract, Cognify, Load) pipelines.
 
   <p align="center">
   🌐 Available Languages
@@ -64,70 +63,65 @@ Persistent and accurate memory for AI agents. With Cognee, your AI agent underst
 </div>
 </div>
 
+## About Cognee
 
+Cognee is an open source tool and platform that transforms your raw data into intelligent, searchable AI memory for Agents. It combines vector search with graph databases to make your data both searchable by meaning and connected by relationships. 
+
+You can use Cognee in two ways:
+
+1. [Self-host Cognee Open Source](), which stores all data locally by default.
+2. [Connect to Cognee Cloud]((https://platform.cognee.ai/)), and get the same OSS stack on managed infrastructure for easier development and productionization. 
+
+Cognee Open Source (self-hosted):
+
+- Interconnects any type of data — including past conversations, files, images, and audio transcriptions
+- Replaces traditional RAG systems with a unified memory layer built on graphs and vectors
+- Reduces developer effort and infrastructure cost while improving quality and precision
+- Provides Pythonic data pipelines for ingestion from 30+ data sources
+- Offers high customizability through user-defined tasks, modular pipelines, and built-in search endpoints
+
+Cognee Cloud (managed):
+- Hosted web UI dashboard 
+- Automatic version updates 
+- Resource usage analytics
+- GDPR compliant, enterprise-grade security
+
+### Basic Usage & Feature Guide
+
+[Check out this short, end-to-end walkthrough]((https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing)) of Cognee's core features in Google Colab.
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing)
 
 ## Quickstart
 
-- 🚀 Try it now on [Google Colab](https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing)
-- 📓 Explore our [Deepnote Notebook](https://deepnote.com/workspace/cognee-382213d0-0444-4c89-8265-13770e333c02/project/cognee-demo-78ffacb9-5832-4611-bb1a-560386068b30/notebook/Notebook-1-75b24cda566d4c24ab348f7150792601?utm_source=share-modal&utm_medium=product-shared-content&utm_campaign=notebook&utm_content=78ffacb9-5832-4611-bb1a-560386068b30)
-- 🛠️ Clone our [Starter Repo](https://github.com/topoteretes/cognee/tree/main/cognee-starter-kit)
+Let’s take a quick look at how Cognee works in just a few lines of code. For detailed setup and configuration, see the [Cognee Docs](https://docs.cognee.ai/getting-started/installation#environment-configuration).
 
+### Prerequisites
 
-## About Cognee
+- Python 3.10 to 3.12
 
-Cognee transforms your data into a living knowledge graph that learns from feedback and auto-tunes to deliver better answers over time.
+### Step 1: Install Cognee
 
-**Run anywhere:**
-- 🏠 **Self-Hosted**: Runs locally, data stays on your device
-- ☁️ **Cognee Cloud**: Same open-source Cognee, deployed on Modal for seamless workflows
-
-**Self-Hosted Package:**
-
-- Unified memory for all your data sources
-- Domain-smart copilots that learn and adapt over time
-- Flexible memory architecture for AI agents and devices
-- Integrates easily with your current technology stack
-- Pythonic data pipelines supporting 30+ data sources out of the box
-- Fully extensible: customize tasks, pipelines, and search endpoints
-
-**Cognee Cloud:**
-- Get a managed UI and [Hosted Infrastructure](https://www.cognee.ai) with zero setup
-
-## Self-Hosted (Open Source)
-
-Run Cognee on your stack. Cognee integrates easily with your current technologies. See our [integration guides](https://docs.cognee.ai/setup-configuration/overview).
-
-
-### 📦 Installation
-
-Install Cognee with **pip**, **poetry**, **uv**, or your preferred Python package manager.
-
-**Requirements:** Python 3.10 to 3.12
-
-#### Using uv
+You can install Cognee with **pip**, **poetry**, **uv**, or your preferred Python package manager.
 
 ```bash
 uv pip install cognee
 ```
 
-For detailed setup instructions, see our [Documentation](https://docs.cognee.ai/getting-started/installation#environment-configuration).
-
-### 💻 Usage
-
-#### Configuration
-
+### Step 2: Configure the LLM
 ```python
 import os
 os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 ```
-
 Alternatively, create a `.env` file using our [template](https://github.com/topoteretes/cognee/blob/main/.env.template).
+
 To integrate other LLM providers, see our [LLM Provider Documentation](https://docs.cognee.ai/setup-configuration/llm-providers).
 
+### Step 3: Run the Pipeline
 
-#### Python Example
+Cognee will take your documents, generate a knowledge graph from them and then query the graph based on combined relationships. 
 
-Run the default pipeline with this script:
+Let's run a minimal pipeline:
 
 ```python
 import cognee
@@ -145,7 +139,7 @@ async def main():
     await cognee.memify()
 
     # Query the knowledge graph
-    results = await cognee.search("What does cognee do?")
+    results = await cognee.search("What does Cognee do?")
 
     # Display the results
     for result in results:
@@ -156,41 +150,30 @@ if __name__ == '__main__':
     asyncio.run(main())
 
 ```
+
 Example output:
 ```
   Cognee turns documents into AI memory.
-
 ```
 
-#### CLI Example
+### Use the Cognee CLI 
 
-Get started with these essential commands:
+As an alternative, you can get started with these essential commands:
 
 ```
 cognee-cli add "Cognee turns documents into AI memory."
 
 cognee-cli cognify
 
-cognee-cli search "What does cognee do?"
+cognee-cli search "What does Cognee do?"
 cognee-cli delete --all
 
 ```
-Or run:
+
+To open the local UI, run:
 ```
 cognee-cli -ui
 ```
-
-## Cognee Cloud
-
-Cognee is the fastest way to start building reliable AI agent memory. Deploy in minutes with automatic updates, analytics, and enterprise-grade security.
-
-- Sign up on [Cognee Cloud](https://www.cognee.ai)
-- Add your API key to local UI and sync your data to Cognee Cloud
-- Start building with managed infrastructure and zero configuration
-
-## Trusted in Production
-
-From regulated industries to startup stacks, Cognee is deployed in production and delivering value now. Read our [case studies](https://cognee.ai/blog) to learn more.
 
 ## Demos & Examples
 
@@ -220,7 +203,7 @@ We're committed to fostering an inclusive and respectful community. Read our [Co
 
 ## Research & Citation
 
-Cite our research paper on optimizing knowledge graphs for LLM reasoning:
+We recently published a research paper on optimizing knowledge graphs for LLM reasoning:
 
 ```bibtex
 @misc{markovic2025optimizinginterfaceknowledgegraphs,
