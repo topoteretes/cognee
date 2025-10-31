@@ -5,7 +5,7 @@
 
   <br />
 
-  Cognee turns your data into memory for AI agents.
+  Cognee - Accurate & Persistent Memory for AI agents.
 
   <p align="center">
   <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
@@ -65,7 +65,7 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
 
 ## About Cognee
 
-Cognee is an open source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your data both searchable by meaning and connected by relationships. 
+Cognee is an open source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your documents both searchable by meaning and connected by relationships. 
 
 You can use Cognee in two ways:
 
