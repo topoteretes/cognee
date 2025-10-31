@@ -7,7 +7,6 @@ from uuid import UUID
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.methods import get_authorized_dataset
 from cognee.modules.pipelines.operations.run_tasks_distributed import run_tasks_distributed
 from cognee.modules.users.models import User
 from cognee.shared.logging_utils import get_logger
@@ -65,7 +64,11 @@ async def run_tasks(
     if not user:
         user = await get_default_user()
 
-    dataset = await get_authorized_dataset(user, dataset_id, "write")
+    async with get_relational_engine().get_async_session() as session:
+        from cognee.modules.data.models import Dataset
+
+        dataset = await session.get(Dataset, dataset_id)
+
     pipeline_id = generate_pipeline_id(user.id, dataset.id, pipeline_name)
     pipeline_run = await log_pipeline_run_start(pipeline_id, pipeline_name, dataset.id, data)
     pipeline_run_id = pipeline_run.pipeline_run_id
