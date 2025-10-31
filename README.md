@@ -65,12 +65,12 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
 
 ## About Cognee
 
-Cognee is an open source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your documents both searchable by meaning and connected by relationships. 
+Cognee is an open-source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your documents both searchable by meaning and connected by relationships. 
 
 You can use Cognee in two ways:
 
-1. [Self-host Cognee Open Source](), which stores all data locally by default.
-2. [Connect to Cognee Cloud]((https://platform.cognee.ai/)), and get the same OSS stack on managed infrastructure for easier development and productionization. 
+1. [Self-host Cognee Open Source](https://docs.cognee.ai/getting-started/installation), which stores all data locally by default.
+2. [Connect to Cognee Cloud](https://platform.cognee.ai/), and get the same OSS stack on managed infrastructure for easier development and productionization. 
 
 ### Cognee Open Source (self-hosted):
 
@@ -88,7 +88,7 @@ You can use Cognee in two ways:
 
 ## Basic Usage & Feature Guide
 
-To learn more, [check out this short, end-to-end Colab walkthrough]((https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing)) of Cognee's core features.
+To learn more, [check out this short, end-to-end Colab walkthrough](https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing) of Cognee's core features.
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98ElkRPWy?usp=sharing)
 
