@@ -5,7 +5,7 @@
 
   <br />
 
-  Cognee - Accurate & Persistent Memory for AI agents.
+  Cognee - Accurate and Persistent AI Memory
 
   <p align="center">
   <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
