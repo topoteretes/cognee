@@ -84,6 +84,7 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'neo4j'
           VECTOR_DB_PROVIDER: 'lancedb'
           DB_PROVIDER: 'sqlite'
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
           GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
@@ -135,6 +136,7 @@ jobs:
             EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
             GRAPH_DATABASE_PROVIDER: 'kuzu'
             VECTOR_DB_PROVIDER: 'pgvector'
+            ENABLE_BACKEND_ACCESS_CONTROL: 'false'
             DB_PROVIDER: 'postgres'
             DB_NAME: 'cognee_db'
             DB_HOST: '127.0.0.1'
@@ -197,6 +199,7 @@ jobs:
           GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
           DB_NAME: cognee_db
           DB_HOST: 127.0.0.1
           DB_PORT: 5432

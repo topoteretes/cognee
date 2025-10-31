@@ -168,7 +168,7 @@ async def run_procurement_example():
         for q in questions:
             print(f"Question: \n{q}")
             results = await procurement_system.search_memory(q, search_categories=[category])
-            top_answer = results[category][0]
+            top_answer = results[category][0]["search_result"][0]
             print(f"Answer: \n{top_answer.strip()}\n")
             research_notes[category].append({"question": q, "answer": top_answer})
 

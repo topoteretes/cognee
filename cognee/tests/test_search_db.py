@@ -146,7 +146,7 @@ async def main():
         assert len(search_results) == 1, (
             f"{name}: expected single-element list, got {len(search_results)}"
         )
-        text = search_results[0]
+        text = search_results[0]["search_result"][0]
         assert isinstance(text, str), f"{name}: element should be a string"
         assert text.strip(), f"{name}: string should not be empty"
         assert "netherlands" in text.lower(), (

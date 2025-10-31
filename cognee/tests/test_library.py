@@ -90,15 +90,17 @@ async def main():
         )
 
     search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION, query_text="What information do you contain?"
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="What information do you contain?",
+        dataset_ids=[pipeline_run_obj.dataset_id],
     )
-    assert "Mark" in search_results[0], (
+    assert "Mark" in search_results[0]["search_result"][0], (
         "Failed to update document, no mention of Mark in search results"
     )
-    assert "Cindy" in search_results[0], (
+    assert "Cindy" in search_results[0]["search_result"][0], (
         "Failed to update document, no mention of Cindy in search results"
     )
-    assert "Artificial intelligence" not in search_results[0], (
+    assert "Artificial intelligence" not in search_results[0]["search_result"][0], (
         "Failed to update document, Artificial intelligence still mentioned in search results"
     )
 

@@ -1,5 +1,7 @@
 import argparse
 import asyncio
+import os
+
 import cognee
 from cognee import SearchType
 from cognee.shared.logging_utils import setup_logging, ERROR
@@ -8,6 +10,9 @@ from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
 
 
 async def main(repo_path, include_docs):
+    # Disable permissions feature for this example
+    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
+
     run_status = False
     async for run_status in run_code_graph_pipeline(repo_path, include_docs=include_docs):
         run_status = run_status

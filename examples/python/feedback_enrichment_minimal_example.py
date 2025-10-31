@@ -67,7 +67,6 @@ async def run_feedback_enrichment_memify(last_n: int = 5):
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
         data=[{}],  # A placeholder to prevent fetching the entire graph
-        dataset="feedback_enrichment_minimal",
     )
 
 
