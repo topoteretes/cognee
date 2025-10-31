@@ -153,7 +153,7 @@ if __name__ == '__main__':
 
 As you can see, the output is generated from the document we previously stored in Cognee:
 
-```
+```bash
   Cognee turns documents into AI memory.
 ```
 
@@ -161,7 +161,7 @@ As you can see, the output is generated from the document we previously stored i
 
 As an alternative, you can get started with these essential commands:
 
-```
+```bash
 cognee-cli add "Cognee turns documents into AI memory."
 
 cognee-cli cognify
@@ -172,7 +172,7 @@ cognee-cli delete --all
 ```
 
 To open the local UI, run:
-```
+```bash
 cognee-cli -ui
 ```
 
