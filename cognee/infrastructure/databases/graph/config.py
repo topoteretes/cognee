@@ -26,6 +26,7 @@ class GraphConfig(BaseSettings):
     - graph_database_username
     - graph_database_password
     - graph_database_port
+    - graph_database_key
     - graph_file_path
     - graph_model
     - graph_topology
@@ -41,6 +42,7 @@ class GraphConfig(BaseSettings):
     graph_database_username: str = ""
     graph_database_password: str = ""
     graph_database_port: int = 123
+    graph_database_key: str = ""
     graph_file_path: str = ""
     graph_filename: str = ""
     graph_model: object = KnowledgeGraph
@@ -90,6 +92,7 @@ class GraphConfig(BaseSettings):
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
             "graph_database_port": self.graph_database_port,
+            "graph_database_key": self.graph_database_key,
             "graph_file_path": self.graph_file_path,
             "graph_model": self.graph_model,
             "graph_topology": self.graph_topology,
@@ -116,6 +119,7 @@ class GraphConfig(BaseSettings):
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
             "graph_database_port": self.graph_database_port,
+            "graph_database_key": self.graph_database_key,
             "graph_file_path": self.graph_file_path,
         }
 
