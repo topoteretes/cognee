@@ -150,7 +150,9 @@ async def main():
 
     # To add a user to a role he must be part of the same tenant/organization
     print("\nOperation started as user_2 to add user_3 to CogneeLab tenant/organization")
-    await add_user_to_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
+    await add_user_to_tenant(
+        user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id, set_active_tenant=True
+    )
 
     print(
         "\nOperation started by user_2, as tenant owner, to add user_3 to Researcher role inside the tenant/organization"

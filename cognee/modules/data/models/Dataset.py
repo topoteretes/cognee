@@ -18,6 +18,7 @@ class Dataset(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
 
     owner_id = Column(UUID, index=True)
+    tenant_id = Column(UUID, index=True, nullable=True)
 
     acls = relationship("ACL", back_populates="dataset", cascade="all, delete-orphan")
 
