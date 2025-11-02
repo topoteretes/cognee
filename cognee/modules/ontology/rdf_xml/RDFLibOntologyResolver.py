@@ -2,7 +2,7 @@ import os
 import difflib
 from cognee.shared.logging_utils import get_logger
 from collections import deque
-from typing import List, Tuple, Dict, Optional, Any, Union
+from typing import List, Tuple, Dict, Optional, Any, Union, IO
 from rdflib import Graph, URIRef, RDF, RDFS, OWL
 
 from cognee.modules.ontology.exceptions import (
@@ -26,44 +26,55 @@ class RDFLibOntologyResolver(BaseOntologyResolver):
 
     def __init__(
         self,
-        ontology_file: Optional[Union[str, List[str]]] = None,
+        ontology_file: Optional[Union[str, List[str], IO]] = None,
         matching_strategy: Optional[MatchingStrategy] = None,
     ) -> None:
         super().__init__(matching_strategy)
         self.ontology_file = ontology_file
         try:
-            files_to_load = []
+            self.graph = None
             if ontology_file is not None:
-                if isinstance(ontology_file, str):
-                    files_to_load = [ontology_file]
-                elif isinstance(ontology_file, list):
-                    files_to_load = ontology_file
+                if hasattr(ontology_file, "read"):
+                    self.graph = Graph()
+                    content = ontology_file.read()
+                    self.graph.parse(data=content, format="xml")
+                    logger.info("Ontology loaded successfully from file object")
                 else:
-                    raise ValueError(
-                        f"ontology_file must be a string, list of strings, or None. Got: {type(ontology_file)}"
-                    )
-
-            if files_to_load:
-                self.graph = Graph()
-                loaded_files = []
-                for file_path in files_to_load:
-                    if os.path.exists(file_path):
-                        self.graph.parse(file_path)
-                        loaded_files.append(file_path)
-                        logger.info("Ontology loaded successfully from file: %s", file_path)
+                    files_to_load = []
+                    if isinstance(ontology_file, str):
+                        files_to_load = [ontology_file]
+                    elif isinstance(ontology_file, list):
+                        files_to_load = ontology_file
                     else:
-                        logger.warning(
-                            "Ontology file '%s' not found. Skipping this file.",
-                            file_path,
+                        raise ValueError(
+                            f"ontology_file must be a string, list of strings, file-like object, or None. Got: {type(ontology_file)}"
                         )
 
-                if not loaded_files:
-                    logger.info(
-                        "No valid ontology files found. No owl ontology will be attached to the graph."
-                    )
-                    self.graph = None
-                else:
-                    logger.info("Total ontology files loaded: %d", len(loaded_files))
+                    if files_to_load:
+                        self.graph = Graph()
+                        loaded_files = []
+                        for file_path in files_to_load:
+                            if os.path.exists(file_path):
+                                self.graph.parse(file_path)
+                                loaded_files.append(file_path)
+                                logger.info("Ontology loaded successfully from file: %s", file_path)
+                            else:
+                                logger.warning(
+                                    "Ontology file '%s' not found. Skipping this file.",
+                                    file_path,
+                                )
+
+                        if not loaded_files:
+                            logger.info(
+                                "No valid ontology files found. No owl ontology will be attached to the graph."
+                            )
+                            self.graph = None
+                        else:
+                            logger.info("Total ontology files loaded: %d", len(loaded_files))
+                    else:
+                        logger.info(
+                            "No ontology file provided. No owl ontology will be attached to the graph."
+                        )
             else:
                 logger.info(
                     "No ontology file provided. No owl ontology will be attached to the graph."
