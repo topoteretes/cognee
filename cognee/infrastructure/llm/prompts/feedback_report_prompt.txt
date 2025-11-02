@@ -1,0 +1,13 @@
+Write a concise, stand-alone paragraph that explains the correct answer to the question below.
+The paragraph should read naturally on its own, providing all necessary context and reasoning
+so the answer is clear and well-supported.
+
+Question: {question}
+Correct answer: {improved_answer}
+Supporting context: {new_context}
+
+Your paragraph should:
+- First sentence clearly states the correct answer as a full sentence
+- Remainder flows from first sentence and provides explanation based on context
+- Use simple, direct language that is easy to follow
+- Use shorter sentences, no long-winded explanations

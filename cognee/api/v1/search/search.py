@@ -1,6 +1,7 @@
 from uuid import UUID
 from typing import Union, Optional, List, Type
 
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.modules.search.types import SearchResult, SearchType, CombinedSearchResult

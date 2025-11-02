@@ -110,6 +110,47 @@ If you'd rather run cognee-mcp in a container, you have two options:
       # For stdio transport (default)
       docker run -e TRANSPORT_MODE=stdio --env-file ./.env --rm -it cognee/cognee-mcp:main
       ```
+      
+      **Installing optional dependencies at runtime:**
+      
+      You can install optional dependencies when running the container by setting the `EXTRAS` environment variable:
+      ```bash
+      # Install a single optional dependency group at runtime
+      docker run \
+        -e TRANSPORT_MODE=http \
+        -e EXTRAS=aws \
+        --env-file ./.env \
+        -p 8000:8000 \
+        --rm -it cognee/cognee-mcp:main
+      
+      # Install multiple optional dependency groups at runtime (comma-separated)
+      docker run \
+        -e TRANSPORT_MODE=sse \
+        -e EXTRAS=aws,postgres,neo4j \
+        --env-file ./.env \
+        -p 8000:8000 \
+        --rm -it cognee/cognee-mcp:main
+      ```
+      
+      **Available optional dependency groups:**
+      - `aws` - S3 storage support
+      - `postgres` / `postgres-binary` - PostgreSQL database support
+      - `neo4j` - Neo4j graph database support
+      - `neptune` - AWS Neptune support
+      - `chromadb` - ChromaDB vector store support
+      - `scraping` - Web scraping capabilities
+      - `distributed` - Modal distributed execution
+      - `langchain` - LangChain integration
+      - `llama-index` - LlamaIndex integration
+      - `anthropic` - Anthropic models
+      - `groq` - Groq models
+      - `mistral` - Mistral models
+      - `ollama` / `huggingface` - Local model support
+      - `docs` - Document processing
+      - `codegraph` - Code analysis
+      - `monitoring` - Sentry & Langfuse monitoring
+      - `redis` - Redis support
+      - And more (see [pyproject.toml](https://github.com/topoteretes/cognee/blob/main/pyproject.toml) for full list)
 2. **Pull from Docker Hub** (no build required):
    ```bash
    # With HTTP transport (recommended for web deployments)
@@ -118,6 +159,17 @@ If you'd rather run cognee-mcp in a container, you have two options:
    docker run -e TRANSPORT_MODE=sse --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
    # With stdio transport (default)
    docker run -e TRANSPORT_MODE=stdio --env-file ./.env --rm -it cognee/cognee-mcp:main
+   ```
+   
+   **With runtime installation of optional dependencies:**
+   ```bash
+   # Install optional dependencies from Docker Hub image
+   docker run \
+     -e TRANSPORT_MODE=http \
+     -e EXTRAS=aws,postgres \
+     --env-file ./.env \
+     -p 8000:8000 \
+     --rm -it cognee/cognee-mcp:main
    ```
 
 ### **Important: Docker vs Direct Usage**

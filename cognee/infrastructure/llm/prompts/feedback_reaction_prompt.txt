@@ -1,0 +1,14 @@
+A question was previously answered, but the answer received negative feedback.
+Please reconsider and improve the response.
+
+Question: {question}
+Context originally used: {context}
+Previous answer: {wrong_answer}
+Feedback on that answer: {negative_feedback}
+
+Task: Provide a better response. The new answer should be short and direct.
+Then explain briefly why this answer is better.
+
+Format your reply as:
+Answer: <improved answer>
+Explanation: <short explanation>

@@ -8,6 +8,7 @@ from cognee.modules.users.models import User
 
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.shared.utils import send_telemetry
+from cognee import __version__ as cognee_version
 
 logger = get_logger()
 
@@ -46,6 +47,7 @@ def get_visualize_router() -> APIRouter:
             additional_properties={
                 "endpoint": "GET /v1/visualize",
                 "dataset_id": str(dataset_id),
+                "cognee_version": cognee_version,
             },
         )
 
