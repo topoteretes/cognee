@@ -3,7 +3,6 @@ from typing import Dict, List
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
-from cognee.modules.engine.utils import generate_edge_id
 from cognee.modules.graph.methods import (
     delete_data_related_edges,
     delete_data_related_nodes,
@@ -32,14 +31,14 @@ async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID) -> None:
     vector_engine = get_vector_engine()
     for affected_collection, affected_nodes in affected_vector_collections.items():
         await vector_engine.delete_data_points(
-            affected_collection, [node.id for node in affected_nodes]
+            affected_collection, [node.slug for node in affected_nodes]
         )
 
     affected_relationships = await get_data_related_edges(dataset_id, data_id)
 
     await vector_engine.delete_data_points(
         "EdgeType_relationship_name",
-        [generate_edge_id(edge.relationship_name) for edge in affected_relationships],
+        [edge.slug for edge in affected_relationships],
     )
 
     await delete_data_related_nodes(data_id)

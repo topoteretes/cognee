@@ -1,4 +1,5 @@
 from uuid import UUID
+from sqlalchemy.orm import aliased
 from sqlalchemy import and_, exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,13 +9,13 @@ from cognee.modules.graph.models import Node
 
 @with_async_session
 async def get_data_related_nodes(dataset_id: UUID, data_id: UUID, session: AsyncSession):
-    NodeAlias = Node.__table__.alias("n2")
+    NodeAlias = aliased(Node)
 
-    subq = select(NodeAlias.c.id).where(
+    subq = select(NodeAlias.id).where(
         and_(
-            NodeAlias.c.slug == Node.slug,
-            NodeAlias.c.dataset_id == dataset_id,
-            NodeAlias.c.data_id != data_id,
+            NodeAlias.slug == Node.slug,
+            NodeAlias.dataset_id == dataset_id,
+            NodeAlias.data_id != data_id,
         )
     )
 

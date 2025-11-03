@@ -50,6 +50,7 @@ def upgrade() -> None:
         op.create_table(
             "edges",
             sa.Column("id", sa.UUID, primary_key=True),
+            sa.Column("slug", sa.UUID, nullable=False),
             sa.Column("user_id", sa.UUID, nullable=False),
             sa.Column("data_id", sa.UUID, index=True),
             sa.Column("dataset_id", sa.UUID, index=True),

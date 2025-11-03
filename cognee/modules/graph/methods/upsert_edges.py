@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Tuple
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
+from cognee.modules.engine.utils import generate_edge_id
 
 from cognee.infrastructure.databases.relational import with_async_session
 from cognee.modules.graph.models.Edge import Edge
@@ -37,6 +38,7 @@ async def upsert_edges(
                         NAMESPACE_OID,
                         str(user_id) + str(dataset_id) + str(edge[0]) + str(edge[2]) + str(edge[1]),
                     ),
+                    "slug": generate_edge_id(edge[2]),
                     "user_id": user_id,
                     "data_id": data_id,
                     "dataset_id": dataset_id,

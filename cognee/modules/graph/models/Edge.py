@@ -18,6 +18,8 @@ class Edge(Base):
 
     id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
 
+    slug: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+
     user_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
     data_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), index=True, nullable=False)
