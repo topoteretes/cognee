@@ -82,16 +82,16 @@ class LocalFileStorage(Storage):
         self.ensure_directory_exists(file_dir_path)
 
         if overwrite or not os.path.exists(full_file_path):
-            with open(
-                full_file_path,
-                mode="w" if isinstance(data, str) else "wb",
-                encoding="utf-8" if isinstance(data, str) else None,
-            ) as file:
-                if hasattr(data, "read"):
-                    data.seek(0)
-                    file.write(data.read())
-                else:
+            if isinstance(data, str):
+                with open(full_file_path, mode="w", encoding="utf-8", newline="\n") as file:
                     file.write(data)
+            else:
+                with open(full_file_path, mode="wb") as file:
+                    if hasattr(data, "read"):
+                        data.seek(0)
+                        file.write(data.read())
+                    else:
+                        file.write(data)
 
                 file.close()
 

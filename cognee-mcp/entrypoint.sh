@@ -4,6 +4,42 @@ set -e  # Exit on error
 echo "Debug mode: $DEBUG"
 echo "Environment: $ENVIRONMENT"
 
+# Install optional dependencies if EXTRAS is set
+if [ -n "$EXTRAS" ]; then
+    echo "Installing optional dependencies: $EXTRAS"
+    
+    # Get the cognee version that's currently installed
+    COGNEE_VERSION=$(uv pip show cognee | grep "Version:" | awk '{print $2}')
+    echo "Current cognee version: $COGNEE_VERSION"
+    
+    # Build the extras list for cognee
+    IFS=',' read -ra EXTRA_ARRAY <<< "$EXTRAS"
+    # Combine base extras from pyproject.toml with requested extras
+    ALL_EXTRAS=""
+    for extra in "${EXTRA_ARRAY[@]}"; do
+        # Trim whitespace
+        extra=$(echo "$extra" | xargs)
+        # Add to extras list if not already present
+        if [[ ! "$ALL_EXTRAS" =~ (^|,)"$extra"(,|$) ]]; then
+            if [ -z "$ALL_EXTRAS" ]; then
+                ALL_EXTRAS="$extra"
+            else
+                ALL_EXTRAS="$ALL_EXTRAS,$extra"
+            fi
+        fi
+    done
+    
+    echo "Installing cognee with extras: $ALL_EXTRAS"
+    echo "Running: uv pip install 'cognee[$ALL_EXTRAS]==$COGNEE_VERSION'"
+    uv pip install "cognee[$ALL_EXTRAS]==$COGNEE_VERSION"
+    
+    # Verify installation
+    echo ""
+    echo "✓ Optional dependencies installation completed"
+else
+    echo "No optional dependencies specified"
+fi
+
 # Set default transport mode if not specified
 TRANSPORT_MODE=${TRANSPORT_MODE:-"stdio"}
 echo "Transport mode: $TRANSPORT_MODE"

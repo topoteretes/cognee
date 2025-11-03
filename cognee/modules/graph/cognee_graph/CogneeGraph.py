@@ -171,8 +171,10 @@ class CogneeGraph(CogneeAbstractGraph):
             embedding_map = {result.payload["text"]: result.score for result in edge_distances}
 
             for edge in self.edges:
-                relationship_type = edge.attributes.get("relationship_type")
-                distance = embedding_map.get(relationship_type, None)
+                edge_key = edge.attributes.get("edge_text") or edge.attributes.get(
+                    "relationship_type"
+                )
+                distance = embedding_map.get(edge_key, None)
                 if distance is not None:
                     edge.attributes["vector_distance"] = distance
 
