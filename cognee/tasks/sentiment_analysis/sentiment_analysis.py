@@ -1,44 +1,59 @@
-"""
-Sentiment Classification Task
------------------------------
-This module performs simple sentiment analysis on text input
-and returns a structured sentiment output.
-"""
-
 from textblob import TextBlob
-import asyncio
+from cognee.shared.logging_utils import get_logger
 
+logger = get_logger(__name__)
 
-async def run_sentiment_analysis(prev_question: str, prev_answer: str, current_question: str, user_id: str):
+def run_sentiment_analysis(
+    prev_question: str,
+    prev_answer: str,
+    current_question: str,
+    user_id: str
+) -> dict[str, str | float]:
     """
-    Analyze sentiment based on the latest user interaction.
-    
+    Analyze sentiment from combined conversation context.
+
     Args:
-        prev_question (str): The previous question asked by the user.
-        prev_answer (str): The system's previous answer.
-        current_question (str): The current user input/question.
-        user_id (str): Identifier of the current user.
-        
+        prev_question (str): Previous question text
+        prev_answer (str): Previous answer text
+        current_question (str): Current question text
+        user_id (str): ID of the user
+
     Returns:
-        dict: {
+        dict[str, str | float]: {
             "user_id": str,
             "sentiment": "positive" | "neutral" | "negative",
             "score": float,
             "context": str
         }
     """
-    # Combine conversation context
+
+    # Validate input
+    if not any([prev_question, prev_answer, current_question]):
+        logger.warning(f"Empty input for sentiment analysis, user_id={user_id}")
+        return {
+            "user_id": user_id,
+            "sentiment": "neutral",
+            "score": 0.0,
+            "context": "",
+        }
+
+    # Combine text
     combined_text = f"{prev_question} {prev_answer} {current_question}".strip()
 
-    # Perform sentiment analysis using TextBlob
-    polarity = TextBlob(combined_text).sentiment.polarity
+    # Perform sentiment analysis safely
+    try:
+        polarity = TextBlob(combined_text).sentiment.polarity
+    except Exception as e:
+        logger.error(f"Sentiment analysis failed for user_id={user_id}: {e}")
+        raise ValueError(f"Failed to analyze sentiment: {e}") from e
 
-    if polarity > 0:
+    # Map score to sentiment label
+    if polarity > 0.1:
         sentiment = "positive"
-    elif polarity == 0:
-        sentiment = "neutral"
-    else:
+    elif polarity < -0.1:
         sentiment = "negative"
+    else:
+        sentiment = "neutral"
 
     result = {
         "user_id": user_id,
@@ -47,18 +62,20 @@ async def run_sentiment_analysis(prev_question: str, prev_answer: str, current_q
         "context": combined_text,
     }
 
+    logger.info(f"Sentiment analysis result for user_id={user_id}: {result}")
     return result
 
 
-# For quick testing without importing
 if __name__ == "__main__":
+    import asyncio
+
     async def _demo():
-        res = await run_sentiment_analysis(
+        result = run_sentiment_analysis(
             prev_question="How are you?",
-            prev_answer="I'm doing great!",
-            current_question="I love this tool!",
-            user_id="demo_user",
+            prev_answer="I'm good, thanks!",
+            current_question="What do you think about the project?",
+            user_id="user_123"
         )
-        print(res)
+        print(result)
 
     asyncio.run(_demo())
