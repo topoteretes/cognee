@@ -1,0 +1,18 @@
+name: Docs Test Suite
+permissions:
+  contents: read
+
+on:
+  release:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUNTIME__LOG_LEVEL: ERROR
+  ENV: 'dev'
+
+jobs:
+
