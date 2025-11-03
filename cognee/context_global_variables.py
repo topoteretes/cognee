@@ -27,13 +27,10 @@ async def set_session_user_context_variable(user):
 def check_multi_user_support():
     graph_db_config = get_graph_context_config()
     vector_db_config = get_vectordb_context_config()
-    if (
+    return (
         graph_db_config["graph_database_provider"] in graph_dbs_with_multi_user_support
         and vector_db_config["vector_db_provider"] in vector_dbs_with_multi_user_support
-    ):
-        return True
-    else:
-        return False
+    )
 
 
 def check_backend_access_control_mode():
