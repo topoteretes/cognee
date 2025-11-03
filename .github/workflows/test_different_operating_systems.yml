@@ -181,6 +181,7 @@ jobs:
   run-soft-deletion-test:
     name: Soft Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
@@ -218,6 +219,7 @@ jobs:
   run-hard-deletion-test:
     name: Hard Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
