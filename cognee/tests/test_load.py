@@ -30,17 +30,10 @@ async def process_and_search(num_of_searches):
 
 
 async def main():
-    data_directory_path = str(
-        pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_load")
-        ).resolve()
-    )
+    data_directory_path = os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_load")
     cognee.config.data_root_directory(data_directory_path)
-    cognee_directory_path = str(
-        pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_load")
-        ).resolve()
-    )
+
+    cognee_directory_path = os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_load")
     cognee.config.system_root_directory(cognee_directory_path)
 
     num_of_pdfs = 10
