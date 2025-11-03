@@ -125,10 +125,18 @@ async def persist_sessions_in_knowledge_graph_pipeline(
     run_in_background: bool = False,
 ):
     await set_session_user_context_variable(user)
-    dataset = await get_authorized_existing_datasets(
-        user=user, datasets=[dataset], permission_type="read"
+    dataset_to_write = await get_authorized_existing_datasets(
+        user=user, datasets=[dataset], permission_type="write"
     )
-    await set_database_global_context_variables(dataset[0].id, dataset[0].owner_id)
+
+    if not dataset_to_write:
+        raise CogneeValidationError(
+            message=f"User does not have write access to dataset: {dataset}", log=False
+        )
+
+    await set_database_global_context_variables(
+        dataset_to_write[0].id, dataset_to_write[0].owner_id
+    )
 
     extraction_tasks = [Task(extract_user_sessions, session_ids=session_ids)]
 
@@ -139,7 +147,7 @@ async def persist_sessions_in_knowledge_graph_pipeline(
     result = await memify(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
-        dataset=dataset[0].id,
+        dataset=dataset_to_write[0].id,
         data=[{}],
         run_in_background=run_in_background,
     )
@@ -194,6 +202,7 @@ async def main():
 
     session_ids_to_persist = ["default_session", "different_session"]
     default_user = await get_default_user()
+
     await persist_sessions_in_knowledge_graph_pipeline(
         user=default_user,
         session_ids=session_ids_to_persist,
