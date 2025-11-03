@@ -22,7 +22,12 @@ class TextChunkerWithOverlap(Chunker):
         self._accumulated_size = 0
         self.chunk_overlap_ratio = chunk_overlap_ratio
         self.chunk_overlap = int(max_chunk_size * chunk_overlap_ratio)
-        self.get_chunk_data = get_chunk_data if get_chunk_data is not None else chunk_by_paragraph
+        if get_chunk_data is not None:
+            self.get_chunk_data = get_chunk_data
+        else:
+            self.get_chunk_data = lambda text: chunk_by_paragraph(
+                text, self.max_chunk_size, batch_paragraphs=True
+            )
 
     def _accumulation_overflows(self, chunk_data):
         """Check if adding chunk_data would exceed max_chunk_size."""
@@ -100,11 +105,7 @@ class TextChunkerWithOverlap(Chunker):
 
     async def read(self):
         async for content_text in self.get_text():
-            for chunk_data in self.get_chunk_data(
-                content_text,
-                self.max_chunk_size,
-                batch_paragraphs=True,
-            ):
+            for chunk_data in self.get_chunk_data(content_text):
                 if not self._accumulation_overflows(chunk_data):
                     self._accumulate_chunk_data(chunk_data)
                     continue

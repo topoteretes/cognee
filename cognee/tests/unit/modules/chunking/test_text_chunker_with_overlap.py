@@ -26,7 +26,7 @@ def make_controlled_chunk_data():
     """Factory for controlled chunk_data generators."""
 
     def _factory(*sentences, chunk_size_per_sentence=10):
-        def _chunk_data(text, max_size, batch_paragraphs=True):
+        def _chunk_data(text):
             return [
                 {
                     "text": sentence,
@@ -40,14 +40,6 @@ def make_controlled_chunk_data():
         return _chunk_data
 
     return _factory
-
-
-async def collect_chunks(chunker):
-    """Consume async generator and return list of chunks."""
-    chunks = []
-    async for chunk in chunker.read():
-        chunks.append(chunk)
-    return chunks
 
 
 @pytest.mark.asyncio
@@ -76,7 +68,7 @@ async def test_half_overlap_preserves_content_across_chunks(
         chunk_overlap_ratio=0.5,
         get_chunk_data=get_chunk_data,
     )
-    chunks = await collect_chunks(chunker)
+    chunks = [chunk async for chunk in chunker.read()]
 
     assert len(chunks) == 3, "Should produce exactly 3 chunks (s1+s2, overlap s2, s3+s4)"
     assert [c.chunk_index for c in chunks] == [0, 1, 2], "Chunk indices should be [0, 1, 2]"
@@ -115,7 +107,7 @@ async def test_zero_overlap_produces_no_duplicate_content(
         chunk_overlap_ratio=0.0,
         get_chunk_data=get_chunk_data,
     )
-    chunks = await collect_chunks(chunker)
+    chunks = [chunk async for chunk in chunker.read()]
 
     assert len(chunks) == 2, "Should produce exactly 2 chunks (s1+s2, s3+s4)"
     assert "one" in chunks[0].text and "two" in chunks[0].text, (
@@ -155,7 +147,7 @@ async def test_small_overlap_ratio_creates_minimal_overlap(
         chunk_overlap_ratio=0.25,
         get_chunk_data=get_chunk_data,
     )
-    chunks = await collect_chunks(chunker)
+    chunks = [chunk async for chunk in chunker.read()]
 
     assert len(chunks) == 2, "Should produce exactly 2 chunks"
     assert [c.chunk_index for c in chunks] == [0, 1], "Chunk indices should be [0, 1]"
@@ -193,7 +185,7 @@ async def test_high_overlap_ratio_creates_significant_overlap(
         chunk_overlap_ratio=0.75,
         get_chunk_data=get_chunk_data,
     )
-    chunks = await collect_chunks(chunker)
+    chunks = [chunk async for chunk in chunker.read()]
 
     assert len(chunks) == 2, "Should produce exactly 2 chunks with 75% overlap"
     assert [c.chunk_index for c in chunks] == [0, 1], "Chunk indices should be [0, 1]"
