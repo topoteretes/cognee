@@ -91,7 +91,7 @@ async def cognify_session(data):
 
         await cognee.add(data, node_set=["user_sessions"])
         logger.debug("Session data added to cognee with node_set: user_sessions")
-
+        # :TODO: This we should discuss, I am not sure cognifying this into a new nodeset is the best idea, we should have some kind of a separation from the main knowledge base (other than nodesets)
         await cognee.cognify()
         logger.info("Session data successfully cognified")
 
