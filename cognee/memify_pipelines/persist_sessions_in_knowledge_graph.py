@@ -84,7 +84,7 @@ async def cognify_session(data):
     """
     try:
         if not data or (isinstance(data, str) and not data.strip()):
-            logger.warning("Empty session data provided to cognify_session, skipping")
+            logger.warning("Empty session data provided to cognify_session task, skipping")
             raise CogneeValidationError(message="Session data cannot be empty", log=False)
 
         logger.info("Processing session data for cognification")
