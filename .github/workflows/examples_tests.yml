@@ -233,7 +233,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./examples/python/custom_pipeline_example.py
+        run: uv run python ./examples/python/run_custom_pipeline_example.py
 
   test-permissions-example:
     name: Run Permissions Example
