@@ -41,11 +41,7 @@ def check_backend_access_control_mode():
     if backend_access_control is None:
         # If backend access control is not defined in environment variables,
         # enable it by default if graph and vector DBs can support it, otherwise disable it
-        multi_user_support = check_multi_user_support()
-        if multi_user_support:
-            return True
-        else:
-            return False
+        return check_multi_user_support()
     elif backend_access_control.lower() == "true":
         # If enabled, ensure that the current graph and vector DBs can support it
         multi_user_support = check_multi_user_support()
