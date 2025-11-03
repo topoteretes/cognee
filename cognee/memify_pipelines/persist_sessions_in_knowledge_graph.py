@@ -8,6 +8,7 @@ from cognee.context_global_variables import (
     set_database_global_context_variables,
     set_session_user_context_variable,
 )
+from cognee.exceptions import CogneeValidationError, CogneeSystemError
 from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
 from cognee.modules.data.methods import get_datasets_by_name, get_authorized_existing_datasets
 from cognee.modules.search.types import SearchType
@@ -67,9 +68,38 @@ async def extract_user_sessions(
 
 
 async def cognify_session(data):
-    # :TODO: This we should discuss, I am not sure cognifying this into a new nodeset is the best idea, we should have some kind of a separation from the main knowledge base (other than nodesets)
-    await cognee.add(data, node_set=["user_sessions"])
-    await cognee.cognify()
+    """
+    Process and cognify session data into the knowledge graph.
+
+    Adds session content to cognee with a dedicated "user_sessions" node set,
+    then triggers the cognify pipeline to extract entities and relationships
+    from the session data.
+
+    Args:
+        data: Session string containing Question, Context, and Answer information.
+
+    Raises:
+        CogneeValidationError: If data is None or empty.
+        CogneeSystemError: If cognee operations fail.
+    """
+    try:
+        if not data or (isinstance(data, str) and not data.strip()):
+            logger.warning("Empty session data provided to cognify_session, skipping")
+            raise CogneeValidationError(message="Session data cannot be empty", log=False)
+
+        logger.info("Processing session data for cognification")
+
+        await cognee.add(data, node_set=["user_sessions"])
+        logger.debug("Session data added to cognee with node_set: user_sessions")
+
+        await cognee.cognify()
+        logger.info("Session data successfully cognified")
+
+    except CogneeValidationError:
+        raise
+    except Exception as e:
+        logger.error(f"Error cognifying session data: {str(e)}")
+        raise CogneeSystemError(message=f"Failed to cognify session data: {str(e)}", log=False)
 
 
 async def persist_sessions_in_knowledge_graph_pipeline(
