@@ -46,9 +46,7 @@ async def extract_user_sessions(
 
         user: User = session_user.get()
         if not user:
-            raise CogneeSystemError(
-                message="No authenticated user found in context", log=False
-            )
+            raise CogneeSystemError(message="No authenticated user found in context", log=False)
 
         user_id = str(user.id)
 
@@ -63,16 +61,12 @@ async def extract_user_sessions(
                 try:
                     qa_data = await cache_engine.get_all_qas(user_id, session_id)
                     if qa_data:
-                        logger.info(
-                            f"Extracted session {session_id} with {len(qa_data)} Q&A pairs"
-                        )
+                        logger.info(f"Extracted session {session_id} with {len(qa_data)} Q&A pairs")
                         session_string = f"Session ID: {session_id}\n\n"
                         for qa_pair in qa_data:
                             question = qa_pair.get("question", "")
                             answer = qa_pair.get("answer", "")
-                            session_string += (
-                                f"Question: {question}\n\nAnswer: {answer}\n\n"
-                            )
+                            session_string += f"Question: {question}\n\nAnswer: {answer}\n\n"
                         yield session_string
                 except Exception as e:
                     logger.warning(f"Failed to extract session {session_id}: {str(e)}")
@@ -86,9 +80,7 @@ async def extract_user_sessions(
         raise
     except Exception as e:
         logger.error(f"Error extracting user sessions: {str(e)}")
-        raise CogneeSystemError(
-            message=f"Failed to extract user sessions: {str(e)}", log=False
-        )
+        raise CogneeSystemError(message=f"Failed to extract user sessions: {str(e)}", log=False)
 
 
 async def cognify_session(data):
