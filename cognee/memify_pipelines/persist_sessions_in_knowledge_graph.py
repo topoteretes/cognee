@@ -59,6 +59,7 @@ async def extract_user_sessions(
         raise
 
 async def cognify_session(data):
+    # :TODO: This we should discuss, I am not sure cognifying this into a new nodeset is the best idea, we should have some kind of a separation from the main knowledge base (other than nodesets)
     await cognee.add(data, node_set=['user_sessions'])
     await cognee.cognify()
 
