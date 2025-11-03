@@ -267,8 +267,6 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_edge_ingestion.py
 
-
-
   run_concurrent_subprocess_access_test:
     name: Concurrent Subprocess access test
     runs-on: ubuntu-latest
@@ -450,7 +448,6 @@ jobs:
           DB_PASSWORD: cognee
         run: uv run python ./cognee/tests/test_conversation_history.py
 
-
   test-load:
     name: Test Load
     runs-on: ubuntu-22.04
@@ -462,6 +459,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
+          extra-dependencies: "aws"
 
       - name: Set File Descriptor Limit
         run: sudo prlimit --pid $$ --nofile=4096:4096
