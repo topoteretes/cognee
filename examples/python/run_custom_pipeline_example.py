@@ -1,7 +1,7 @@
 import asyncio
 import cognee
 from cognee.modules.engine.operations.setup import setup
-from cognee.modules.users.methods import create_default_user, get_default_user
+from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import setup_logging, INFO
 from cognee.modules.pipelines import Task
 from cognee.api.v1.search import SearchType
@@ -46,7 +46,7 @@ async def main():
         ),
     ]
     # Forward tasks to custom pipeline along with data and user information
-    await cognee.custom_pipeline(
+    await cognee.run_custom_pipeline(
         tasks=add_tasks, data=text, user=user, dataset="main_dataset", pipeline_name="add_pipeline"
     )
     print("Text added successfully.\n")
@@ -56,7 +56,7 @@ async def main():
 
     cognify_tasks = await get_default_tasks(user=user)
     print("Recreating existing cognify pipeline in custom pipeline to create knowledge graph...\n")
-    await cognee.custom_pipeline(
+    await cognee.run_custom_pipeline(
         tasks=cognify_tasks, user=user, dataset="main_dataset", pipeline_name="cognify_pipeline"
     )
     print("Cognify process complete.\n")

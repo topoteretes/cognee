@@ -11,7 +11,7 @@ from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline
 logger = get_logger()
 
 
-async def custom_pipeline(
+async def run_custom_pipeline(
     tasks: Union[List[Task], List[str]] = None,
     data: Any = None,
     dataset: Union[str, UUID] = "main_dataset",
