@@ -41,63 +41,79 @@ async def main(mock_create_structured_output: AsyncMock):
     assert not await vector_engine.has_collection("TextSummary_text")
     assert not await vector_engine.has_collection("TextDocument_text")
 
-    mock_create_structured_output.side_effect = [
-        "",  # For LLM connection test
-        KnowledgeGraph(
-            nodes=[
-                Node(id="John", name="John", type="Person", description="John is a person"),
-                Node(
-                    id="Apple",
-                    name="Apple",
-                    type="Company",
-                    description="Apple is a company",
-                ),
-                Node(
-                    id="Food for Hungry",
-                    name="Food for Hungry",
-                    type="Non-profit organization",
-                    description="Food for Hungry is a non-profit organization",
-                ),
-            ],
-            edges=[
-                Edge(source_node_id="John", target_node_id="Apple", relationship_name="works_for"),
-                Edge(
-                    source_node_id="John",
-                    target_node_id="Food for Hungry",
-                    relationship_name="works_for",
-                ),
-            ],
-        ),
-        KnowledgeGraph(
-            nodes=[
-                Node(id="Marie", name="Marie", type="Person", description="Marie is a person"),
-                Node(
-                    id="Apple",
-                    name="Apple",
-                    type="Company",
-                    description="Apple is a company",
-                ),
-                Node(
-                    id="MacOS",
-                    name="MacOS",
-                    type="Product",
-                    description="MacOS is Apple's operating system",
-                ),
-            ],
-            edges=[
-                Edge(
-                    source_node_id="Marie",
-                    target_node_id="Apple",
-                    relationship_name="works_for",
-                ),
-                Edge(source_node_id="Marie", target_node_id="MacOS", relationship_name="works_on"),
-            ],
-        ),
-        SummarizedContent(summary="Summary of John's work.", description="Summary of John's work."),
-        SummarizedContent(
-            summary="Summary of Marie's work.", description="Summary of Marie's work."
-        ),
-    ]
+    def mock_llm_output(text_input: str, system_prompt: str, response_model):
+        if text_input == "test":  # LLM connection test
+            return "test"
+
+        if "John" in text_input and response_model == SummarizedContent:
+            return SummarizedContent(
+                summary="Summary of John's work.", description="Summary of John's work."
+            )
+
+        if "Marie" in text_input and response_model == SummarizedContent:
+            return SummarizedContent(
+                summary="Summary of Marie's work.", description="Summary of Marie's work."
+            )
+
+        if "Marie" in text_input and response_model == KnowledgeGraph:
+            return KnowledgeGraph(
+                nodes=[
+                    Node(id="Marie", name="Marie", type="Person", description="Marie is a person"),
+                    Node(
+                        id="Apple",
+                        name="Apple",
+                        type="Company",
+                        description="Apple is a company",
+                    ),
+                    Node(
+                        id="MacOS",
+                        name="MacOS",
+                        type="Product",
+                        description="MacOS is Apple's operating system",
+                    ),
+                ],
+                edges=[
+                    Edge(
+                        source_node_id="Marie",
+                        target_node_id="Apple",
+                        relationship_name="works_for",
+                    ),
+                    Edge(
+                        source_node_id="Marie", target_node_id="MacOS", relationship_name="works_on"
+                    ),
+                ],
+            )
+
+        if "John" in text_input and response_model == KnowledgeGraph:
+            return KnowledgeGraph(
+                nodes=[
+                    Node(id="John", name="John", type="Person", description="John is a person"),
+                    Node(
+                        id="Apple",
+                        name="Apple",
+                        type="Company",
+                        description="Apple is a company",
+                    ),
+                    Node(
+                        id="Food for Hungry",
+                        name="Food for Hungry",
+                        type="Non-profit organization",
+                        description="Food for Hungry is a non-profit organization",
+                    ),
+                ],
+                edges=[
+                    Edge(
+                        source_node_id="John", target_node_id="Apple", relationship_name="works_for"
+                    ),
+                    Edge(
+                        source_node_id="John",
+                        target_node_id="Food for Hungry",
+                        relationship_name="works_for",
+                    ),
+                ],
+            )
+
+    mock_create_structured_output.side_effect = mock_llm_output
 
     add_john_result = await cognee.add(
         "John works for Apple. He is also affiliated with a non-profit organization called 'Food for Hungry'"
