@@ -147,9 +147,9 @@ async def main():
             f"{name}: expected single-element list, got {len(search_results)}"
         )
 
-        from cognee.context_global_variables import check_backend_access_control_mode
+        from cognee.context_global_variables import backend_access_control_enabled
 
-        if check_backend_access_control_mode():
+        if backend_access_control_enabled():
             text = search_results[0]["search_result"][0]
         else:
             text = search_results[0]
