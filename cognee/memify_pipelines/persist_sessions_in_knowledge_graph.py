@@ -1,4 +1,3 @@
-import asyncio
 from typing import Optional, List
 
 import cognee
@@ -10,9 +9,7 @@ from cognee.context_global_variables import (
 )
 from cognee.exceptions import CogneeValidationError, CogneeSystemError
 from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
-from cognee.modules.data.methods import get_datasets_by_name, get_authorized_existing_datasets
-from cognee.modules.search.types import SearchType
-from cognee.modules.users.methods import get_default_user
+from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
@@ -53,7 +50,8 @@ async def extract_user_sessions(
         cache_engine = get_cache_engine()
         if cache_engine is None:
             raise CogneeSystemError(
-                message="Cache engine not available for session extraction", log=False
+                message="Cache engine not available for session extraction, please enable caching in order to have sessions to save",
+                log=False,
             )
 
         if session_ids:
@@ -107,7 +105,6 @@ async def cognify_session(data):
 
         await cognee.add(data, node_set=["user_sessions"])
         logger.debug("Session data added to cognee with node_set: user_sessions")
-        # :TODO: This we should discuss, I am not sure cognifying this into a new nodeset is the best idea, we should have some kind of a separation from the main knowledge base (other than nodesets)
         await cognee.cognify()
         logger.info("Session data successfully cognified")
 
@@ -154,65 +151,3 @@ async def persist_sessions_in_knowledge_graph_pipeline(
 
     logger.info("Session persistence pipeline completed")
     return result
-
-
-async def main():
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
-    text_1 = "Cognee is a solution that can build knowledge graph from text, creating an AI memory system"
-    text_2 = "Apple is a company which produces Iphone, Macbook and Airpods"
-    text_3 = "Germany is a country located next to the Netherlands"
-
-    await cognee.add([text_1, text_2, text_3])
-    await cognee.cognify()
-
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="What can I use to create a knowledge graph?",
-    )
-    print(search_results)
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION, query_text="You sure about that?"
-    )
-    print(search_results)
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION, query_text="This is awesome!"
-    )
-    print(search_results)
-
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="Where is Germany?",
-        session_id="different_session",
-    )
-    print(search_results)
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="Right to which country again?",
-        session_id="different_session",
-    )
-    print(search_results)
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="So you remember everything I asked from you?",
-        session_id="different_session",
-    )
-    print(search_results)
-
-    session_ids_to_persist = ["default_session", "different_session"]
-    default_user = await get_default_user()
-
-    await persist_sessions_in_knowledge_graph_pipeline(
-        user=default_user,
-        session_ids=session_ids_to_persist,
-    )
-
-
-if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(main())
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
