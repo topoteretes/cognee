@@ -219,7 +219,7 @@ class TestGraphCompletionCoTRetriever:
         assert isinstance(structured_answer, list), (
             f"Expected list, got {type(structured_answer).__name__}"
         )
-        assert all(isinstance(item, TestAnswer) for item in string_answer), (
+        assert all(isinstance(item, TestAnswer) for item in structured_answer), (
             f"Expected TestAnswer, got {type(structured_answer).__name__}"
         )
 
