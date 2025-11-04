@@ -16,18 +16,18 @@ from cognee.modules.users.exceptions import (
 
 
 async def add_user_to_tenant(
-    user_id: UUID, tenant_id: UUID, owner_id: UUID, set_active_tenant: Optional[bool] = True
+    user_id: UUID, tenant_id: UUID, owner_id: UUID, set_as_active_tenant: Optional[bool] = True
 ):
     """
         Add a user with the given id to the tenant with the given id.
         This can only be successful if the request owner with the given id is the tenant owner.
 
-        If set_active_tenant is true it will automatically set the users active tenant to provided tenant.
+        If set_as_active_tenant is true it will automatically set the users active tenant to provided tenant.
     Args:
         user_id: Id of the user.
         tenant_id: Id of the tenant.
         owner_id: Id of the request owner.
-        set_active_tenant: If set_active_tenant is true it will automatically set the users active tenant to provided tenant.
+        set_as_active_tenant: If set_as_active_tenant is true it will automatically set the users active tenant to provided tenant.
 
     Returns:
         None
@@ -48,7 +48,7 @@ async def add_user_to_tenant(
                 message="Only tenant owner can add other users to organization."
             )
 
-        if set_active_tenant:
+        if set_as_active_tenant:
             user.tenant_id = tenant_id
             await session.merge(user)
             await session.commit()

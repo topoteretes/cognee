@@ -52,7 +52,7 @@ async def select_tenant(user_id: UUID, tenant_id: Union[UUID, None]):
         try:
             result = result.scalar_one()
         except sqlalchemy.exc.NoResultFound as e:
-            raise TenantNotFoundError("User Tenant relationship not found.") from e
+            raise TenantNotFoundError("User is not part of the tenant.") from e
 
         if result:
             # If user is part of tenant update current tenant of user
