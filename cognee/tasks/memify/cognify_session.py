@@ -28,7 +28,7 @@ async def cognify_session(data):
 
         logger.info("Processing session data for cognification")
 
-        await cognee.add(data, node_set=["user_sessions"])
+        await cognee.add(data, node_set=["user_sessions_from_cache"])
         logger.debug("Session data added to cognee with node_set: user_sessions")
         await cognee.cognify()
         logger.info("Session data successfully cognified")
