@@ -257,6 +257,18 @@ async def main():
         f"Number of DocumentChunk ndoes in the graph is incorrect, found {type_counts.get('DocumentChunk', 0)} but there should be exactly 4 (2 original documents, 2 sessions)."
     )
 
+    from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
+
+    vector_engine = get_vector_engine()
+    collection_size = await vector_engine.search(
+        collection_name="DocumentChunk_text",
+        query_text="test",
+        limit=1000,
+    )
+    assert len(collection_size) == 4, (
+        f"DocumentChunk_text collection should have exactly 4 embeddings, found {len(collection_size)}"
+    )
+
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
