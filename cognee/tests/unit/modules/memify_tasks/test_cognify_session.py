@@ -5,27 +5,19 @@ from cognee.tasks.memify.cognify_session import cognify_session
 from cognee.exceptions import CogneeValidationError, CogneeSystemError
 
 
-@pytest.fixture
-def mock_cognee():
-    """Create a mock cognee module."""
-    cognee_mock = AsyncMock()
-    cognee_mock.add = AsyncMock()
-    cognee_mock.cognify = AsyncMock()
-    return cognee_mock
-
-
 @pytest.mark.asyncio
-async def test_cognify_session_success(mock_cognee):
+async def test_cognify_session_success():
     """Test successful cognification of session data."""
     session_data = (
         "Session ID: test_session\n\nQuestion: What is AI?\n\nAnswer: AI is artificial intelligence"
     )
 
-    with patch("cognee.tasks.memify.cognify_session.cognee", mock_cognee):
+    with patch("cognee.add", new_callable=AsyncMock) as mock_add, \
+         patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify:
         await cognify_session(session_data)
 
-        mock_cognee.add.assert_called_once_with(session_data, node_set=["user_sessions_from_cache"])
-        mock_cognee.cognify.assert_called_once()
+        mock_add.assert_called_once_with(session_data, node_set=["user_sessions_from_cache"])
+        mock_cognify.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -56,12 +48,14 @@ async def test_cognify_session_none_data():
 
 
 @pytest.mark.asyncio
-async def test_cognify_session_add_failure(mock_cognee):
+async def test_cognify_session_add_failure():
     """Test cognification handles cognee.add failure."""
     session_data = "Session ID: test\n\nQuestion: test?"
-    mock_cognee.add.side_effect = Exception("Add operation failed")
 
-    with patch("cognee.tasks.memify.cognify_session.cognee", mock_cognee):
+    with patch("cognee.add", new_callable=AsyncMock) as mock_add, \
+         patch("cognee.cognify", new_callable=AsyncMock):
+        mock_add.side_effect = Exception("Add operation failed")
+
         with pytest.raises(CogneeSystemError) as exc_info:
             await cognify_session(session_data)
 
@@ -70,12 +64,14 @@ async def test_cognify_session_add_failure(mock_cognee):
 
 
 @pytest.mark.asyncio
-async def test_cognify_session_cognify_failure(mock_cognee):
+async def test_cognify_session_cognify_failure():
     """Test cognification handles cognify failure."""
     session_data = "Session ID: test\n\nQuestion: test?"
-    mock_cognee.cognify.side_effect = Exception("Cognify operation failed")
 
-    with patch("cognee.tasks.memify.cognify_session.cognee", mock_cognee):
+    with patch("cognee.add", new_callable=AsyncMock), \
+         patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify:
+        mock_cognify.side_effect = Exception("Cognify operation failed")
+
         with pytest.raises(CogneeSystemError) as exc_info:
             await cognify_session(session_data)
 
@@ -84,23 +80,20 @@ async def test_cognify_session_cognify_failure(mock_cognee):
 
 
 @pytest.mark.asyncio
-async def test_cognify_session_re_raises_validation_error(mock_cognee):
+async def test_cognify_session_re_raises_validation_error():
     """Test that CogneeValidationError is re-raised as-is."""
     with pytest.raises(CogneeValidationError):
         await cognify_session("")
 
-    # Verify add and cognify were not called
-    mock_cognee.add.assert_not_called()
-    mock_cognee.cognify.assert_not_called()
-
 
 @pytest.mark.asyncio
-async def test_cognify_session_with_special_characters(mock_cognee):
+async def test_cognify_session_with_special_characters():
     """Test cognification with special characters."""
     session_data = "Session: test™ © Question: What's special? Answer: Cognee is special!"
 
-    with patch("cognee.tasks.memify.cognify_session.cognee", mock_cognee):
+    with patch("cognee.add", new_callable=AsyncMock) as mock_add, \
+         patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify:
         await cognify_session(session_data)
 
-        mock_cognee.add.assert_called_once_with(session_data, node_set=["user_sessions_from_cache"])
-        mock_cognee.cognify.assert_called_once()
+        mock_add.assert_called_once_with(session_data, node_set=["user_sessions_from_cache"])
+        mock_cognify.assert_called_once()
