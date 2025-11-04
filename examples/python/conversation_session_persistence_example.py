@@ -18,10 +18,9 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
 
     text_1 = "Cognee is a solution that can build knowledge graph from text, creating an AI memory system"
-    text_2 = "Apple is a company that produces Iphone, Macbook and Airpods"
-    text_3 = "Germany is a country located next to the Netherlands"
+    text_2 = "Germany is a country located next to the Netherlands"
 
-    await cognee.add([text_1, text_2, text_3])
+    await cognee.add([text_1, text_2])
     await cognee.cognify()
 
     question = "What can I use to create a knowledge graph?"
