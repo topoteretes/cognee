@@ -7,7 +7,7 @@ from cognee.exceptions import CogneeSystemError
 from cognee.modules.users.models import User
 
 # Get the actual module object (not the function) for patching
-extract_user_sessions_module = sys.modules['cognee.tasks.memify.extract_user_sessions']
+extract_user_sessions_module = sys.modules["cognee.tasks.memify.extract_user_sessions"]
 
 
 @pytest.fixture
@@ -43,8 +43,12 @@ async def test_extract_user_sessions_success(mock_user, mock_qa_data):
     mock_cache_engine = AsyncMock()
     mock_cache_engine.get_all_qas.return_value = mock_qa_data
 
-    with patch.object(extract_user_sessions_module, "session_user") as mock_session_user, \
-         patch.object(extract_user_sessions_module, "get_cache_engine", return_value=mock_cache_engine):
+    with (
+        patch.object(extract_user_sessions_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_user_sessions_module, "get_cache_engine", return_value=mock_cache_engine
+        ),
+    ):
         mock_session_user.get.return_value = mock_user
 
         sessions = []
@@ -65,8 +69,12 @@ async def test_extract_user_sessions_multiple_sessions(mock_user, mock_qa_data):
     mock_cache_engine = AsyncMock()
     mock_cache_engine.get_all_qas.return_value = mock_qa_data
 
-    with patch.object(extract_user_sessions_module, "session_user") as mock_session_user, \
-         patch.object(extract_user_sessions_module, "get_cache_engine", return_value=mock_cache_engine):
+    with (
+        patch.object(extract_user_sessions_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_user_sessions_module, "get_cache_engine", return_value=mock_cache_engine
+        ),
+    ):
         mock_session_user.get.return_value = mock_user
 
         sessions = []
@@ -83,8 +91,12 @@ async def test_extract_user_sessions_no_data(mock_user, mock_qa_data):
     mock_cache_engine = AsyncMock()
     mock_cache_engine.get_all_qas.return_value = mock_qa_data
 
-    with patch.object(extract_user_sessions_module, "session_user") as mock_session_user, \
-         patch.object(extract_user_sessions_module, "get_cache_engine", return_value=mock_cache_engine):
+    with (
+        patch.object(extract_user_sessions_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_user_sessions_module, "get_cache_engine", return_value=mock_cache_engine
+        ),
+    ):
         mock_session_user.get.return_value = mock_user
 
         sessions = []
@@ -99,8 +111,12 @@ async def test_extract_user_sessions_no_session_ids(mock_user):
     """Test extraction handles no session IDs provided."""
     mock_cache_engine = AsyncMock()
 
-    with patch.object(extract_user_sessions_module, "session_user") as mock_session_user, \
-         patch.object(extract_user_sessions_module, "get_cache_engine", return_value=mock_cache_engine):
+    with (
+        patch.object(extract_user_sessions_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_user_sessions_module, "get_cache_engine", return_value=mock_cache_engine
+        ),
+    ):
         mock_session_user.get.return_value = mock_user
 
         sessions = []
@@ -117,8 +133,12 @@ async def test_extract_user_sessions_empty_qa_data(mock_user):
     mock_cache_engine = AsyncMock()
     mock_cache_engine.get_all_qas.return_value = []
 
-    with patch.object(extract_user_sessions_module, "session_user") as mock_session_user, \
-         patch.object(extract_user_sessions_module, "get_cache_engine", return_value=mock_cache_engine):
+    with (
+        patch.object(extract_user_sessions_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_user_sessions_module, "get_cache_engine", return_value=mock_cache_engine
+        ),
+    ):
         mock_session_user.get.return_value = mock_user
 
         sessions = []
@@ -138,8 +158,12 @@ async def test_extract_user_sessions_cache_error_handling(mock_user, mock_qa_dat
         mock_qa_data,
     ]
 
-    with patch.object(extract_user_sessions_module, "session_user") as mock_session_user, \
-         patch.object(extract_user_sessions_module, "get_cache_engine", return_value=mock_cache_engine):
+    with (
+        patch.object(extract_user_sessions_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_user_sessions_module, "get_cache_engine", return_value=mock_cache_engine
+        ),
+    ):
         mock_session_user.get.return_value = mock_user
 
         sessions = []

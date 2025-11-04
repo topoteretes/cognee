@@ -12,8 +12,10 @@ async def test_cognify_session_success():
         "Session ID: test_session\n\nQuestion: What is AI?\n\nAnswer: AI is artificial intelligence"
     )
 
-    with patch("cognee.add", new_callable=AsyncMock) as mock_add, \
-         patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify:
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as mock_add,
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+    ):
         await cognify_session(session_data)
 
         mock_add.assert_called_once_with(session_data, node_set=["user_sessions_from_cache"])
@@ -52,8 +54,10 @@ async def test_cognify_session_add_failure():
     """Test cognification handles cognee.add failure."""
     session_data = "Session ID: test\n\nQuestion: test?"
 
-    with patch("cognee.add", new_callable=AsyncMock) as mock_add, \
-         patch("cognee.cognify", new_callable=AsyncMock):
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as mock_add,
+        patch("cognee.cognify", new_callable=AsyncMock),
+    ):
         mock_add.side_effect = Exception("Add operation failed")
 
         with pytest.raises(CogneeSystemError) as exc_info:
@@ -68,8 +72,10 @@ async def test_cognify_session_cognify_failure():
     """Test cognification handles cognify failure."""
     session_data = "Session ID: test\n\nQuestion: test?"
 
-    with patch("cognee.add", new_callable=AsyncMock), \
-         patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify:
+    with (
+        patch("cognee.add", new_callable=AsyncMock),
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+    ):
         mock_cognify.side_effect = Exception("Cognify operation failed")
 
         with pytest.raises(CogneeSystemError) as exc_info:
@@ -91,8 +97,10 @@ async def test_cognify_session_with_special_characters():
     """Test cognification with special characters."""
     session_data = "Session: test™ © Question: What's special? Answer: Cognee is special!"
 
-    with patch("cognee.add", new_callable=AsyncMock) as mock_add, \
-         patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify:
+    with (
+        patch("cognee.add", new_callable=AsyncMock) as mock_add,
+        patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
+    ):
         await cognify_session(session_data)
 
         mock_add.assert_called_once_with(session_data, node_set=["user_sessions_from_cache"])
