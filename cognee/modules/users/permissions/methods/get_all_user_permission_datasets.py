@@ -26,13 +26,16 @@ async def get_all_user_permission_datasets(user: User, permission_type: str) -> 
     tenants = await user.awaitable_attrs.tenants
 
     for tenant in tenants:
-        # Get all datasets all tenant members have access to
-        datasets.extend(await get_principal_datasets(tenant, permission_type))
+        # If tenant is the user's selected tenant add datasets that users roles in the tenant and the tenant itself
+        # have access for
+        if tenant.id == user.tenant_id:
+            # Get all datasets all tenant members have access to
+            datasets.extend(await get_principal_datasets(tenant, permission_type))
 
-        # Get all datasets accessible by roles user is a part of
-        roles = await user.awaitable_attrs.roles
-        for role in roles:
-            datasets.extend(await get_principal_datasets(role, permission_type))
+            # Get all datasets accessible by roles user is a part of
+            roles = await user.awaitable_attrs.roles
+            for role in roles:
+                datasets.extend(await get_principal_datasets(role, permission_type))
 
     # Deduplicate datasets with same ID
     unique = {}
