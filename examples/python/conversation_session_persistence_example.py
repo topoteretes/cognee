@@ -29,7 +29,7 @@ async def main():
         query_type=SearchType.GRAPH_COMPLETION,
         query_text=question,
     )
-    print(f"\nSession ID: default_session")
+    print("\nSession ID: default_session")
     print(f"Question: {question}")
     print(f"Answer: {search_results}\n")
 
@@ -37,7 +37,7 @@ async def main():
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION, query_text=question
     )
-    print(f"\nSession ID: default_session")
+    print("\nSession ID: default_session")
     print(f"Question: {question}")
     print(f"Answer: {search_results}\n")
 
@@ -45,7 +45,7 @@ async def main():
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION, query_text=question
     )
-    print(f"\nSession ID: default_session")
+    print("\nSession ID: default_session")
     print(f"Question: {question}")
     print(f"Answer: {search_results}\n")
 
@@ -55,7 +55,7 @@ async def main():
         query_text=question,
         session_id="different_session",
     )
-    print(f"\nSession ID: different_session")
+    print("\nSession ID: different_session")
     print(f"Question: {question}")
     print(f"Answer: {search_results}\n")
 
@@ -65,7 +65,7 @@ async def main():
         query_text=question,
         session_id="different_session",
     )
-    print(f"\nSession ID: different_session")
+    print("\nSession ID: different_session")
     print(f"Question: {question}")
     print(f"Answer: {search_results}\n")
 
@@ -75,7 +75,7 @@ async def main():
         query_text=question,
         session_id="different_session",
     )
-    print(f"\nSession ID: different_session")
+    print("\nSession ID: different_session")
     print(f"Question: {question}")
     print(f"Answer: {search_results}\n")
 
