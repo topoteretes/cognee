@@ -206,16 +206,22 @@ class TestGraphCompletionCoTRetriever:
         retriever = GraphCompletionCotRetriever()
 
         # Test with string response model (default)
-        string_answer = await retriever.get_structured_completion("Who works at Figma?")
-        assert isinstance(string_answer, str), f"Expected str, got {type(string_answer).__name__}"
-        assert string_answer.strip(), "Answer should not be empty"
+        string_answer = await retriever.get_completion("Who works at Figma?")
+        assert isinstance(string_answer, list), f"Expected str, got {type(string_answer).__name__}"
+        assert all(isinstance(item, str) and item.strip() for item in string_answer), (
+            "Answer should not be empty"
+        )
 
         # Test with structured response model
-        structured_answer = await retriever.get_structured_completion(
+        structured_answer = await retriever.get_completion(
             "Who works at Figma?", response_model=TestAnswer
         )
-        assert isinstance(structured_answer, TestAnswer), (
+        assert isinstance(structured_answer, list), (
+            f"Expected list, got {type(structured_answer).__name__}"
+        )
+        assert all(isinstance(item, TestAnswer) for item in string_answer), (
             f"Expected TestAnswer, got {type(structured_answer).__name__}"
         )
-        assert structured_answer.answer.strip(), "Answer field should not be empty"
-        assert structured_answer.explanation.strip(), "Explanation field should not be empty"
+
+        assert structured_answer[0].answer.strip(), "Answer field should not be empty"
+        assert structured_answer[0].explanation.strip(), "Explanation field should not be empty"

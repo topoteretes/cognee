@@ -146,7 +146,11 @@ class TemporalRetriever(GraphCompletionRetriever):
         return self.descriptions_to_string(top_k_events)
 
     async def get_completion(
-        self, query: str, context: Optional[str] = None, session_id: Optional[str] = None
+        self,
+        query: str,
+        context: Optional[str] = None,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
     ) -> List[str]:
         """
         Generates a response using the query and optional context.
@@ -159,6 +163,7 @@ class TemporalRetriever(GraphCompletionRetriever):
               retrieved based on the query. (default None)
             - session_id (Optional[str]): Optional session identifier for caching. If None,
               defaults to 'default_session'. (default None)
+            - response_model (Type): The Pydantic model type for structured output. (default str)
 
         Returns:
         --------
@@ -186,6 +191,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                         user_prompt_path=self.user_prompt_path,
                         system_prompt_path=self.system_prompt_path,
                         conversation_history=conversation_history,
+                        response_model=response_model,
                     ),
                 )
             else:
@@ -194,6 +200,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                     context=context,
                     user_prompt_path=self.user_prompt_path,
                     system_prompt_path=self.system_prompt_path,
+                    response_model=response_model,
                 )
 
             if session_save:
