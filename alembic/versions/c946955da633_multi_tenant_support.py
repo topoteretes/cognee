@@ -79,18 +79,11 @@ def upgrade() -> None:
     if not tenant_id_column:
         op.add_column("datasets", sa.Column("tenant_id", sa.UUID(), nullable=True))
 
-        # Build correlated subquery: select users.tenant_id for each dataset.owner_id
+        # Build subquery, select users.tenant_id for each dataset.owner_id
         tenant_id_from_dataset_owner = (
             sa.select(user.c.tenant_id).where(user.c.id == dataset.c.owner_id).scalar_subquery()
         )
 
-        # Update statement; restrict to rows where tenant_id is currently NULL
-        # update_stmt = (
-        #     sa.update(dataset)
-        #     .values(tenant_id=subq)
-        # )
-
-        user = _define_user_table()
         if op.get_context().dialect.name == "sqlite":
             # If column doesn't exist create new original_extension column and update from values of extension column
             with op.batch_alter_table("datasets") as batch_op:
