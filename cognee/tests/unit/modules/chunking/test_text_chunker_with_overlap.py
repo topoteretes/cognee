@@ -1,10 +1,13 @@
 """Unit tests for TextChunkerWithOverlap overlap behavior."""
 
+import sys
 import pytest
 from uuid import uuid4
+from unittest.mock import patch
 
 from cognee.modules.chunking.text_chunker_with_overlap import TextChunkerWithOverlap
 from cognee.modules.data.processing.document_types import Document
+from cognee.tasks.chunks import chunk_by_paragraph
 
 
 @pytest.fixture
@@ -194,4 +197,93 @@ async def test_high_overlap_ratio_creates_significant_overlap(
     )
     assert "blue" in chunks[1].text and "green" in chunks[1].text and "yellow" in chunks[1].text, (
         "Chunk 1 should contain s2, s3, s4 (75% overlap)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_paragraph_chunking_with_overlap(make_text_generator):
+    """Test that chunk_by_paragraph integration produces 25% overlap between chunks."""
+
+    def mock_get_embedding_engine():
+        class MockEngine:
+            tokenizer = None
+
+        return MockEngine()
+
+    chunk_by_sentence_module = sys.modules.get("cognee.tasks.chunks.chunk_by_sentence")
+
+    max_chunk_size = 20
+    overlap_ratio = 0.25  # 5 token overlap
+    paragraph_max_size = int(0.5 * overlap_ratio * max_chunk_size)  # = 2
+
+    text = (
+        "A0 A1. A2 A3. A4 A5. A6 A7. A8 A9. "  # 10 tokens (0-9)
+        "B0 B1. B2 B3. B4 B5. B6 B7. B8 B9. "  # 10 tokens (10-19)
+        "C0 C1. C2 C3. C4 C5. C6 C7. C8 C9. "  # 10 tokens (20-29)
+        "D0 D1. D2 D3. D4 D5. D6 D7. D8 D9. "  # 10 tokens (30-39)
+        "E0 E1. E2 E3. E4 E5. E6 E7. E8 E9."  # 10 tokens (40-49)
+    )
+
+    document = Document(
+        id=uuid4(),
+        name="test_document",
+        raw_data_location="/test/path",
+        external_metadata=None,
+        mime_type="text/plain",
+    )
+
+    get_text = make_text_generator(text)
+
+    def get_chunk_data(text_input):
+        return chunk_by_paragraph(
+            text_input, max_chunk_size=paragraph_max_size, batch_paragraphs=True
+        )
+
+    with patch.object(
+        chunk_by_sentence_module, "get_embedding_engine", side_effect=mock_get_embedding_engine
+    ):
+        chunker = TextChunkerWithOverlap(
+            document,
+            get_text,
+            max_chunk_size=max_chunk_size,
+            chunk_overlap_ratio=overlap_ratio,
+            get_chunk_data=get_chunk_data,
+        )
+        chunks = [chunk async for chunk in chunker.read()]
+
+    assert len(chunks) == 3, f"Should produce exactly 3 chunks, got {len(chunks)}"
+
+    assert chunks[0].chunk_index == 0, "First chunk should have index 0"
+    assert chunks[1].chunk_index == 1, "Second chunk should have index 1"
+    assert chunks[2].chunk_index == 2, "Third chunk should have index 2"
+
+    assert "A0" in chunks[0].text, "Chunk 0 should start with A0"
+    assert "A9" in chunks[0].text, "Chunk 0 should contain A9"
+    assert "B0" in chunks[0].text, "Chunk 0 should contain B0"
+    assert "B9" in chunks[0].text, "Chunk 0 should contain up to B9 (20 tokens)"
+
+    assert "B" in chunks[1].text, "Chunk 1 should have overlap from B section"
+    assert "C" in chunks[1].text, "Chunk 1 should contain C section"
+    assert "D" in chunks[1].text, "Chunk 1 should contain D section"
+
+    assert "D" in chunks[2].text, "Chunk 2 should have overlap from D section"
+    assert "E0" in chunks[2].text, "Chunk 2 should contain E0"
+    assert "E9" in chunks[2].text, "Chunk 2 should end with E9"
+
+    chunk_0_end_words = chunks[0].text.split()[-4:]
+    chunk_1_words = chunks[1].text.split()
+    overlap_0_1 = any(word in chunk_1_words for word in chunk_0_end_words)
+    assert overlap_0_1, (
+        f"No overlap detected between chunks 0 and 1. "
+        f"Chunk 0 ends with: {chunk_0_end_words}, "
+        f"Chunk 1 starts with: {chunk_1_words[:6]}"
+    )
+
+    chunk_1_end_words = chunks[1].text.split()[-4:]
+    chunk_2_words = chunks[2].text.split()
+    overlap_1_2 = any(word in chunk_2_words for word in chunk_1_end_words)
+    assert overlap_1_2, (
+        f"No overlap detected between chunks 1 and 2. "
+        f"Chunk 1 ends with: {chunk_1_end_words}, "
+        f"Chunk 2 starts with: {chunk_2_words[:6]}"
     )
