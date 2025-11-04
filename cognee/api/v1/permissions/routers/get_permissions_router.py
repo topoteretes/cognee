@@ -259,7 +259,7 @@ def get_permissions_router() -> APIRouter:
 
         from cognee.modules.users.tenants.methods import select_tenant as select_tenant_method
 
-        await select_tenant_method(user=user, tenant_id=payload.tenant_id)
+        await select_tenant_method(user_id=user.id, tenant_id=payload.tenant_id)
 
         return JSONResponse(
             status_code=200,

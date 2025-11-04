@@ -145,7 +145,7 @@ async def main():
     tenant_id = await create_tenant("CogneeLab", user_2.id)
 
     print("User 2 is selecting CogneeLab tenant/organization as active tenant")
-    await select_tenant(user=user_2, tenant_id=tenant_id)
+    await select_tenant(user_id=user_2.id, tenant_id=tenant_id)
 
     print("\nUser 2 is creating Researcher role")
     role_id = await create_role(role_name="Researcher", owner_id=user_2.id)
@@ -163,7 +163,7 @@ async def main():
     await add_user_to_role(user_id=user_3.id, role_id=role_id, owner_id=user_2.id)
 
     print("\nOperation as user_3 to select CogneeLab tenant/organization as active tenant")
-    await select_tenant(user=user_3, tenant_id=tenant_id)
+    await select_tenant(user_id=user_3.id, tenant_id=tenant_id)
 
     print(
         "\nOperation started as user_2, with CogneeLab as its active tenant, to give read permission to Researcher role for the dataset QUANTUM owned by user_2"
@@ -187,6 +187,10 @@ async def main():
     )
     # We can re-create the QUANTUM dataset in the CogneeLab tenant. The old QUANTUM dataset is still owned by user_2 personally
     # and can still be accessed by selecting the personal tenant for user 2.
+    from cognee.modules.users.methods import get_user
+
+    # Note: We need to update user_2 from the database to refresh its tenant context changes
+    user_2 = await get_user(user_2.id)
     await cognee.add([text], dataset_name="QUANTUM_COGNEE_LAB", user=user_2)
     quantum_cognee_lab_cognify_result = await cognee.cognify(["QUANTUM_COGNEE_LAB"], user=user_2)
 
