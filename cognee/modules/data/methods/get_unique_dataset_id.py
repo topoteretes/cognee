@@ -62,7 +62,7 @@ async def get_unique_dataset_id(dataset_name: Union[str, UUID], user: User) -> U
     async with db_engine.get_async_session() as session:
         legacy_dataset = (
             await session.execute(
-                select(Dataset).filter(Dataset.id == dataset_id["legacy_data_id"])
+                select(Dataset).filter(Dataset.id == dataset_id["legacy_dataset_id"])
             )
         ).scalar_one_or_none()
 
