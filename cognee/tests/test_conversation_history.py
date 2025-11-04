@@ -229,7 +229,9 @@ async def main():
     assert "CONTEXT:" in formatted_history, "Formatted history should contain 'CONTEXT:' prefix"
     assert "ANSWER:" in formatted_history, "Formatted history should contain 'ANSWER:' prefix"
 
-    from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import persist_sessions_in_knowledge_graph_pipeline
+    from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
+        persist_sessions_in_knowledge_graph_pipeline,
+    )
 
     logger.info("Starting persist_sessions_in_knowledge_graph tests")
 
