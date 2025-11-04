@@ -8,6 +8,4 @@ from cognee.modules.data.methods import get_unique_data_id
 async def identify(data: IngestionData, user: User) -> UUID:
     data_content_hash: str = data.get_identifier()
 
-    return await get_unique_data_id(
-        data_identifier=data_content_hash, user=user, tenant_id=user.tenant_id
-    )
+    return await get_unique_data_id(data_identifier=data_content_hash, user=user)

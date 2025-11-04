@@ -1,5 +1,4 @@
 from uuid import uuid5, NAMESPACE_OID, UUID
-from typing import Optional
 from sqlalchemy import select
 
 from cognee.modules.data.models.Data import Data
@@ -7,7 +6,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models import User
 
 
-async def get_unique_data_id(data_identifier: str, user: User, tenant_id: Optional[UUID]) -> UUID:
+async def get_unique_data_id(data_identifier: str, user: User) -> UUID:
     """
     Function returns a unique UUID for data based on data identifier, user id and tenant id.
     If data with legacy ID exists, return that ID to maintain compatibility.
@@ -35,7 +34,7 @@ async def get_unique_data_id(data_identifier: str, user: User, tenant_id: Option
         # return UUID hash of file contents + owner id + tenant_id
         return uuid5(NAMESPACE_OID, f"{data_identifier}{str(user.id)}")
 
-    def _get_modern_unique_data_id(data_identifier: str, user: User, tenant_id: UUID) -> UUID:
+    def _get_modern_unique_data_id(data_identifier: str, user: User) -> UUID:
         """
         Function returns a unique UUID for data based on data identifier, user id and tenant id.
         Args:
@@ -47,13 +46,11 @@ async def get_unique_data_id(data_identifier: str, user: User, tenant_id: Option
             UUID: Unique identifier for the data
         """
         # return UUID hash of file contents + owner id + tenant_id
-        return uuid5(NAMESPACE_OID, f"{data_identifier}{str(user.id)}{str(tenant_id)}")
+        return uuid5(NAMESPACE_OID, f"{data_identifier}{str(user.id)}{str(user.tenant_id)}")
 
     # Get all possible data_id values
     data_id = {
-        "modern_data_id": _get_modern_unique_data_id(
-            data_identifier=data_identifier, user=user, tenant_id=tenant_id
-        ),
+        "modern_data_id": _get_modern_unique_data_id(data_identifier=data_identifier, user=user),
         "legacy_data_id": _get_deprecated_unique_data_id(
             data_identifier=data_identifier, user=user
         ),
