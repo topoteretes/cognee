@@ -7,7 +7,12 @@ from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.data.methods import has_dataset_data
 from cognee.modules.data.methods import get_authorized_dataset, get_authorized_existing_datasets
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
-from cognee.modules.graph.methods import delete_data_nodes_and_edges, delete_dataset_nodes_and_edges
+from cognee.modules.graph.methods import (
+    delete_data_nodes_and_edges,
+    delete_dataset_nodes_and_edges,
+    has_data_related_nodes,
+    legacy_delete,
+)
 from cognee.modules.ingestion import discover_directory_datasets
 from cognee.modules.pipelines.operations.get_pipeline_status import get_pipeline_status
 
@@ -66,7 +71,9 @@ class datasets:
         return await delete_dataset(dataset)
 
     @staticmethod
-    async def delete_data(dataset_id: UUID, data_id: UUID, user: Optional[User] = None):
+    async def delete_data(
+        dataset_id: UUID, data_id: UUID, user: Optional[User] = None, mode: str = "soft"
+    ):
         from cognee.modules.data.methods import delete_data, get_data
 
         if not user:
@@ -81,7 +88,7 @@ class datasets:
 
         if not data:
             # If data is not found in the system, user is using a custom graph model.
-            await delete_data_nodes_and_edges(dataset_id, data_id)
+            await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
             return
 
         data_datasets = data.datasets
@@ -89,7 +96,10 @@ class datasets:
         if not data or not any([dataset.id == dataset_id for dataset in data_datasets]):
             raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
 
-        await delete_data_nodes_and_edges(dataset_id, data.id)
+        if not await has_data_related_nodes(dataset_id, data_id):
+            await legacy_delete(data, mode)
+        else:
+            await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
         await delete_data(data)
 

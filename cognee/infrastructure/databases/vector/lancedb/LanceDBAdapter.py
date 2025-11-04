@@ -206,12 +206,12 @@ class LanceDBAdapter(VectorDBInterface):
         collection = await self.get_collection(collection_name)
 
         if len(data_point_ids) == 1:
-            results = await collection.query().where(f"id = '{data_point_ids[0]}'")
+            query = collection.query().where(f"id = '{data_point_ids[0]}'")
         else:
-            results = await collection.query().where(f"id IN {tuple(data_point_ids)}")
+            query = collection.query().where(f"id IN {tuple(data_point_ids)}")
 
         # Convert query results to list format
-        results_list = results.to_list() if hasattr(results, "to_list") else list(results)
+        results_list = await query.to_list()
 
         return [
             ScoredResult(

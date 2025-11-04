@@ -3,6 +3,8 @@ from .get_formatted_graph_data import get_formatted_graph_data
 from .upsert_edges import upsert_edges
 from .upsert_nodes import upsert_nodes
 
+from .has_data_related_nodes import has_data_related_nodes
+
 from .get_data_related_nodes import get_data_related_nodes
 from .get_data_related_edges import get_data_related_edges
 from .delete_data_related_nodes import delete_data_related_nodes
@@ -14,3 +16,5 @@ from .get_dataset_related_edges import get_dataset_related_edges
 from .delete_dataset_related_nodes import delete_dataset_related_nodes
 from .delete_dataset_related_edges import delete_dataset_related_edges
 from .delete_dataset_nodes_and_edges import delete_dataset_nodes_and_edges
+
+from .legacy_delete import legacy_delete

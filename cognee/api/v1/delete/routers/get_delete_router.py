@@ -54,9 +54,10 @@ def get_delete_router() -> APIRouter:
 
         try:
             result = await datasets.delete_data(
-                data_id=data_id,
                 dataset_id=dataset_id,
+                data_id=data_id,
                 user=user,
+                mode=mode,
             )
             return result
 

@@ -8,7 +8,6 @@ from cognee.api.v1.datasets import datasets
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm import LLMGateway
-from cognee.modules.data.methods import get_dataset_data
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge, SummarizedContent
@@ -100,23 +99,18 @@ async def main(mock_create_structured_output: AsyncMock):
         ),
     ]
 
-    await cognee.add(
+    add_john_result = await cognee.add(
         "John works for Apple. He is also affiliated with a non-profit organization called 'Food for Hungry'"
     )
+    johns_data_id = add_john_result.data_ingestion_info[0]["data_id"]
 
-    await cognee.add("Marie works for Apple as well. She is a software engineer on MacOS project.")
+    add_marie_result = await cognee.add(
+        "Marie works for Apple as well. She is a software engineer on MacOS project."
+    )
+    maries_data_id = add_marie_result.data_ingestion_info[0]["data_id"]
 
     cognify_result: dict = await cognee.cognify()
     dataset_id = list(cognify_result.keys())[0]
-
-    dataset_data = await get_dataset_data(dataset_id)
-    added_data_1 = dataset_data[0]
-    added_data_2 = dataset_data[1]
-
-    # file_path = os.path.join(
-    #     pathlib.Path(__file__).parent, ".artifacts", "graph_visualization_full.html"
-    # )
-    # await visualize_graph(file_path)
 
     graph_engine = await get_graph_engine()
     initial_nodes, initial_edges = await graph_engine.get_graph_data()
@@ -136,16 +130,13 @@ async def main(mock_create_structured_output: AsyncMock):
     initial_node_ids = set([node[0] for node in initial_nodes])
 
     user = await get_default_user()
-    await datasets.delete_data(dataset_id, added_data_1.id, user)  # type: ignore
-
-    # file_path = os.path.join(
-    #     pathlib.Path(__file__).parent, ".artifacts", "graph_visualization_after_delete.html"
-    # )
-    # await visualize_graph(file_path)
+    await datasets.delete_data(dataset_id, johns_data_id, user)  # type: ignore
 
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 9 and len(edges) == 10, "Nodes and edges are not deleted."
-    assert not any(node[1]["name"] == "john" or node[1]["name"] == "food for hungry" for node in nodes), "Nodes are not deleted."
+    assert not any(
+        node[1]["name"] == "john" or node[1]["name"] == "food for hungry" for node in nodes
+    ), "Nodes are not deleted."
 
     after_first_delete_node_ids = set([node[0] for node in nodes])
 
@@ -166,7 +157,7 @@ async def main(mock_create_structured_output: AsyncMock):
             vector_items = await vector_engine.retrieve(collection_name, query_node_ids)
             assert len(vector_items) == 0, "Vector items are not deleted."
 
-    await datasets.delete_data(dataset_id, added_data_2.id, user)  # type: ignore
+    await datasets.delete_data(dataset_id, maries_data_id, user)  # type: ignore
 
     final_nodes, final_edges = await graph_engine.get_graph_data()
     assert len(final_nodes) == 0 and len(final_edges) == 0, "Nodes and edges are not deleted."
