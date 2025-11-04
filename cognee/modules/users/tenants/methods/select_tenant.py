@@ -7,11 +7,12 @@ from sqlalchemy import select
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.models.UserTenant import UserTenant
 from cognee.modules.users.methods import get_user
+from cognee.modules.users.models.User import User
 from cognee.modules.users.permissions.methods import get_tenant
 from cognee.modules.users.exceptions import UserNotFoundError, TenantNotFoundError
 
 
-async def select_tenant(user_id: UUID, tenant_id: Union[UUID, None]):
+async def select_tenant(user_id: UUID, tenant_id: Union[UUID, None]) -> User:
     """
         Set the users active tenant to provided tenant.
 
@@ -33,7 +34,7 @@ async def select_tenant(user_id: UUID, tenant_id: Union[UUID, None]):
             user.tenant_id = None
             await session.merge(user)
             await session.commit()
-            return
+            return user
 
         tenant = await get_tenant(tenant_id)
 
@@ -59,3 +60,4 @@ async def select_tenant(user_id: UUID, tenant_id: Union[UUID, None]):
             user.tenant_id = tenant_id
             await session.merge(user)
             await session.commit()
+            return user

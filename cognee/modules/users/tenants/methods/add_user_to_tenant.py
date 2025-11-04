@@ -16,7 +16,7 @@ from cognee.modules.users.exceptions import (
 
 
 async def add_user_to_tenant(
-    user_id: UUID, tenant_id: UUID, owner_id: UUID, set_as_active_tenant: Optional[bool] = True
+    user_id: UUID, tenant_id: UUID, owner_id: UUID, set_as_active_tenant: Optional[bool] = False
 ):
     """
         Add a user with the given id to the tenant with the given id.
