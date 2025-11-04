@@ -288,10 +288,7 @@ async def main(mock_create_structured_output: AsyncMock):
     )
     johns_data_id = add_john_result.data_ingestion_info[0]["data_id"]
 
-    add_marie_result = await cognee.add(
-        "Marie works for Apple as well. She is a software engineer on MacOS project."
-    )
-    # maries_data_id = add_marie_result.data_ingestion_info[0]["data_id"]
+    await cognee.add("Marie works for Apple as well. She is a software engineer on MacOS project.")
 
     cognify_result: dict = await cognee.cognify()
     dataset_id = list(cognify_result.keys())[0]

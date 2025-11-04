@@ -13,4 +13,4 @@ async def has_data_related_nodes(dataset_id: UUID, data_id: UUID, session: Async
     )
 
     data_related_node = await session.scalar(query_statement)
-    return data_related_node != None
+    return data_related_node is not None
