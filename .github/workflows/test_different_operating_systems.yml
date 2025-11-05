@@ -44,6 +44,7 @@ jobs:
   run-unit-tests:
     name: Unit tests ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
@@ -80,6 +81,7 @@ jobs:
   run-integration-tests:
     name: Integration tests ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
@@ -116,6 +118,7 @@ jobs:
   run-library-test:
     name: Library test ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
@@ -152,6 +155,7 @@ jobs:
   run-build-test:
     name: Build test ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
@@ -181,6 +185,7 @@ jobs:
   run-soft-deletion-test:
     name: Soft Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
@@ -218,6 +223,7 @@ jobs:
   run-hard-deletion-test:
     name: Hard Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
