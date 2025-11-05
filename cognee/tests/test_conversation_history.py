@@ -16,9 +16,11 @@ import cognee
 import pathlib
 
 from cognee.infrastructure.databases.cache import get_cache_engine
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.search.types import SearchType
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.methods import get_default_user
+from collections import Counter
 
 logger = get_logger()
 
@@ -188,7 +190,6 @@ async def main():
         f"GRAPH_SUMMARY_COMPLETION should return non-empty list, got: {result_summary!r}"
     )
 
-    # Verify saved
     history_summary = await cache_engine.get_latest_qa(str(user.id), session_id_summary, last_n=10)
     our_qa_summary = [
         h for h in history_summary if h["question"] == "What are the key points about TechCorp?"
@@ -227,6 +228,46 @@ async def main():
     assert "QUESTION:" in formatted_history, "Formatted history should contain 'QUESTION:' prefix"
     assert "CONTEXT:" in formatted_history, "Formatted history should contain 'CONTEXT:' prefix"
     assert "ANSWER:" in formatted_history, "Formatted history should contain 'ANSWER:' prefix"
+
+    from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
+        persist_sessions_in_knowledge_graph_pipeline,
+    )
+
+    logger.info("Starting persist_sessions_in_knowledge_graph tests")
+
+    await persist_sessions_in_knowledge_graph_pipeline(
+        user=user,
+        session_ids=[session_id_1, session_id_2],
+        dataset=dataset_name,
+        run_in_background=False,
+    )
+
+    graph_engine = await get_graph_engine()
+    graph = await graph_engine.get_graph_data()
+
+    type_counts = Counter(node_data[1].get("type", {}) for node_data in graph[0])
+
+    "Tests the correct number of NodeSet nodes after session persistence"
+    assert type_counts.get("NodeSet", 0) == 1, (
+        f"Number of NodeSets in the graph is incorrect, found {type_counts.get('NodeSet', 0)} but there should be exactly 1."
+    )
+
+    "Tests the correct number of DocumentChunk nodes after session persistence"
+    assert type_counts.get("DocumentChunk", 0) == 4, (
+        f"Number of DocumentChunk ndoes in the graph is incorrect, found {type_counts.get('DocumentChunk', 0)} but there should be exactly 4 (2 original documents, 2 sessions)."
+    )
+
+    from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
+
+    vector_engine = get_vector_engine()
+    collection_size = await vector_engine.search(
+        collection_name="DocumentChunk_text",
+        query_text="test",
+        limit=1000,
+    )
+    assert len(collection_size) == 4, (
+        f"DocumentChunk_text collection should have exactly 4 embeddings, found {len(collection_size)}"
+    )
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
