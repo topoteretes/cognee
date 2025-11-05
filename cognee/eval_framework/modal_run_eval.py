@@ -104,18 +104,7 @@ async def main():
     configs = [
         EvalConfig(
             task_getter_type="Default",
-            number_of_samples_in_corpus=10,
-            benchmark="HotPotQA",
-            qa_engine="cognee_graph_completion",
-            building_corpus_from_scratch=True,
-            answering_questions=True,
-            evaluating_answers=True,
-            calculate_metrics=True,
-            dashboard=True,
-        ),
-        EvalConfig(
-            task_getter_type="Default",
-            number_of_samples_in_corpus=10,
+            number_of_samples_in_corpus=25,
             benchmark="TwoWikiMultiHop",
             qa_engine="cognee_graph_completion",
             building_corpus_from_scratch=True,
@@ -126,7 +115,7 @@ async def main():
         ),
         EvalConfig(
             task_getter_type="Default",
-            number_of_samples_in_corpus=10,
+            number_of_samples_in_corpus=25,
             benchmark="Musique",
             qa_engine="cognee_graph_completion",
             building_corpus_from_scratch=True,
