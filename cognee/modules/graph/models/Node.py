@@ -31,7 +31,7 @@ class Node(Base):
     type: Mapped[str] = mapped_column(String(255), nullable=False)
     indexed_fields: Mapped[list] = mapped_column(JSON, nullable=False)
 
-    # props: Mapped[dict] = mapped_column(JSON)
+    attributes: Mapped[dict | None] = mapped_column(JSON)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
