@@ -36,7 +36,8 @@ def upgrade() -> None:
                 "FAILED",
                 "CANCELLED",
                 name="syncstatus",
-                create_type=False,
+                create_type=True,
+                checkfirst=True,
             )
         else:
             syncstatus = sa.Enum(
@@ -46,7 +47,8 @@ def upgrade() -> None:
                 "FAILED",
                 "CANCELLED",
                 name="syncstatus",
-                create_type=False,
+                create_type=True,
+                checkfirst=True,
             )
 
         # Table doesn't exist, create it normally
