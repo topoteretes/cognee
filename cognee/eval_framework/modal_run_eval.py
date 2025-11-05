@@ -46,7 +46,13 @@ image = Image.from_dockerfile(
 ).add_local_python_source("cognee")
 
 
-@app.function(image=image, max_containers=10, timeout=86400, volumes={"/data": vol}, secrets=[modal.Secret.from_name('eval_secrets')])
+@app.function(
+    image=image,
+    max_containers=10,
+    timeout=86400,
+    volumes={"/data": vol},
+    secrets=[modal.Secret.from_name("eval_secrets")],
+)
 async def modal_run_eval(eval_params=None):
     """Runs evaluation pipeline and returns combined metrics results."""
     if eval_params is None:
@@ -90,6 +96,7 @@ async def modal_run_eval(eval_params=None):
     logger.info("Evaluation set finished...")
 
     return True
+
 
 @app.local_entrypoint()
 async def main():
