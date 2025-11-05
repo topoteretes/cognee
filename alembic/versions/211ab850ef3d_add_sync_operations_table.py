@@ -27,6 +27,12 @@ def upgrade() -> None:
     connection = op.get_bind()
     inspector = sa.inspect(connection)
 
+    if op.get_context().dialect.name == "postgresql":
+        syncstatus_enum = postgresql.ENUM(
+            "STARTED", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", name="syncstatus"
+        )
+        syncstatus_enum.create(op.get_bind(), checkfirst=True)
+
     if "sync_operations" not in inspector.get_table_names():
         if op.get_context().dialect.name == "postgresql":
             syncstatus = postgresql.ENUM(
@@ -36,8 +42,7 @@ def upgrade() -> None:
                 "FAILED",
                 "CANCELLED",
                 name="syncstatus",
-                create_type=True,
-                checkfirst=True,
+                create_type=False,
             )
         else:
             syncstatus = sa.Enum(
@@ -47,8 +52,7 @@ def upgrade() -> None:
                 "FAILED",
                 "CANCELLED",
                 name="syncstatus",
-                create_type=True,
-                checkfirst=True,
+                create_type=False,
             )
 
         # Table doesn't exist, create it normally
