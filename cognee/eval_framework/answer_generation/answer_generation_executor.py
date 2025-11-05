@@ -38,7 +38,9 @@ class AnswerGeneratorExecutor:
             ############
             #:TODO This is a quick fix until we don't structure retriever results properly but lets not leave it like this...this is needed now due to the changed combined retriever structure..
             if not isinstance(retrieval_context, str) and isinstance(retrieval_context, list):
-                retrieval_context=await retriever.convert_retrieved_objects_to_context(triplets = retrieval_context)
+                retrieval_context = await retriever.convert_retrieved_objects_to_context(
+                    triplets=retrieval_context
+                )
 
             if isinstance(search_results, str):
                 search_results = [search_results]
