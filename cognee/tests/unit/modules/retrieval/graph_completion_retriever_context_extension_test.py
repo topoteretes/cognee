@@ -183,15 +183,15 @@ class TestGraphCompletionWithContextExtensionRetriever:
         )
 
     @pytest.mark.asyncio
-    async def test_get_structured_completion_extension_context(self):
+    async def test_get_graph_structured_completion_extension_context(self):
         system_directory_path = os.path.join(
             pathlib.Path(__file__).parent,
-            ".cognee_system/test_get_structured_completion_extension_context",
+            ".cognee_system/test_get_graph_structured_completion_extension_context",
         )
         cognee.config.system_root_directory(system_directory_path)
         data_directory_path = os.path.join(
             pathlib.Path(__file__).parent,
-            ".data_storage/test_get_structured_completion_extension_context",
+            ".data_storage/test_get_graph_structured_completion_extension_context",
         )
         cognee.config.data_root_directory(data_directory_path)
 
