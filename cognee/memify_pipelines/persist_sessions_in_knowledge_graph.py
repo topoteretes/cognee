@@ -29,7 +29,8 @@ async def persist_sessions_in_knowledge_graph_pipeline(
 
     if not dataset_to_write:
         raise CogneeValidationError(
-            message=f"User (id: {str(user.id)}) does not have write access to dataset: {dataset}", log=False
+            message=f"User (id: {str(user.id)}) does not have write access to dataset: {dataset}",
+            log=False,
         )
 
     await set_database_global_context_variables(
