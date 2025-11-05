@@ -75,6 +75,28 @@ def upgrade() -> None:
     dataset = _define_dataset_table()
     user = _define_user_table()
 
+    if "user_tenants" not in insp.get_table_names():
+        tenant_id_from_user = sa.select(user.c.tenant_id).scalar_subquery()
+        # Define table with all necessary columns including primary key
+        user_tenants = op.create_table(
+            "user_tenants",
+            sa.Column("user_id", sa.UUID, sa.ForeignKey("users.id"), primary_key=True),
+            sa.Column("tenant_id", sa.UUID, sa.ForeignKey("tenants.id"), primary_key=True),
+            sa.Column("created_at", sa.DateTime(), default=lambda: datetime.now(timezone.utc)),
+        )
+        if op.get_context().dialect.name == "sqlite":
+            # If column doesn't exist create new original_extension column and update from values of extension column
+            with op.batch_alter_table("user_tenants") as batch_op:
+                batch_op.execute(
+                    user_tenants.update().values(
+                        tenant_id=tenant_id_from_user,
+                        user_id=user.c.id,
+                    )
+                )
+        else:
+            conn = op.get_bind()
+            conn.execute(dataset.update().values(tenant_id=tenant_id_from_user, user_id=user.c.id))
+
     tenant_id_column = _get_column(insp, "datasets", "tenant_id")
     if not tenant_id_column:
         op.add_column("datasets", sa.Column("tenant_id", sa.UUID(), nullable=True))
