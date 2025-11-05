@@ -408,75 +408,6 @@ async def save_interaction(data: str) -> list:
 
 
 @mcp.tool()
-async def codify(repo_path: str) -> list:
-    """
-    Analyze and generate a code-specific knowledge graph from a software repository.
-
-    This function launches a background task that processes the provided repository
-    and builds a code knowledge graph. The function returns immediately while
-    the processing continues in the background due to MCP timeout constraints.
-
-    Parameters
-    ----------
-    repo_path : str
-        Path to the code repository to analyze. This can be a local file path or a
-        relative path to a repository. The path should point to the root of the
-        repository or a specific directory within it.
-
-    Returns
-    -------
-    list
-        A list containing a single TextContent object with information about the
-        background task launch and how to check its status.
-
-    Notes
-    -----
-    - The function launches a background task and returns immediately
-    - The code graph generation may take significant time for larger repositories
-    - Use the codify_status tool to check the progress of the operation
-    - Process results are logged to the standard Cognee log file
-    - All stdout is redirected to stderr to maintain MCP communication integrity
-    """
-
-    if cognee_client.use_api:
-        error_msg = "❌ Codify operation is not available in API mode. Please use direct mode for code graph pipeline."
-        logger.error(error_msg)
-        return [types.TextContent(type="text", text=error_msg)]
-
-    async def codify_task(repo_path: str):
-        # NOTE: MCP uses stdout to communicate, we must redirect all output
-        #       going to stdout ( like the print function ) to stderr.
-        with redirect_stdout(sys.stderr):
-            logger.info("Codify process starting.")
-            from cognee.api.v1.cognify.code_graph_pipeline import run_code_graph_pipeline
-
-            results = []
-            async for result in run_code_graph_pipeline(repo_path, False):
-                results.append(result)
-                logger.info(result)
-            if all(results):
-                logger.info("Codify process finished succesfully.")
-            else:
-                logger.info("Codify process failed.")
-
-    asyncio.create_task(codify_task(repo_path))
-
-    log_file = get_log_file_location()
-    text = (
-        f"Background process launched due to MCP timeout limitations.\n"
-        f"To check current codify status use the codify_status tool\n"
-        f"or you can check the log file at: {log_file}"
-    )
-
-    return [
-        types.TextContent(
-            type="text",
-            text=text,
-        )
-    ]
-
-
-@mcp.tool()
 async def search(search_query: str, search_type: str) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -950,48 +881,6 @@ async def cognify_status():
             return [types.TextContent(type="text", text=error_msg)]
         except Exception as e:
             error_msg = f"❌ Failed to get cognify status: {str(e)}"
-            logger.error(error_msg)
-            return [types.TextContent(type="text", text=error_msg)]
-
-
-@mcp.tool()
-async def codify_status():
-    """
-    Get the current status of the codify pipeline.
-
-    This function retrieves information about current and recently completed codify operations
-    in the codebase dataset. It provides details on progress, success/failure status, and statistics
-    about the processed code repositories.
-
-    Returns
-    -------
-    list
-        A list containing a single TextContent object with the status information as a string.
-        The status includes information about active and completed jobs for the cognify_code_pipeline.
-
-    Notes
-    -----
-    - The function retrieves pipeline status specifically for the "cognify_code_pipeline" on the "codebase" dataset
-    - Status information includes job progress, execution time, and completion status
-    - The status is returned in string format for easy reading
-    - This operation is not available in API mode
-    """
-    with redirect_stdout(sys.stderr):
-        try:
-            from cognee.modules.data.methods.get_unique_dataset_id import get_unique_dataset_id
-            from cognee.modules.users.methods import get_default_user
-
-            user = await get_default_user()
-            status = await cognee_client.get_pipeline_status(
-                [await get_unique_dataset_id("codebase", user)], "cognify_code_pipeline"
-            )
-            return [types.TextContent(type="text", text=str(status))]
-        except NotImplementedError:
-            error_msg = "❌ Pipeline status is not available in API mode"
-            logger.error(error_msg)
-            return [types.TextContent(type="text", text=error_msg)]
-        except Exception as e:
-            error_msg = f"❌ Failed to get codify status: {str(e)}"
             logger.error(error_msg)
             return [types.TextContent(type="text", text=error_msg)]
 
