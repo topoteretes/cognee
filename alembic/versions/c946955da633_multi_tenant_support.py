@@ -95,7 +95,9 @@ def upgrade() -> None:
                 )
         else:
             conn = op.get_bind()
-            conn.execute(dataset.update().values(tenant_id=tenant_id_from_user, user_id=user.c.id))
+            conn.execute(
+                user_tenants.update().values(tenant_id=tenant_id_from_user, user_id=user.c.id)
+            )
 
     tenant_id_column = _get_column(insp, "datasets", "tenant_id")
     if not tenant_id_column:
