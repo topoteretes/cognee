@@ -20,7 +20,7 @@ async def update_node_access_timestamps(items: List[Any]):
       
     This function:  
     1. Updates last_accessed_at in the graph database nodes (in properties JSON)  
-    2. Traverses to find origin TextDocument nodes  
+    2. Traverses to find origin TextDocument nodes (without hardcoded relationship names)  
     3. Updates last_accessed in the SQL Data table for those documents  
       
     Parameters  
@@ -64,23 +64,21 @@ async def update_node_access_timestamps(items: List[Any]):
           
         logger.debug(f"Updated access timestamps for {len(node_ids)} graph nodes")  
           
-        # Step 2: Find origin TextDocument nodes  
+        # Step 2: Find origin TextDocument nodes (without hardcoded relationship names)  
         origin_query = """  
         UNWIND $node_ids AS node_id  
         MATCH (n:Node {id: node_id})  
         OPTIONAL MATCH (n)-[e:EDGE]-(chunk:Node)  
-        WHERE (e.relationship_name = 'contains' OR e.relationship_name = 'made_from')   
-        AND chunk.type = 'DocumentChunk'  
-        OPTIONAL MATCH (chunk)-[e2:EDGE]->(doc:Node)  
-        WHERE e2.relationship_name = 'is_part_of'  
-        AND doc.type IN ['TextDocument', 'PdfDocument', 'AudioDocument', 'ImageDocument', 'UnstructuredDocument']  
+        WHERE chunk.type = 'DocumentChunk'  
+        OPTIONAL MATCH (chunk)-[e2:EDGE]-(doc:Node)  
+        WHERE doc.type IN ['TextDocument', 'PdfDocument', 'AudioDocument', 'ImageDocument', 'UnstructuredDocument']  
         RETURN DISTINCT doc.id as doc_id  
         """  
           
         result = await graph_engine.query(origin_query, {"node_ids": node_ids})  
           
-        # Extract document IDs  
-        doc_ids = [row[0] for row in result if row and row[0]] if result else []  
+        # Extract and deduplicate document IDs  
+        doc_ids = list(set([row[0] for row in result if row and row[0]])) if result else []  
           
         # Step 3: Update SQL Data table  
         if doc_ids:  
