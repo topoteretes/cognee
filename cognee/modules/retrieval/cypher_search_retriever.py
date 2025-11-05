@@ -1,4 +1,6 @@
 from typing import Any, Optional
+from fastapi.encoders import jsonable_encoder
+
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
@@ -49,7 +51,6 @@ class CypherSearchRetriever(BaseRetriever):
             if is_empty:
                 logger.warning("Search attempt on an empty knowledge graph")
                 return []
-            from fastapi.encoders import jsonable_encoder
 
             result = jsonable_encoder(await graph_engine.query(query))
         except Exception as e:
