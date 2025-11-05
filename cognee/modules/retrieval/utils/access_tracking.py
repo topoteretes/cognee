@@ -67,12 +67,9 @@ async def update_node_access_timestamps(items: List[Any]):
         # Step 2: Find origin TextDocument nodes (without hardcoded relationship names)  
         origin_query = """  
         UNWIND $node_ids AS node_id  
-        MATCH (n:Node {id: node_id})  
-        OPTIONAL MATCH (n)-[e:EDGE]-(chunk:Node)  
-        WHERE chunk.type = 'DocumentChunk'  
-        OPTIONAL MATCH (chunk)-[e2:EDGE]-(doc:Node)  
-        WHERE doc.type IN ['TextDocument', 'PdfDocument', 'AudioDocument', 'ImageDocument', 'UnstructuredDocument']  
-        RETURN DISTINCT doc.id as doc_id  
+        MATCH (chunk:Node {id: node_id})-[e:EDGE]-(doc:Node)  
+        WHERE chunk.type = 'DocumentChunk' AND doc.type IN ['TextDocument', 'Document']  
+        RETURN DISTINCT doc.id  
         """  
           
         result = await graph_engine.query(origin_query, {"node_ids": node_ids})  
