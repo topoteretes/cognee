@@ -17,14 +17,30 @@ down_revision: Union[str, None] = '211ab850ef3d'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+def _get_column(inspector, table, name, schema=None):  
+    for col in inspector.get_columns(table, schema=schema):  
+        if col["name"] == name:  
+            return col  
+    return None  
+  
   
 def upgrade() -> None:  
-    op.add_column('data',   
-        sa.Column('last_accessed', sa.DateTime(timezone=True), nullable=True)  
-    )  
-    # Optionally initialize with created_at values for existing records  
-    op.execute("UPDATE data SET last_accessed = created_at")  
+    conn = op.get_bind()  
+    insp = sa.inspect(conn)  
+  
+    last_accessed_column = _get_column(insp, "data", "last_accessed")   
+    if not last_accessed_column:  
+        op.add_column('data',   
+            sa.Column('last_accessed', sa.DateTime(timezone=True), nullable=True)  
+        )  
+        # Optionally initialize with created_at values for existing records  
+        op.execute("UPDATE data SET last_accessed = created_at")  
   
   
 def downgrade() -> None:  
-    op.drop_column('data', 'last_accessed')
+    conn = op.get_bind()  
+    insp = sa.inspect(conn)  
+      
+    last_accessed_column = _get_column(insp, "data", "last_accessed")  
+    if last_accessed_column:  
+        op.drop_column('data', 'last_accessed')
