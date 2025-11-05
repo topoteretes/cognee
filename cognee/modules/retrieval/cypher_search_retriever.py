@@ -49,8 +49,9 @@ class CypherSearchRetriever(BaseRetriever):
             if is_empty:
                 logger.warning("Search attempt on an empty knowledge graph")
                 return []
+            from fastapi.encoders import jsonable_encoder
 
-            result = await graph_engine.query(query)
+            result = jsonable_encoder(await graph_engine.query(query))
         except Exception as e:
             logger.error("Failed to execture cypher search retrieval: %s", str(e))
             raise CypherSearchError() from e
