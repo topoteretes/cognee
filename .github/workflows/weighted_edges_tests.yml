@@ -111,11 +111,11 @@ jobs:
       LLM_ENDPOINT: https://api.openai.com/v1
       LLM_API_KEY: ${{ secrets.OPENAI_API_KEY  }}
       LLM_API_VERSION: "2024-02-01"
-      EMBEDDING_PROVIDER: openai
-      EMBEDDING_MODEL: text-embedding-3-small
-      EMBEDDING_ENDPOINT: https://api.openai.com/v1/embeddings
-      EMBEDDING_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      EMBEDDING_API_VERSION: "2024-02-01"
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+      
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
