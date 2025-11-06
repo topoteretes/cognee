@@ -2,7 +2,7 @@ name: Weighted Edges Tests
 
 on:
   push:
-    branches: [ main, weighted_edges ]
+    branches: [ main, dev, weighted_edges ]
     paths:
       - 'cognee/modules/graph/utils/get_graph_from_model.py'
       - 'cognee/infrastructure/engine/models/Edge.py'
@@ -10,7 +10,7 @@ on:
       - 'examples/python/weighted_edges_example.py'
       - '.github/workflows/weighted_edges_tests.yml'
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev ]
     paths:
       - 'cognee/modules/graph/utils/get_graph_from_model.py'
       - 'cognee/infrastructure/engine/models/Edge.py'
