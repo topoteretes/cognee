@@ -49,12 +49,11 @@ class Company(DataPoint):
 
 
 ROOT = Path(__file__).resolve().parent
-DATA_DIR = ROOT.parent / "data"
 COGNEE_DIR = ROOT / ".cognee_system"
 ARTIFACTS_DIR = ROOT / ".artifacts"
 GRAPH_HTML = ARTIFACTS_DIR / "graph_visualization.html"
-COMPANIES_JSON = DATA_DIR / "companies.json"
-PEOPLE_JSON = DATA_DIR / "people.json"
+COMPANIES_JSON = ROOT / "companies.json"
+PEOPLE_JSON = ROOT / "people.json"
 
 
 def load_json_file(path: Path) -> Any:
