@@ -22,8 +22,14 @@ class TextChunkerWithOverlap(Chunker):
         self._accumulated_size = 0
         self.chunk_overlap_ratio = chunk_overlap_ratio
         self.chunk_overlap = int(max_chunk_size * chunk_overlap_ratio)
+
         if get_chunk_data is not None:
             self.get_chunk_data = get_chunk_data
+        elif chunk_overlap_ratio > 0:
+            paragraph_max_size = int(0.5 * chunk_overlap_ratio * max_chunk_size)
+            self.get_chunk_data = lambda text: chunk_by_paragraph(
+                text, paragraph_max_size, batch_paragraphs=True
+            )
         else:
             self.get_chunk_data = lambda text: chunk_by_paragraph(
                 text, self.max_chunk_size, batch_paragraphs=True
