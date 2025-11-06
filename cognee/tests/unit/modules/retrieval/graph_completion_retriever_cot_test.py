@@ -9,6 +9,7 @@ from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.tasks.storage import add_data_points
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 
+
 class TestGraphCompletionCoTRetriever:
     @pytest.mark.asyncio
     async def test_graph_completion_cot_context_simple(self):

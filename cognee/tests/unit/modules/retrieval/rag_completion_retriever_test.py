@@ -26,6 +26,7 @@ class DocumentChunkWithEntities(DataPoint):
 
     metadata: dict = {"index_fields": ["text"]}
 
+
 class TestRAGCompletionRetriever:
     @pytest.mark.asyncio
     async def test_rag_completion_context_simple(self):

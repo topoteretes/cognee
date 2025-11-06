@@ -11,6 +11,7 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
     GraphCompletionContextExtensionRetriever,
 )
 
+
 class TestGraphCompletionWithContextExtensionRetriever:
     @pytest.mark.asyncio
     async def test_graph_completion_extension_context_simple(self):

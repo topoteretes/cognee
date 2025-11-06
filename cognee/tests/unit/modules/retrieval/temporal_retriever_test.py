@@ -139,6 +139,7 @@ async def test_filter_top_k_events_error_handling():
     with pytest.raises((KeyError, TypeError)):
         await tr.filter_top_k_events([{}], [])
 
+
 class _FakeRetriever(TemporalRetriever):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
