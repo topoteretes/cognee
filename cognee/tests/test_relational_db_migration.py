@@ -1,6 +1,5 @@
 import pathlib
 import os
-from typing import List
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import (
     get_migration_relational_engine,
@@ -10,7 +9,7 @@ from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
 from cognee.tasks.ingestion import migrate_relational_database
-from cognee.modules.search.types import SearchResult, SearchType
+from cognee.modules.search.types import SearchType
 import cognee
 
 
@@ -274,6 +273,44 @@ async def test_schema_only_migration():
     print(f"Edge counts: {edge_counts}")
 
 
+async def test_search_result_quality():
+    from cognee.infrastructure.databases.relational import (
+        get_migration_relational_engine,
+    )
+
+    migration_engine = get_migration_relational_engine()
+    from sqlalchemy import text
+
+    async with migration_engine.engine.connect() as conn:
+        result = await conn.execute(
+            text("""
+            SELECT CustomerId, GROUP_CONCAT(InvoiceId, ',') AS invoice_ids
+            FROM Invoice
+            GROUP BY CustomerId
+        """)
+        )
+
+        for row in result:
+            customer_id = row.CustomerId
+            invoice_ids = row.invoice_ids.split(",") if row.invoice_ids else []
+            print(f"Relational DB Customer {customer_id}: {invoice_ids}")
+
+            search_results = await cognee.search(
+                query_type=SearchType.GRAPH_COMPLETION,
+                query_text=f"List me all the invoices of Customer:{customer_id}",
+                top_k=50,
+                system_prompt="Just return me the invoiceID as a number without any text. This is an example output: ['1', '2', '3']. Where 1, 2, 3 are invoiceIDs of an invoice",
+            )
+            print(f"Cognee search result: {search_results}")
+
+            import ast
+
+            lst = ast.literal_eval(search_results[0])  # converts string -> Python list
+            assert lst == invoice_ids, (
+                f"Search results {lst} do not match expected invoice IDs {invoice_ids} for Customer:{customer_id}"
+            )
+
+
 async def test_migration_sqlite():
     database_to_migrate_path = os.path.join(pathlib.Path(__file__).parent, "test_data/")
 
@@ -287,6 +324,7 @@ async def test_migration_sqlite():
 
     await relational_db_migration()
     await test_schema_only_migration()
+    await test_search_result_quality()
 
 
 async def test_migration_postgres():
