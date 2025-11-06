@@ -23,7 +23,7 @@ depends_on: Union[str, Sequence[str], None] = "8057ae7329c2"
 
 
 def upgrade() -> None:
-    pass  # It's fine if the default user already exists
+    pass
 
 
 def downgrade() -> None:
