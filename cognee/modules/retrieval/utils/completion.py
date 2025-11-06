@@ -11,7 +11,7 @@ async def generate_completion(
     system_prompt: Optional[str] = None,
     conversation_history: Optional[str] = None,
     response_model: Type = str,
-) -> str:
+) -> Any:
     """Generates a completion using LLM with given context and prompts."""
     args = {"question": query, "context": context}
     user_prompt = render_prompt(user_prompt_path, args)

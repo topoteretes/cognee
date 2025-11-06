@@ -90,7 +90,7 @@ class EntityCompletionRetriever(BaseRetriever):
         context: Optional[Any] = None,
         session_id: Optional[str] = None,
         response_model: Type = str,
-    ) -> List[str]:
+    ) -> List[Any]:
         """
         Generate completion using provided context or fetch new context.
 

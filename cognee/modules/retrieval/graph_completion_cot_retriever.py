@@ -171,7 +171,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         session_id: Optional[str] = None,
         max_iter=4,
         response_model: Type = str,
-    ) -> List[str]:
+    ) -> List[Any]:
         """
         Generate completion responses based on a user query and contextual information.
 

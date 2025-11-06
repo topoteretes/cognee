@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Optional, Type
+from typing import Any, Optional, Type, List
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -80,7 +80,7 @@ class CompletionRetriever(BaseRetriever):
         context: Optional[Any] = None,
         session_id: Optional[str] = None,
         response_model: Type = str,
-    ) -> str:
+    ) -> List[Any]:
         """
         Generates an LLM completion using the context.
 

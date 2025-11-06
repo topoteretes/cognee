@@ -147,7 +147,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         context: Optional[List[Edge]] = None,
         session_id: Optional[str] = None,
         response_model: Type = str,
-    ) -> List[str]:
+    ) -> List[Any]:
         """
         Generates a completion using graph connections context based on a query.
 

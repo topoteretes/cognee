@@ -151,7 +151,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         context: Optional[str] = None,
         session_id: Optional[str] = None,
         response_model: Type = str,
-    ) -> List[str]:
+    ) -> List[Any]:
         """
         Generates a response using the query and optional context.
 

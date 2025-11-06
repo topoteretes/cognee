@@ -1,5 +1,5 @@
 import asyncio
-from typing import Optional, List, Type
+from typing import Optional, List, Type, Any
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -57,7 +57,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         session_id: Optional[str] = None,
         context_extension_rounds=4,
         response_model: Type = str,
-    ) -> List[str]:
+    ) -> List[Any]:
         """
         Extends the context for a given query by retrieving related triplets and generating new
         completions based on them.
