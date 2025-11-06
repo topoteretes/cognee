@@ -73,7 +73,7 @@ async def test_half_overlap_preserves_content_across_chunks(
     )
     chunks = [chunk async for chunk in chunker.read()]
 
-    assert len(chunks) == 3, "Should produce exactly 3 chunks (s1+s2, overlap s2, s3+s4)"
+    assert len(chunks) == 3, "Should produce exactly 3 chunks (s1+s2, s2+s3, s3+s4)"
     assert [c.chunk_index for c in chunks] == [0, 1, 2], "Chunk indices should be [0, 1, 2]"
     assert "one" in chunks[0].text and "two" in chunks[0].text, "Chunk 0 should contain s1 and s2"
     assert "two" in chunks[1].text and "three" in chunks[1].text, (
@@ -119,8 +119,8 @@ async def test_zero_overlap_produces_no_duplicate_content(
     assert "three" in chunks[1].text and "four" in chunks[1].text, (
         "Second chunk should contain s3 and s4"
     )
-    assert "three" not in chunks[0].text and "one" not in chunks[1].text, (
-        "No overlap between chunks"
+    assert "two" not in chunks[1].text and "three" not in chunks[0].text, (
+        "No overlap: end of chunk 0 should not appear in chunk 1"
     )
 
 
@@ -133,6 +133,7 @@ async def test_small_overlap_ratio_creates_minimal_overlap(
     s2 = "beta"
     s3 = "gamma"
     s4 = "delta"
+    s5 = "epsilon"
     text = "dummy"
     document = Document(
         id=uuid4(),
@@ -142,11 +143,11 @@ async def test_small_overlap_ratio_creates_minimal_overlap(
         mime_type="text/plain",
     )
     get_text = make_text_generator(text)
-    get_chunk_data = make_controlled_chunk_data(s1, s2, s3, s4, chunk_size_per_sentence=10)
+    get_chunk_data = make_controlled_chunk_data(s1, s2, s3, s4, s5, chunk_size_per_sentence=10)
     chunker = TextChunkerWithOverlap(
         document,
         get_text,
-        max_chunk_size=30,
+        max_chunk_size=40,
         chunk_overlap_ratio=0.25,
         get_chunk_data=get_chunk_data,
     )
@@ -154,11 +155,11 @@ async def test_small_overlap_ratio_creates_minimal_overlap(
 
     assert len(chunks) == 2, "Should produce exactly 2 chunks"
     assert [c.chunk_index for c in chunks] == [0, 1], "Chunk indices should be [0, 1]"
-    assert "alpha" in chunks[0].text and "beta" in chunks[0].text and "gamma" in chunks[0].text, (
-        "Chunk 0 should contain s1, s2, s3"
+    assert all(token in chunks[0].text for token in [s1, s2, s3, s4]), (
+        "Chunk 0 should contain s1 through s4"
     )
-    assert chunks[1].text == "delta", (
-        "Chunk 1 should contain s4 only (overlap too small for full sentence)"
+    assert s4 in chunks[1].text and s5 in chunks[1].text, (
+        "Chunk 1 should contain overlap s4 and new content s5"
     )
 
 
@@ -171,6 +172,7 @@ async def test_high_overlap_ratio_creates_significant_overlap(
     s2 = "blue"
     s3 = "green"
     s4 = "yellow"
+    s5 = "purple"
     text = "dummy"
     document = Document(
         id=uuid4(),
@@ -180,11 +182,11 @@ async def test_high_overlap_ratio_creates_significant_overlap(
         mime_type="text/plain",
     )
     get_text = make_text_generator(text)
-    get_chunk_data = make_controlled_chunk_data(s1, s2, s3, s4, chunk_size_per_sentence=5)
+    get_chunk_data = make_controlled_chunk_data(s1, s2, s3, s4, s5, chunk_size_per_sentence=5)
     chunker = TextChunkerWithOverlap(
         document,
         get_text,
-        max_chunk_size=15,
+        max_chunk_size=20,
         chunk_overlap_ratio=0.75,
         get_chunk_data=get_chunk_data,
     )
@@ -192,11 +194,44 @@ async def test_high_overlap_ratio_creates_significant_overlap(
 
     assert len(chunks) == 2, "Should produce exactly 2 chunks with 75% overlap"
     assert [c.chunk_index for c in chunks] == [0, 1], "Chunk indices should be [0, 1]"
-    assert "red" in chunks[0].text and "blue" in chunks[0].text and "green" in chunks[0].text, (
-        "Chunk 0 should contain s1, s2, s3"
+    assert all(token in chunks[0].text for token in [s1, s2, s3, s4]), (
+        "Chunk 0 should contain s1, s2, s3, s4"
     )
-    assert "blue" in chunks[1].text and "green" in chunks[1].text and "yellow" in chunks[1].text, (
-        "Chunk 1 should contain s2, s3, s4 (75% overlap)"
+    assert all(token in chunks[1].text for token in [s2, s3, s4, s5]), (
+        "Chunk 1 should contain s2, s3, s4 (overlap) and s5"
+    )
+
+
+@pytest.mark.asyncio
+async def test_single_chunk_no_dangling_overlap(make_text_generator, make_controlled_chunk_data):
+    """Text that fits in one chunk should produce exactly one chunk, no overlap artifact."""
+    s1 = "alpha"
+    s2 = "beta"
+    text = "dummy"
+    document = Document(
+        id=uuid4(),
+        name="test_document",
+        raw_data_location="/test/path",
+        external_metadata=None,
+        mime_type="text/plain",
+    )
+    get_text = make_text_generator(text)
+    get_chunk_data = make_controlled_chunk_data(s1, s2, chunk_size_per_sentence=10)
+    chunker = TextChunkerWithOverlap(
+        document,
+        get_text,
+        max_chunk_size=20,
+        chunk_overlap_ratio=0.5,
+        get_chunk_data=get_chunk_data,
+    )
+    chunks = [chunk async for chunk in chunker.read()]
+
+    assert len(chunks) == 1, (
+        "Should produce exactly 1 chunk when content fits within max_chunk_size"
+    )
+    assert chunks[0].chunk_index == 0, "Single chunk should have index 0"
+    assert "alpha" in chunks[0].text and "beta" in chunks[0].text, (
+        "Single chunk should contain all content"
     )
 
 
