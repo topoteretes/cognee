@@ -146,7 +146,13 @@ async def main():
         assert len(search_results) == 1, (
             f"{name}: expected single-element list, got {len(search_results)}"
         )
-        text = search_results[0]
+
+        from cognee.context_global_variables import backend_access_control_enabled
+
+        if backend_access_control_enabled():
+            text = search_results[0]["search_result"][0]
+        else:
+            text = search_results[0]
         assert isinstance(text, str), f"{name}: element should be a string"
         assert text.strip(), f"{name}: string should not be empty"
         assert "netherlands" in text.lower(), (
