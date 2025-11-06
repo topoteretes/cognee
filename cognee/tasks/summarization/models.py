@@ -1,5 +1,7 @@
-from typing import Union
 
+from pydantic import BaseModel, Field
+from typing import Union
+from datetime import datetime, timezone  
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.shared.CodeGraphEntities import CodeFile, CodePart
@@ -17,7 +19,6 @@ class TextSummary(DataPoint):
 
     text: str
     made_from: DocumentChunk
-
     metadata: dict = {"index_fields": ["text"]}
 
 
