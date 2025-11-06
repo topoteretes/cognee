@@ -79,6 +79,10 @@ def upgrade() -> None:
     dataset = _define_dataset_table()
     user = _define_user_table()
 
+    print(insp.get_table_names())
+
+    print(_get_column(insp, "user_tenants", "tenant_id"))
+
     if "user_tenants" not in insp.get_table_names():
         # Define table with all necessary columns including primary key
         user_tenants = op.create_table(
