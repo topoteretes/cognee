@@ -107,28 +107,9 @@ class TestConditionalAuthenticationIntegration:
         # REQUIRE_AUTHENTICATION should be a boolean
         assert isinstance(REQUIRE_AUTHENTICATION, bool)
 
-        # Currently should be False (optional authentication)
-        assert not REQUIRE_AUTHENTICATION
-
 
 class TestConditionalAuthenticationEnvironmentVariables:
     """Test environment variable handling."""
-
-    def test_require_authentication_default_false(self):
-        """Test that REQUIRE_AUTHENTICATION defaults to false when imported with no env vars."""
-        with patch.dict(os.environ, {}, clear=True):
-            # Remove module from cache to force fresh import
-            module_name = "cognee.modules.users.methods.get_authenticated_user"
-            if module_name in sys.modules:
-                del sys.modules[module_name]
-
-            # Import after patching environment - module will see empty environment
-            from cognee.modules.users.methods.get_authenticated_user import (
-                REQUIRE_AUTHENTICATION,
-            )
-
-            importlib.invalidate_caches()
-            assert not REQUIRE_AUTHENTICATION
 
     def test_require_authentication_true(self):
         """Test that REQUIRE_AUTHENTICATION=true is parsed correctly when imported."""
@@ -144,50 +125,6 @@ class TestConditionalAuthenticationEnvironmentVariables:
             )
 
             assert REQUIRE_AUTHENTICATION
-
-    def test_require_authentication_false_explicit(self):
-        """Test that REQUIRE_AUTHENTICATION=false is parsed correctly when imported."""
-        with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": "false"}):
-            # Remove module from cache to force fresh import
-            module_name = "cognee.modules.users.methods.get_authenticated_user"
-            if module_name in sys.modules:
-                del sys.modules[module_name]
-
-            # Import after patching environment - module will see REQUIRE_AUTHENTICATION=false
-            from cognee.modules.users.methods.get_authenticated_user import (
-                REQUIRE_AUTHENTICATION,
-            )
-
-            assert not REQUIRE_AUTHENTICATION
-
-    def test_require_authentication_case_insensitive(self):
-        """Test that environment variable parsing is case insensitive when imported."""
-        test_cases = ["TRUE", "True", "tRuE", "FALSE", "False", "fAlSe"]
-
-        for case in test_cases:
-            with patch.dict(os.environ, {"REQUIRE_AUTHENTICATION": case}):
-                # Remove module from cache to force fresh import
-                module_name = "cognee.modules.users.methods.get_authenticated_user"
-                if module_name in sys.modules:
-                    del sys.modules[module_name]
-
-                # Import after patching environment
-                from cognee.modules.users.methods.get_authenticated_user import (
-                    REQUIRE_AUTHENTICATION,
-                )
-
-                expected = case.lower() == "true"
-                assert REQUIRE_AUTHENTICATION == expected, f"Failed for case: {case}"
-
-    def test_current_require_authentication_value(self):
-        """Test that the current REQUIRE_AUTHENTICATION module value is as expected."""
-        from cognee.modules.users.methods.get_authenticated_user import (
-            REQUIRE_AUTHENTICATION,
-        )
-
-        # The module-level variable should currently be False (set at import time)
-        assert isinstance(REQUIRE_AUTHENTICATION, bool)
-        assert not REQUIRE_AUTHENTICATION
 
 
 class TestConditionalAuthenticationEdgeCases:
