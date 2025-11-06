@@ -17,6 +17,7 @@ on:
       - 'cognee/tests/unit/interfaces/graph/test_weighted_edges.py'
       - 'examples/python/weighted_edges_example.py'
       - '.github/workflows/weighted_edges_tests.yml'
+  workflow_dispatch:
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
