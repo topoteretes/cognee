@@ -1,0 +1,14 @@
+# Long-running, heavy and resource-consuming tests for release validation
+name: Release Test Workflow
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+
+jobs:
+  load-tests:
+    name: Load Tests
+    uses: ./.github/workflows/load_tests.yml
+    secrets: inherit
