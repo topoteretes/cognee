@@ -71,7 +71,7 @@ async def get_memory_fragment(
         await memory_fragment.project_graph_from_db(
             graph_engine,
             node_properties_to_project=properties_to_project,
-            edge_properties_to_project=["relationship_name"],
+            edge_properties_to_project=["relationship_name", "edge_text"],
             node_type=node_type,
             node_name=node_name,
         )

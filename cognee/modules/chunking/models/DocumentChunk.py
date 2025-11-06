@@ -3,6 +3,7 @@ from typing import List, Union
 from pydantic import BaseModel, Field
 from datetime import datetime, timezone  
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.data.processing.document_types import Document
 from cognee.modules.engine.models import Entity
 from cognee.tasks.temporal_graph.models import Event
@@ -24,7 +25,6 @@ class DocumentChunk(DataPoint):
     - cut_type: The type of cut that defined this chunk.
     - is_part_of: The document to which this chunk belongs.
     - contains: A list of entities or events contained within the chunk (default is None).
-    - last_accessed_at: The timestamp of the last time the chunk was accessed.
     - metadata: A dictionary to hold meta information related to the chunk, including index
     fields.
     """
@@ -34,5 +34,5 @@ class DocumentChunk(DataPoint):
     chunk_index: int
     cut_type: str
     is_part_of: Document
-    contains: List[Union[Entity, Event]] = None
+    contains: List[Union[Entity, Event, tuple[Edge, Entity]]] = None
     metadata: dict = {"index_fields": ["text"]}
