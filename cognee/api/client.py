@@ -40,6 +40,8 @@ from cognee.api.v1.users.routers import (
 )
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
+# Ensure application logging is configured for container stdout/stderr
+setup_logging()
 logger = get_logger()
 
 if os.getenv("ENV", "prod") == "prod":
@@ -74,6 +76,9 @@ async def lifespan(app: FastAPI):
     from cognee.modules.users.methods import get_default_user
 
     await get_default_user()
+
+    # Emit a clear startup message for docker logs
+    logger.info("Backend server has started")
 
     yield
 

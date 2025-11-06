@@ -11,8 +11,10 @@ import pathlib
 from uuid import uuid4, uuid5, NAMESPACE_OID
 
 from cognee.base_config import get_base_config
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
 
+logger = get_logger()
 
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
@@ -38,16 +40,21 @@ def get_anonymous_id():
 
     home_dir = str(pathlib.Path(pathlib.Path(__file__).parent.parent.parent.resolve()))
 
-    if not os.path.isdir(home_dir):
-        os.makedirs(home_dir, exist_ok=True)
-    anonymous_id_file = os.path.join(home_dir, ".anon_id")
-    if not os.path.isfile(anonymous_id_file):
-        anonymous_id = str(uuid4())
-        with open(anonymous_id_file, "w", encoding="utf-8") as f:
-            f.write(anonymous_id)
-    else:
-        with open(anonymous_id_file, "r", encoding="utf-8") as f:
-            anonymous_id = f.read()
+    try:
+        if not os.path.isdir(home_dir):
+            os.makedirs(home_dir, exist_ok=True)
+        anonymous_id_file = os.path.join(home_dir, ".anon_id")
+        if not os.path.isfile(anonymous_id_file):
+            anonymous_id = str(uuid4())
+            with open(anonymous_id_file, "w", encoding="utf-8") as f:
+                f.write(anonymous_id)
+        else:
+            with open(anonymous_id_file, "r", encoding="utf-8") as f:
+                anonymous_id = f.read()
+    except Exception as e:
+        # In case of read-only filesystem or other issues
+        logger.warning("Could not create or read anonymous id file: %s", e)
+        return "unknown-anonymous-id"
     return anonymous_id
 
 

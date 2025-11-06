@@ -1,6 +1,9 @@
 import asyncio
 import cognee
-from cognee.shared.logging_utils import setup_logging, ERROR
+from cognee.modules.engine.operations.setup import setup
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import setup_logging, INFO
+from cognee.modules.pipelines import Task
 from cognee.api.v1.search import SearchType
 
 # Prerequisites:
@@ -16,6 +19,9 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
     print("Data reset complete.\n")
 
+    # Create relational database and tables
+    await setup()
+
     # cognee knowledge graph will be created based on this text
     text = """
     Natural language processing (NLP) is an interdisciplinary
@@ -24,27 +30,35 @@ async def main():
 
     print("Adding text to cognee:")
     print(text.strip())
-    # Add the text, and make it available for cognify
-    await cognee.add(text)
+
+    # Let's recreate the cognee add pipeline through the custom pipeline framework
+    from cognee.tasks.ingestion import ingest_data, resolve_data_directories
+
+    user = await get_default_user()
+
+    # Values for tasks need to be filled before calling the pipeline
+    add_tasks = [
+        Task(resolve_data_directories, include_subdirectories=True),
+        Task(
+            ingest_data,
+            "main_dataset",
+            user,
+        ),
+    ]
+    # Forward tasks to custom pipeline along with data and user information
+    await cognee.run_custom_pipeline(
+        tasks=add_tasks, data=text, user=user, dataset="main_dataset", pipeline_name="add_pipeline"
+    )
     print("Text added successfully.\n")
 
-    print("Running cognify to create knowledge graph...\n")
-    print("Cognify process steps:")
-    print("1. Classifying the document: Determining the type and category of the input text.")
-    print(
-        "2. Checking permissions: Ensuring the user has the necessary rights to process the text."
-    )
-    print(
-        "3. Extracting text chunks: Breaking down the text into sentences or phrases for analysis."
-    )
-    print("4. Adding data points: Storing the extracted chunks for processing.")
-    print(
-        "5. Generating knowledge graph: Extracting entities and relationships to form a knowledge graph."
-    )
-    print("6. Summarizing text: Creating concise summaries of the content for quick insights.\n")
-
     # Use LLMs and cognee to create knowledge graph
-    await cognee.cognify()
+    from cognee.api.v1.cognify.cognify import get_default_tasks
+
+    cognify_tasks = await get_default_tasks(user=user)
+    print("Recreating existing cognify pipeline in custom pipeline to create knowledge graph...\n")
+    await cognee.run_custom_pipeline(
+        tasks=cognify_tasks, user=user, dataset="main_dataset", pipeline_name="cognify_pipeline"
+    )
     print("Cognify process complete.\n")
 
     query_text = "Tell me about NLP"
@@ -61,7 +75,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    logger = setup_logging(log_level=ERROR)
+    logger = setup_logging(log_level=INFO)
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
