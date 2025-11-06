@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from dataclasses import dataclass
 
+
 @dataclass
 class OntologyMetadata:
     ontology_key: str
@@ -13,6 +14,7 @@ class OntologyMetadata:
     size_bytes: int
     uploaded_at: str
     description: Optional[str] = None
+
 
 class OntologyService:
     def __init__(self):
@@ -33,18 +35,20 @@ class OntologyService:
     def _load_metadata(self, user_dir: Path) -> dict:
         metadata_path = self._get_metadata_path(user_dir)
         if metadata_path.exists():
-            with open(metadata_path, 'r') as f:
+            with open(metadata_path, "r") as f:
                 return json.load(f)
         return {}
 
     def _save_metadata(self, user_dir: Path, metadata: dict):
         metadata_path = self._get_metadata_path(user_dir)
-        with open(metadata_path, 'w') as f:
+        with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2)
 
-    async def upload_ontology(self, ontology_key: str, file, user, description: Optional[str] = None) -> OntologyMetadata:
+    async def upload_ontology(
+        self, ontology_key: str, file, user, description: Optional[str] = None
+    ) -> OntologyMetadata:
         # Validate file format
-        if not file.filename.lower().endswith('.owl'):
+        if not file.filename.lower().endswith(".owl"):
             raise ValueError("File must be in .owl format")
 
         user_dir = self._get_user_dir(str(user.id))
@@ -61,7 +65,7 @@ class OntologyService:
 
         # Save file
         file_path = user_dir / f"{ontology_key}.owl"
-        with open(file_path, 'wb') as f:
+        with open(file_path, "wb") as f:
             f.write(content)
 
         # Update metadata
@@ -69,7 +73,7 @@ class OntologyService:
             "filename": file.filename,
             "size_bytes": len(content),
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
-            "description": description
+            "description": description,
         }
         metadata[ontology_key] = ontology_metadata
         self._save_metadata(user_dir, metadata)
@@ -79,7 +83,7 @@ class OntologyService:
             filename=file.filename,
             size_bytes=len(content),
             uploaded_at=ontology_metadata["uploaded_at"],
-            description=description
+            description=description,
         )
 
     def get_ontology_content(self, ontology_key: str, user) -> str:
@@ -93,7 +97,7 @@ class OntologyService:
         if not file_path.exists():
             raise ValueError(f"Ontology file for key '{ontology_key}' not found")
 
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             return f.read()
 
     def list_ontologies(self, user) -> dict:

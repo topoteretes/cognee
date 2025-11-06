@@ -42,8 +42,7 @@ class CognifyPayloadDTO(InDTO):
         default="", description="Custom prompt for entity extraction and graph generation"
     )
     ontology_key: Optional[str] = Field(
-        default=None,
-        description="Reference to previously uploaded ontology"
+        default=None, description="Reference to previously uploaded ontology"
     )
 
 
@@ -123,16 +122,22 @@ def get_cognify_router() -> APIRouter:
             if payload.ontology_key:
                 ontology_service = OntologyService()
                 try:
-                    ontology_content = ontology_service.get_ontology_content(payload.ontology_key, user)
+                    ontology_content = ontology_service.get_ontology_content(
+                        payload.ontology_key, user
+                    )
 
                     from cognee.modules.ontology.ontology_config import Config
-                    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
+                    from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
+                        RDFLibOntologyResolver,
+                    )
                     from io import StringIO
 
                     ontology_stream = StringIO(ontology_content)
                     config_to_use: Config = {
                         "ontology_config": {
-                            "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_stream)
+                            "ontology_resolver": RDFLibOntologyResolver(
+                                ontology_file=ontology_stream
+                            )
                         }
                     }
                 except ValueError as e:

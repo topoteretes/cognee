@@ -8,6 +8,7 @@ from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
 from ..ontologies import OntologyService
 
+
 def get_ontology_router() -> APIRouter:
     router = APIRouter()
     ontology_service = OntologyService()
@@ -17,7 +18,7 @@ def get_ontology_router() -> APIRouter:
         ontology_key: str = Form(...),
         ontology_file: UploadFile = File(...),
         description: Optional[str] = Form(None),
-        user: User = Depends(get_authenticated_user)
+        user: User = Depends(get_authenticated_user),
     ):
         """
         Upload an ontology file with a named key for later use in cognify operations.
@@ -51,7 +52,7 @@ def get_ontology_router() -> APIRouter:
                 "ontology_key": result.ontology_key,
                 "filename": result.filename,
                 "size_bytes": result.size_bytes,
-                "uploaded_at": result.uploaded_at
+                "uploaded_at": result.uploaded_at,
             }
         except ValueError as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
@@ -59,9 +60,7 @@ def get_ontology_router() -> APIRouter:
             return JSONResponse(status_code=500, content={"error": str(e)})
 
     @router.get("", response_model=dict)
-    async def list_ontologies(
-        user: User = Depends(get_authenticated_user)
-    ):
+    async def list_ontologies(user: User = Depends(get_authenticated_user)):
         """
         List all uploaded ontologies for the authenticated user.
 
