@@ -6,7 +6,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("cognify_session")
 
 
-async def cognify_session(data, dataset_id):
+async def cognify_session(data, dataset_id=None):
     """
     Process and cognify session data into the knowledge graph.
 
