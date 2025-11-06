@@ -16,9 +16,11 @@ async def test_cognify_session_success():
         patch("cognee.add", new_callable=AsyncMock) as mock_add,
         patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
     ):
-        await cognify_session(session_data)
+        await cognify_session(session_data, dataset_id="123")
 
-        mock_add.assert_called_once_with(session_data, node_set=["user_sessions_from_cache"])
+        mock_add.assert_called_once_with(
+            session_data, dataset_id="123", node_set=["user_sessions_from_cache"]
+        )
         mock_cognify.assert_called_once()
 
 
@@ -101,7 +103,9 @@ async def test_cognify_session_with_special_characters():
         patch("cognee.add", new_callable=AsyncMock) as mock_add,
         patch("cognee.cognify", new_callable=AsyncMock) as mock_cognify,
     ):
-        await cognify_session(session_data)
+        await cognify_session(session_data, dataset_id="123")
 
-        mock_add.assert_called_once_with(session_data, node_set=["user_sessions_from_cache"])
+        mock_add.assert_called_once_with(
+            session_data, dataset_id="123", node_set=["user_sessions_from_cache"]
+        )
         mock_cognify.assert_called_once()

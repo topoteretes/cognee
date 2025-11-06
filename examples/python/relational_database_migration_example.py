@@ -31,6 +31,9 @@ from cognee.infrastructure.databases.vector.pgvector import (
 
 
 async def main():
+    # Disable backend access control to migrate relational data
+    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
+
     # Clean all data stored in Cognee
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
