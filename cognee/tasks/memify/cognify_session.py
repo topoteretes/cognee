@@ -6,7 +6,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("cognify_session")
 
 
-async def cognify_session(data):
+async def cognify_session(data, dataset_id=None):
     """
     Process and cognify session data into the knowledge graph.
 
@@ -16,6 +16,7 @@ async def cognify_session(data):
 
     Args:
         data: Session string containing Question, Context, and Answer information.
+        dataset_name: Name of dataset.
 
     Raises:
         CogneeValidationError: If data is None or empty.
@@ -28,9 +29,9 @@ async def cognify_session(data):
 
         logger.info("Processing session data for cognification")
 
-        await cognee.add(data, node_set=["user_sessions_from_cache"])
+        await cognee.add(data, dataset_id=dataset_id, node_set=["user_sessions_from_cache"])
         logger.debug("Session data added to cognee with node_set: user_sessions")
-        await cognee.cognify()
+        await cognee.cognify(datasets=[dataset_id])
         logger.info("Session data successfully cognified")
 
     except CogneeValidationError:
