@@ -97,13 +97,23 @@ def upgrade() -> None:
 
         # Insert into user_tenants table
         if user_data:
-            op.bulk_insert(
-                user_tenants,
-                [
-                    {"user_id": user_id, "tenant_id": tenant_id, "created_at": _now()}
-                    for user_id, tenant_id in user_data
-                ],
-            )
+            if op.get_context().dialect.name == "sqlite":
+                insert_stmt = user_tenants.insert().values(
+                    [
+                        {"user_id": user_id, "tenant_id": tenant_id, "created_at": _now()}
+                        for user_id, tenant_id in user_data
+                    ]
+                )
+                conn.execute(insert_stmt)
+                conn.commit()
+            else:
+                op.bulk_insert(
+                    user_tenants,
+                    [
+                        {"user_id": user_id, "tenant_id": tenant_id, "created_at": _now()}
+                        for user_id, tenant_id in user_data
+                    ],
+                )
 
     tenant_id_column = _get_column(insp, "datasets", "tenant_id")
     if not tenant_id_column:
