@@ -23,7 +23,7 @@ logger = get_logger(__name__)
     
     
 async def cleanup_unused_data(    
-    minutes_threshold: int = 30,    
+    days_threshold: Optional[int],    
     dry_run: bool = True,    
     user_id: Optional[UUID] = None,  
     text_doc: bool = False  
@@ -33,8 +33,8 @@ async def cleanup_unused_data(
         
     Parameters    
     ----------    
-    minutes_threshold : int    
-        Minutes since last access to consider data unused (default: 30)    
+    days_threshold : int    
+        days since last access to consider data unused     
     dry_run : bool    
         If True, only report what would be deleted without actually deleting (default: True)    
     user_id : UUID, optional    
@@ -50,14 +50,14 @@ async def cleanup_unused_data(
     """    
     logger.info(    
         "Starting cleanup task",    
-        minutes_threshold=minutes_threshold,    
+        days_threshold=days_threshold,    
         dry_run=dry_run,    
         user_id=str(user_id) if user_id else None,  
         text_doc=text_doc  
     )    
         
     # Calculate cutoff timestamp  
-    cutoff_date = datetime.now(timezone.utc) - timedelta(minutes=minutes_threshold)  
+    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_threshold)
       
     if text_doc:  
         # SQL-based approach: Find unused TextDocuments and use cognee.delete()  
