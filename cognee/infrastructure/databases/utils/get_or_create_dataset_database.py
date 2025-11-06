@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from uuid import UUID
 from typing import Union
 
@@ -6,6 +8,11 @@ from sqlalchemy.exc import IntegrityError
 from cognee.modules.data.methods import create_dataset
 
 from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.infrastructure.databases.utils.constants import (
+    DEFAULT_GRAPH_DB_PROVIDER,
+    DEFAULT_VECTOR_DB_NAME,
+    GRAPH_DB_EXTENSIONS,
+)
 from cognee.modules.data.methods import get_unique_dataset_id
 from cognee.modules.users.models import DatasetDatabase
 from cognee.modules.users.models import User
@@ -14,6 +21,7 @@ from cognee.modules.users.models import User
 async def get_or_create_dataset_database(
     dataset: Union[str, UUID],
     user: User,
+    graph_provider: str | None = None,
 ) -> DatasetDatabase:
     """
     Return the `DatasetDatabase` row for the given owner + dataset.
@@ -32,8 +40,12 @@ async def get_or_create_dataset_database(
 
     dataset_id = await get_unique_dataset_id(dataset, user)
 
-    vector_db_name = f"{dataset_id}.lance.db"
-    graph_db_name = f"{dataset_id}.pkl"
+    vector_db_name = f"{dataset_id}.{DEFAULT_VECTOR_DB_NAME}"
+    provider = _resolve_graph_provider(graph_provider)
+    graph_extension = GRAPH_DB_EXTENSIONS.get(
+        provider, GRAPH_DB_EXTENSIONS[DEFAULT_GRAPH_DB_PROVIDER]
+    )
+    graph_db_name = f"{dataset_id}{graph_extension}"
 
     async with db_engine.get_async_session() as session:
         # Create dataset if it doesn't exist
@@ -66,3 +78,15 @@ async def get_or_create_dataset_database(
         except IntegrityError:
             await session.rollback()
             raise
+
+
+def _resolve_graph_provider(provider: str | None) -> str:
+    from cognee.infrastructure.databases.utils.constants import (
+        DEFAULT_GRAPH_DB_PROVIDER,
+        GRAPH_DBS_WITH_MULTI_USER_SUPPORT,
+    )
+
+    normalized = (provider or DEFAULT_GRAPH_DB_PROVIDER).lower()
+    if normalized not in GRAPH_DBS_WITH_MULTI_USER_SUPPORT:
+        return DEFAULT_GRAPH_DB_PROVIDER
+    return normalized

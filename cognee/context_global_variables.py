@@ -4,7 +4,12 @@ from typing import Union
 from uuid import UUID
 
 from cognee.base_config import get_base_config
+from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.utils import get_or_create_dataset_database
+from cognee.infrastructure.databases.utils.constants import (
+    DEFAULT_GRAPH_DB_PROVIDER,
+    GRAPH_DBS_WITH_MULTI_USER_SUPPORT,
+)
 from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.modules.users.methods import get_user
 
@@ -23,12 +28,13 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     """
     If backend access control is enabled this function will ensure all datasets have their own databases,
     access to which will be enforced by given permissions.
-    Database name will be determined by dataset_id and LanceDB and KuzuDB use will be enforced.
+    Database name will be determined by dataset_id and LanceDB and the configured graph provider
+    will be enforced.
 
     Note: This is only currently supported by the following databases:
           Relational: SQLite, Postgres
           Vector: LanceDB
-          Graph: KuzuDB
+          Graph: KuzuDB (default), Ladybug
 
     Args:
         dataset: Cognee dataset name or id
@@ -45,8 +51,15 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
 
     user = await get_user(user_id)
 
+    configured_graph_provider = get_graph_config().graph_database_provider
+    graph_provider = (configured_graph_provider or DEFAULT_GRAPH_DB_PROVIDER).lower()
+    if graph_provider not in GRAPH_DBS_WITH_MULTI_USER_SUPPORT:
+        graph_provider = DEFAULT_GRAPH_DB_PROVIDER
+
     # To ensure permissions are enforced properly all datasets will have their own databases
-    dataset_database = await get_or_create_dataset_database(dataset, user)
+    dataset_database = await get_or_create_dataset_database(
+        dataset, user, graph_provider=graph_provider
+    )
 
     data_root_directory = os.path.join(
         base_config.data_root_directory, str(user.tenant_id or user.id)
@@ -64,12 +77,15 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
         "vector_db_provider": "lancedb",
     }
 
+    graph_db_path = os.path.join(databases_directory_path, dataset_database.graph_database_name)
     graph_config = {
-        "graph_database_provider": "kuzu",
-        "graph_file_path": os.path.join(
-            databases_directory_path, dataset_database.graph_database_name
-        ),
+        "graph_database_provider": graph_provider,
+        "graph_file_path": graph_db_path,
     }
+
+    # Providers registered through supported_databases expect a URL-style argument.
+    if graph_provider != "kuzu":
+        graph_config["graph_database_url"] = graph_db_path
 
     storage_config = {
         "data_root_directory": data_root_directory,
