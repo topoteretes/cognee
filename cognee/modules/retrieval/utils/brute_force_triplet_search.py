@@ -116,11 +116,6 @@ async def brute_force_triplet_search(
     if top_k <= 0:
         raise ValueError("top_k must be a positive integer.")
 
-    if memory_fragment is None:
-        memory_fragment = await get_memory_fragment(
-            properties_to_project, node_type=node_type, node_name=node_name
-        )
-
     if collections is None:
         collections = [
             "Entity_name",
@@ -156,10 +151,15 @@ async def brute_force_triplet_search(
             return []
 
         # Final statistics
-        projection_time = time.time() - start_time
+        vector_collection_search_time = time.time() - start_time
         logger.info(
-            f"Vector collection retrieval completed: Retrieved distances from {sum(1 for res in results if res)} collections in {projection_time:.2f}s"
+            f"Vector collection retrieval completed: Retrieved distances from {sum(1 for res in results if res)} collections in {vector_collection_search_time :.2f}s"
         )
+
+        if memory_fragment is None:
+            memory_fragment = await get_memory_fragment(
+                properties_to_project, node_type=node_type, node_name=node_name
+            )
 
         node_distances = {collection: result for collection, result in zip(collections, results)}
 
