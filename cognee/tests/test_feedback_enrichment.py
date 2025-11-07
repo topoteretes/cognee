@@ -139,7 +139,7 @@ async def main():
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
         data=[EnrichmentData(id=uuid4())],
-        dataset="feedback_enrichment_test_memify",
+        dataset=dataset_name,
     )
 
     nodes_after, edges_after = await graph_engine.get_graph_data()

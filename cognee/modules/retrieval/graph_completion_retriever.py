@@ -146,7 +146,8 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         query: str,
         context: Optional[List[Edge]] = None,
         session_id: Optional[str] = None,
-    ) -> List[str]:
+        response_model: Type = str,
+    ) -> List[Any]:
         """
         Generates a completion using graph connections context based on a query.
 
@@ -188,6 +189,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                     system_prompt_path=self.system_prompt_path,
                     system_prompt=self.system_prompt,
                     conversation_history=conversation_history,
+                    response_model=response_model,
                 ),
             )
         else:
@@ -197,6 +199,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
+                response_model=response_model,
             )
 
         if self.save_interaction and context and triplets and completion:
