@@ -119,7 +119,7 @@ async def brute_force_triplet_search(
         raise ValueError("top_k must be a positive integer.")
 
     # Setting wide search limit based on the parameters
-    non_global_search = (node_name is None) and (properties_to_project is None)
+    non_global_search = node_name is None
 
     wide_search_limit = wide_search_top_k if non_global_search else None
 
