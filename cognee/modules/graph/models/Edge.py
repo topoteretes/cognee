@@ -2,9 +2,9 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     # event,
     DateTime,
-    String,
     JSON,
     UUID,
+    Text,
 )
 
 # from sqlalchemy.schema import DDL
@@ -29,9 +29,9 @@ class Edge(Base):
     source_node_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     destination_node_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
-    relationship_name: Mapped[str | None] = mapped_column(String(255), nullable=False)
+    relationship_name: Mapped[str | None] = mapped_column(Text, nullable=False)
 
-    label: Mapped[str | None] = mapped_column(String(255))
+    label: Mapped[str | None] = mapped_column(Text)
     attributes: Mapped[dict | None] = mapped_column(JSON)
 
     created_at: Mapped[datetime] = mapped_column(

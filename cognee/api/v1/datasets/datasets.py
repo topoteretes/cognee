@@ -66,7 +66,7 @@ class datasets:
         if not dataset:
             raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
 
-        await delete_dataset_nodes_and_edges(dataset_id)
+        await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
         return await delete_dataset(dataset)
 

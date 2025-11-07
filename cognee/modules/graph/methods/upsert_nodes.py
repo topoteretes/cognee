@@ -3,10 +3,9 @@ from uuid import NAMESPACE_OID, UUID, uuid5
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
 
-from cognee.infrastructure.engine.models.DataPoint import DataPoint
-from cognee.infrastructure.databases.relational import with_async_session
 from cognee.modules.graph.models import Node
-from .set_current_user import set_current_user
+from cognee.infrastructure.engine.models.DataPoint import DataPoint
+from cognee.infrastructure.databases.relational.with_async_session import with_async_session
 
 
 @with_async_session
@@ -20,10 +19,6 @@ async def upsert_nodes(
     -----------
         - nodes (list): A list of nodes to be added to the graph.
     """
-    if session.get_bind().dialect.name == "postgresql":
-        # Set the session-level RLS variable
-        await set_current_user(session, user_id)
-
     upsert_statement = (
         insert(Node)
         .values(

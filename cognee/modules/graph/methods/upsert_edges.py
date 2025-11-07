@@ -5,9 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
 from cognee.modules.engine.utils import generate_edge_id
 
-from cognee.infrastructure.databases.relational import with_async_session
 from cognee.modules.graph.models.Edge import Edge
-from .set_current_user import set_current_user
+from cognee.infrastructure.databases.relational.with_async_session import with_async_session
 
 
 @with_async_session
@@ -25,10 +24,6 @@ async def upsert_edges(
     -----------
         - edges (list): A list of edges to be added to the graph.
     """
-    if session.get_bind().dialect.name == "postgresql":
-        # Set the session-level RLS variable
-        await set_current_user(session, user_id)
-
     edges_to_add = []
 
     for edge in edges:

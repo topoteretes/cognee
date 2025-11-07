@@ -5,7 +5,9 @@ from ..models import User
 from ..get_fastapi_users import get_fastapi_users
 from .get_default_user import get_default_user
 from cognee.shared.logging_utils import get_logger
-from cognee.context_global_variables import backend_access_control_enabled
+from cognee.infrastructure.environment.config.is_backend_access_control_enabled import (
+    is_backend_access_control_enabled,
+)
 
 
 logger = get_logger("get_authenticated_user")
@@ -13,7 +15,7 @@ logger = get_logger("get_authenticated_user")
 # Check environment variable to determine authentication requirement
 REQUIRE_AUTHENTICATION = (
     os.getenv("REQUIRE_AUTHENTICATION", "false").lower() == "true"
-    or backend_access_control_enabled()
+    or is_backend_access_control_enabled()
 )
 
 fastapi_users = get_fastapi_users()
