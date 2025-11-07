@@ -76,21 +76,36 @@ class LLMConfig(BaseSettings):
     @model_validator(mode="after")
     def strip_quotes_from_strings(self) -> "LLMConfig":
         """
-        Strip surrounding quotes from all string fields in the model.
+        Strip surrounding quotes from specific string fields that often come from
+        environment variables with extra quotes (e.g., via Docker's --env-file).
 
-        This handles cases where Docker's --env-file or shell quoting
-        accidentally includes quotes in the value (e.g., LLM_API_KEY="value").
-
-        Returns:
-            LLMConfig: The instance with quotes stripped from all string fields.
+        Only applies to known config keys where quotes are invalid or cause issues.
         """
-        for field_name, _ in self.__class__.model_fields.items():
+        string_fields_to_strip = [
+            "llm_api_key",
+            "llm_endpoint",
+            "llm_api_version",
+            "baml_llm_api_key",
+            "baml_llm_endpoint",
+            "baml_llm_api_version",
+            "fallback_api_key",
+            "fallback_endpoint",
+            "fallback_model",
+            "llm_provider",
+            "llm_model",
+            "baml_llm_provider",
+            "baml_llm_model",
+        ]
+
+        cls = self.__class__
+        for field_name in string_fields_to_strip:
+            if field_name not in cls.model_fields:
+                continue
             value = getattr(self, field_name, None)
             if isinstance(value, str) and len(value) >= 2:
-                if (value.startswith('"') and value.endswith('"')) or (
-                    value.startswith("'") and value.endswith("'")
-                ):
+                if value[0] == value[-1] and value[0] in ("'", '"'):
                     setattr(self, field_name, value[1:-1])
+
         return self
 
     def model_post_init(self, __context) -> None:
