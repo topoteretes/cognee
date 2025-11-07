@@ -278,26 +278,34 @@ async def test_search_result_quality():
         get_migration_relational_engine,
     )
 
+    # Get relational database with original data
     migration_engine = get_migration_relational_engine()
     from sqlalchemy import text
 
     async with migration_engine.engine.connect() as conn:
         result = await conn.execute(
             text("""
-            SELECT CustomerId, GROUP_CONCAT(InvoiceId, ',') AS invoice_ids
-            FROM Invoice
-            GROUP BY CustomerId
-        """)
+                SELECT
+                    c.CustomerId,
+                    c.FirstName,
+                    c.LastName,
+                    GROUP_CONCAT(i.InvoiceId, ',') AS invoice_ids
+                FROM Customer AS c
+                LEFT JOIN Invoice AS i ON c.CustomerId = i.CustomerId
+                GROUP BY c.CustomerId, c.FirstName, c.LastName
+            """)
         )
 
         for row in result:
+            # Get expected invoice IDs from relational DB for each Customer
             customer_id = row.CustomerId
             invoice_ids = row.invoice_ids.split(",") if row.invoice_ids else []
             print(f"Relational DB Customer {customer_id}: {invoice_ids}")
 
+            # Use Cognee search to get invoice IDs for the same Customer but by providing Customer name
             search_results = await cognee.search(
                 query_type=SearchType.GRAPH_COMPLETION,
-                query_text=f"List me all the invoices of Customer:{customer_id}",
+                query_text=f"List me all the invoices of Customer:{row.FirstName} {row.LastName}.",
                 top_k=50,
                 system_prompt="Just return me the invoiceID as a number without any text. This is an example output: ['1', '2', '3']. Where 1, 2, 3 are invoiceIDs of an invoice",
             )
@@ -306,6 +314,9 @@ async def test_search_result_quality():
             import ast
 
             lst = ast.literal_eval(search_results[0])  # converts string -> Python list
+            # Transfrom both lists to int for comparison, sorting and type consistency
+            lst = [int(x) for x in lst].sort()
+            invoice_ids = [int(x) for x in invoice_ids].sort()
             assert lst == invoice_ids, (
                 f"Search results {lst} do not match expected invoice IDs {invoice_ids} for Customer:{customer_id}"
             )
