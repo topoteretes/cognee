@@ -196,11 +196,9 @@ class TestStructuredOutputCompletion:
         entities = [entity]
         await add_data_points(entities)
 
-        await asyncio.gather(
-            _test_get_structured_graph_completion_cot(),
-            _test_get_structured_graph_completion(),
-            _test_get_structured_graph_completion_temporal(),
-            _test_get_structured_graph_completion_rag(),
-            _test_get_structured_graph_completion_context_extension(),
-            _test_get_structured_entity_completion(),
-        )
+        await _test_get_structured_graph_completion_cot()
+        await _test_get_structured_graph_completion()
+        await _test_get_structured_graph_completion_temporal()
+        await _test_get_structured_graph_completion_rag()
+        await _test_get_structured_graph_completion_context_extension()
+        await _test_get_structured_entity_completion()
