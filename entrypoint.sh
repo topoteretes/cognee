@@ -1,6 +1,13 @@
 #!/bin/bash
 
 set -e  # Exit on error
+
+# Ensure the Cognee service uses its dedicated LiteLLM key when one is provided
+if [ -n "$COGNEE_API_KEY" ]; then
+  export LLM_API_KEY="$COGNEE_API_KEY"
+  export OPENAI_API_KEY="$COGNEE_API_KEY"
+  export LITELLM_PROXY_API_KEY="${LITELLM_PROXY_API_KEY:-$COGNEE_API_KEY}"
+fi
 echo "Debug mode: $DEBUG"
 echo "Environment: $ENVIRONMENT"
 

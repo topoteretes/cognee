@@ -12,6 +12,7 @@ from cognee.infrastructure.databases.utils.constants import (
 )
 from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.modules.users.methods import get_user
+from cognee.modules.data.methods import get_dataset
 
 # Note: ContextVar allows us to use different graph db configurations in Cognee
 #       for different async tasks, threads and processes
@@ -61,23 +62,42 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
         dataset, user, graph_provider=graph_provider
     )
 
-    data_root_directory = os.path.join(
-        base_config.data_root_directory, str(user.tenant_id or user.id)
-    )
-    databases_directory_path = os.path.join(
-        base_config.system_root_directory, "databases", str(user.id)
-    )
+    dataset_name: str | None = None
+    if isinstance(dataset, str):
+        dataset_name = dataset
+    else:
+        dataset_obj = await get_dataset(user.id, dataset)
+        if dataset_obj:
+            dataset_name = dataset_obj.name
+
+    if not dataset_name:
+        dataset_name = str(dataset)
+    project_segment = dataset_name.split("_", 1)[0]
+    if not project_segment:
+        project_segment = str(user.tenant_id or user.id)
+
+    project_root = os.path.join(base_config.system_root_directory, project_segment)
+    graph_root = os.path.join(project_root, "graph")
+    vector_root = os.path.join(project_root, "vector")
+    files_root = os.path.join(base_config.data_root_directory, project_segment, "files")
+
+    if not graph_root.startswith("s3://"):
+        os.makedirs(graph_root, exist_ok=True)
+    if not vector_root.startswith("s3://"):
+        os.makedirs(vector_root, exist_ok=True)
+    if not files_root.startswith("s3://"):
+        os.makedirs(files_root, exist_ok=True)
 
     # Set vector and graph database configuration based on dataset database information
     vector_config = {
         "vector_db_url": os.path.join(
-            databases_directory_path, dataset_database.vector_database_name
+            vector_root, dataset_database.vector_database_name
         ),
         "vector_db_key": "",
         "vector_db_provider": "lancedb",
     }
 
-    graph_db_path = os.path.join(databases_directory_path, dataset_database.graph_database_name)
+    graph_db_path = os.path.join(graph_root, dataset_database.graph_database_name)
     graph_config = {
         "graph_database_provider": graph_provider,
         "graph_file_path": graph_db_path,
@@ -88,7 +108,7 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
         graph_config["graph_database_url"] = graph_db_path
 
     storage_config = {
-        "data_root_directory": data_root_directory,
+        "data_root_directory": files_root,
     }
 
     # Use ContextVar to use these graph and vector configurations are used

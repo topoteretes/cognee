@@ -30,6 +30,9 @@ def upgrade() -> None:
         base_config = get_base_config()
 
         databases_root = os.path.join(base_config.system_root_directory, "databases")
+        if databases_root.startswith("s3://"):
+            # Ladybug/S3 deployments don't store Kuzu files locally, so there's nothing to migrate
+            return
         if not os.path.isdir(databases_root):
             raise FileNotFoundError(f"Directory not found: {databases_root}")
 
