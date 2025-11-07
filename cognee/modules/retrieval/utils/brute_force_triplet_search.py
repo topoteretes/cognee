@@ -153,7 +153,7 @@ async def brute_force_triplet_search(
         # Final statistics
         vector_collection_search_time = time.time() - start_time
         logger.info(
-            f"Vector collection retrieval completed: Retrieved distances from {sum(1 for res in results if res)} collections in {vector_collection_search_time :.2f}s"
+            f"Vector collection retrieval completed: Retrieved distances from {sum(1 for res in results if res)} collections in {vector_collection_search_time:.2f}s"
         )
 
         if memory_fragment is None:

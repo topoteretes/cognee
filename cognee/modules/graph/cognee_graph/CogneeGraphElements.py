@@ -26,7 +26,9 @@ class Node:
             raise InvalidDimensionsError()
         self.id = node_id
         self.attributes = attributes if attributes is not None else {}
-        self.attributes["vector_distance"] = 42 # This has to be more than the maximal vector distance
+        self.attributes["vector_distance"] = (
+            42  # This has to be more than the maximal vector distance
+        )
         self.skeleton_neighbours = []
         self.skeleton_edges = []
         self.status = np.ones(dimension, dtype=int)
@@ -111,7 +113,9 @@ class Edge:
         self.node1 = node1
         self.node2 = node2
         self.attributes = attributes if attributes is not None else {}
-        self.attributes["vector_distance"] = 42 # This has to be more than the maximal vector distance
+        self.attributes["vector_distance"] = (
+            42  # This has to be more than the maximal vector distance
+        )
         self.directed = directed
         self.status = np.ones(dimension, dtype=int)
 

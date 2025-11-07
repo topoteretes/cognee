@@ -71,7 +71,6 @@ class CogneeGraph(CogneeAbstractGraph):
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidDimensionsError()
         try:
-
             # Determine projection strategy
             if node_type is not None and node_name not in [None, [], ""]:
                 nodes_data, edges_data = await adapter.get_nodeset_subgraph(
