@@ -95,6 +95,7 @@ async def brute_force_triplet_search(
     memory_fragment: Optional[CogneeGraph] = None,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
+    wide_search_top_k: Optional[int] = 100,
 ) -> List[Edge]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
@@ -107,6 +108,7 @@ async def brute_force_triplet_search(
         memory_fragment (Optional[CogneeGraph]): Existing memory fragment to reuse.
         node_type: node type to filter
         node_name: node name to filter
+        wide_search_top_k (Optional[int]): Number of initial elements to retrieve from collections
 
     Returns:
         list: The top triplet results.
@@ -115,6 +117,11 @@ async def brute_force_triplet_search(
         raise ValueError("The query must be a non-empty string.")
     if top_k <= 0:
         raise ValueError("top_k must be a positive integer.")
+
+    # Setting wide search limit based on the parameters
+    non_global_search = (node_name is None) and (properties_to_project is None)
+
+    wide_search_limit = wide_search_top_k if non_global_search else None
 
     if collections is None:
         collections = [
@@ -135,7 +142,7 @@ async def brute_force_triplet_search(
     async def search_in_collection(collection_name: str):
         try:
             return await vector_engine.search(
-                collection_name=collection_name, query_vector=query_vector, limit=100
+                collection_name=collection_name, query_vector=query_vector, limit=wide_search_limit
             )
         except CollectionNotFoundError:
             return []
