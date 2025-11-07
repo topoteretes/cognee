@@ -73,6 +73,26 @@ class LLMConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
+    @model_validator(mode="after")
+    def strip_quotes_from_strings(self) -> "LLMConfig":
+        """
+        Strip surrounding quotes from all string fields in the model.
+
+        This handles cases where Docker's --env-file or shell quoting
+        accidentally includes quotes in the value (e.g., LLM_API_KEY="value").
+
+        Returns:
+            LLMConfig: The instance with quotes stripped from all string fields.
+        """
+        for field_name, _ in self.__class__.model_fields.items():
+            value = getattr(self, field_name, None)
+            if isinstance(value, str) and len(value) >= 2:
+                if (value.startswith('"') and value.endswith('"')) or (
+                    value.startswith("'") and value.endswith("'")
+                ):
+                    setattr(self, field_name, value[1:-1])
+        return self
+
     def model_post_init(self, __context) -> None:
         """Initialize the BAML registry after the model is created."""
         # Check if BAML is selected as structured output framework but not available
