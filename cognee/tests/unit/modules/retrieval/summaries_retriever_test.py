@@ -13,7 +13,7 @@ from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 
 
-class TextSummariesRetriever:
+class TestSummariesRetriever:
     @pytest.mark.asyncio
     async def test_chunk_context(self):
         system_directory_path = os.path.join(
