@@ -95,7 +95,7 @@ async def brute_force_triplet_search(
     memory_fragment: Optional[CogneeGraph] = None,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
-    wide_search_top_k: Optional[int] = 100,
+    wide_search_top_k: Optional[int] = 100, #:TODO: Should we expose this?
 ) -> List[Edge]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
