@@ -16,6 +16,7 @@ async def create_dataset(dataset_name: str, user: User, session: AsyncSession) -
             .options(joinedload(Dataset.data))
             .filter(Dataset.name == dataset_name)
             .filter(Dataset.owner_id == owner_id)
+            .filter(Dataset.tenant_id == user.tenant_id)
         )
     ).first()
 
