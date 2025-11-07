@@ -315,8 +315,8 @@ async def test_search_result_quality():
 
             lst = ast.literal_eval(search_results[0])  # converts string -> Python list
             # Transfrom both lists to int for comparison, sorting and type consistency
-            lst = [int(x) for x in lst].sort()
-            invoice_ids = [int(x) for x in invoice_ids].sort()
+            lst = sorted([int(x) for x in lst])
+            invoice_ids = sorted([int(x) for x in invoice_ids])
             assert lst == invoice_ids, (
                 f"Search results {lst} do not match expected invoice IDs {invoice_ids} for Customer:{customer_id}"
             )
@@ -334,8 +334,8 @@ async def test_migration_sqlite():
     )
 
     await relational_db_migration()
-    await test_schema_only_migration()
     await test_search_result_quality()
+    await test_schema_only_migration()
 
 
 async def test_migration_postgres():
