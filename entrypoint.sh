@@ -8,6 +8,26 @@ if [ -n "$COGNEE_API_KEY" ]; then
   export OPENAI_API_KEY="$COGNEE_API_KEY"
   export LITELLM_PROXY_API_KEY="${LITELLM_PROXY_API_KEY:-$COGNEE_API_KEY}"
 fi
+
+if [ -z "$DATA_ROOT_DIRECTORY" ] && [ "${STORAGE_BACKEND:-s3}" = "s3" ]; then
+  bucket="${COGNEE_S3_BUCKET:-projects}"
+  prefix="${COGNEE_S3_PREFIX:-}"
+  prefix="${prefix#/}"
+  prefix="${prefix%/}"
+  root="s3://$bucket"
+  if [ -n "$prefix" ]; then
+    root="$root/$prefix"
+  fi
+  export DATA_ROOT_DIRECTORY="$root"
+fi
+
+if [ -z "$SYSTEM_ROOT_DIRECTORY" ]; then
+  export SYSTEM_ROOT_DIRECTORY="${DATA_ROOT_DIRECTORY:-/data/storage}"
+fi
+
+if [ -z "$CACHE_ROOT_DIRECTORY" ]; then
+  export CACHE_ROOT_DIRECTORY="${SYSTEM_ROOT_DIRECTORY}/cache"
+fi
 echo "Debug mode: $DEBUG"
 echo "Environment: $ENVIRONMENT"
 
