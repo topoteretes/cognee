@@ -71,9 +71,6 @@ class CogneeGraph(CogneeAbstractGraph):
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidDimensionsError()
         try:
-            import time
-
-            start_time = time.time()
 
             # Determine projection strategy
             if node_type is not None and node_name not in [None, [], ""]:
@@ -97,6 +94,9 @@ class CogneeGraph(CogneeAbstractGraph):
                         message="Empty filtered graph projected from the database."
                     )
 
+            import time
+
+            start_time = time.time()
             # Process nodes
             for node_id, properties in nodes_data:
                 node_attributes = {key: properties.get(key) for key in node_properties_to_project}
