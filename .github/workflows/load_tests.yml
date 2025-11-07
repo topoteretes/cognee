@@ -45,14 +45,8 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "aws"
 
-      - name: Set File Descriptor Limit
-        run: sudo prlimit --pid $$ --nofile=4096:4096
-
       - name: Verify File Descriptor Limit
         run: ulimit -n
-
-      - name: Dependencies already installed
-        run: echo "Dependencies already installed in setup"
 
       - name: Run Load Test
         env:
