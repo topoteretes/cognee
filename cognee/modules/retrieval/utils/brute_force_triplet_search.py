@@ -135,7 +135,7 @@ async def brute_force_triplet_search(
     async def search_in_collection(collection_name: str):
         try:
             return await vector_engine.search(
-                collection_name=collection_name, query_vector=query_vector, limit=None
+                collection_name=collection_name, query_vector=query_vector, limit=100
             )
         except CollectionNotFoundError:
             return []
