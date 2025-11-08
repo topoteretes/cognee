@@ -56,10 +56,10 @@ async def main():
         """DataCo is a data analytics company. They help businesses make sense of their data."""
     )
 
-    await cognee.add(text_1, dataset_name)
-    await cognee.add(text_2, dataset_name)
+    await cognee.add(data=text_1, dataset_name=dataset_name)
+    await cognee.add(data=text_2, dataset_name=dataset_name)
 
-    await cognee.cognify([dataset_name])
+    await cognee.cognify(datasets=[dataset_name])
 
     user = await get_default_user()
 

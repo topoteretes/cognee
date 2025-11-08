@@ -40,7 +40,7 @@ async def persist_sessions_in_knowledge_graph_pipeline(
     extraction_tasks = [Task(extract_user_sessions, session_ids=session_ids)]
 
     enrichment_tasks = [
-        Task(cognify_session),
+        Task(cognify_session, dataset_id=dataset_to_write[0].id),
     ]
 
     result = await memify(
