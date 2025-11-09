@@ -119,6 +119,21 @@ os.environ["LLM_API_KEY"] = "YOUR OPENAI_API_KEY"
 
 ```
 
+
+### MinerU HTTP OCR (optional)
+
+To offload image transcription to a remote [MinerU](https://github.com/opendatalab/mineru) deployment,
+configure the following environment variables before running Cognee:
+
+- `MINERU_ENABLED`: set to `true` to activate the integration.
+- `MINERU_SERVER_URL`: base URL for the MinerU service (for example `http://mineru.local:8000`).
+- `MINERU_API_KEY` (optional): API key sent with each request.
+- `MINERU_API_KEY_HEADER` (optional): header name that carries the API key, defaults to `Authorization`.
+- `MINERU_MODEL` (optional): explicit model name; otherwise the client picks the first model returned by `/v1/models`.
+
+With the integration enabled, image ingestion uses the MinerU HTTP client first and falls back to the
+configured LLM provider if the remote call fails.
+
 You can also set the variables by creating .env file, using our <a href="https://github.com/topoteretes/cognee/blob/main/.env.template">template.</a>
 To use different LLM providers, for more info check out our <a href="https://docs.cognee.ai/setup-configuration/llm-providers">documentation</a>
 

@@ -46,6 +46,7 @@ dependencies = [
     "fastapi-users[sqlalchemy]>=14.0.1,<15.0.0",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
+    "pillow>=11.0.0,<12.0.0",
     "onnxruntime<=1.22.1",
     "pylance>=0.22.0,<=0.36.0",
     "kuzu (==0.11.3)",
