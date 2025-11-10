@@ -27,9 +27,6 @@ def upgrade() -> None:
 
     table_names = inspector.get_table_names()
 
-    if "graph_relationship_ledger" in table_names:
-        op.drop_table("graph_relationship_ledger")
-
     if "nodes" not in table_names:
         op.create_table(
             "nodes",
@@ -84,37 +81,3 @@ def downgrade() -> None:
 
     if "edges" in table_names:
         op.drop_table("edges")
-
-    if "graph_relationship_ledger" not in table_names:
-        op.create_table(
-            "graph_relationship_ledger",
-            sa.Column(
-                "id",
-                sa.UUID,
-                primary_key=True,
-                default=lambda: uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
-            ),
-            sa.Column("source_node_id", sa.UUID, nullable=False),
-            sa.Column("destination_node_id", sa.UUID, nullable=False),
-            sa.Column("creator_function", sa.String(), nullable=False),
-            sa.Column("node_label", sa.String(), nullable=False),
-            sa.Column(
-                "created_at", sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-            ),
-            sa.Column(
-                "deleted_at", sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
-            ),
-            sa.Column("user_id", sa.UUID, nullable=False),
-        )
-
-    op.create_index("idx_graph_relationship_id", "graph_relationship_ledger", ["id"])
-    op.create_index(
-        "idx_graph_relationship_ledger_source_node_id",
-        "graph_relationship_ledger",
-        ["source_node_id"],
-    )
-    op.create_index(
-        "idx_graph_relationship_ledger_destination_node_id",
-        "graph_relationship_ledger",
-        ["destination_node_id"],
-    )

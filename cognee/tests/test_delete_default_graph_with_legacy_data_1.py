@@ -147,6 +147,8 @@ def get_nodes_and_edges():
 @pytest.mark.asyncio
 @patch.object(LLMGateway, "acreate_structured_output", new_callable=AsyncMock)
 async def main(mock_create_structured_output: AsyncMock):
+    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
+
     data_directory_path = os.path.join(
         pathlib.Path(__file__).parent, ".data_storage/test_delete_default_graph_with_legacy_graph_1"
     )
@@ -172,43 +174,7 @@ async def main(mock_create_structured_output: AsyncMock):
 
     user = await get_default_user()
 
-    graph_engine = await get_graph_engine()
-    old_nodes, old_edges = get_nodes_and_edges()
-    old_document = old_nodes[0]
-
-    await graph_engine.add_nodes(old_nodes)
-    await graph_engine.add_edges(old_edges)
-
-    await index_data_points(old_nodes)
-    await index_graph_edges(old_edges)
-
-    await record_data_in_legacy_ledger(old_nodes, old_edges, user)
-
-    db_engine = get_relational_engine()
-
-    dataset = await create_authorized_dataset("main_dataset", user)
-
-    async with db_engine.get_async_session() as session:
-        old_data = Data(
-            id=old_document.id,
-            name=old_document.name,
-            extension="txt",
-            raw_data_location=old_document.raw_data_location,
-            external_metadata=old_document.external_metadata,
-            mime_type=old_document.mime_type,
-            owner_id=user.id,
-            pipeline_status={
-                "cognify_pipeline": {
-                    str(dataset.id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED,
-                }
-            },
-        )
-        session.add(old_data)
-
-        dataset.data.append(old_data)
-        session.add(dataset)
-
-        await session.commit()
+    old_nodes, old_edges = await add_mocked_legacy_data(user)
 
     def mock_llm_output(text_input: str, system_prompt: str, response_model):
         if text_input == "test":  # LLM connection test
@@ -332,6 +298,8 @@ async def main(mock_create_structured_output: AsyncMock):
             after_delete_nodes_by_vector_collection[collection_name] = []
         after_delete_nodes_by_vector_collection[collection_name].append(node)
 
+    vector_engine = get_vector_engine()
+
     removed_node_ids = initial_node_ids - after_first_delete_node_ids
 
     for collection_name, initial_nodes in initial_nodes_by_vector_collection.items():
@@ -364,6 +332,48 @@ async def main(mock_create_structured_output: AsyncMock):
 
     vector_items = await vector_engine.retrieve("EdgeType_relationship_name", query_edge_ids)
     assert len(vector_items) == len(query_edge_ids), "Vector items are not deleted."
+
+
+async def add_mocked_legacy_data(user):
+    graph_engine = await get_graph_engine()
+    old_nodes, old_edges = get_nodes_and_edges()
+    old_document = old_nodes[0]
+
+    await graph_engine.add_nodes(old_nodes)
+    await graph_engine.add_edges(old_edges)
+
+    await index_data_points(old_nodes)
+    await index_graph_edges(old_edges)
+
+    await record_data_in_legacy_ledger(old_nodes, old_edges, user)
+
+    db_engine = get_relational_engine()
+
+    dataset = await create_authorized_dataset("main_dataset", user)
+
+    async with db_engine.get_async_session() as session:
+        old_data = Data(
+            id=old_document.id,
+            name=old_document.name,
+            extension="txt",
+            raw_data_location=old_document.raw_data_location,
+            external_metadata=old_document.external_metadata,
+            mime_type=old_document.mime_type,
+            owner_id=user.id,
+            pipeline_status={
+                "cognify_pipeline": {
+                    str(dataset.id): DataItemStatus.DATA_ITEM_PROCESSING_COMPLETED,
+                }
+            },
+        )
+        session.add(old_data)
+
+        dataset.data.append(old_data)
+        session.add(dataset)
+
+        await session.commit()
+
+    return old_nodes, old_edges
 
 
 if __name__ == "__main__":

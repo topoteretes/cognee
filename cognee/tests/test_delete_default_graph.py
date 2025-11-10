@@ -33,14 +33,6 @@ async def main(mock_create_structured_output: AsyncMock):
     await cognee.prune.prune_system(metadata=True)
     await setup()
 
-    vector_engine = get_vector_engine()
-
-    assert not await vector_engine.has_collection("EdgeType_relationship_name")
-    assert not await vector_engine.has_collection("Entity_name")
-    assert not await vector_engine.has_collection("DocumentChunk_text")
-    assert not await vector_engine.has_collection("TextSummary_text")
-    assert not await vector_engine.has_collection("TextDocument_text")
-
     def mock_llm_output(text_input: str, system_prompt: str, response_model):
         if text_input == "test":  # LLM connection test
             return "test"
@@ -115,6 +107,14 @@ async def main(mock_create_structured_output: AsyncMock):
 
     mock_create_structured_output.side_effect = mock_llm_output
 
+    vector_engine = get_vector_engine()
+
+    assert not await vector_engine.has_collection("EdgeType_relationship_name")
+    assert not await vector_engine.has_collection("Entity_name")
+    assert not await vector_engine.has_collection("DocumentChunk_text")
+    assert not await vector_engine.has_collection("TextSummary_text")
+    assert not await vector_engine.has_collection("TextDocument_text")
+
     add_john_result = await cognee.add(
         "John works for Apple. He is also affiliated with a non-profit organization called 'Food for Hungry'"
     )
@@ -163,6 +163,8 @@ async def main(mock_create_structured_output: AsyncMock):
         if collection_name not in after_delete_nodes_by_vector_collection:
             after_delete_nodes_by_vector_collection[collection_name] = []
         after_delete_nodes_by_vector_collection[collection_name].append(node)
+
+    vector_engine = get_vector_engine()
 
     removed_node_ids = initial_node_ids - after_first_delete_node_ids
 

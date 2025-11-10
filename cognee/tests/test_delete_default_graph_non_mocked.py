@@ -27,14 +27,6 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
     await setup()
 
-    vector_engine = get_vector_engine()
-
-    assert not await vector_engine.has_collection("EdgeType_relationship_name")
-    assert not await vector_engine.has_collection("Entity_name")
-    assert not await vector_engine.has_collection("DocumentChunk_text")
-    assert not await vector_engine.has_collection("TextSummary_text")
-    assert not await vector_engine.has_collection("TextDocument_text")
-
     add_result = await cognee.add(
         "John works for Apple. He is also affiliated with a non-profit organization called 'Food for Hungry'"
     )
@@ -44,6 +36,14 @@ async def main():
         "Marie works for Apple as well. She is a software engineer on MacOS project."
     )
     maries_data_id = add_result.data_ingestion_info[0]["data_id"]
+
+    vector_engine = get_vector_engine()
+
+    assert not await vector_engine.has_collection("EdgeType_relationship_name")
+    assert not await vector_engine.has_collection("Entity_name")
+    assert not await vector_engine.has_collection("DocumentChunk_text")
+    assert not await vector_engine.has_collection("TextSummary_text")
+    assert not await vector_engine.has_collection("TextDocument_text")
 
     cognify_result: dict = await cognee.cognify()
     dataset_id = list(cognify_result.keys())[0]
