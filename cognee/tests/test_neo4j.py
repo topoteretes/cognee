@@ -8,10 +8,17 @@ from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
 from cognee.modules.engine.models import NodeSet
+import vcr
 
 logger = get_logger()
 
 
+@vcr.use_cassette(
+    "cognee/tests/cassettes/test_neo4j.yaml",
+    record_mode="new_episodes",
+    filter_headers=["authorization", "cookie"],
+    match_on=["method", "uri"],
+)
 async def main():
     cognee.config.set_graph_database_provider("neo4j")
     data_directory_path = str(
