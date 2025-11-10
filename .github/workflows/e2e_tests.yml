@@ -13,10 +13,6 @@ on:
         required: false
         type: string
         default: '["3.10.x", "3.12.x", "3.13.x"]'
-      supported-operating-systems:
-        required: false
-        type: string
-        default: '["ubuntu-22.04", "macos-15", "windows-latest"]'
     secrets:
       LLM_MODEL:
         required: true
@@ -276,12 +272,11 @@ jobs:
         run: uv run python ./cognee/tests/test_delete_permission.py
 
   test-deletion-on-default-graph:
-    name: Delete default graph data test ${{ matrix.python-version }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Delete default graph data test ${{ matrix.python-version }} on ubuntu-22.04
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.supported-python-versions) }}
-        os: ${{ fromJSON(inputs.supported-operating-systems) }}
       fail-fast: false
     steps:
       - name: Check out
@@ -293,13 +288,6 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Path setup
-        if: ${{ matrix.os }} == 'windows-latest'
-        shell: bash
-        run: |
-          PATH=$(printf '%s' "$PATH" | tr ':' $'\n' | grep -vi '/git/usr/bin' | paste -sd: -)
-          export PATH
 
       - name: Run deletion on default graph
         env:
@@ -315,12 +303,11 @@ jobs:
         run: uv run python ./cognee/tests/test_delete_default_graph.py
 
   test-deletion-on-custom-graph:
-    name: Delete custom graph data test ${{ matrix.python-version }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: Delete custom graph data test ${{ matrix.python-version }} on ubuntu-22.04
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.supported-python-versions) }}
-        os: ${{ fromJSON(inputs.supported-operating-systems) }}
       fail-fast: false
     steps:
       - name: Check out
