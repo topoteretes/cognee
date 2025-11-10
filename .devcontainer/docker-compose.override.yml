@@ -1,0 +1,73 @@
+version: '3.8'
+
+# Docker Compose override for GitHub Codespaces
+# This file customizes the main docker-compose.yml for codespace environments
+
+services:
+  cognee:
+    # Override to keep container running and allow codespace to attach
+    command: sleep infinity
+
+    # Additional environment variables for codespace
+    environment:
+      - ENVIRONMENT=codespace
+      - DEBUG=true
+      - HOST=0.0.0.0
+      - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+
+    # Mount the workspace
+    volumes:
+      - ..:/app:cached
+      - /app/.venv  # Prevent mounting .venv from host
+
+    # Increase resource limits for development
+    deploy:
+      resources:
+        limits:
+          cpus: "6.0"
+          memory: 12GB
+        reservations:
+          cpus: "2.0"
+          memory: 4GB
+
+  # Override postgres for codespace
+  postgres:
+    profiles: []  # Remove profile requirement to make it available by default
+    environment:
+      POSTGRES_USER: cognee
+      POSTGRES_PASSWORD: cognee
+      POSTGRES_DB: cognee_db
+    # Add health check
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cognee"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Override neo4j for codespace
+  neo4j:
+    profiles: []  # Remove profile requirement
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p pleaseletmein 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Override chromadb for codespace
+  chromadb:
+    profiles: []  # Remove profile requirement
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Override redis for codespace
+  redis:
+    profiles: []  # Remove profile requirement
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5

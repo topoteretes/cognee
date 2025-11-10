@@ -1,0 +1,106 @@
+{
+  "name": "Cognee RAG Development",
+  "dockerComposeFile": [
+    "../docker-compose.yml",
+    "docker-compose.override.yml"
+  ],
+  "service": "cognee",
+  "workspaceFolder": "/app",
+
+  // Features to install
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.11"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    },
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+
+  // VS Code customizations
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.black-formatter",
+        "charliermarsh.ruff",
+        "ms-azuretools.vscode-docker",
+        "redhat.vscode-yaml",
+        "tamasfe.even-better-toml",
+        "eamodio.gitlens"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": true,
+        "python.formatting.provider": "black",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+          "source.organizeImports": "explicit"
+        },
+        "files.exclude": {
+          "**/__pycache__": true,
+          "**/*.pyc": true,
+          ".pytest_cache": true
+        }
+      }
+    }
+  },
+
+  // Environment variables
+  "containerEnv": {
+    "ENVIRONMENT": "codespace",
+    "DEBUG": "false",
+    "HOST": "0.0.0.0",
+    "LOG_LEVEL": "INFO"
+  },
+
+  // Ports to forward
+  "forwardPorts": [
+    8000,  // Cognee API
+    3000,  // Frontend
+    7474,  // Neo4j Browser
+    7687,  // Neo4j Bolt
+    5432,  // PostgreSQL
+    6379,  // Redis
+    3002   // ChromaDB
+  ],
+
+  "portsAttributes": {
+    "8000": {
+      "label": "Cognee API",
+      "onAutoForward": "notify"
+    },
+    "3000": {
+      "label": "Frontend",
+      "onAutoForward": "silent"
+    },
+    "7474": {
+      "label": "Neo4j Browser",
+      "onAutoForward": "silent"
+    }
+  },
+
+  // Commands to run after container creation (delayed initialization)
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  // Commands to run after container starts (delayed startup tasks)
+  "postStartCommand": "bash .devcontainer/post-start.sh",
+
+  // User to run as
+  "remoteUser": "root",
+
+  // Mount the workspace folder
+  "mounts": [
+    "source=${localWorkspaceFolder}/.env.template,target=/app/.env,type=bind,consistency=cached"
+  ],
+
+  // Lifecycle scripts
+  "updateContentCommand": "echo 'Updating dependencies...' && pip install --no-cache-dir -e .[dev]",
+
+  // Keep container running
+  "overrideCommand": false
+}
