@@ -246,7 +246,7 @@ def get_permissions_router() -> APIRouter:
         - **tenant_id** (Union[UUID, None]): UUID of the tenant to select, If null/None is provided use the default single user tenant
 
         ## Response
-        Returns a success message indicating the tenant was created.
+        Returns a success message along with selected tenant id.
         """
         send_telemetry(
             "Permissions API Endpoint Invoked",
