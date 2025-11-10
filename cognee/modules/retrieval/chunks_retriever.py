@@ -57,6 +57,7 @@ class ChunksRetriever(BaseRetriever):
 
         chunk_payloads = [result.payload for result in found_chunks]
         logger.info(f"Returning {len(chunk_payloads)} chunk payloads")
+        return chunk_payloads
 
     async def get_completion(
         self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
