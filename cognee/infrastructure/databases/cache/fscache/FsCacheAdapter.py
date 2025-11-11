@@ -7,7 +7,10 @@ import threading
 import diskcache as dc
 
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
-from cognee.infrastructure.databases.exceptions.exceptions import CacheConnectionError
+from cognee.infrastructure.databases.exceptions.exceptions import (
+    CacheConnectionError,
+    SharedKuzuLockRequiresRedisError,
+)
 from cognee.infrastructure.files.storage.get_storage_config import get_storage_config
 from cognee.shared.logging_utils import get_logger
 
@@ -15,104 +18,32 @@ logger = get_logger("FSCacheAdapter")
 
 
 class FSCacheAdapter(CacheDBInterface):
-    def __init__(self, timeout=240, blocking_timeout=300, lock_key: str = "default_lock"):
-        self.timeout = timeout
-        self.blocking_timeout = blocking_timeout
-
-        if lock_key is None:
-            lock_key = "default_lock"
+    def __init__(self):
+        default_key = "sessions_db"
 
         storage_config = get_storage_config()
         data_root_directory = storage_config["data_root_directory"]
-        cache_directory = os.path.join(data_root_directory, ".cognee_fs_cache", lock_key)
-
+        cache_directory = os.path.join(data_root_directory, ".cognee_fs_cache", default_key)
         os.makedirs(cache_directory, exist_ok=True)
-
         self.cache = dc.Cache(directory=cache_directory)
         self.cache.expire()
-        self.lock = dc.Lock(self.cache, lock_key)
+        self.lock = dc.Lock(self.cache, default_key)
         self._auto_release_timer = None
         self._timeout_flag = threading.Event()
 
         logger.debug(f"FSCacheAdapter initialized with cache directory: {cache_directory}")
 
     def acquire_lock(self):
-        """
-        Acquire the lock with timeout and auto-release settings.
-
-        - timeout: How long to wait for lock acquisition before raising TimeoutError
-        - blocking_timeout: Auto-release the lock after this duration (like TTL)
-
-        Returns:
-            bool: True if lock was acquired
-
-        Raises:
-            TimeoutError: If lock cannot be acquired within the timeout period
-        """
-        self._timeout_flag.clear()
-        timeout_timer = None
-
-        if self.timeout and self.timeout > 0:
-
-            def on_timeout():
-                self._timeout_flag.set()
-                logger.error(
-                    f"Failed to acquire lock within {self.timeout} seconds on key: {self.lock._key}"
-                )
-
-            timeout_timer = threading.Timer(self.timeout, on_timeout)
-            timeout_timer.daemon = True
-            timeout_timer.start()
-
-        try:
-            sleep_interval = 0.001
-
-            while True:
-                if self._timeout_flag.is_set():
-                    raise TimeoutError(
-                        f"Failed to acquire lock within {self.timeout} seconds on key: {self.lock._key}"
-                    )
-
-                if self.cache.add(
-                    self.lock._key,
-                    None,
-                    expire=self.lock._expire,
-                    tag=self.lock._tag,
-                    retry=True,
-                ):
-                    logger.debug(f"Lock acquired successfully on key: {self.lock._key}")
-
-                    if self.blocking_timeout and self.blocking_timeout > 0:
-
-                        def on_auto_release():
-                            logger.debug(
-                                f"Auto-releasing lock after {self.blocking_timeout}s on key: {self.lock._key}"
-                            )
-                            self.release_lock()
-
-                        self._auto_release_timer = threading.Timer(
-                            self.blocking_timeout, on_auto_release
-                        )
-                        self._auto_release_timer.daemon = True
-                        self._auto_release_timer.start()
-
-                    return True
-
-                time.sleep(sleep_interval)
-        finally:
-            if timeout_timer:
-                timeout_timer.cancel()
+        """Lock acquisition is not available for filesystem cache backend."""
+        message = "Shared Kuzu lock requires Redis cache backend."
+        logger.error(message)
+        raise SharedKuzuLockRequiresRedisError()
 
     def release_lock(self):
-        """Release the lock and cancel any auto-release timer."""
-        if self.lock is None:
-            return
-
-        if self._auto_release_timer:
-            self._auto_release_timer.cancel()
-            logger.debug(f"Lock manually released on key: {self.lock._key}")
-
-        self.lock.release()
+        """Lock release is not available for filesystem cache backend."""
+        message = "Shared Kuzu lock requires Redis cache backend."
+        logger.error(message)
+        raise SharedKuzuLockRequiresRedisError()
 
     async def add_qa(
         self,

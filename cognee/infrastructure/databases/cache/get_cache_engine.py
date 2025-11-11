@@ -51,11 +51,7 @@ def create_cache_engine(
                 blocking_timeout=agentic_lock_timeout,
             )
         elif config.cache_backend == "fs":
-            return FSCacheAdapter(
-                timeout=agentic_lock_expire,
-                blocking_timeout=agentic_lock_timeout,
-                lock_key=lock_key,
-            )
+            return FSCacheAdapter()
         else:
             raise ValueError(
                 f"Unsupported cache backend: '{config.cache_backend}'. "
