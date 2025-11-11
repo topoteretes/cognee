@@ -35,7 +35,7 @@ async def get_or_create_dataset_database(
 
     vector_config = get_vectordb_config()
     graph_config = get_graph_config()
-
+Note: for hybrid databases both graph and vector DB name have to be the same
     if graph_config.graph_database_provider == "kuzu":
         graph_db_name = f"{dataset_id}.pkl"
     else:
