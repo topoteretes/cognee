@@ -387,8 +387,8 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_feedback_enrichment.py
 
-  run_conversation_sessions_test:
-    name: Conversation sessions test
+  run_conversation_sessions_test_redis:
+    name: Conversation sessions test (Redis)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -449,6 +449,37 @@ jobs:
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
         run: uv run python ./cognee/tests/test_conversation_history.py
+
+  run_conversation_sessions_test_fs:
+    name: Conversation sessions test (FS)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "postgres"
 
       - name: Run Conversation session tests (FS)
         env:
