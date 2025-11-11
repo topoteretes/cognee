@@ -41,6 +41,7 @@ def test_cache_config_custom_values():
 def test_cache_config_to_dict():
     """Test the to_dict method returns all configuration values."""
     config = CacheConfig(
+        cache_backend="fs",
         caching=True,
         shared_kuzu_lock=True,
         cache_host="test-host",
