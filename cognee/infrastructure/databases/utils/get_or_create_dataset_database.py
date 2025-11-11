@@ -40,12 +40,12 @@ async def get_or_create_dataset_database(
     if graph_config.graph_database_provider == "kuzu":
         graph_db_name = f"{dataset_id}.pkl"
     else:
-        graph_db_name = dataset_id
+        graph_db_name = f"{dataset_id}"
 
     if vector_config.vector_db_provider == "lancedb":
         vector_db_name = f"{dataset_id}.lance.db"
     else:
-        vector_db_name = dataset_id
+        vector_db_name = f"{dataset_id}"
 
     async with db_engine.get_async_session() as session:
         # Create dataset if it doesn't exist
