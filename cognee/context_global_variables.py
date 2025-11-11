@@ -16,8 +16,8 @@ vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
 session_user = ContextVar("session_user", default=None)
 
-VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb"]
-GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["kuzu"]
+VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "falkor"]
+GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["kuzu", "falkor"]
 
 
 async def set_session_user_context_variable(user):
