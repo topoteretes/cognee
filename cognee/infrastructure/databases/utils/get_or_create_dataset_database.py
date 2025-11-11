@@ -11,12 +11,6 @@ from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.modules.data.methods import get_unique_dataset_id
 from cognee.modules.users.models import DatasetDatabase
 from cognee.modules.users.models import User
-from .constants import (
-    GRAPH_DBS_WITH_MULTI_USER_SUPPORT,
-    VECTOR_DBS_WITH_MULTI_USER_SUPPORT,
-    HYBRID_DBS,
-)
-
 
 async def get_or_create_dataset_database(
     dataset: Union[str, UUID],
@@ -42,15 +36,15 @@ async def get_or_create_dataset_database(
     vector_config = get_vectordb_config()
     graph_config = get_graph_config()
 
-    graph_db_name = f"{dataset_id}.pkl"
-
-    if graph_config.graph_database_provider in HYBRID_DBS:
-        vector_db_name = graph_db_name
+    if graph_config.graph_database_provider == "kuzu":
+        graph_db_name = f"{dataset_id}.pkl"
     else:
-        if vector_config.vector_db_provider == "lancedb":
-            vector_db_name = f"{dataset_id}.lance.db"
-        else:
-            vector_db_name = f"{dataset_id}.db"
+        graph_db_name = dataset_id
+
+    if vector_config.vector_db_provider == "lancedb":
+        vector_db_name = f"{dataset_id}.lance.db"
+    else:
+        vector_db_name = dataset_id
 
     async with db_engine.get_async_session() as session:
         # Create dataset if it doesn't exist
@@ -65,20 +59,6 @@ async def get_or_create_dataset_database(
         existing: DatasetDatabase = await session.scalar(stmt)
         if existing:
             return existing
-
-        # Check if we support multi-user for this provider. If not, use default
-        if graph_config.graph_database_provider not in GRAPH_DBS_WITH_MULTI_USER_SUPPORT:
-            raise EnvironmentError(
-                f"Multi-user is currently not supported for the graph database provider: {graph_config.graph_database_provider}. "
-                f"Supported providers are: {', '.join(GRAPH_DBS_WITH_MULTI_USER_SUPPORT)}. Either use one of these"
-                f"providers, or disable BACKEND_ACCESS_CONTROL"
-            )
-        if vector_config.vector_db_provider not in VECTOR_DBS_WITH_MULTI_USER_SUPPORT:
-            raise EnvironmentError(
-                f"Multi-user is currently not supported for the vector database provider: {vector_config.vector_db_provider}. "
-                f"Supported providers are: {', '.join(VECTOR_DBS_WITH_MULTI_USER_SUPPORT)}. Either use one of these"
-                f"providers, or disable BACKEND_ACCESS_CONTROL"
-            )
 
         # If there are no existing rows build a new row
         record = DatasetDatabase(
