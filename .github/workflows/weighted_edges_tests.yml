@@ -1,22 +1,9 @@
 name: Weighted Edges Tests
 
+# Modified for fork: Only runs manually to avoid unnecessary alerts
+# Original triggers: push/PR on specific file changes
 on:
-  push:
-    branches: [ main, weighted_edges ]
-    paths:
-      - 'cognee/modules/graph/utils/get_graph_from_model.py'
-      - 'cognee/infrastructure/engine/models/Edge.py'
-      - 'cognee/tests/unit/interfaces/graph/test_weighted_edges.py'
-      - 'examples/python/weighted_edges_example.py'
-      - '.github/workflows/weighted_edges_tests.yml'
-  pull_request:
-    branches: [ main ]
-    paths:
-      - 'cognee/modules/graph/utils/get_graph_from_model.py'
-      - 'cognee/infrastructure/engine/models/Edge.py'
-      - 'cognee/tests/unit/interfaces/graph/test_weighted_edges.py'
-      - 'examples/python/weighted_edges_example.py'
-      - '.github/workflows/weighted_edges_tests.yml'
+  workflow_dispatch:
 
 env:
   RUNTIME__LOG_LEVEL: ERROR

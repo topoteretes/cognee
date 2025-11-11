@@ -1,11 +1,8 @@
 name: Test Suites
 
+# Modified for fork: Only runs manually to avoid unnecessary alerts
+# Original triggers: push to main/dev, pull_request
 on:
-  push:
-    branches: [ main, dev ]
-  pull_request:
-    branches: [ main, dev ]
-    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 concurrency:
