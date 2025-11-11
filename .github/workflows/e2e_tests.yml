@@ -454,7 +454,7 @@ jobs:
 
       - name: Run Conversation session tests
         env:
-          ENV: dev
+          ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
