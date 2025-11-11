@@ -7,3 +7,4 @@ from .PipelineRunInfo import (
     PipelineRunErrored,
 )
 from .DataItemStatus import DataItemStatus
+from .DataItem import DataItem
