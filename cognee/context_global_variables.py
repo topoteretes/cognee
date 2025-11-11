@@ -17,7 +17,7 @@ graph_db_config = ContextVar("graph_db_config", default=None)
 session_user = ContextVar("session_user", default=None)
 
 VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "falkor"]
-GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["kuzu", "falkor"]
+GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["kuzu", "falkor", "neo4j"]
 
 
 async def set_session_user_context_variable(user):
@@ -101,6 +101,8 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
         "graph_file_path": os.path.join(
             databases_directory_path, dataset_database.graph_database_name
         ),
+        "graph_database_username": dataset_database.graph_database_username,
+        "graph_database_password": dataset_database.graph_database_password,
     }
 
     storage_config = {
