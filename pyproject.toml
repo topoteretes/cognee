@@ -169,7 +169,6 @@ exclude = [
   "/dist",
   "/.data",
   "/.github",
-  "/alembic",
   "/deployment",
   "/cognee-mcp",
   "/cognee-frontend",
