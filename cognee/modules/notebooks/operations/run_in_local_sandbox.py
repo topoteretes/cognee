@@ -2,6 +2,8 @@ import io
 import sys
 import traceback
 
+import cognee
+
 
 def wrap_in_async_handler(user_code: str) -> str:
     return (
@@ -34,6 +36,7 @@ def run_in_local_sandbox(code, environment=None, loop=None):
 
     environment["print"] = customPrintFunction
     environment["running_loop"] = loop
+    environment["cognee"] = cognee
 
     try:
         exec(code, environment)
