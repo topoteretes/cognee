@@ -39,6 +39,30 @@ async def get_or_create_dataset_database(
     vector_config = get_vectordb_config()
     graph_config = get_graph_config()
 
+    # Note: for hybrid databases both graph and vector DB name have to be the same
+    if graph_config.graph_database_provider == "kuzu":
+        graph_db_name = f"{dataset_id}.pkl"
+    else:
+        graph_db_name = f"{dataset_id}"
+
+    if vector_config.vector_db_provider == "lancedb":
+        vector_db_name = f"{dataset_id}.lance.db"
+    else:
+        vector_db_name = f"{dataset_id}"
+
+    base_config = get_base_config()
+    databases_directory_path = os.path.join(
+        base_config.system_root_directory, "databases", str(user.id)
+    )
+
+    # Determine vector database URL
+    if vector_config.vector_db_provider == "lancedb":
+        vector_db_url = os.path.join(databases_directory_path, vector_config.vector_db_name)
+    else:
+        vector_db_url = vector_config.vector_database_url
+
+    # Determine graph database URL
+
     async with db_engine.get_async_session() as session:
         # Create dataset if it doesn't exist
         if isinstance(dataset, str):

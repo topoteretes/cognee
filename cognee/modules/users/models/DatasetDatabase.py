@@ -27,5 +27,14 @@ class DatasetDatabase(Base):
     graph_database_username = Column(String, unique=False, nullable=True)
     graph_database_password = Column(String, unique=False, nullable=True)
 
+    vector_database_provider = Column(String, unique=False, nullable=False)
+    graph_database_provider = Column(String, unique=False, nullable=False)
+
+    vector_database_url = Column(String, unique=False, nullable=True)
+    graph_database_url = Column(String, unique=False, nullable=True)
+
+    vector_database_key = Column(String, unique=False, nullable=True)
+    graph_database_key = Column(String, unique=False, nullable=True)
+
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
