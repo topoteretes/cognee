@@ -39,7 +39,7 @@ async def get_all_user_permission_datasets(user: User, permission_type: str) -> 
         # If the dataset id key already exists, leave the dictionary unchanged.
         unique.setdefault(dataset.id, dataset)
 
-    # Filter out dataset that aren't part of the current user's tenant
+    # Filter out dataset that aren't part of the selected user's tenant
     filtered_datasets = []
     for dataset in list(unique.values()):
         if dataset.tenant_id == user.tenant_id:
