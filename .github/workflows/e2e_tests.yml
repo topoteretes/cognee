@@ -331,29 +331,6 @@ jobs:
           DB_PASSWORD: cognee
         run: uv run python ./cognee/tests/test_concurrent_subprocess_access.py
 
-      - name: Run Concurrent subprocess access test (Kuzu/Lancedb/Postgres/FS)
-        env:
-          ENV: dev
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          GRAPH_DATABASE_PROVIDER: 'kuzu'
-          CACHING: true
-          CACHE_BACKEND: 'fs'
-          SHARED_KUZU_LOCK: true
-          DB_PROVIDER: 'postgres'
-          DB_NAME: 'cognee_db'
-          DB_HOST: '127.0.0.1'
-          DB_PORT: 5432
-          DB_USERNAME: cognee
-          DB_PASSWORD: cognee
-        run: uv run python ./cognee/tests/test_concurrent_subprocess_access.py
-
   test-entity-extraction:
     name: Test Entity Extraction
     runs-on: ubuntu-22.04
@@ -451,7 +428,7 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "postgres redis"
 
-      - name: Run Conversation session tests
+      - name: Run Conversation session tests (Redis)
         env:
           ENV: dev
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -465,6 +442,28 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           CACHING: true
           CACHE_BACKEND: 'redis'
+          DB_PROVIDER: 'postgres'
+          DB_NAME: 'cognee_db'
+          DB_HOST: '127.0.0.1'
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+        run: uv run python ./cognee/tests/test_conversation_history.py
+
+      - name: Run Conversation session tests (FS)
+        env:
+          ENV: dev
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          GRAPH_DATABASE_PROVIDER: 'kuzu'
+          CACHING: true
+          CACHE_BACKEND: 'fs'
           DB_PROVIDER: 'postgres'
           DB_NAME: 'cognee_db'
           DB_HOST: '127.0.0.1'
