@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.3.6"
+version = "0.3.9"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -167,7 +167,6 @@ exclude = [
   "/dist",
   "/.data",
   "/.github",
-  "/alembic",
   "/deployment",
   "/cognee-mcp",
   "/cognee-frontend",
