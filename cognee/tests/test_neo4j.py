@@ -20,6 +20,17 @@ logger = get_logger()
     match_on=["method", "uri"],
 )
 async def main():
+    '''
+    VCR.py Configuration:
+        path (str): Path to the cassette file (.yaml) used to store and replay HTTP interactions.
+        record_mode (str): Controls recording behavior.
+            - "all": Record all requests, overwriting existing ones.
+            - "none": Replay only, never record new interactions.
+            - "new_episodes": Replay existing interactions and record new ones if missing.
+            - "once": Record only if cassette doesn’t exist, then replay thereafter.
+        filter_headers (list[str]): Headers to omit from recording (e.g., authorization, cookie).
+        match_on (list[str]): Attributes used to match recorded interactions (e.g., method, uri, body).
+    '''
     cognee.config.set_graph_database_provider("neo4j")
     data_directory_path = str(
         pathlib.Path(
