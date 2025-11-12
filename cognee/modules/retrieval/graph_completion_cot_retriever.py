@@ -75,7 +75,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             node_type=node_type,
             node_name=node_name,
             save_interaction=save_interaction,
-            wide_search_top_k=wide_search_top_k
+            wide_search_top_k=wide_search_top_k,
         )
         self.validation_system_prompt_path = validation_system_prompt_path
         self.validation_user_prompt_path = validation_user_prompt_path

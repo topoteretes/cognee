@@ -68,7 +68,7 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k
+                wide_search_top_k=wide_search_top_k,
             ).get_completion,
             GraphCompletionRetriever(
                 system_prompt_path=system_prompt_path,
@@ -77,7 +77,7 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k
+                wide_search_top_k=wide_search_top_k,
             ).get_context,
         ],
         SearchType.GRAPH_COMPLETION_COT: [
@@ -88,7 +88,7 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k
+                wide_search_top_k=wide_search_top_k,
             ).get_completion,
             GraphCompletionCotRetriever(
                 system_prompt_path=system_prompt_path,
@@ -97,7 +97,7 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k
+                wide_search_top_k=wide_search_top_k,
             ).get_context,
         ],
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: [
@@ -108,7 +108,7 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k
+                wide_search_top_k=wide_search_top_k,
             ).get_completion,
             GraphCompletionContextExtensionRetriever(
                 system_prompt_path=system_prompt_path,
@@ -117,7 +117,7 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k
+                wide_search_top_k=wide_search_top_k,
             ).get_context,
         ],
         SearchType.GRAPH_SUMMARY_COMPLETION: [
@@ -128,7 +128,7 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k
+                wide_search_top_k=wide_search_top_k,
             ).get_completion,
             GraphSummaryCompletionRetriever(
                 system_prompt_path=system_prompt_path,
@@ -137,7 +137,7 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k
+                wide_search_top_k=wide_search_top_k,
             ).get_context,
         ],
         SearchType.CODE: [

@@ -271,7 +271,7 @@ async def authorized_search(
             node_name=node_name,
             save_interaction=save_interaction,
             last_k=last_k,
-            wide_search_top_k=wide_search_top_k
+            wide_search_top_k=wide_search_top_k,
         )
         search_tools = specific_search_tools
         if len(search_tools) == 2:

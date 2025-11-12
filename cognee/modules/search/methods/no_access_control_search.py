@@ -36,7 +36,7 @@ async def no_access_control_search(
         node_name=node_name,
         save_interaction=save_interaction,
         last_k=last_k,
-        wide_search_top_k=wide_search_top_k
+        wide_search_top_k=wide_search_top_k,
     )
     graph_engine = await get_graph_engine()
     is_empty = await graph_engine.is_empty()

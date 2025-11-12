@@ -55,7 +55,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         self.system_prompt_path = system_prompt_path
         self.system_prompt = system_prompt
         self.top_k = top_k if top_k is not None else 5
-        self.wide_search_top_k=wide_search_top_k
+        self.wide_search_top_k = wide_search_top_k
         self.node_type = node_type
         self.node_name = node_name
 
@@ -107,7 +107,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
             collections=vector_index_collections or None,
             node_type=self.node_type,
             node_name=self.node_name,
-            wide_search_top_k=self.wide_search_top_k
+            wide_search_top_k=self.wide_search_top_k,
         )
 
         return found_triplets
