@@ -27,9 +27,6 @@ class FSCacheAdapter(CacheDBInterface):
         os.makedirs(cache_directory, exist_ok=True)
         self.cache = dc.Cache(directory=cache_directory)
         self.cache.expire()
-        self.lock = dc.Lock(self.cache, default_key)
-        self._auto_release_timer = None
-        self._timeout_flag = threading.Event()
 
         logger.debug(f"FSCacheAdapter initialized with cache directory: {cache_directory}")
 
@@ -81,7 +78,7 @@ class FSCacheAdapter(CacheDBInterface):
         session_key = f"agent_sessions:{user_id}:{session_id}"
         value = self.cache.get(session_key)
         if value is None:
-            return []
+            return None
         entries = json.loads(value)
         return entries[-last_n:] if len(entries) > last_n else entries
 
