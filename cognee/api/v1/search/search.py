@@ -31,6 +31,7 @@ async def search(
     only_context: bool = False,
     use_combined_context: bool = False,
     session_id: Optional[str] = None,
+    wide_search_top_k: Optional[int] = 100,
 ) -> Union[List[SearchResult], CombinedSearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -200,6 +201,7 @@ async def search(
         only_context=only_context,
         use_combined_context=use_combined_context,
         session_id=session_id,
+        wide_search_top_k=wide_search_top_k
     )
 
     return filtered_search_results
