@@ -4,6 +4,30 @@ This guide will walk you through setting up the complete Cognee stack on Unraid,
 
 ---
 
+## ⚠️ CRITICAL: Multi-User Dataset Separation Configuration
+
+**THIS CONFIGURATION IS MANDATORY:**
+
+```bash
+# Backend MUST have these settings
+ENABLE_BACKEND_ACCESS_CONTROL=true   # ← REQUIRED for dataset separation!
+AUTHENTICATION_REQUIRED=false         # ← No passwords (local network only)
+SKIP_AUTH=true                        # ← No auth enforcement
+```
+
+**What this means:**
+- ✅ **Dataset separation works** - Each LibreChat user sees only their own datasets
+- ✅ **No passwords needed** - Safe for trusted local network with personal data
+- ❌ **DO NOT expose to internet** - No authentication means anyone can access
+- 🔑 **User ID determines ownership** - LibreChat's `X-User-ID` header controls access
+
+**How LibreChat users are separated:**
+- User "alice" creates datasets → Only alice sees them (via `X-User-ID: alice`)
+- User "bob" creates datasets → Only bob sees them (via `X-User-ID: bob`)
+- No passwords, but datasets stay isolated by user ID
+
+---
+
 ## Table of Contents
 
 1. [Architecture Overview](#architecture-overview)
@@ -69,6 +93,19 @@ This guide will walk you through setting up the complete Cognee stack on Unraid,
    - Get it at: https://jina.ai/?sui=apikey
    - Used for MCP search reranking
 
+### Important Configuration Notes
+
+**Multi-User Dataset Separation (REQUIRED):**
+- The backend **MUST** run with `ENABLE_BACKEND_ACCESS_CONTROL=true`
+- This enables dataset isolation per user (each LibreChat user sees only their own datasets)
+- User identification is handled via `X-User-ID` header from LibreChat
+
+**No Authentication Mode (Local Network Only):**
+- Since this is a personal setup on a local network with no sensitive data
+- You can run **without authentication** on the backend
+- LibreChat will still pass user IDs for dataset separation
+- **WARNING:** Only use this on trusted local networks (not internet-exposed!)
+
 ---
 
 ## Part 1: Cognee Backend Setup
@@ -133,8 +170,16 @@ DB_NAME=cognee
 DB_USERNAME=cognee
 DB_PASSWORD=your_secure_postgres_password
 
-# Backend Configuration
+# Backend Configuration - CRITICAL FOR MULTI-USER DATASET SEPARATION
 ENABLE_BACKEND_ACCESS_CONTROL=true
+
+# Authentication Configuration - NO AUTH for local network
+# Since we're on a trusted local network with no sensitive data, we disable auth
+# But keep access control ON for dataset separation per user
+AUTHENTICATION_REQUIRED=false
+SKIP_AUTH=true
+
+# Port and Logging
 BACKEND_PORT=8000
 LOG_LEVEL=INFO
 
@@ -142,6 +187,23 @@ LOG_LEVEL=INFO
 SYSTEM_ROOT=/app/.cognee_system
 DATA_ROOT=/app/data
 ```
+
+**CRITICAL CONFIGURATION NOTES:**
+
+1. **`ENABLE_BACKEND_ACCESS_CONTROL=true`** - **REQUIRED!**
+   - Enables dataset isolation per user
+   - Each LibreChat user sees only their own datasets
+   - User ID from `X-User-ID` header determines dataset ownership
+
+2. **`AUTHENTICATION_REQUIRED=false` and `SKIP_AUTH=true`** - No authentication
+   - Safe for local network with no sensitive data
+   - LibreChat still sends user IDs for separation
+   - **DO NOT expose to internet without authentication!**
+
+3. **How it works:**
+   - LibreChat sends `X-User-ID: alice` → Alice's datasets
+   - LibreChat sends `X-User-ID: bob` → Bob's datasets
+   - No passwords needed, but datasets stay separated by user ID
 
 **Path Mappings:**
 
@@ -570,21 +632,62 @@ Expected: Cognee dashboard loads
 3. Try increasing `top_k` in search parameters
 4. Use `search_type: "GRAPH_COMPLETION"` for better reasoning
 
-### Issue 5: Multi-User Isolation Not Working
+### Issue 5: Multi-User Isolation Not Working (CRITICAL)
 
 **Symptom:** Users see each other's datasets
 
+**This is a critical failure of the required configuration!**
+
 **Solution:**
-1. Verify backend has access control enabled:
+
+1. **Verify backend has BOTH settings:**
    ```bash
-   ENABLE_BACKEND_ACCESS_CONTROL=true
+   # Check these environment variables in cognee-backend container
+   docker exec cognee-backend env | grep -E "ENABLE_BACKEND_ACCESS_CONTROL|AUTHENTICATION_REQUIRED|SKIP_AUTH"
+
+   # Should show:
+   ENABLE_BACKEND_ACCESS_CONTROL=true   # ← MUST be true!
+   AUTHENTICATION_REQUIRED=false        # ← No auth (local network)
+   SKIP_AUTH=true                       # ← No auth enforcement
    ```
-2. Restart backend: `docker restart cognee-backend`
-3. Check LibreChat passes user ID:
+
+2. **Restart backend after fixing:**
+   ```bash
+   docker restart cognee-backend
+   # Wait 10 seconds for startup
+   docker logs cognee-backend | grep -i "access control"
+   # Should see: "Backend access control: ENABLED"
+   ```
+
+3. **Verify LibreChat passes user ID:**
    ```yaml
+   # In librechat.yaml under cognee-search:
    headers:
      X-User-ID: "{{LIBRECHAT_USER_ID}}"
+     X-User-Email: "{{LIBRECHAT_USER_EMAIL}}"
    ```
+
+4. **Test dataset separation:**
+   ```bash
+   # Create dataset as user "alice"
+   curl -X POST http://localhost:8000/api/v1/datasets \
+     -H "X-User-ID: alice" \
+     -H "Content-Type: application/json" \
+     -d '{"name": "Alice Dataset"}'
+
+   # Try to list as user "bob" - should NOT see Alice's dataset
+   curl http://localhost:8000/api/v1/datasets -H "X-User-ID: bob"
+   ```
+
+5. **If still failing:**
+   - Check backend logs: `docker logs cognee-backend | grep -i "user\|access"`
+   - Verify database has user_id column: `docker exec cognee-postgres psql -U cognee -d cognee -c "\d datasets"`
+   - May need to recreate database if upgraded from non-multiuser version
+
+**Important Notes:**
+- `ENABLE_BACKEND_ACCESS_CONTROL=true` is **MANDATORY** - without it, ALL users see ALL datasets
+- `AUTHENTICATION_REQUIRED=false` means no passwords, but user IDs still separate datasets
+- LibreChat MUST send `X-User-ID` header for separation to work
 
 ---
 
@@ -605,16 +708,29 @@ Expected: Cognee dashboard loads
 
 ## Quick Reference: Environment Variables
 
-### Cognee Backend
+### Cognee Backend (CRITICAL SETTINGS!)
 ```bash
+# CRITICAL: Multi-user dataset separation (REQUIRED!)
+ENABLE_BACKEND_ACCESS_CONTROL=true    # ← MUST BE TRUE!
+AUTHENTICATION_REQUIRED=false          # ← No auth (local network only)
+SKIP_AUTH=true                         # ← No password enforcement
+
+# LLM Configuration
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-...
+
+# Database Configuration
 GRAPH_DATABASE_PROVIDER=neo4j
 GRAPH_DATABASE_URL=bolt://neo4j:7687
+GRAPH_DATABASE_USERNAME=neo4j
+GRAPH_DATABASE_PASSWORD=your_password
 VECTOR_DB_PROVIDER=qdrant
 VECTOR_DB_URL=http://qdrant:6333
 DB_HOST=postgres
-ENABLE_BACKEND_ACCESS_CONTROL=true
+DB_PORT=5432
+DB_NAME=cognee
+DB_USERNAME=cognee
+DB_PASSWORD=your_password
 ```
 
 ### Cognee MCP
@@ -694,8 +810,16 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # CRITICAL: Multi-user dataset separation (REQUIRED!)
+      ENABLE_BACKEND_ACCESS_CONTROL: "true"    # ← MUST BE TRUE!
+      AUTHENTICATION_REQUIRED: "false"          # ← No auth (local network)
+      SKIP_AUTH: "true"                         # ← No password enforcement
+
+      # LLM Configuration
       LLM_PROVIDER: openai
       OPENAI_API_KEY: your_openai_key
+
+      # Database Configuration
       GRAPH_DATABASE_PROVIDER: neo4j
       GRAPH_DATABASE_URL: bolt://neo4j:7687
       GRAPH_DATABASE_USERNAME: neo4j
@@ -708,7 +832,6 @@ services:
       DB_NAME: cognee
       DB_USERNAME: cognee
       DB_PASSWORD: your_secure_password
-      ENABLE_BACKEND_ACCESS_CONTROL: "true"
     volumes:
       - /mnt/user/appdata/cognee-backend/data:/app/data
       - /mnt/user/appdata/cognee-backend/.cognee_system:/app/.cognee_system
