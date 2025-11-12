@@ -56,6 +56,59 @@ class CogneeGraph(CogneeAbstractGraph):
     def get_edges(self) -> List[Edge]:
         return self.edges
 
+    async def _get_nodeset_subgraph(
+        self,
+        adapter,
+        node_type,
+        node_name,
+    ):
+        """Retrieve subgraph based on node type and name."""
+        nodes_data, edges_data = await adapter.get_nodeset_subgraph(
+            node_type=node_type, node_name=node_name
+        )
+        if not nodes_data or not edges_data:
+            raise EntityNotFoundError(
+                message="Nodeset does not exist, or empty nodeset projected from the database."
+            )
+        return nodes_data, edges_data
+
+    async def _get_full_or_id_filtered_graph(
+        self,
+        adapter,
+        relevant_ids_to_filter,
+    ):
+        """Retrieve full or ID-filtered graph with fallback."""
+        if relevant_ids_to_filter is None:
+            nodes_data, edges_data = await adapter.get_graph_data()
+            if not nodes_data or not edges_data:
+                raise EntityNotFoundError(message="Empty graph projected from the database.")
+            return nodes_data, edges_data
+
+        get_graph_data_fn = getattr(adapter, "get_id_filtered_graph_data", adapter.get_graph_data)
+        nodes_data, edges_data = await get_graph_data_fn()
+        if get_graph_data_fn is not adapter.get_graph_data and (not nodes_data or not edges_data):
+            logger.warning(
+                "Id filtered graph returned empty, falling back to full graph retrieval."
+            )
+            nodes_data, edges_data = await adapter.get_graph_data()
+
+        if not nodes_data or not edges_data:
+            raise EntityNotFoundError("Empty graph projected from the database.")
+        return nodes_data, edges_data
+
+    async def _get_filtered_graph(
+        self,
+        adapter,
+        memory_fragment_filter,
+    ):
+        """Retrieve graph filtered by attributes."""
+        nodes_data, edges_data = await adapter.get_filtered_graph_data(
+            attribute_filters=memory_fragment_filter
+        )
+        if not nodes_data or not edges_data:
+            raise EntityNotFoundError(message="Empty filtered graph projected from the database.")
+        return nodes_data, edges_data
+
     async def project_graph_from_db(
         self,
         adapter: Union[GraphDBInterface],
@@ -67,31 +120,23 @@ class CogneeGraph(CogneeAbstractGraph):
         memory_fragment_filter=[],
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        relevant_ids_to_filter: Optional[List[str]] = None,
     ) -> None:
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidDimensionsError()
         try:
-            # Determine projection strategy
             if node_type is not None and node_name not in [None, [], ""]:
-                nodes_data, edges_data = await adapter.get_nodeset_subgraph(
-                    node_type=node_type, node_name=node_name
+                nodes_data, edges_data = await self._get_nodeset_subgraph(
+                    adapter, node_type, node_name
                 )
-                if not nodes_data or not edges_data:
-                    raise EntityNotFoundError(
-                        message="Nodeset does not exist, or empty nodetes projected from the database."
-                    )
             elif len(memory_fragment_filter) == 0:
-                nodes_data, edges_data = await adapter.get_graph_data()
-                if not nodes_data or not edges_data:
-                    raise EntityNotFoundError(message="Empty graph projected from the database.")
-            else:
-                nodes_data, edges_data = await adapter.get_filtered_graph_data(
-                    attribute_filters=memory_fragment_filter
+                nodes_data, edges_data = await self._get_full_or_id_filtered_graph(
+                    adapter, relevant_ids_to_filter
                 )
-                if not nodes_data or not edges_data:
-                    raise EntityNotFoundError(
-                        message="Empty filtered graph projected from the database."
-                    )
+            else:
+                nodes_data, edges_data = await self._get_filtered_graph(
+                    adapter, memory_fragment_filter
+                )
 
             import time
 
