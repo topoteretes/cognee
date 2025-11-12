@@ -20,7 +20,7 @@ on:
 
 env:
   DOCKERHUB_REPO: lvarming/cognee-mcp
-  PLATFORMS: linux/amd64,linux/arm64
+  PLATFORMS: linux/amd64
 
 jobs:
   build-and-push:

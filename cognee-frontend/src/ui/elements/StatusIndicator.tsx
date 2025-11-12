@@ -1,4 +1,4 @@
-export default function StatusIndicator({ status }: { status: "DATASET_PROCESSING_COMPLETED" | string }) {
+export default function StatusIndicator({ status }: { status?: "DATASET_PROCESSING_COMPLETED" | string }) {
   const statusColor = {
     DATASET_PROCESSING_STARTED: "#ffd500",
     DATASET_PROCESSING_INITIATED: "#ffd500",
@@ -7,6 +7,7 @@ export default function StatusIndicator({ status }: { status: "DATASET_PROCESSIN
   };
 
   const isSuccess = status === "DATASET_PROCESSING_COMPLETED";
+  const displayColor = status ? statusColor[status as keyof typeof statusColor] : "#808080";
 
   return (
     <div
@@ -14,9 +15,9 @@ export default function StatusIndicator({ status }: { status: "DATASET_PROCESSIN
         width: "16px",
         height: "16px",
         borderRadius: "4px",
-        background: statusColor[status as keyof typeof statusColor],
+        background: displayColor,
       }}
-      title={isSuccess ? "Dataset cognified" : "Cognify data in order to explore it"}
+      title={isSuccess ? "Dataset cognified" : status ? "Cognify data in order to explore it" : "Status unknown"}
     />
   );
 }
