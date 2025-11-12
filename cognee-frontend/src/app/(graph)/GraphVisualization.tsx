@@ -1,7 +1,7 @@
 "use client";
 
 import classNames from "classnames";
-import { MutableRefObject, useEffect, useImperativeHandle, useRef, useState, useCallback } from "react";
+import { MutableRefObject, forwardRef, useEffect, useImperativeHandle, useRef, useState, useCallback } from "react";
 import { forceCollide, forceManyBody } from "d3-force-3d";
 import dynamic from "next/dynamic";
 import { GraphControlsAPI } from "./GraphControls";
@@ -15,10 +15,9 @@ const ForceGraph = dynamic(() => import("react-force-graph-2d"), {
 
 import type { ForceGraphMethods, GraphData, LinkObject, NodeObject } from "react-force-graph-2d";
 
-interface GraphVisuzaliationProps {
-  ref: MutableRefObject<GraphVisualizationAPI>;
+interface GraphVisualizationProps {
   data?: GraphData<NodeObject, LinkObject>;
-  graphControls: MutableRefObject<GraphControlsAPI>;
+  graphControls: MutableRefObject<GraphControlsAPI | null>;
   className?: string;
 }
 
@@ -27,7 +26,10 @@ export interface GraphVisualizationAPI {
   setGraphShape: (shape: string) => void;
 }
 
-export default function GraphVisualization({ ref, data, graphControls, className }: GraphVisuzaliationProps) {
+const GraphVisualization = forwardRef<GraphVisualizationAPI, GraphVisualizationProps>(function GraphVisualization(
+  { data, graphControls, className }: GraphVisualizationProps,
+  ref,
+) {
   const textSize = 6;
   const nodeSize = 15;
   // const addNodeDistanceFromSourceNode = 15;
@@ -267,4 +269,6 @@ export default function GraphVisualization({ ref, data, graphControls, className
       />
     </div>
   );
-}
+});
+
+export default GraphVisualization;

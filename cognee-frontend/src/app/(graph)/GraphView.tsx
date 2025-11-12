@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, MutableRefObject } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import Link from "next/link";
 import { TextLogo } from "@/ui/App";
@@ -47,11 +47,9 @@ export default function GraphView() {
     updateData(newData);
   }, []);
 
-  const graphRef = useRef<GraphVisualizationAPI>();
-
-  const graphControls = useRef<GraphControlsAPI>();
-
-  const activityLog = useRef<ActivityLogAPI>();
+  const graphRef = useRef<GraphVisualizationAPI | null>(null);
+  const graphControls = useRef<GraphControlsAPI | null>(null);
+  const activityLog = useRef<ActivityLogAPI | null>(null);
 
   return (
     <main className="flex flex-col h-full">
@@ -74,9 +72,9 @@ export default function GraphView() {
       <div className="w-full h-full relative overflow-hidden">
         <GraphVisualization
           key={data?.nodes.length}
-          ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
+          ref={graphRef}
           data={data}
-          graphControls={graphControls as MutableRefObject<GraphControlsAPI>}
+          graphControls={graphControls}
         />
 
         <div className="absolute top-2 left-2 flex flex-col gap-2">
@@ -88,7 +86,7 @@ export default function GraphView() {
           </div> */}
           <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-sm">
             <h2 className="text-xl text-white mb-4">Activity Log</h2>
-            <ActivityLog ref={activityLog as MutableRefObject<ActivityLogAPI>} />
+            <ActivityLog ref={activityLog} />
           </div>
         </div>
 
@@ -96,10 +94,10 @@ export default function GraphView() {
           <div className="bg-gray-500 pt-4 pr-4 pb-4 pl-4 rounded-md w-110">
             <GraphControls
               data={data}
-              ref={graphControls as MutableRefObject<GraphControlsAPI>}
+              ref={graphControls}
               isAddNodeFormOpen={isAddNodeFormOpen}
-              onFitIntoView={() => graphRef.current!.zoomToFit(1000, 50)}
-              onGraphShapeChange={(shape) => graphRef.current!.setGraphShape(shape)}
+              onFitIntoView={() => graphRef.current?.zoomToFit(1000, 50)}
+              onGraphShapeChange={(shape) => graphRef.current?.setGraphShape(shape)}
             />
           </div>
           {data?.nodes.length && (

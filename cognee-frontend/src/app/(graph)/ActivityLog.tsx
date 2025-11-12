@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useImperativeHandle, useState } from "react";
+import { forwardRef, useCallback, useImperativeHandle, useState } from "react";
 
 type ActivityLog = {
   id: string;
@@ -12,13 +12,9 @@ export interface ActivityLogAPI {
   updateActivityLog: (activityLog: ActivityLog[]) => void;
 }
 
-interface ActivityLogProps {
-  ref: React.RefObject<ActivityLogAPI>;
-}
-
 const formatter = new Intl.DateTimeFormat("en-GB", { dateStyle: "short", timeStyle: "medium" });
 
-export default function ActivityLog({ ref }: ActivityLogProps) {
+const ActivityLog = forwardRef<ActivityLogAPI>(function ActivityLog(_, ref) {
   const [activityLog, updateActivityLog] = useState<ActivityLog[]>([]);
 
   const handleActivityLogUpdate = useCallback(
@@ -51,4 +47,6 @@ export default function ActivityLog({ ref }: ActivityLogProps) {
       </div>
     </div>
   );
-}
+});
+
+export default ActivityLog;

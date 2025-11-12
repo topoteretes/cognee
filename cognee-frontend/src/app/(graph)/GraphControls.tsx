@@ -3,7 +3,7 @@
 import { v4 as uuid4 } from "uuid";
 // import classNames from "classnames";
 import { NodeObject, LinkObject } from "react-force-graph-2d";
-import { ChangeEvent, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { ChangeEvent, forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { DeleteIcon } from "@/ui/Icons";
 // import { FeedbackForm } from "@/ui/Partials";
@@ -15,7 +15,6 @@ interface GraphControlsProps {
     links: LinkObject[];
   };
   isAddNodeFormOpen: boolean;
-  ref: React.RefObject<GraphControlsAPI>;
   onFitIntoView: () => void;
   onGraphShapeChange: (shape: string) => void;
 }
@@ -64,7 +63,10 @@ const GRAPH_SHAPES = [{
   label: "Radial-out",
 }];
 
-export default function GraphControls({ data, isAddNodeFormOpen, onGraphShapeChange, onFitIntoView, ref }: GraphControlsProps) {
+const GraphControls = forwardRef<GraphControlsAPI, GraphControlsProps>(function GraphControls(
+  { data, isAddNodeFormOpen, onGraphShapeChange, onFitIntoView }: GraphControlsProps,
+  ref,
+) {
   const [selectedNode, setSelectedNode] = useState<NodeObject | null>(null);
   const [nodeProperties, setNodeProperties] = useState<NodeProperty[]>([]);
   const [newProperty, setNewProperty] = useState<NodeProperty>({
@@ -239,4 +241,6 @@ export default function GraphControls({ data, isAddNodeFormOpen, onGraphShapeCha
       </div>
     </>
   );
-}
+});
+
+export default GraphControls;
