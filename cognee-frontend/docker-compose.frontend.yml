@@ -1,0 +1,82 @@
+# ==============================================
+# Frontend-specific Docker Compose Configuration
+# Can be used standalone or with the main docker-compose.yml
+# ==============================================
+
+version: '3.8'
+
+services:
+  # Production Frontend
+  frontend-prod:
+    container_name: cognee-frontend-prod
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # Optional build args
+      # args:
+      #   NODE_ENV: production
+    image: cognee-frontend:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_TELEMETRY_DISABLED=1
+      - NEXT_PUBLIC_BACKEND_API_URL=${NEXT_PUBLIC_BACKEND_API_URL:-http://localhost:8000/api}
+    # Resource limits for production
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    # Health check
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Restart policy
+    restart: unless-stopped
+    networks:
+      - cognee-network
+
+  # Development Frontend
+  frontend-dev:
+    container_name: cognee-frontend-dev
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: cognee-frontend:dev
+    ports:
+      - "3000:3000"
+      - "9229:9229"  # Node.js debugging
+    volumes:
+      # Mount source code for hot-reloading
+      - ./src:/app/src
+      - ./public:/app/public
+      # Mount config files
+      - ./next.config.mjs:/app/next.config.mjs
+      - ./postcss.config.mjs:/app/postcss.config.mjs
+      - ./tsconfig.json:/app/tsconfig.json
+      # Prevent node_modules from being mounted
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NODE_ENV=development
+      - NEXT_TELEMETRY_DISABLED=1
+      - NEXT_PUBLIC_BACKEND_API_URL=${NEXT_PUBLIC_BACKEND_API_URL:-http://localhost:8000/api}
+      - WATCHPACK_POLLING=true  # Enable polling for file changes in Docker
+    # No resource limits in development for faster builds
+    restart: unless-stopped
+    networks:
+      - cognee-network
+    profiles:
+      - dev
+
+networks:
+  cognee-network:
+    name: cognee-network
+    external: true

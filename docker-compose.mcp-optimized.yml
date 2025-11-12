@@ -1,0 +1,120 @@
+# Cognee MCP Server - Optimized Docker Compose Configuration
+# This is an optimized configuration for the MCP server with security hardening
+# and production-ready settings.
+#
+# Usage:
+#   docker-compose -f docker-compose.yml -f docker-compose.mcp-optimized.yml up cognee-mcp
+#
+# Or to use this standalone:
+#   docker-compose -f docker-compose.mcp-optimized.yml up
+
+version: '3.8'
+
+services:
+  # Optimized Cognee MCP Server
+  cognee-mcp:
+    container_name: cognee-mcp
+    image: cognee/cognee-mcp:${COGNEE_MCP_VERSION:-latest}
+    profiles:
+      - mcp
+    networks:
+      - cognee-network
+    build:
+      context: ./cognee-mcp
+      dockerfile: Dockerfile.optimized
+      args:
+        - DEBUG=${DEBUG:-false}
+      labels:
+        - "com.cognee.component=mcp-server"
+        - "com.cognee.version=${COGNEE_MCP_VERSION:-latest}"
+
+    # Environment configuration
+    environment:
+      # Transport configuration
+      - TRANSPORT_MODE=${MCP_TRANSPORT_MODE:-sse}
+      - HTTP_PORT=8001  # Different port from main API to avoid conflicts
+
+      # API mode configuration (REQUIRED)
+      - API_URL=${COGNEE_API_URL:-http://cognee:8000}
+      - API_TOKEN=${COGNEE_API_TOKEN:-}
+
+      # Backend settings
+      - ENABLE_BACKEND_ACCESS_CONTROL=${ENABLE_BACKEND_ACCESS_CONTROL:-true}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
+
+      # Logging and debugging
+      - LOG_LEVEL=${MCP_LOG_LEVEL:-INFO}
+      - MCP_LOG_LEVEL=${MCP_LOG_LEVEL:-INFO}
+      - PYTHONUNBUFFERED=1
+      - DEBUG=${DEBUG:-false}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+
+    # Port mappings (non-conflicting with main API)
+    ports:
+      - "${MCP_HTTP_PORT:-8001}:8001"   # MCP server port
+      - "${MCP_DEBUG_PORT:-5679}:5678"  # Debugger port (different from main API)
+
+    # Dependency management
+    depends_on:
+      cognee:
+        condition: service_healthy
+        required: true
+
+    # Restart policy for production reliability
+    restart: unless-stopped
+
+    # Resource limits (optimized for read-only MCP operations)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'       # Reduced from 2.0 (MCP is lightweight)
+          memory: 2048M     # Reduced from 4GB
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    # Health check configuration
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+
+    # Read-only root filesystem (uncomment when ready)
+    # read_only: true
+    # tmpfs:
+    #   - /tmp
+    #   - /app/.cache
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "com.cognee.component"
+
+    # Labels for container management
+    labels:
+      - "com.cognee.component=mcp-server"
+      - "com.cognee.description=Model Context Protocol server for Cognee"
+      - "com.cognee.transport=${MCP_TRANSPORT_MODE:-sse}"
+      - "traefik.enable=false"  # Disable if using Traefik
+
+networks:
+  cognee-network:
+    name: cognee-network
+    external: true  # Use existing network
+
+# Note: This configuration assumes the main cognee service is running
+# and accessible at http://cognee:8000 within the cognee-network.
+#
+# To run standalone, ensure:
+# 1. cognee-network exists: docker network create cognee-network
+# 2. Main cognee API is running on the network
+# 3. Environment variables are set (see .env.example)

@@ -5,6 +5,19 @@
   <br />
   <strong>Cognee MCP – Read‑only Knowledge Search Server</strong>
   <p>Expose your Cognee knowledge bases to any Model Context Protocol client (LibreChat, IDEs, terminals) through a lightweight two‑tool server.</p>
+
+  <a href="https://github.com/Varming73/cognee/actions/workflows/cognee-mcp-docker.yml">
+    <img src="https://github.com/Varming73/cognee/actions/workflows/cognee-mcp-docker.yml/badge.svg" alt="Docker Build Status">
+  </a>
+  <a href="https://hub.docker.com/r/lvarming/cognee-mcp">
+    <img src="https://img.shields.io/docker/v/lvarming/cognee-mcp?label=docker&logo=docker" alt="Docker Image Version">
+  </a>
+  <a href="https://hub.docker.com/r/lvarming/cognee-mcp">
+    <img src="https://img.shields.io/docker/pulls/lvarming/cognee-mcp?logo=docker" alt="Docker Pulls">
+  </a>
+  <a href="https://hub.docker.com/r/lvarming/cognee-mcp">
+    <img src="https://img.shields.io/docker/image-size/lvarming/cognee-mcp?logo=docker" alt="Docker Image Size">
+  </a>
 </div>
 
 ---
@@ -59,10 +72,22 @@ Environment variables such as `BACKEND_API_TOKEN`, `CORS_ALLOWED_ORIGINS`, etc.,
 
 ## 4. Docker & Deployment Notes
 
-You can build or pull the `cognee/cognee-mcp` image. Key differences from the stock README:
+You can build or pull the `lvarming/cognee-mcp` image from Docker Hub. Key differences from the stock README:
 
 - MCP is API-only, so always pass `API_URL` (and optionally `API_TOKEN`).
 - Transport selection still uses `TRANSPORT_MODE` env inside Docker (`http`, `sse`, or `stdio`).
+
+### Pull from Docker Hub
+
+```bash
+# Pull the latest version
+docker pull lvarming/cognee-mcp:latest
+
+# Or pull a specific version
+docker pull lvarming/cognee-mcp:0.4.0
+```
+
+### Run the container
 
 ```bash
 # Example: SSE transport pointing at backend container "cognee-api"
@@ -73,10 +98,16 @@ docker run --rm -it \
   -e API_URL=http://cognee-api:8000 \
   -e API_TOKEN=YOUR_TOKEN \
   -p 8001:8000 \
-  cognee/cognee-mcp:main
+  lvarming/cognee-mcp:latest
 ```
 
 Remember: Docker uses env vars (`API_URL`, `API_TOKEN`, `TRANSPORT_MODE`), while direct Python execution uses CLI flags.
+
+### Multi-platform support
+
+The Docker images are built for both `linux/amd64` and `linux/arm64` architectures, making them suitable for:
+- x86_64 servers and desktops
+- ARM-based systems (Apple Silicon, Raspberry Pi, AWS Graviton)
 
 ---
 
@@ -99,7 +130,7 @@ Best practices:
 - Call `list_datasets` once at the beginning of a conversation to discover dataset IDs and owners.
 - Use `get_dataset_summary(dataset_id)` when you need a quick preview before committing to a KB.
 - `search` accepts dataset IDs (recommended), combined-context flags, and node filters—set them explicitly so the LLM retrieves exactly what the user needs.
-- Tune `top_k` (1–50) to balance latency vs. recall. LibreChat’s LLM can interpret the returned evidence to craft the final response.
+- Tune `top_k` (1–50) to balance latency vs. recall. LibreChat's LLM can interpret the returned evidence to craft the final response.
 
 ---
 

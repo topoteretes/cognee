@@ -1,0 +1,38 @@
+# ==============================================
+# Development Dockerfile for Next.js Frontend
+# Optimized for hot-reloading and development workflow
+# ==============================================
+
+FROM node:22-alpine
+
+# Install dependencies for development
+RUN apk update && apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json package-lock.json ./
+
+# Install all dependencies (including devDependencies)
+RUN npm ci && npm cache clean --force
+
+# Copy source code and configuration files
+# Note: In development, these are often mounted as volumes
+COPY src ./src
+COPY public ./public
+COPY next.config.mjs .
+COPY postcss.config.mjs .
+COPY tsconfig.json .
+COPY .env.template .
+
+# Set development environment
+ENV NODE_ENV=development \
+    NEXT_TELEMETRY_DISABLED=1
+
+# Expose the application port and debugging port
+EXPOSE 3000
+EXPOSE 9229
+
+# Start the Next.js development server
+# This enables hot-reloading for development
+CMD ["npm", "run", "dev"]
