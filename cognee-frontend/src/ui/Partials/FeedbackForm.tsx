@@ -20,11 +20,11 @@ export default function FeedbackForm({ onSuccess }: FeedbackFormProps) {
     setFalse: enableFeedbackSubmit,
   } = useBoolean(false);
 
+  const [feedbackValue, setFeedbackValue] = useState("");
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
   const signIn = (event: React.FormEvent<SignInFormPayload>) => {
     event.preventDefault();
-    const formElements = event.currentTarget;
 
     setFeedbackError(null);
     disableFeedbackSubmit();
@@ -32,7 +32,7 @@ export default function FeedbackForm({ onSuccess }: FeedbackFormProps) {
     fetch("/v1/crewai/feedback", {
       method: "POST",
       body: JSON.stringify({
-        feedback: formElements.feedback.value,
+        feedback: feedbackValue,
       }),
       headers: {
         "Content-Type": "application/json",
@@ -41,7 +41,7 @@ export default function FeedbackForm({ onSuccess }: FeedbackFormProps) {
       .then(response => response.json())
       .then(() => {
         onSuccess();
-        formElements.feedback.value = "";
+        setFeedbackValue("");
       })
       .catch(error => setFeedbackError(error.detail))
       .finally(() => enableFeedbackSubmit());
@@ -52,7 +52,13 @@ export default function FeedbackForm({ onSuccess }: FeedbackFormProps) {
       <div className="flex flex-col gap-2">
         <div className="mb-4">
           <label className="block text-white" htmlFor="feedback">Feedback on agent&apos;s reasoning</label>
-          <TextArea id="feedback" name="feedback" type="text" placeholder="Your feedback" />
+          <TextArea
+            id="feedback"
+            name="feedback"
+            placeholder="Your feedback"
+            value={feedbackValue}
+            onChange={setFeedbackValue}
+          />
         </div>
       </div>
 
