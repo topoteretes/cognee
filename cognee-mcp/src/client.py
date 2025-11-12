@@ -2,48 +2,38 @@ from datetime import timedelta
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-# Create server parameters for stdio connection
-server_params = StdioServerParameters(
-    command="uv",  # Executable
-    args=["--directory", ".", "run", "cognee"],  # Optional command line arguments
-    env=None,  # Optional environment variables
-)
 
-text = """
-Artificial intelligence, or AI, is technology that enables computers
-and machines to simulate human intelligence and problem-solving
-capabilities.
-On its own or combined with other technologies (e.g., sensors,
-geolocation, robotics) AI can perform tasks that would otherwise
-require human intelligence or intervention. Digital assistants, GPS
-guidance, autonomous vehicles, and generative AI tools (like Open
-AI's Chat GPT) are just a few examples of AI in the daily news and
-our daily lives.
-As a field of computer science, artificial intelligence encompasses
-(and is often mentioned together with) machine learning and deep
-learning. These disciplines involve the development of AI
-algorithms, modeled after the decision-making processes of the human
-brain, that can ‘learn’ from available data and make increasingly
-more accurate classifications or predictions over time.
-"""
+server_params = StdioServerParameters(
+    command="python",
+    args=[
+        "-m",
+        "cognee-mcp.src.server",
+        "--transport",
+        "stdio",
+        "--api-url",
+        "http://localhost:8000",
+    ],
+)
 
 
 async def run():
     async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write, timedelta(minutes=3)) as session:
+        async with ClientSession(read, write, timedelta(minutes=1)) as session:
             await session.initialize()
 
-            toolResult = await session.list_tools()
+            tools_result = await session.list_tools()
+            print("Available tools:", [tool.name for tool in tools_result.tools])
 
-            toolResult = await session.call_tool("prune", arguments={})
+            datasets = await session.call_tool("list_datasets", arguments={})
+            print("Datasets response:", datasets.content)
 
-            toolResult = await session.call_tool("cognify", arguments={})
-
-            toolResult = await session.call_tool(
-                "search", arguments={"search_type": "GRAPH_COMPLETION"}
-            )
-
-            print(f"Cognify result: {toolResult.content}")
+            search_arguments = {
+                "query": "Give me a short summary of the onboarding guide",
+                "search_type": "GRAPH_COMPLETION",
+                "top_k": 5,
+            }
+            search_result = await session.call_tool("search", arguments=search_arguments)
+            print("Search response:", search_result.content)
 
 
 if __name__ == "__main__":

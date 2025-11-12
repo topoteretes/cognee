@@ -10,6 +10,7 @@ import { Notebook as NotebookType } from "@/ui/elements/Notebook/types";
 import { useAuthenticatedUser } from "@/modules/auth";
 import { Dataset } from "@/modules/ingestion/useDatasets";
 import useNotebooks from "@/modules/notebooks/useNotebooks";
+import { ENABLE_NOTEBOOKS } from "@/config/featureFlags";
 
 import AddDataToCognee from "./AddDataToCognee";
 import NotebooksAccordion from "./NotebooksAccordion";
@@ -41,6 +42,10 @@ export default function Dashboard({ accessToken }: DashboardProps) {
   } = useNotebooks();
 
   useEffect(() => {
+    if (!ENABLE_NOTEBOOKS) {
+      return;
+    }
+
     if (!notebooks.length) {
       refreshNotebooks()
         .then((notebooks) => {
@@ -138,12 +143,14 @@ export default function Dashboard({ accessToken }: DashboardProps) {
             useCloud={isCloudEnv}
           />
 
-          <NotebooksAccordion
-            notebooks={notebooks}
-            addNotebook={addNotebook}
-            removeNotebook={handleNotebookRemove}
-            openNotebook={setSelectedNotebookId}
-          />
+          {ENABLE_NOTEBOOKS && (
+            <NotebooksAccordion
+              notebooks={notebooks}
+              addNotebook={addNotebook}
+              removeNotebook={handleNotebookRemove}
+              openNotebook={setSelectedNotebookId}
+            />
+          )}
 
           <div className="mt-7 mb-14">
             <CogneeInstancesAccordion>
@@ -161,14 +168,25 @@ export default function Dashboard({ accessToken }: DashboardProps) {
         </div>
 
         <div className="flex-1 flex flex-col justify-between h-full overflow-y-auto">
-            {selectedNotebook && (
+          {ENABLE_NOTEBOOKS ? (
+            selectedNotebook ? (
               <Notebook
                 key={selectedNotebook.id}
                 notebook={selectedNotebook}
                 updateNotebook={handleNotebookUpdate}
                 runCell={runCell}
               />
-            )}
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-gray-500">
+                Select or create a notebook to start scripting ingest/search flows.
+              </div>
+            )
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-gray-500 text-center px-10">
+              Notebook automation is disabled for this deployment. Manage datasets on the left and
+              use LibreChat/MCP for search.
+            </div>
+          )}
         </div>
       </div>
     </div>

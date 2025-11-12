@@ -7,13 +7,12 @@ import createDataset from "../datasets/createDataset";
 export interface Dataset {
   id: string;
   name: string;
-  data: DataFile[];
-  status: string;
+  data?: DataFile[];
+  status?: string;
 }
 
 function useDatasets(useCloud = false) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   // const statusTimeout = useRef<any>(null);
 
   // const fetchDatasetStatuses = useCallback((datasets: Dataset[]) => {
@@ -57,6 +56,15 @@ function useDatasets(useCloud = false) {
   //   };
   // }, []);
 
+  const buildDeleteQuery = useCallback((datasetId: string, dataId: string) => {
+    const params = new URLSearchParams({
+      data_id: dataId,
+      dataset_id: datasetId,
+      mode: "hard",
+    });
+    return `/v1/delete?${params.toString()}`;
+  }, []);
+
   const addDataset = useCallback((datasetName: string) => {
     return createDataset({ name: datasetName  }, useCloud)
       .then((dataset) => {
@@ -67,7 +75,20 @@ function useDatasets(useCloud = false) {
       });
   }, [useCloud]);
 
-  const removeDataset = useCallback((datasetId: string) => {
+  const removeDataset = useCallback(async (datasetId: string) => {
+    // Always fetch latest data entries to make sure all documents are removed everywhere
+    const datasetData: DataFile[] = await fetch(`/v1/datasets/${datasetId}/data`, {}, useCloud)
+      .then((response) => response.json())
+      .catch(() => []);
+
+    if (Array.isArray(datasetData) && datasetData.length > 0) {
+      await Promise.all(
+        datasetData.map((dataItem) =>
+          fetch(buildDeleteQuery(datasetId, dataItem.id), { method: 'DELETE' }, useCloud)
+        ),
+      );
+    }
+
     return fetch(`/v1/datasets/${datasetId}`, {
       method: 'DELETE',
     }, useCloud)
@@ -76,7 +97,7 @@ function useDatasets(useCloud = false) {
           datasets.filter((dataset) => dataset.id !== datasetId)
         );
       });
-  }, [useCloud]);
+  }, [buildDeleteQuery, useCloud]);
 
   const fetchDatasets = useCallback(() => {
     return fetch('/v1/datasets', {
@@ -121,10 +142,19 @@ function useDatasets(useCloud = false) {
   }, [datasets, useCloud]);
 
   const removeDatasetData = useCallback((datasetId: string, dataId: string) => {
-    return fetch(`/v1/datasets/${datasetId}/data/${dataId}`, {
+    return fetch(buildDeleteQuery(datasetId, dataId), {
       method: 'DELETE',
-    }, useCloud);
-  }, [useCloud]);
+    }, useCloud)
+      .then(() => {
+        setDatasets((current) => current.map((dataset) => {
+          if (dataset.id !== datasetId) return dataset;
+          return {
+            ...dataset,
+            data: dataset.data?.filter((dataItem) => dataItem.id !== dataId) || [],
+          };
+        }));
+      });
+  }, [buildDeleteQuery, setDatasets, useCloud]);
 
   return {
     datasets,

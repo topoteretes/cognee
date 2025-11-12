@@ -320,7 +320,10 @@ export default function DatasetsAccordion({
             <span className="text-2xl">Delete <span className="text-indigo-600">{datasetToRemove?.name}</span> dataset?</span>
             <IconButton onClick={handleDatasetRemoveCancel}><CloseIcon /></IconButton>
           </div>
-          <div className="mt-8 mb-6">Are you sure you want to delete <span className="text-indigo-600">{datasetToRemove?.name}</span>? This action cannot be undone.</div>
+          <div className="mt-8 mb-6">
+            Are you sure you want to delete <span className="text-indigo-600">{datasetToRemove?.name}</span>?
+            This will permanently remove every document, embedding, and graph node linked to it.
+          </div>
           <div className="flex flex-row gap-4 mt-4 justify-end">
             <GhostButton type="button" onClick={handleDatasetRemoveCancel}>cancel</GhostButton>
             <CTAButton onClick={handleRemoveDatasetConfirm} type="submit">delete</CTAButton>
@@ -334,7 +337,10 @@ export default function DatasetsAccordion({
             <span className="text-2xl">Delete <span className="text-indigo-600">{dataToRemove?.name}</span> data?</span>
             <IconButton onClick={handleDataRemoveCancel}><CloseIcon /></IconButton>
           </div>
-          <div className="mt-8 mb-6">Are you sure you want to delete <span className="text-indigo-600">{dataToRemove?.name}</span>? This action cannot be undone.</div>
+          <div className="mt-8 mb-6">
+            Are you sure you want to delete <span className="text-indigo-600">{dataToRemove?.name}</span>?
+            The underlying embeddings and graph relationships will also be removed.
+          </div>
           <div className="flex flex-row gap-4 mt-4 justify-end">
             <GhostButton type="button" onClick={handleDataRemoveCancel}>cancel</GhostButton>
             <CTAButton onClick={handleDataRemoveConfirm} type="submit">delete</CTAButton>

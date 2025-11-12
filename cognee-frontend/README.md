@@ -34,3 +34,24 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+
+## Feature Flags
+
+This fork hides some of the upstream experimental UI by default. Toggle them via environment variables:
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `NEXT_PUBLIC_ENABLE_NOTEBOOKS` | `false` | Set to `true` to show the notebook workflow builder. |
+| `NEXT_PUBLIC_ENABLE_CLOUD_CONNECTOR` | `false` | Set to `true` to re-enable the Cloud Cognee connection panel. |
+
+### Search Panel
+
+The dashboard search/QA view now mirrors the MCP capabilities:
+
+- Dataset dropdown lets you target any local dataset (defaults to the first available one).
+- Advanced options expose `combined context`, `context only`, and node filters (comma-separated node set names) which map directly to Cognee’s `/v1/search` flags.
+- The “max results” input maps to `top_k`.
+
+Reminder: dataset and file deletions run in *hard* mode, so the UI warns that graph data will be purged.
+
+Add the variables to your `.env.local` (or deployment environment) before running `npm run dev`.

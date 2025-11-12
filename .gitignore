@@ -197,3 +197,6 @@ SWE-bench_testsample/
 
 # ChromaDB Data
 .chromadb_data/
+
+# Serena AI assistant cache and memories
+.serena/

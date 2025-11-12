@@ -9,23 +9,57 @@ interface ChatMessage {
   text: string;
 }
 
+interface SendMessageOptions {
+  searchType: string;
+  topK: number;
+  datasetId?: string;
+  datasetName?: string;
+  useCombinedContext?: boolean;
+  onlyContext?: boolean;
+  nodeFilter?: string[];
+}
+
 const fetchMessages = () => {
   return fetch("/v1/search/")
     .then(response => response.json());
 };
 
-const sendMessage = (message: string, searchType: string, topK: number) => {
+const sendMessage = (
+  message: string,
+  {
+    searchType,
+    topK,
+    datasetId,
+    datasetName,
+    useCombinedContext,
+    onlyContext,
+    nodeFilter,
+  }: SendMessageOptions,
+) => {
+  const payload: Record<string, unknown> = {
+    query: message,
+    searchType,
+    top_k: topK,
+    use_combined_context: useCombinedContext,
+    only_context: onlyContext,
+  };
+
+  if (datasetId) {
+    payload.dataset_ids = [datasetId];
+  } else if (datasetName) {
+    payload.datasets = [datasetName];
+  }
+
+  if (nodeFilter && nodeFilter.length) {
+    payload.node_name = nodeFilter;
+  }
+
   return fetch("/v1/search/", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      query: message,
-      searchType,
-      datasets: ["main_dataset"],
-      top_k: topK,
-    }),
+    body: JSON.stringify(payload),
   })
     .then(response => response.json());
 };
@@ -46,7 +80,7 @@ export default function useChat(dataset: Dataset) {
     return setMessages(data);
   }, []);
 
-  const handleMessageSending = useCallback((message: string, searchType: string, topK: number) => {
+  const handleMessageSending = useCallback((message: string, options: SendMessageOptions) => {
     const sentMessageId = v4();
 
     setMessages((messages) => [
@@ -60,14 +94,14 @@ export default function useChat(dataset: Dataset) {
 
     disableSearchRun();
 
-    return sendMessage(message, searchType, topK)
+    return sendMessage(message, options)
       .then(newMessages => {
         setMessages((messages) => [
           ...messages,
           ...newMessages.map((newMessage: string | []) => ({
             id: v4(),
             user: "system",
-            text: convertToSearchTypeOutput(newMessage, searchType),
+            text: convertToSearchTypeOutput(newMessage, options.searchType),
           })),
         ]);
       })

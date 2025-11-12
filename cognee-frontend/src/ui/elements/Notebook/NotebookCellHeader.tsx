@@ -1,4 +1,3 @@
-import { useState } from "react";
 import classNames from "classnames";
 
 import { isCloudEnvironment, useBoolean } from "@/utils";
@@ -33,7 +32,7 @@ export default function NotebookCellHeader({
     setFalse: setIsNotRunningCell,
   } = useBoolean(false);
 
-  const [runInstance, setRunInstance] = useState<string>(isCloudEnvironment() ? "cloud" : "local");
+  const runInstance = isCloudEnvironment() ? "cloud" : "local";
 
   const handleCellRun = () => {
     if (runCell) {

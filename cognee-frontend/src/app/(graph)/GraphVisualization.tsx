@@ -224,9 +224,9 @@ export default function GraphVisualization({ ref, data, graphControls, className
   ) => {
     if (!graphRef.current) {
       console.warn("GraphVisualization: graphRef not ready yet");
-      return undefined as any;
+      return;
     }
-  
+
     return graphRef.current.zoomToFit?.(durationMs, padding, nodeFilter);
   };
   

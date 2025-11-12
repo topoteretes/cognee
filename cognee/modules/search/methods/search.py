@@ -73,6 +73,17 @@ async def search(
         },
     )
 
+    # CRITICAL: Dataset filtering requires access control to be enabled
+    # When access control is disabled, all data is in shared database
+    if dataset_ids is not None and len(dataset_ids) > 0:
+        if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() != "true":
+            raise ValueError(
+                "Multi-dataset search requires ENABLE_BACKEND_ACCESS_CONTROL=true. "
+                "When access control is disabled, there is no dataset isolation - "
+                "all data is searched as a single knowledge base. "
+                "To search specific datasets, enable access control in your .env file."
+            )
+
     # Use search function filtered by permissions if access control is enabled
     if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
         search_results = await authorized_search(

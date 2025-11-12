@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { LoadingIndicator } from "@/ui/App";
 import { CTAButton, Select, TextArea, Input } from "@/ui/elements";
 import useChat from "@/modules/chat/hooks/useChat";
+import useDatasets from "@/modules/ingestion/useDatasets";
 
 import styles from "./SearchView.module.css";
 
@@ -26,6 +27,7 @@ const MAIN_DATASET = {
 };
 
 export default function SearchView() {
+  const { datasets, refreshDatasets } = useDatasets();
   const searchOptions: SelectOption[] = [{
     value: "GRAPH_COMPLETION",
     label: "GraphRAG Completion",
@@ -51,16 +53,32 @@ export default function SearchView() {
   }, []);
 
   // Hardcoded to `main_dataset` for now, change when multiple datasets are supported.
-  const { messages, refreshChat, sendMessage, isSearchRunning } = useChat(MAIN_DATASET);
+  const availableDatasets = datasets.length ? datasets : [MAIN_DATASET];
+  const [selectedDatasetId, setSelectedDatasetId] = useState<string>(availableDatasets[0]?.id || "");
+  const selectedDataset = availableDatasets.find((dataset) => dataset.id === selectedDatasetId) || availableDatasets[0];
+
+  const { messages, refreshChat, sendMessage, isSearchRunning } = useChat(selectedDataset || MAIN_DATASET);
+
+  useEffect(() => {
+    refreshDatasets();
+  }, [refreshDatasets]);
 
   useEffect(() => {
     refreshChat()
       .then(() => scrollToBottom());
   }, [refreshChat, scrollToBottom]);
 
+  useEffect(() => {
+    if (datasets.length && !selectedDatasetId) {
+      setSelectedDatasetId(datasets[0].id);
+    }
+  }, [datasets, selectedDatasetId]);
+
   const [searchInputValue, setSearchInputValue] = useState("");
-  // Add state for top_k
   const [topK, setTopK] = useState(10);
+  const [useCombinedContext, setUseCombinedContext] = useState(false);
+  const [onlyContext, setOnlyContext] = useState(false);
+  const [nodeFilter, setNodeFilter] = useState("");
 
   const handleSearchInputChange = useCallback((value: string) => {
     setSearchInputValue(value);
@@ -92,9 +110,22 @@ export default function SearchView() {
     setSearchInputValue("");
     
     // Pass topK to sendMessage
-    sendMessage(chatInput, searchType, topK)
+    const datasetSelection = datasets.find((dataset) => dataset.id === selectedDatasetId) || selectedDataset;
+
+    sendMessage(chatInput, {
+      searchType,
+      topK,
+      datasetId: datasetSelection?.id,
+      datasetName: datasetSelection?.name,
+      useCombinedContext,
+      onlyContext,
+      nodeFilter: nodeFilter
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    })
       .then(scrollToBottom)
-  }, [scrollToBottom, sendMessage, searchInputValue, topK]);
+  }, [datasets, nodeFilter, onlyContext, scrollToBottom, selectedDataset, selectedDatasetId, sendMessage, topK, useCombinedContext, searchInputValue]);
 
   const chatFormRef = useRef<HTMLFormElement>(null);
 
@@ -138,6 +169,22 @@ export default function SearchView() {
           />
           <div className="flex flex-row items-center justify-between gap-4">
             <div className="flex flex-row items-center gap-4">
+              <div className="flex flex-col">
+                <label className="text-gray-600 whitespace-nowrap">Dataset:</label>
+                <Select
+                  name="dataset"
+                  value={selectedDatasetId}
+                  onChange={(event) => setSelectedDatasetId(event.target.value)}
+                  className="max-w-xs"
+                >
+                  {availableDatasets.map((dataset) => (
+                    <option key={dataset.id || dataset.name} value={dataset.id}>{dataset.name}</option>
+                  ))}
+                </Select>
+                <span className="text-[11px] text-gray-500">
+                  Choose which knowledge base to query.
+                </span>
+              </div>
               <div className="flex flex-row items-center gap-2">
                 <label className="text-gray-600 whitespace-nowrap">Search type:</label>
                 <Select name="searchType" defaultValue={searchOptions[0].value} className="max-w-2xs">
@@ -159,6 +206,35 @@ export default function SearchView() {
                   onChange={handleTopKChange}
                   className="w-20"
                   title="Controls how many results to return. Smaller = focused, larger = broader graph exploration."
+                />
+              </div>
+            </div>
+            <div className="flex flex-row gap-6 items-center">
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={useCombinedContext}
+                  onChange={(event) => setUseCombinedContext(event.target.checked)}
+                />
+                combined context
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-600">
+                <input
+                  type="checkbox"
+                  checked={onlyContext}
+                  onChange={(event) => setOnlyContext(event.target.checked)}
+                />
+                context only
+              </label>
+              <div className="flex flex-col">
+                <label className="text-sm text-gray-600" htmlFor="nodeFilter">Node filter</label>
+                <Input
+                  id="nodeFilter"
+                  name="nodeFilter"
+                  placeholder="comma-separated node sets"
+                  value={nodeFilter}
+                  onChange={(event) => setNodeFilter(event.target.value)}
+                  className="w-64"
                 />
               </div>
             </div>

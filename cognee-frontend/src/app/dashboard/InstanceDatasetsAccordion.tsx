@@ -3,6 +3,7 @@ import { useCallback, useEffect } from "react";
 
 import { fetch, isCloudEnvironment, useBoolean } from "@/utils";
 import { checkCloudConnection } from "@/modules/cloud";
+import { ENABLE_CLOUD_CONNECTOR } from "@/config/featureFlags";
 import { CaretIcon, CloseIcon, CloudIcon, LocalCogneeIcon } from "@/ui/Icons";
 import { CTAButton, GhostButton, IconButton, Input, Modal } from "@/ui/elements";
 
@@ -21,13 +22,19 @@ export default function InstanceDatasetsAccordion({ onDatasetsChange }: Instance
     setTrue: setCloudCogneeConnected,
   } = useBoolean(isCloudEnvironment());
 
+  const cloudFeatureEnabled = ENABLE_CLOUD_CONNECTOR;
+
   const checkConnectionToCloudCognee = useCallback((apiKey?: string) => {
+      if (!cloudFeatureEnabled) {
+        return Promise.resolve(false);
+      }
+
       if (apiKey) {
         fetch.setApiKey(apiKey);
       }
       return checkCloudConnection()
         .then(setCloudCogneeConnected)
-    }, [setCloudCogneeConnected]);
+    }, [cloudFeatureEnabled, setCloudCogneeConnected]);
 
   useEffect(() => {
     const checkConnectionToLocalCognee = () => {
@@ -36,8 +43,10 @@ export default function InstanceDatasetsAccordion({ onDatasetsChange }: Instance
     };
 
     checkConnectionToLocalCognee();
-    checkConnectionToCloudCognee();
-  }, [checkConnectionToCloudCognee, setCloudCogneeConnected, setLocalCogneeConnected]);
+    if (cloudFeatureEnabled) {
+      checkConnectionToCloudCognee();
+    }
+  }, [checkConnectionToCloudCognee, cloudFeatureEnabled, setCloudCogneeConnected, setLocalCogneeConnected]);
 
   const {
     value: isCloudConnectedModalOpen,
@@ -78,37 +87,40 @@ export default function InstanceDatasetsAccordion({ onDatasetsChange }: Instance
         onDatasetsChange={!isCloudEnv ? onDatasetsChange : () => {}}
       />
 
-      {isCloudCogneeConnected ? (
-        <DatasetsAccordion
-          title={(
-            <div className="flex flex-row items-center justify-between">
+      {cloudFeatureEnabled && (
+        isCloudCogneeConnected ? (
+          <DatasetsAccordion
+            title={(
+              <div className="flex flex-row items-center justify-between">
+                <div className="flex flex-row items-center gap-2">
+                  <LocalCogneeIcon className="text-indigo-700" />
+                  <span className="text-xs">cloud cognee</span>
+                </div>
+              </div>
+            )}
+            tools={<span className="text-xs text-indigo-600">Connected</span>}
+            switchCaretPosition={true}
+            className="pt-3 pb-1.5"
+            contentClassName="pl-4"
+            onDatasetsChange={isCloudEnv ? onDatasetsChange : () => {}}
+            useCloud={true}
+          />
+        ) : (
+          <button className="w-full flex flex-row items-center justify-between py-1.5 cursor-pointer pt-3" onClick={!isCloudCogneeConnected ? openCloudConnectionModal : () => {}}>
+            <div className="flex flex-row items-center gap-1.5">
+              <CaretIcon className="rotate-[-90deg]" />
               <div className="flex flex-row items-center gap-2">
-                <LocalCogneeIcon className="text-indigo-700" />
+                <CloudIcon color="#000000" />
                 <span className="text-xs">cloud cognee</span>
               </div>
             </div>
-          )}
-          tools={<span className="text-xs text-indigo-600">Connected</span>}
-          switchCaretPosition={true}
-          className="pt-3 pb-1.5"
-          contentClassName="pl-4"
-          onDatasetsChange={isCloudEnv ? onDatasetsChange : () => {}}
-          useCloud={true}
-        />
-      ) : (
-        <button className="w-full flex flex-row items-center justify-between py-1.5 cursor-pointer pt-3" onClick={!isCloudCogneeConnected ? openCloudConnectionModal : () => {}}>
-          <div className="flex flex-row items-center gap-1.5">
-            <CaretIcon className="rotate-[-90deg]" />
-            <div className="flex flex-row items-center gap-2">
-              <CloudIcon color="#000000" />
-              <span className="text-xs">cloud cognee</span>
-            </div>
-          </div>
-          <span className="text-xs text-gray-400">Not connected</span>
-        </button>
+            <span className="text-xs text-gray-400">Not connected</span>
+          </button>
+        )
       )}
 
-      <Modal isOpen={isCloudConnectedModalOpen}>
+      {cloudFeatureEnabled && (
+        <Modal isOpen={isCloudConnectedModalOpen}>
         <div className="w-full max-w-2xl">
           <div className="flex flex-row items-center justify-between">
             <span className="text-2xl">Connect to cloud?</span>
@@ -126,6 +138,7 @@ export default function InstanceDatasetsAccordion({ onDatasetsChange }: Instance
           </form>
         </div>
       </Modal>
+      )}
     </div>
   );
 }
