@@ -42,6 +42,7 @@ COPY public ./public
 COPY next.config.mjs .
 COPY postcss.config.mjs .
 COPY tsconfig.json .
+COPY types ./types
 COPY tailwindcss.config.js* ./
 COPY .env.template .
 
