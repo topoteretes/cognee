@@ -1417,6 +1417,27 @@ class KuzuAdapter(GraphDBInterface):
                 formatted_edges.append((source_id, target_id, rel_type, props))
         return formatted_nodes, formatted_edges
 
+    async def get_id_filtered_graph_data(self):
+        """Retrieve graph data filtered by node identifiers NOT IMPLEMENTED YET."""
+        import time
+
+        start_time = time.time()
+
+        try:
+            nodes=[]
+            edges=[]
+
+            retrieval_time = time.time() - start_time
+            logger.info(
+                f"Retrieved {len(nodes)} nodes and {len(edges)} edges in {retrieval_time:.2f} seconds"
+            )
+
+            return (nodes, edges)
+
+        except Exception as e:
+            logger.error(f"Error during graph data retrieval: {str(e)}")
+            raise
+
     async def get_graph_metrics(self, include_optional=False) -> Dict[str, Any]:
         """
         Get metrics on graph structure and connectivity.
