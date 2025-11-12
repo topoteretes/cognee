@@ -54,4 +54,5 @@ async def main():
     )
     assert isinstance(answers, CombinedSearchResult)
 
+
 asyncio.run(main())
