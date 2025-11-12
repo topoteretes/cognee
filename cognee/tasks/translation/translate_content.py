@@ -17,6 +17,7 @@ if not OPENAI_API_KEY:
 
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
+
 def detect_language(text: str) -> Tuple[str, float]:
     try:
         langs = detect_langs(text)
@@ -27,7 +28,11 @@ def detect_language(text: str) -> Tuple[str, float]:
         logger.error(f"Language detection failed: {e}")
     return "en", 1.0
 
-async def translate_text(text: str, source_lang: str, target_lang: str, provider: str) -> Tuple[str, float]:
+
+async def translate_text(
+    text: str, source_lang: str, target_lang: str, provider: str
+) -> Tuple[str, float]:
+
     if provider.lower() == "openai":
         try:
             response = await client.chat.completions.create(
@@ -35,17 +40,27 @@ async def translate_text(text: str, source_lang: str, target_lang: str, provider
                 messages=[
                     {
                         "role": "user",
-                        "content": f"Translate this text from {source_lang} to {target_lang}:\n\n{text}"
+                        "content": f"Translate this text from {source_lang} to {target_lang}:\n\n{text}",
                     }
                 ],
             )
-            translated = response.choices[0].message.content.strip()
+
+            # FIXED: v1.x message structure
+            message = response.choices[0].message
+            translated = message["content"].strip()
+
+            # OpenAI doesn't return explicit confidence
             confidence = 0.95
+
             return translated, confidence
+
         except Exception as e:
             logger.error(f"OpenAI translation failed: {e}")
             return text, 0.0
+
+    # Unknown provider → no translation
     return text, 1.0
+
 
 async def translate_content(
     data_chunks: List[DocumentChunk],
@@ -53,13 +68,20 @@ async def translate_content(
     translation_provider: str = "openai",
     confidence_threshold: float = 0.8,
 ) -> List[DocumentChunk]:
+
     translated_chunks = []
+
     for chunk in data_chunks:
         try:
             text = chunk.text
-            lang, lang_conf = detect_language(text)
-            requires_translation = (lang != target_language and lang_conf >= confidence_threshold)
 
+            # Detect language
+            lang, lang_conf = detect_language(text)
+            requires_translation = (
+                lang != target_language and lang_conf >= confidence_threshold
+            )
+
+            # Add metadata
             language_metadata = LanguageMetadata(
                 content_id=chunk.id,
                 detected_language=lang,
@@ -72,6 +94,7 @@ async def translate_content(
                 translated_text, trans_conf = await translate_text(
                     text, lang, target_language, translation_provider
                 )
+
                 translation_info = TranslatedContent(
                     original_chunk_id=chunk.id,
                     original_text=text,
@@ -82,11 +105,17 @@ async def translate_content(
                     confidence_score=trans_conf,
                     translation_timestamp=datetime.now(timezone.utc),
                 )
+
                 chunk.translated = translation_info
-                logger.info(f"Translated chunk {chunk.id} from {lang} to {target_language}")
+                logger.info(
+                    f"Translated chunk {chunk.id} from {lang} → {target_language}"
+                )
+
             else:
                 chunk.translated = None
-                logger.debug(f"Chunk {chunk.id} does not require translation (lang={lang})")
+                logger.debug(
+                    f"Chunk {chunk.id}: no translation required (detected={lang})"
+                )
 
             chunk.language_metadata = language_metadata
             translated_chunks.append(chunk)
