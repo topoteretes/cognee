@@ -86,7 +86,7 @@ class FSCacheAdapter(CacheDBInterface):
         session_key = f"agent_sessions:{user_id}:{session_id}"
         value = self.cache.get(session_key)
         if value is None:
-            return []
+            return None
         return json.loads(value)
 
     async def close(self):
