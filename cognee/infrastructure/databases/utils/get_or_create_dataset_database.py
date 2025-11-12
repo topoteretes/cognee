@@ -20,15 +20,13 @@ from cognee.modules.users.models import User
 async def _get_vector_db_info(dataset_id: UUID, user: User) -> dict:
     vector_config = get_vectordb_config()
 
-    base_config = get_base_config()
-    databases_directory_path = os.path.join(
-        base_config.system_root_directory, "databases", str(user.id)
-    )
-
     # Determine vector configuration
     if vector_config.vector_db_provider == "lancedb":
-        vector_db_name = f"{dataset_id}.lance.db"
-        vector_db_url = os.path.join(databases_directory_path, vector_db_name)
+        # TODO: Have the create_database method be called from interface adapter automatically for all providers instead of specifically here
+        from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
+
+        return await LanceDBAdapter.create_database(dataset_id, user)
+
     else:
         # Note: for hybrid databases both graph and vector DB name have to be the same
         vector_db_name = vector_config.vector_db_name

@@ -1,10 +1,15 @@
 import asyncio
 from os import path
+import os
+from uuid import UUID
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
 from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
 
+from cognee.base_config import get_base_config
+from cognee.infrastructure.databases.vector import get_vectordb_config
+from cognee.modules.users.models import User
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
@@ -357,3 +362,20 @@ class LanceDBAdapter(VectorDBInterface):
             },
             exclude_fields=["metadata"] + related_models_fields,
         )
+
+    @classmethod
+    async def create_database(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+        vector_config = get_vectordb_config()
+        base_config = get_base_config()
+        databases_directory_path = os.path.join(
+            base_config.system_root_directory, "databases", str(user.id)
+        )
+
+        vector_db_name = f"{dataset_id}.lance.db"
+
+        return {
+            "vector_database_name": vector_db_name,
+            "vector_database_url": os.path.join(databases_directory_path, vector_db_name),
+            "vector_database_provider": vector_config.vector_db_provider,
+            "vector_database_key": vector_config.vector_db_key,
+        }
