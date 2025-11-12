@@ -222,12 +222,11 @@ export default function GraphVisualization({ ref, data, graphControls, className
     padding?: number,
     nodeFilter?: (node: NodeObject) => boolean
   ) => {
-    if (!graphRef.current) {
-      console.warn("GraphVisualization: graphRef not ready yet");
-      return;
+    if (!graphRef.current || !graphRef.current.zoomToFit) {
+      throw new Error("GraphVisualization: graphRef not ready yet");
     }
 
-    return graphRef.current.zoomToFit?.(durationMs, padding, nodeFilter);
+    return graphRef.current.zoomToFit(durationMs, padding, nodeFilter);
   };
   
   useImperativeHandle(ref, () => ({
