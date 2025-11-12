@@ -201,7 +201,7 @@ async def search(
         only_context=only_context,
         use_combined_context=use_combined_context,
         session_id=session_id,
-        wide_search_top_k=wide_search_top_k
+        wide_search_top_k=wide_search_top_k,
     )
 
     return filtered_search_results
