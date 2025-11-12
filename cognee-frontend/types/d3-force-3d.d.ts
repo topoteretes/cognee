@@ -1,41 +1,42 @@
 declare module "d3-force-3d" {
-  // Import types from d3-force if needed
-  import {
-    SimulationNodeDatum,
-    SimulationLinkDatum,
-    Force,
-    Simulation,
-  } from "d3-force";
-
-  export interface SimulationNodeDatum3D extends SimulationNodeDatum {
-    x: number;
-    y: number;
-    z: number;
-    vx: number;
-    vy: number;
-    vz: number;
+  interface SimulationNodeDatum {
+    index?: number;
+    x?: number;
+    y?: number;
+    z?: number;
+    vx?: number;
+    vy?: number;
+    vz?: number;
     fx?: number | null;
     fy?: number | null;
     fz?: number | null;
   }
 
-  export function forceSimulation<NodeDatum extends SimulationNodeDatum3D>(
-    nodes?: NodeDatum[]
-  ): Simulation<NodeDatum, undefined>;
+  interface Force<Nodes extends SimulationNodeDatum = SimulationNodeDatum> {
+    (alpha: number): void;
+  }
 
-  export function forceCenter(x: number, y: number, z: number): Force<SimulationNodeDatum3D, any>;
+  type ForceStrength<Nodes extends SimulationNodeDatum> =
+    | number
+    | ((node: Nodes, index: number, nodes: Nodes[]) => number);
 
-  export function forceManyBody(): Force<SimulationNodeDatum3D, any>;
+  export function forceCollide<Nodes extends SimulationNodeDatum = SimulationNodeDatum>(
+    radius?: number | ((node: Nodes, index: number, nodes: Nodes[]) => number)
+  ): Force<Nodes> & {
+    iterations(): number;
+    iterations(iterations: number): this;
+    radius(): (node: Nodes, index: number, nodes: Nodes[]) => number;
+    radius(radius: number | ((node: Nodes, index: number, nodes: Nodes[]) => number)): this;
+  };
 
-  export function forceLink<NodeDatum extends SimulationNodeDatum3D, Links extends SimulationLinkDatum<NodeDatum>[] = SimulationLinkDatum<NodeDatum>[]>(
-    links?: Links
-  ): Force<NodeDatum, SimulationLinkDatum<NodeDatum>>;
-
-  export function forceCollide(radius?: number): Force<SimulationNodeDatum3D, any>;
-
-  export function forceRadial(radius: number, x?: number, y?: number, z?: number): Force<SimulationNodeDatum3D, any>;
-
-  export function forceX(x?: number): Force<SimulationNodeDatum3D, any>;
-  export function forceY(y?: number): Force<SimulationNodeDatum3D, any>;
-  export function forceZ(z?: number): Force<SimulationNodeDatum3D, any>;
+  export function forceManyBody<Nodes extends SimulationNodeDatum = SimulationNodeDatum>(): Force<Nodes> & {
+    strength(): (node: Nodes, index: number, nodes: Nodes[]) => number;
+    strength(strength: ForceStrength<Nodes>): this;
+    theta(): number;
+    theta(theta: number): this;
+    distanceMin(): number;
+    distanceMin(distance: number): this;
+    distanceMax(): number;
+    distanceMax(distance: number): this;
+  };
 }
