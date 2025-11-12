@@ -63,6 +63,7 @@ class CogneeGraph(CogneeAbstractGraph):
         node_name,
     ):
         """Retrieve subgraph based on node type and name."""
+        logger.info("Retrieving graph filtered by node type and node name (NodeSet).")
         nodes_data, edges_data = await adapter.get_nodeset_subgraph(
             node_type=node_type, node_name=node_name
         )
@@ -79,17 +80,23 @@ class CogneeGraph(CogneeAbstractGraph):
     ):
         """Retrieve full or ID-filtered graph with fallback."""
         if relevant_ids_to_filter is None:
+            logger.info("Retrieving full graph.")
             nodes_data, edges_data = await adapter.get_graph_data()
             if not nodes_data or not edges_data:
                 raise EntityNotFoundError(message="Empty graph projected from the database.")
             return nodes_data, edges_data
 
         get_graph_data_fn = getattr(adapter, "get_id_filtered_graph_data", adapter.get_graph_data)
+        if getattr(adapter.__class__, "get_id_filtered_graph_data", None):
+            logger.info("Retrieving ID-filtered graph from database.")
+        else:
+            logger.info("Retrieving full graph from database.")
         nodes_data, edges_data = await get_graph_data_fn()
-        if get_graph_data_fn is not adapter.get_graph_data and (not nodes_data or not edges_data):
+        if hasattr(adapter, "get_id_filtered_graph_data") and (not nodes_data or not edges_data):
             logger.warning(
                 "Id filtered graph returned empty, falling back to full graph retrieval."
             )
+            logger.info("Retrieving full graph")
             nodes_data, edges_data = await adapter.get_graph_data()
 
         if not nodes_data or not edges_data:
@@ -102,6 +109,7 @@ class CogneeGraph(CogneeAbstractGraph):
         memory_fragment_filter,
     ):
         """Retrieve graph filtered by attributes."""
+        logger.info("Retrieving graph filtered by memory fragment")
         nodes_data, edges_data = await adapter.get_filtered_graph_data(
             attribute_filters=memory_fragment_filter
         )
