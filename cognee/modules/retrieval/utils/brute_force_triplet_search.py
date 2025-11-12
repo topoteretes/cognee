@@ -58,6 +58,7 @@ async def get_memory_fragment(
     properties_to_project: Optional[List[str]] = None,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
+    relevant_ids_to_filter: Optional[List[str]] = None,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     if properties_to_project is None:
@@ -74,6 +75,7 @@ async def get_memory_fragment(
             edge_properties_to_project=["relationship_name", "edge_text"],
             node_type=node_type,
             node_name=node_name,
+            relevant_ids_to_filter=relevant_ids_to_filter,
         )
 
     except EntityNotFoundError:
@@ -163,14 +165,31 @@ async def brute_force_triplet_search(
             f"Vector collection retrieval completed: Retrieved distances from {sum(1 for res in results if res)} collections in {vector_collection_search_time:.2f}s"
         )
 
-        if memory_fragment is None:
-            memory_fragment = await get_memory_fragment(
-                properties_to_project, node_type=node_type, node_name=node_name
+        relevant_ids_to_filter = (
+            list(
+                {
+                    str(getattr(scored_node, "id"))
+                    for score_collection in results
+                    if isinstance(score_collection, (list, tuple))
+                    for scored_node in score_collection
+                    if getattr(scored_node, "id", None)
+                }
             )
+            if wide_search_limit is not None
+            else None
+        )
 
         node_distances = {collection: result for collection, result in zip(collections, results)}
 
         edge_distances = node_distances.get("EdgeType_relationship_name", None)
+
+        if memory_fragment is None:
+            memory_fragment = await get_memory_fragment(
+                properties_to_project=properties_to_project,
+                node_type=node_type,
+                node_name=node_name,
+                relevant_ids_to_filter=relevant_ids_to_filter,
+            )
 
         await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)
         await memory_fragment.map_vector_distances_to_graph_edges(
