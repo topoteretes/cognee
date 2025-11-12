@@ -1,4 +1,3 @@
-import os
 import json
 import asyncio
 from uuid import UUID
@@ -9,6 +8,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 from cognee.context_global_variables import set_database_global_context_variables
+from cognee.context_global_variables import backend_access_control_enabled
 
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
@@ -74,7 +74,7 @@ async def search(
     )
 
     # Use search function filtered by permissions if access control is enabled
-    if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
+    if backend_access_control_enabled():
         search_results = await authorized_search(
             query_type=query_type,
             query_text=query_text,
@@ -156,7 +156,7 @@ async def search(
         )
     else:
         # This is for maintaining backwards compatibility
-        if os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
+        if backend_access_control_enabled():
             return_value = []
             for search_result in search_results:
                 prepared_search_results = await prepare_search_result(search_result)
@@ -172,6 +172,7 @@ async def search(
                             "search_result": [context] if context else None,
                             "dataset_id": datasets[0].id,
                             "dataset_name": datasets[0].name,
+                            "dataset_tenant_id": datasets[0].tenant_id,
                             "graphs": graphs,
                         }
                     )
@@ -181,6 +182,7 @@ async def search(
                             "search_result": [result] if result else None,
                             "dataset_id": datasets[0].id,
                             "dataset_name": datasets[0].name,
+                            "dataset_tenant_id": datasets[0].tenant_id,
                             "graphs": graphs,
                         }
                     )

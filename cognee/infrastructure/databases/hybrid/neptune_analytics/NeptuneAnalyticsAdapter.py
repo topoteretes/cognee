@@ -416,6 +416,15 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         self._client.query(f"MATCH (n :{self._VECTOR_NODE_LABEL}) DETACH DELETE n")
         pass
 
+    async def is_empty(self) -> bool:
+        query = """
+        MATCH (n)
+        RETURN true
+        LIMIT 1;
+        """
+        query_result = await self._client.query(query)
+        return len(query_result) == 0
+
     @staticmethod
     def _get_scored_result(
         item: dict, with_vector: bool = False, with_score: bool = False
