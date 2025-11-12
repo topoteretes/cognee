@@ -34,6 +34,25 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Free disk space on runner
+        shell: bash
+        run: |
+          echo "Disk usage before cleanup:"
+          df -h
+
+          echo "Removing pre-installed SDKs caches..."
+          sudo rm -rf /opt/hostedtoolcache/* || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/local/share/powershell || true
+
+          echo "Pruning Docker artifacts..."
+          docker system prune -af || true
+          docker volume prune -f || true
+
+          echo "Disk usage after cleanup:"
+          df -h
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
