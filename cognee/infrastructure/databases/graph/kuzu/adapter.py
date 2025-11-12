@@ -1424,8 +1424,8 @@ class KuzuAdapter(GraphDBInterface):
         start_time = time.time()
 
         try:
-            nodes=[]
-            edges=[]
+            nodes = []
+            edges = []
 
             retrieval_time = time.time() - start_time
             logger.info(
