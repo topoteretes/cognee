@@ -1,6 +1,7 @@
 """Search-focused MCP tools for Cognee."""
 
 import json
+import re
 from typing import List, Literal, Optional
 
 import mcp.types as types
@@ -13,6 +14,12 @@ from dependencies import DependencyContainer
 logger = get_logger()
 
 SearchTypeLiteral = Literal["GRAPH_COMPLETION", "CHUNKS", "SUMMARIES"]
+VALID_SEARCH_TYPES = {"GRAPH_COMPLETION", "CHUNKS", "SUMMARIES"}
+UUID_PATTERN = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    re.IGNORECASE
+)
+MAX_SYSTEM_PROMPT_LENGTH = 2000
 
 
 def setup_tools(mcp: FastMCP, container: DependencyContainer) -> None:
@@ -65,16 +72,37 @@ def setup_tools(mcp: FastMCP, container: DependencyContainer) -> None:
         only_context: bool = False,
         node_name: Optional[List[str]] = None,
     ) -> List[types.TextContent]:
+        # Validate query
         if not query or not query.strip():
             raise ValueError("query must not be empty")
 
+        # Validate search_type
+        if search_type not in VALID_SEARCH_TYPES:
+            raise ValueError(f"search_type must be one of {VALID_SEARCH_TYPES}")
+
+        # Validate top_k
         if top_k < 1 or top_k > 50:
             raise ValueError("top_k must be between 1 and 50")
 
+        # Validate dataset_ids (UUID format)
         if dataset_ids:
-            for value in dataset_ids:
-                if not value or not value.strip():
+            for ds_id in dataset_ids:
+                if not ds_id or not ds_id.strip():
                     raise ValueError("dataset_ids must contain non-empty strings")
+                if not UUID_PATTERN.match(ds_id):
+                    raise ValueError(f"Invalid UUID format for dataset_id: {ds_id}")
+
+        # Validate system_prompt length
+        if system_prompt and len(system_prompt) > MAX_SYSTEM_PROMPT_LENGTH:
+            raise ValueError(
+                f"system_prompt exceeds maximum length of {MAX_SYSTEM_PROMPT_LENGTH} characters"
+            )
+
+        # Validate node_name
+        if node_name:
+            for name in node_name:
+                if not name or not name.strip():
+                    raise ValueError("node_name must contain non-empty strings")
 
         payload = await container.cognee_client.search(
             query_text=query,

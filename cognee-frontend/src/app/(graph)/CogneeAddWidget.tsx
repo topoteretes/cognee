@@ -36,18 +36,29 @@ export default function CogneeAddWidget({ onData, useCloud = false }: CogneeAddW
   } = useDatasets();
 
   useEffect(() => {
+    let isMounted = true;
+
     refreshDatasets()
       .then((datasets) => {
+        if (!isMounted) return;
+
         const dataset = datasets?.[0];
 
         if (dataset) {
           getDatasetGraph(dataset)
-            .then((graph) => onData({
-              nodes: graph.nodes,
-              links: graph.edges,
-            }));
+            .then((graph) => {
+              if (!isMounted) return;
+              onData({
+                nodes: graph.nodes,
+                links: graph.edges,
+              });
+            });
         }
       });
+
+    return () => {
+      isMounted = false;
+    };
   }, [onData, refreshDatasets]);
 
   const {
@@ -76,20 +87,15 @@ export default function CogneeAddWidget({ onData, useCloud = false }: CogneeAddW
     }
 
     return addData(dataset, files)
+      .then(() => cognifyDataset(dataset, useCloud))
       .then(() => {
-        // const onUpdate = (data: NodesAndEdges) => {
-        //   onData({
-        //     nodes: data.nodes,
-        //     links: data.edges,
-        //   });
-        //   setProcessingFilesDone();
-        // };
-
-        return cognifyDataset(dataset, useCloud)
-          .then(() => {
-            refreshDatasets();
-            setProcessingFilesDone();
-          });
+        refreshDatasets();
+        setProcessingFilesDone();
+      })
+      .catch((error) => {
+        console.error('File processing failed:', error);
+        alert(`Failed to process files: ${error.message || 'Unknown error'}`);
+        setProcessingFilesDone();
       });
   };
 
@@ -105,6 +111,11 @@ export default function CogneeAddWidget({ onData, useCloud = false }: CogneeAddW
     createDataset({ name: "main_dataset" })
       .then((newDataset: Dataset) => {
         return handleAddFiles(newDataset, event);
+      })
+      .catch((error) => {
+        console.error('Dataset creation failed:', error);
+        alert(`Failed to create dataset: ${error.message || 'Unknown error'}`);
+        setProcessingFilesDone();
       });
   };
 

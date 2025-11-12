@@ -12,12 +12,18 @@ logger = get_logger()
 class CogneeClient:
     """HTTP client wrapper used by the MCP tools."""
 
-    def __init__(self, api_url: str, api_token: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        api_url: str,
+        api_token: Optional[str] = None,
+        timeout: float = 120.0
+    ) -> None:
         if not api_url:
             raise ValueError("api_url is required")
 
         self.api_url = api_url.rstrip("/")
         self.api_token = api_token
+        self.timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -26,7 +32,11 @@ class CogneeClient:
             if self.api_token:
                 headers["Authorization"] = f"Bearer {self.api_token}"
 
-            self._client = httpx.AsyncClient(base_url=self.api_url, headers=headers, timeout=120.0)
+            self._client = httpx.AsyncClient(
+                base_url=self.api_url,
+                headers=headers,
+                timeout=self.timeout
+            )
             logger.debug("Created Cognee HTTP client for %s", self.api_url)
 
         return self._client
@@ -38,12 +48,21 @@ class CogneeClient:
 
     async def list_datasets(self) -> List[Dict[str, Any]]:
         client = await self._get_client()
-        response = await client.get("/api/v1/datasets")
-        response.raise_for_status()
-        data = response.json()
-        if not isinstance(data, list):  # pragma: no cover - API contract
-            raise ValueError("Unexpected datasets payload")
-        return data
+        try:
+            response = await client.get("/api/v1/datasets")
+            response.raise_for_status()
+            data = response.json()
+            if not isinstance(data, list):  # pragma: no cover - API contract
+                raise ValueError("Unexpected datasets payload")
+            return data
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"List datasets failed with status {e.response.status_code}: {e.response.text}"
+            )
+            raise
+        except httpx.RequestError as e:
+            logger.error(f"List datasets request failed: {str(e)}")
+            raise
 
     async def search(
         self,
@@ -75,6 +94,15 @@ class CogneeClient:
         if node_name:
             payload["node_name"] = node_name
 
-        response = await client.post("/api/v1/search", json=payload)
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = await client.post("/api/v1/search", json=payload)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Search failed with status {e.response.status_code}: {e.response.text}"
+            )
+            raise
+        except httpx.RequestError as e:
+            logger.error(f"Search request failed: {str(e)}")
+            raise

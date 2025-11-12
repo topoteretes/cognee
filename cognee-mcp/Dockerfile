@@ -68,6 +68,10 @@ ENV PYTHONPATH=/app
 # Add labels for API mode usage
 LABEL org.opencontainers.image.description="Cognee MCP Server with API mode support"
 
+# Add healthcheck for monitoring container health
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD python3 -c "import httpx; httpx.get('http://localhost:8000/health', timeout=5.0)" || exit 1
+
 # Use the application name from pyproject.toml for normal operation
 # For testing, we'll override this with a direct command
 ENTRYPOINT ["/app/entrypoint.sh"]
