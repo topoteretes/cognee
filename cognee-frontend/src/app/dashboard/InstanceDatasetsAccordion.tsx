@@ -1,7 +1,7 @@
 import classNames from "classnames";
 import { useCallback, useEffect } from "react";
 
-import { fetch, isCloudApiKeySet, isCloudEnvironment, useBoolean } from "@/utils";
+import { fetch, isCloudEnvironment, useBoolean } from "@/utils";
 import { checkCloudConnection } from "@/modules/cloud";
 import { CaretIcon, CloseIcon, CloudIcon, LocalCogneeIcon } from "@/ui/Icons";
 import { CTAButton, GhostButton, IconButton, Input, Modal } from "@/ui/elements";
@@ -21,7 +21,7 @@ export default function InstanceDatasetsAccordion({ searchValue, onDatasetsChang
   const {
     value: isCloudCogneeConnected,
     setTrue: setCloudCogneeConnected,
-  } = useBoolean(isCloudEnvironment() || isCloudApiKeySet());
+  } = useBoolean(isCloudEnvironment());
 
   const checkConnectionToCloudCognee = useCallback((apiKey?: string) => {
       if (apiKey) {
