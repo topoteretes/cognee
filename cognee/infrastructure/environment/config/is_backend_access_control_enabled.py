@@ -12,8 +12,8 @@ def multi_user_support_possible():
     graph_db_config = get_graph_context_config()
     vector_db_config = get_vectordb_context_config()
     return (
-        graph_db_config["graph_database_provider"] in VECTOR_DBS_WITH_MULTI_USER_SUPPORT
-        and vector_db_config["vector_db_provider"] in GRAPH_DBS_WITH_MULTI_USER_SUPPORT
+        graph_db_config["graph_database_provider"] in GRAPH_DBS_WITH_MULTI_USER_SUPPORT
+        and vector_db_config["vector_db_provider"] in VECTOR_DBS_WITH_MULTI_USER_SUPPORT
     )
 
 
