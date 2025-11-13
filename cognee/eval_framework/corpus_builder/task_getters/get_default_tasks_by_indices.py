@@ -30,8 +30,8 @@ async def get_no_summary_tasks(
     ontology_file_path=None,
 ) -> List[Task]:
     """Returns default tasks without summarization tasks."""
-    # Get base tasks (0=classify, 1=check_permissions, 2=extract_chunks)
-    base_tasks = await get_default_tasks_by_indices([0, 1, 2], chunk_size, chunker)
+    # Get base tasks (0=classify, 1=extract_chunks)
+    base_tasks = await get_default_tasks_by_indices([0, 1], chunk_size, chunker)
 
     ontology_adapter = RDFLibOntologyResolver(ontology_file=ontology_file_path)
 
@@ -51,8 +51,8 @@ async def get_just_chunks_tasks(
     chunk_size: int = None, chunker=TextChunker, user=None
 ) -> List[Task]:
     """Returns default tasks with only chunk extraction and data points addition."""
-    # Get base tasks (0=classify, 1=check_permissions, 2=extract_chunks)
-    base_tasks = await get_default_tasks_by_indices([0, 1, 2], chunk_size, chunker)
+    # Get base tasks (0=classify, 1=extract_chunks)
+    base_tasks = await get_default_tasks_by_indices([0, 1], chunk_size, chunker)
 
     add_data_points_task = Task(add_data_points, task_config={"batch_size": 10})
 
