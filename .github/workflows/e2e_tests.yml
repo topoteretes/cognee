@@ -325,6 +325,37 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_delete_default_graph.py
 
+  test-deletion-on-default-graph-non-mocked:
+    name: Delete default graph data test ${{ matrix.python-version }} on ubuntu-22.04
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python-version: ${{ fromJSON(inputs.supported-python-versions) }}
+      fail-fast: false
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run deletion on default graph non mocked
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_delete_default_graph_non_mocked.py
+
   test-deletion-on-custom-graph:
     name: Delete custom graph data test ${{ matrix.python-version }} on ubuntu-22.04
     runs-on: ubuntu-22.04
