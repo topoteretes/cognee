@@ -73,7 +73,9 @@ async def main():
         "Nodes and edges are not deleted."
     )
     assert not any(
-        node[1]["name"] == "john" or node[1]["name"] == "food for hungry" for node in nodes
+        node[1]["name"] == "john" or node[1]["name"] == "food for hungry"
+        for node in nodes
+        if "name" in node[1]
     ), "Nodes are not deleted."
 
     after_first_delete_node_ids = set([node[0] for node in nodes])

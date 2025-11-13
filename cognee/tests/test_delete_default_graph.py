@@ -151,7 +151,9 @@ async def main(mock_create_structured_output: AsyncMock):
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 9 and len(edges) == 10, "Nodes and edges are not deleted."
     assert not any(
-        node[1]["name"] == "john" or node[1]["name"] == "food for hungry" for node in nodes
+        node[1]["name"] == "john" or node[1]["name"] == "food for hungry"
+        for node in nodes
+        if "name" in node[1]
     ), "Nodes are not deleted."
 
     after_first_delete_node_ids = set([node[0] for node in nodes])
