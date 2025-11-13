@@ -4,16 +4,16 @@ from cognee.infrastructure.databases.vector.config import get_vectordb_context_c
 from cognee.infrastructure.databases.graph.config import get_graph_context_config
 
 
-vector_dbs_with_multi_user_support = ["lancedb"]
-graph_dbs_with_multi_user_support = ["kuzu"]
+VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "falkor"]
+GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["kuzu", "falkor"]
 
 
 def multi_user_support_possible():
     graph_db_config = get_graph_context_config()
     vector_db_config = get_vectordb_context_config()
     return (
-        graph_db_config["graph_database_provider"] in graph_dbs_with_multi_user_support
-        and vector_db_config["vector_db_provider"] in vector_dbs_with_multi_user_support
+        graph_db_config["graph_database_provider"] in VECTOR_DBS_WITH_MULTI_USER_SUPPORT
+        and vector_db_config["vector_db_provider"] in GRAPH_DBS_WITH_MULTI_USER_SUPPORT
     )
 
 

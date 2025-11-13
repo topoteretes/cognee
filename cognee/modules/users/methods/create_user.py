@@ -18,7 +18,6 @@ from typing import Optional
 async def create_user(
     email: str,
     password: str,
-    tenant_id: Optional[str] = None,
     is_superuser: bool = False,
     is_active: bool = True,
     is_verified: bool = False,
@@ -30,36 +29,22 @@ async def create_user(
         async with relational_engine.get_async_session() as session:
             async with get_user_db_context(session) as user_db:
                 async with get_user_manager_context(user_db) as user_manager:
-                    if tenant_id:
-                        # Check if the tenant already exists
-                        result = await session.execute(select(Tenant).where(Tenant.id == tenant_id))
-                        tenant = result.scalars().first()
-                        if not tenant:
-                            raise TenantNotFoundError
-
-                        user = await user_manager.create(
-                            UserCreate(
-                                email=email,
-                                password=password,
-                                tenant_id=tenant.id,
-                                is_superuser=is_superuser,
-                                is_active=is_active,
-                                is_verified=is_verified,
-                            )
+                    user = await user_manager.create(
+                        UserCreate(
+                            email=email,
+                            password=password,
+                            is_superuser=is_superuser,
+                            is_active=is_active,
+                            is_verified=is_verified,
                         )
-                    else:
-                        user = await user_manager.create(
-                            UserCreate(
-                                email=email,
-                                password=password,
-                                is_superuser=is_superuser,
-                                is_active=is_active,
-                                is_verified=is_verified,
-                            )
-                        )
+                    )
 
                     if auto_login:
                         await session.refresh(user)
+
+                    # Update tenants and roles information for User object
+                    _ = await user.awaitable_attrs.tenants
+                    _ = await user.awaitable_attrs.roles
 
                     return user
     except UserAlreadyExists as error:
