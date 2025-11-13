@@ -32,16 +32,13 @@ async def main():
     print("Cognify process steps:")
     print("1. Classifying the document: Determining the type and category of the input text.")
     print(
-        "2. Checking permissions: Ensuring the user has the necessary rights to process the text."
+        "2. Extracting text chunks: Breaking down the text into sentences or phrases for analysis."
     )
     print(
-        "3. Extracting text chunks: Breaking down the text into sentences or phrases for analysis."
+        "3. Generating knowledge graph: Extracting entities and relationships to form a knowledge graph."
     )
-    print("4. Adding data points: Storing the extracted chunks for processing.")
-    print(
-        "5. Generating knowledge graph: Extracting entities and relationships to form a knowledge graph."
-    )
-    print("6. Summarizing text: Creating concise summaries of the content for quick insights.\n")
+    print("4. Summarizing text: Creating concise summaries of the content for quick insights.")
+    print("5. Adding data points: Storing the extracted chunks for processing.\n")
 
     # Use LLMs and cognee to create knowledge graph
     await cognee.cognify()
