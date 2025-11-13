@@ -175,7 +175,7 @@ async def brute_force_triplet_search(
                     str(getattr(scored_node, "id"))
                     for collection_name, score_collection in node_distances.items()
                     if collection_name != "EdgeType_relationship_name"
-                       and isinstance(score_collection, (list, tuple))
+                    and isinstance(score_collection, (list, tuple))
                     for scored_node in score_collection
                     if getattr(scored_node, "id", None)
                 }

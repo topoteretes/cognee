@@ -972,6 +972,7 @@ class Neo4jAdapter(GraphDBInterface):
         This version uses a single Cypher query for efficiency.
         """
         import time
+
         start_time = time.time()
 
         try:
