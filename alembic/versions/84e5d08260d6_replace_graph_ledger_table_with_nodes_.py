@@ -1,12 +1,11 @@
 """Replace graph ledger table with nodes and edges tables
 
 Revision ID: 84e5d08260d6
-Revises: 211ab850ef3d
+Revises: 76625596c5c3
 Create Date: 2025-10-30 13:36:23.226706
 
 """
 
-from uuid import NAMESPACE_OID, uuid4, uuid5
 from typing import Sequence, Union
 from datetime import datetime, timezone
 
@@ -16,7 +15,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "84e5d08260d6"
-down_revision: Union[str, None] = "211ab850ef3d"
+down_revision: Union[str, None] = "76625596c5c3"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
