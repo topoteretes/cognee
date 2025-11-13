@@ -165,23 +165,23 @@ async def brute_force_triplet_search(
             f"Vector collection retrieval completed: Retrieved distances from {sum(1 for res in results if res)} collections in {vector_collection_search_time:.2f}s"
         )
 
-        relevant_ids_to_filter = (
-            list(
+        node_distances = {collection: result for collection, result in zip(collections, results)}
+
+        edge_distances = node_distances.get("EdgeType_relationship_name", None)
+
+        if wide_search_limit is not None:
+            relevant_ids_to_filter = list(
                 {
                     str(getattr(scored_node, "id"))
-                    for score_collection in results
-                    if isinstance(score_collection, (list, tuple))
+                    for collection_name, score_collection in node_distances.items()
+                    if collection_name != "EdgeType_relationship_name"
+                       and isinstance(score_collection, (list, tuple))
                     for scored_node in score_collection
                     if getattr(scored_node, "id", None)
                 }
             )
-            if wide_search_limit is not None
-            else None
-        )
-
-        node_distances = {collection: result for collection, result in zip(collections, results)}
-
-        edge_distances = node_distances.get("EdgeType_relationship_name", None)
+        else:
+            relevant_ids_to_filter = None
 
         if memory_fragment is None:
             memory_fragment = await get_memory_fragment(
