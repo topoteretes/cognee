@@ -41,6 +41,7 @@ class GenericAPIAdapter(LLMInterface):
     name: str
     model: str
     api_key: str
+    default_instructor_mode = "json_mode"
 
     def __init__(
         self,
@@ -63,7 +64,16 @@ class GenericAPIAdapter(LLMInterface):
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
 
-        self.aclient = instructor.from_litellm(litellm.acompletion, mode=instructor.Mode.JSON)
+        from cognee.infrastructure.llm.config import get_llm_config
+
+        config_instructor_mode = get_llm_config().llm_instructor_mode
+        instructor_mode = (
+            config_instructor_mode if config_instructor_mode else self.default_instructor_mode
+        )
+
+        self.aclient = instructor.from_litellm(
+            litellm.acompletion, mode=instructor.Mode(instructor_mode)
+        )
 
     @retry(
         stop=stop_after_delay(128),

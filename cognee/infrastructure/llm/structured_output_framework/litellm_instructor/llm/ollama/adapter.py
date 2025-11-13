@@ -42,6 +42,8 @@ class OllamaAPIAdapter(LLMInterface):
     - aclient
     """
 
+    default_instructor_mode = "json_mode"
+
     def __init__(
         self, endpoint: str, api_key: str, model: str, name: str, max_completion_tokens: int
     ):
@@ -51,8 +53,16 @@ class OllamaAPIAdapter(LLMInterface):
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
 
+        from cognee.infrastructure.llm.config import get_llm_config
+
+        config_instructor_mode = get_llm_config().llm_instructor_mode
+        instructor_mode = (
+            config_instructor_mode if config_instructor_mode else self.default_instructor_mode
+        )
+
         self.aclient = instructor.from_openai(
-            OpenAI(base_url=self.endpoint, api_key=self.api_key), mode=instructor.Mode.JSON
+            OpenAI(base_url=self.endpoint, api_key=self.api_key),
+            mode=instructor.Mode(instructor_mode),
         )
 
     @retry(
