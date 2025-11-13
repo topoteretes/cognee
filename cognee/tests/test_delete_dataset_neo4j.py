@@ -20,12 +20,12 @@ logger = get_logger()
 @patch.object(LLMGateway, "acreate_structured_output", new_callable=AsyncMock)
 async def main(mock_create_structured_output: AsyncMock):
     data_directory_path = os.path.join(
-        pathlib.Path(__file__).parent, ".data_storage/test_delete_dataset_two_users_graph"
+        pathlib.Path(__file__).parent, ".data_storage/test_delete_dataset_neo4j"
     )
     cognee.config.data_root_directory(data_directory_path)
 
     cognee_directory_path = os.path.join(
-        pathlib.Path(__file__).parent, ".cognee_system/test_delete_dataset_two_users_graph"
+        pathlib.Path(__file__).parent, ".cognee_system/test_delete_dataset_neo4j"
     )
     cognee.config.system_root_directory(cognee_directory_path)
 

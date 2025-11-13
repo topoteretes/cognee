@@ -497,7 +497,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./cognee/tests/test_delete_dataset.py
+        run: uv run python ./cognee/tests/test_delete_dataset_kuzu.py
 
   test-delete-dataset-neo4j:
     name: Delete dataset in Neo4j graph case
@@ -530,7 +530,7 @@ jobs:
           GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
-        run: uv run python ./cognee/tests/test_delete_dataset.py
+        run: uv run python ./cognee/tests/test_delete_dataset_neo4j.py
 
   test-graph-edges:
     name: Test graph edge ingestion

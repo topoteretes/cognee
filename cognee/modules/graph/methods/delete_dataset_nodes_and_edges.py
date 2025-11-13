@@ -48,7 +48,7 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Non
         vector_engine = get_vector_engine()
         for affected_collection, non_legacy_nodes in affected_vector_collections.items():
             await vector_engine.delete_data_points(
-                affected_collection, [node.id for node in non_legacy_nodes]
+                affected_collection, [str(node.slug) for node in non_legacy_nodes]
             )
 
         if len(affected_relationships) > 0:

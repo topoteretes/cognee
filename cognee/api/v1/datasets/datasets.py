@@ -1,6 +1,7 @@
 from uuid import UUID
 from typing import Optional
 
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.exceptions import PermissionDeniedError
@@ -65,6 +66,8 @@ class datasets:
         if not dataset:
             raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
 
+        await set_database_global_context_variables(dataset.id, user.id)
+
         await delete_dataset_nodes_and_edges(dataset_id, user.id)
 
         dataset_data = await get_dataset_data(dataset.id)
@@ -100,6 +103,8 @@ class datasets:
         if not data or not any([dataset.id == dataset_id for dataset in data_datasets]):
             raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
 
+        await set_database_global_context_variables(dataset_id, user.id)
+
         if not await has_data_related_nodes(dataset_id, data_id):
             await legacy_delete(data, mode)
         else:
@@ -115,4 +120,6 @@ class datasets:
         user_datasets = await get_authorized_existing_datasets([], "delete", user)
 
         for dataset in user_datasets:
+            await set_database_global_context_variables(dataset.id, user.id)
+
             await datasets.delete_dataset(dataset.id, user)
