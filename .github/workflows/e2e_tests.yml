@@ -387,8 +387,8 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_delete_custom_graph.py
 
-  test-deletion-on-default-graph_with_legacy_data_1:
-    name: Delete default graph with legacy data test 1
+  test-deletion-on-default-graph_with_legacy_data_1_default:
+    name: Delete default graph with legacy data test 1 in Kuzu case
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
@@ -412,6 +412,39 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_1.py
+
+  test-deletion-on-default-graph_with_legacy_data_1_neo4j:
+    name: Delete default graph with legacy data test 1 in Neo4j case
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
+
+      - name: Run delete dataset test in Neo4j case
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          GRAPH_DATABASE_PROVIDER: "neo4j"
+          GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
+          GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
+          GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
         run: uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_1.py
 
   test-deletion-on-default-graph_with_legacy_data_2:
@@ -440,6 +473,64 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_2.py
+
+  test-delete-dataset-default:
+    name: Delete dataset in Kuzu graph case
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run delete dataset test in Kuzu case
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_delete_dataset.py
+
+  test-delete-dataset-neo4j:
+    name: Delete dataset in Neo4j graph case
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
+
+      - name: Run delete dataset test in Neo4j case
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          GRAPH_DATABASE_PROVIDER: "neo4j"
+          GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
+          GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
+          GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
+        run: uv run python ./cognee/tests/test_delete_dataset.py
 
   test-graph-edges:
     name: Test graph edge ingestion

@@ -29,3 +29,25 @@ async def get_data_related_edges(dataset_id: UUID, data_id: UUID, session: Async
 
     data_related_edges = await session.scalars(query_statement)
     return data_related_edges.all()
+
+
+@with_async_session
+async def get_global_data_related_edges(data_id: UUID, session: AsyncSession):
+    EdgeAlias = aliased(Edge)
+
+    subq = select(EdgeAlias.id).where(
+        and_(
+            EdgeAlias.slug == Edge.slug,
+            EdgeAlias.data_id != data_id,
+        )
+    )
+
+    query_statement = select(Edge).where(
+        and_(
+            Edge.data_id == data_id,
+            ~exists(subq),
+        )
+    )
+
+    data_related_edges = await session.scalars(query_statement)
+    return data_related_edges.all()

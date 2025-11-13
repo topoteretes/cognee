@@ -4,7 +4,7 @@ from typing import Optional
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.modules.data.methods import has_dataset_data
+from cognee.modules.data.methods import get_dataset_data, has_dataset_data
 from cognee.modules.data.methods import get_authorized_dataset, get_authorized_existing_datasets
 from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.graph.methods import (
@@ -41,12 +41,11 @@ class datasets:
         return await get_dataset_data(dataset.id)
 
     @staticmethod
-    async def has_data(dataset_id: str) -> bool:
-        from cognee.modules.data.methods import get_dataset
+    async def has_data(dataset_id: str, user: Optional[User] = None) -> bool:
+        if not user:
+            user = await get_default_user()
 
-        user = await get_default_user()
-
-        dataset = await get_dataset(user.id, dataset_id)
+        dataset = await get_authorized_dataset(user.id, dataset_id)
 
         return await has_dataset_data(dataset.id)
 
@@ -56,7 +55,7 @@ class datasets:
 
     @staticmethod
     async def delete_dataset(dataset_id: UUID, user: Optional[User] = None):
-        from cognee.modules.data.methods import delete_dataset
+        from cognee.modules.data.methods import delete_data, delete_dataset
 
         if not user:
             user = await get_default_user()
@@ -67,6 +66,11 @@ class datasets:
             raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
 
         await delete_dataset_nodes_and_edges(dataset_id, user.id)
+
+        dataset_data = await get_dataset_data(dataset.id)
+
+        for data in dataset_data:
+            await delete_data(data)
 
         return await delete_dataset(dataset)
 
@@ -108,7 +112,7 @@ class datasets:
         if not user:
             user = await get_default_user()
 
-        user_datasets = await get_authorized_existing_datasets([], "read", user)
+        user_datasets = await get_authorized_existing_datasets([], "delete", user)
 
         for dataset in user_datasets:
             await datasets.delete_dataset(dataset.id, user)

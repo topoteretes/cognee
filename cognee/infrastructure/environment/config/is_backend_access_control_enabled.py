@@ -8,7 +8,7 @@ VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "falkor"]
 GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["kuzu", "falkor"]
 
 
-def multi_user_support_possible():
+def is_multi_user_support_possible():
     graph_db_config = get_graph_context_config()
     vector_db_config = get_vectordb_context_config()
     return (
@@ -22,10 +22,10 @@ def is_backend_access_control_enabled():
     if backend_access_control is None:
         # If backend access control is not defined in environment variables,
         # enable it by default if graph and vector DBs can support it, otherwise disable it
-        return multi_user_support_possible()
+        return is_multi_user_support_possible()
     elif backend_access_control.lower() == "true":
         # If enabled, ensure that the current graph and vector DBs can support it
-        multi_user_support = multi_user_support_possible()
+        multi_user_support = is_multi_user_support_possible()
         if not multi_user_support:
             raise EnvironmentError(
                 "ENABLE_BACKEND_ACCESS_CONTROL is set to true but the current graph and/or vector databases do not support multi-user access control. Please use supported databases or disable backend access control."
