@@ -26,6 +26,7 @@ async def add(
     preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
     incremental_loading: bool = True,
     data_per_batch: Optional[int] = 20,
+    label: Optional[str] = None,
 ):
     """
     Add data to Cognee for knowledge graph processing.
@@ -182,6 +183,7 @@ async def add(
             node_set,
             dataset_id,
             preferred_loaders,
+            label,
         ),
     ]
 

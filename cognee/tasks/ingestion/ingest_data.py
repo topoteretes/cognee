@@ -29,6 +29,7 @@ async def ingest_data(
     node_set: Optional[List[str]] = None,
     dataset_id: UUID = None,
     preferred_loaders: dict[str, dict[str, Any]] = None,
+    label: Optional[str] = None, 
 ):
     if not user:
         user = await get_default_user()
@@ -46,6 +47,7 @@ async def ingest_data(
         node_set: Optional[List[str]] = None,
         dataset_id: UUID = None,
         preferred_loaders: dict[str, dict[str, Any]] = None,
+        label: Optional[str] = None,
     ):
         new_datapoints = []
         existing_data_points = []
@@ -169,6 +171,7 @@ async def ingest_data(
                     tenant_id=user.tenant_id if user.tenant_id else None,
                     pipeline_status={},
                     token_count=-1,
+                    label=label,
                 )
 
                 new_datapoints.append(data_point)
@@ -195,5 +198,5 @@ async def ingest_data(
         return existing_data_points + dataset_new_data_points + new_datapoints
 
     return await store_data_to_dataset(
-        data, dataset_name, user, node_set, dataset_id, preferred_loaders
+        data, dataset_name, user, node_set, dataset_id, preferred_loaders, label
     )
