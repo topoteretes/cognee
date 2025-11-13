@@ -89,9 +89,10 @@ class CogneeGraph(CogneeAbstractGraph):
         get_graph_data_fn = getattr(adapter, "get_id_filtered_graph_data", adapter.get_graph_data)
         if getattr(adapter.__class__, "get_id_filtered_graph_data", None):
             logger.info("Retrieving ID-filtered graph from database.")
+            nodes_data, edges_data = await get_graph_data_fn(target_ids=relevant_ids_to_filter)
         else:
             logger.info("Retrieving full graph from database.")
-        nodes_data, edges_data = await get_graph_data_fn()
+            nodes_data, edges_data = await get_graph_data_fn()
         if hasattr(adapter, "get_id_filtered_graph_data") and (not nodes_data or not edges_data):
             logger.warning(
                 "Id filtered graph returned empty, falling back to full graph retrieval."
