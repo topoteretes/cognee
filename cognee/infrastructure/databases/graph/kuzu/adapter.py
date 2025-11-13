@@ -1417,7 +1417,7 @@ class KuzuAdapter(GraphDBInterface):
                 formatted_edges.append((source_id, target_id, rel_type, props))
         return formatted_nodes, formatted_edges
 
-    async def get_id_filtered_graph_data(self):
+    async def get_id_filtered_graph_data(self, target_ids: list[str]):
         """Retrieve graph data filtered by node identifiers NOT IMPLEMENTED YET."""
         import time
 
