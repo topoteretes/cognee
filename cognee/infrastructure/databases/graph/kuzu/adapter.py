@@ -1473,7 +1473,6 @@ class KuzuAdapter(GraphDBInterface):
             edges = []
 
             for n_id, n_props, m_id, m_props, r_type, r_props_raw in result:
-
                 if n_props.get("properties"):
                     try:
                         additional_props = json.loads(n_props["properties"])
@@ -1498,9 +1497,7 @@ class KuzuAdapter(GraphDBInterface):
                     try:
                         edge_props = json.loads(r_props_raw)
                     except (json.JSONDecodeError, TypeError):
-                        logger.warning(
-                            f"Failed to parse edge properties for {n_id}->{m_id}"
-                        )
+                        logger.warning(f"Failed to parse edge properties for {n_id}->{m_id}")
 
                 source_id = edge_props.get("source_node_id", n_id)
                 target_id = edge_props.get("target_node_id", m_id)
