@@ -1186,6 +1186,11 @@ class KuzuAdapter(GraphDBInterface):
               A tuple with two elements: a list of tuples of (node_id, properties) and a list of
               tuples of (source_id, target_id, relationship_name, properties).
         """
+
+        import time
+
+        start_time = time.time()
+
         try:
             nodes_query = """
             MATCH (n:Node)
@@ -1249,6 +1254,11 @@ class KuzuAdapter(GraphDBInterface):
                             },
                         )
                     )
+
+            retrieval_time = time.time() - start_time
+            logger.info(
+                f"Retrieved {len(nodes)} nodes and {len(edges)} edges in {retrieval_time:.2f} seconds"
+            )
             return formatted_nodes, formatted_edges
         except Exception as e:
             logger.error(f"Failed to get graph data: {e}")
