@@ -1,77 +1,108 @@
-# Use a Python image with uv pre-installed
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS uv
+# ================================
+# Cognee MCP Server - Optimized Dockerfile
+# ================================
+# Multi-stage build for production-ready MCP server
+# Features: security hardening, minimal image size, layer optimization
 
-# Install the project into `/app`
+# ================================
+# Stage 1: Builder
+# ================================
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+
+# Set build arguments
+ARG DEBUG=false
+
+# Build environment variables
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DEBUG=${DEBUG}
+
 WORKDIR /app
 
-# Enable bytecode compilation
-# ENV UV_COMPILE_BYTECODE=1
+# Install build dependencies (minimal set with version pinning)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc=4:12.2.* \
+    libpq-dev=15.* \
+    git=1:2.39.* \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# Copy from the cache instead of linking since it's a mounted volume
-ENV UV_LINK_MODE=copy
-
-# Set build argument
-ARG DEBUG
-
-# Set environment variable based on the build argument
-ENV DEBUG=${DEBUG}
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libpq-dev \
-    git \
-    curl \
-    clang \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy pyproject.toml and lockfile first for better caching
+# Copy dependency files first for better layer caching
 COPY ./cognee-mcp/pyproject.toml ./cognee-mcp/uv.lock ./cognee-mcp/entrypoint.sh ./
 
 # Install the project's dependencies using the lockfile and settings
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --no-install-project --no-dev --no-editable
 
-# Copy Alembic configuration
+# Copy Alembic configuration (for database migrations)
 COPY alembic.ini /app/alembic.ini
 COPY alembic/ /app/alembic
 
-# Then, add the rest of the project source code and install it
-# Installing separately from its dependencies allows optimal layer caching
+# Copy application source code
 COPY ./cognee-mcp /app
-RUN --mount=type=cache,target=/root/.cache/uv \
+
+# Install the project itself
+RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     uv sync --frozen --no-dev --no-editable
 
-FROM python:3.12-slim-bookworm
+# Make entrypoint executable
+RUN chmod +x /app/entrypoint.sh
 
-RUN apt-get update && apt-get install -y \
-    libpq5 \
-    && rm -rf /var/lib/apt/lists/*
+# ================================
+# Stage 2: Runtime
+# ================================
+FROM python:3.12-slim-bookworm AS runtime
+
+# Metadata labels
+LABEL org.opencontainers.image.title="Cognee MCP Server" \
+      org.opencontainers.image.description="Model Context Protocol server for Cognee knowledge base search" \
+      org.opencontainers.image.vendor="Cognee" \
+      org.opencontainers.image.source="https://github.com/topoteretes/cognee" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+# Runtime dependencies only (minimal)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5=15.* \
+    curl=7.88.* \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create non-root user for security
+RUN groupadd -r cognee --gid=1000 && \
+    useradd -r -g cognee --uid=1000 --home-dir=/app --shell=/sbin/nologin cognee
 
 WORKDIR /app
 
-# Copy the virtual environment from the uv stage
-COPY --from=uv /usr/local /usr/local
-COPY --from=uv /app /app
+# Copy ONLY what's needed from builder stage (NOT /usr/local which is 3GB!)
+# This is the KEY fix - only copy the virtual environment and application files
+COPY --from=builder --chown=cognee:cognee /app/.venv /app/.venv
+COPY --from=builder --chown=cognee:cognee /app/src /app/src
+COPY --from=builder --chown=cognee:cognee /app/entrypoint.sh /app/entrypoint.sh
+COPY --from=builder --chown=cognee:cognee /app/alembic.ini /app/alembic.ini
+COPY --from=builder --chown=cognee:cognee /app/alembic /app/alembic
 
-RUN chmod +x /app/entrypoint.sh
+# Runtime environment variables
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    MCP_LOG_LEVEL=INFO
 
-# Place executables in the environment at the front of the path
-ENV PATH="/app/.venv/bin:$PATH"
-
-# Set environment variables for MCP server
-ENV PYTHONUNBUFFERED=1
-ENV MCP_LOG_LEVEL=DEBUG
-ENV PYTHONPATH=/app
-
-# Add labels for API mode usage
-LABEL org.opencontainers.image.description="Cognee MCP Server with API mode support"
-
-# Add healthcheck for monitoring container health
+# Health check configuration
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python3 -c "import httpx; httpx.get('http://localhost:8000/health', timeout=5.0)" || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
-# Use the application name from pyproject.toml for normal operation
-# For testing, we'll override this with a direct command
+# Switch to non-root user for security
+USER cognee
+
+# Expose port (documentation - actual binding controlled by args)
+EXPOSE 8000
+
+# Use entrypoint script for flexible configuration
 ENTRYPOINT ["/app/entrypoint.sh"]
+
+# Default command arguments (can be overridden)
+CMD []
