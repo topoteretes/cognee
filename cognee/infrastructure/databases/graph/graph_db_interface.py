@@ -398,3 +398,18 @@ class GraphDBInterface(ABC):
             - node_id (Union[str, UUID]): Unique identifier of the node for which to retrieve connections.
         """
         raise NotImplementedError
+
+    @abstractmethod
+    async def get_filtered_graph_data(
+        self, attribute_filters: List[Dict[str, List[Union[str, int]]]]
+    ) -> Tuple[List[Node], List[EdgeData]]:
+        """
+        Retrieve nodes and edges filtered by the provided attribute criteria.
+
+        Parameters:
+        -----------
+
+            - attribute_filters: A list of dictionaries where keys are attribute names and values
+              are lists of attribute values to filter by.
+        """
+        raise NotImplementedError

@@ -2,7 +2,6 @@ import modal
 import os
 import asyncio
 import datetime
-import hashlib
 import json
 from cognee.shared.logging_utils import get_logger
 from cognee.eval_framework.eval_config import EvalConfig
@@ -10,6 +9,9 @@ from cognee.eval_framework.corpus_builder.run_corpus_builder import run_corpus_b
 from cognee.eval_framework.answer_generation.run_question_answering_module import (
     run_question_answering,
 )
+import pathlib
+from os import path
+from modal import Image
 from cognee.eval_framework.evaluation.run_evaluation_module import run_evaluation
 from cognee.eval_framework.metrics_dashboard import create_dashboard
 
@@ -38,22 +40,19 @@ def read_and_combine_metrics(eval_params: dict) -> dict:
 
 app = modal.App("modal-run-eval")
 
-image = (
-    modal.Image.from_dockerfile(path="Dockerfile_modal", force_build=False)
-    .copy_local_file("pyproject.toml", "pyproject.toml")
-    .copy_local_file("poetry.lock", "poetry.lock")
-    .env(
-        {
-            "ENV": os.getenv("ENV"),
-            "LLM_API_KEY": os.getenv("LLM_API_KEY"),
-            "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
-        }
-    )
-    .pip_install("protobuf", "h2", "deepeval", "gdown", "plotly")
+image = Image.from_dockerfile(
+    path=pathlib.Path(path.join(path.dirname(__file__), "Dockerfile")).resolve(),
+    force_build=False,
+).add_local_python_source("cognee")
+
+
+@app.function(
+    image=image,
+    max_containers=10,
+    timeout=86400,
+    volumes={"/data": vol},
+    secrets=[modal.Secret.from_name("eval_secrets")],
 )
-
-
-@app.function(image=image, concurrency_limit=10, timeout=86400, volumes={"/data": vol})
 async def modal_run_eval(eval_params=None):
     """Runs evaluation pipeline and returns combined metrics results."""
     if eval_params is None:
@@ -105,18 +104,7 @@ async def main():
     configs = [
         EvalConfig(
             task_getter_type="Default",
-            number_of_samples_in_corpus=10,
-            benchmark="HotPotQA",
-            qa_engine="cognee_graph_completion",
-            building_corpus_from_scratch=True,
-            answering_questions=True,
-            evaluating_answers=True,
-            calculate_metrics=True,
-            dashboard=True,
-        ),
-        EvalConfig(
-            task_getter_type="Default",
-            number_of_samples_in_corpus=10,
+            number_of_samples_in_corpus=25,
             benchmark="TwoWikiMultiHop",
             qa_engine="cognee_graph_completion",
             building_corpus_from_scratch=True,
@@ -127,7 +115,7 @@ async def main():
         ),
         EvalConfig(
             task_getter_type="Default",
-            number_of_samples_in_corpus=10,
+            number_of_samples_in_corpus=25,
             benchmark="Musique",
             qa_engine="cognee_graph_completion",
             building_corpus_from_scratch=True,
