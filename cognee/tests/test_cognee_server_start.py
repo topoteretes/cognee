@@ -7,6 +7,7 @@ import requests
 from pathlib import Path
 import sys
 import uuid
+import json
 
 
 class TestCogneeServerStart(unittest.TestCase):
@@ -90,11 +91,30 @@ class TestCogneeServerStart(unittest.TestCase):
             )
         }
 
-        payload = {"datasets": [dataset_name]}
+        ontology_key = f"test_ontology_{uuid.uuid4().hex[:8]}"
+        payload = {"datasets": [dataset_name], "ontology_key": [ontology_key]}
 
         add_response = requests.post(url, headers=headers, data=form_data, files=file, timeout=50)
         if add_response.status_code not in [200, 201]:
             add_response.raise_for_status()
+
+        ontology_content = b"""<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+             xmlns:owl="http://www.w3.org/2002/07/owl#">
+            <owl:Class rdf:ID="Programmer"/>
+            <owl:Class rdf:ID="LightBulb"/>
+            <owl:Class rdf:ID="HardwareProblem"/>
+            <owl:Class rdf:ID="SoftwareProblem"/>
+        </rdf:RDF>"""
+
+        ontology_response = requests.post(
+            "http://127.0.0.1:8000/api/v1/ontologies",
+            files=[("ontology_file", ("test.owl", ontology_content, "application/xml"))],
+            data={
+                "ontology_key": json.dumps([ontology_key]),
+                "description": json.dumps(["Test ontology"]),
+            },
+        )
+        self.assertEqual(ontology_response.status_code, 200)
 
         # Cognify request
         url = "http://127.0.0.1:8000/api/v1/cognify"
@@ -106,6 +126,29 @@ class TestCogneeServerStart(unittest.TestCase):
         cognify_response = requests.post(url, headers=headers, json=payload, timeout=150)
         if cognify_response.status_code not in [200, 201]:
             cognify_response.raise_for_status()
+
+        datasets_response = requests.get("http://127.0.0.1:8000/api/v1/datasets", headers=headers)
+
+        datasets = datasets_response.json()
+        dataset_id = None
+        for dataset in datasets:
+            if dataset["name"] == dataset_name:
+                dataset_id = dataset["id"]
+                break
+
+        graph_response = requests.get(
+            f"http://127.0.0.1:8000/api/v1/datasets/{dataset_id}/graph", headers=headers
+        )
+        self.assertEqual(graph_response.status_code, 200)
+
+        graph_data = graph_response.json()
+        ontology_nodes = [
+            node for node in graph_data.get("nodes") if node.get("properties").get("ontology_valid")
+        ]
+
+        self.assertGreater(
+            len(ontology_nodes), 0, "No ontology nodes found - ontology was not integrated"
+        )
 
         # TODO: Add test to verify cognify pipeline is complete before testing search
 
