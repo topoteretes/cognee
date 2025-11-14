@@ -41,6 +41,7 @@ class GeminiAdapter(LLMInterface):
     name: str
     model: str
     api_key: str
+    default_instructor_mode = "json_mode"
 
     def __init__(
         self,
@@ -49,6 +50,7 @@ class GeminiAdapter(LLMInterface):
         model: str,
         api_version: str,
         max_completion_tokens: int,
+        instructor_mode: str = None,
         fallback_model: str = None,
         fallback_api_key: str = None,
         fallback_endpoint: str = None,
@@ -63,7 +65,11 @@ class GeminiAdapter(LLMInterface):
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
 
-        self.aclient = instructor.from_litellm(litellm.acompletion, mode=instructor.Mode.JSON)
+        self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
+
+        self.aclient = instructor.from_litellm(
+            litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
+        )
 
     @retry(
         stop=stop_after_delay(128),

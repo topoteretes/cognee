@@ -37,16 +37,26 @@ class MistralAdapter(LLMInterface):
     model: str
     api_key: str
     max_completion_tokens: int
+    default_instructor_mode = "mistral_tools"
 
-    def __init__(self, api_key: str, model: str, max_completion_tokens: int, endpoint: str = None):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        max_completion_tokens: int,
+        endpoint: str = None,
+        instructor_mode: str = None,
+    ):
         from mistralai import Mistral
 
         self.model = model
         self.max_completion_tokens = max_completion_tokens
 
+        self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
+
         self.aclient = instructor.from_litellm(
             litellm.acompletion,
-            mode=instructor.Mode.MISTRAL_TOOLS,
+            mode=instructor.Mode(self.instructor_mode),
             api_key=get_llm_config().llm_api_key,
         )
 
