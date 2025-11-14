@@ -955,22 +955,7 @@ class Neo4jAdapter(GraphDBInterface):
                 f"Retrieved {len(nodes)} nodes and {len(edges)} edges in {retrieval_time:.2f} seconds"
             )
 
-            return (
-                [
-                    (
-                        node_id,
-                        {
-                            **node_data,
-                            "id": node_id,
-                            "metadata": json.loads(node_data["metadata"])
-                            if "metadata" in node_data
-                            else {},
-                        },
-                    )
-                    for (node_id, node_data) in nodes
-                ],
-                edges,
-            )
+            return (nodes, edges)
 
         except Exception as e:
             logger.error(f"Error during graph data retrieval: {str(e)}")
