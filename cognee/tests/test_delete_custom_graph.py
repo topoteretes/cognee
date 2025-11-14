@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 import cognee
 from cognee.api.v1.datasets import datasets
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.methods import create_authorized_dataset
 from cognee.modules.engine.operations.setup import setup
@@ -66,6 +67,8 @@ async def main():
     dataset = await create_authorized_dataset(dataset_name="test_dataset", user=user)
     data1 = CustomData(id=uuid4())
     data2 = CustomData(id=uuid4())
+
+    await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
     await add_data_points(
         [person1],

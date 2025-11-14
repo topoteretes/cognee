@@ -1,4 +1,5 @@
 import os
+import json
 import pathlib
 from uuid import NAMESPACE_OID, uuid5
 import pytest
@@ -247,7 +248,8 @@ async def main(mock_create_structured_output: AsyncMock):
 
     for node in initial_nodes:
         node_data = node[1]
-        collection_name = node_data["type"] + "_" + node_data["metadata"]["index_fields"][0]
+        node_metadata = json.loads(node_data["metadata"])
+        collection_name = node_data["type"] + "_" + node_metadata["index_fields"][0]
         if collection_name not in initial_nodes_by_vector_collection:
             initial_nodes_by_vector_collection[collection_name] = []
         initial_nodes_by_vector_collection[collection_name].append(node)
@@ -269,7 +271,8 @@ async def main(mock_create_structured_output: AsyncMock):
     after_delete_nodes_by_vector_collection = {}
     for node in initial_nodes:
         node_data = node[1]
-        collection_name = node_data["type"] + "_" + node_data["metadata"]["index_fields"][0]
+        node_metadata = json.loads(node_data["metadata"])
+        collection_name = node_data["type"] + "_" + node_metadata["index_fields"][0]
         if collection_name not in after_delete_nodes_by_vector_collection:
             after_delete_nodes_by_vector_collection[collection_name] = []
         after_delete_nodes_by_vector_collection[collection_name].append(node)
@@ -292,7 +295,8 @@ async def main(mock_create_structured_output: AsyncMock):
 
     old_nodes_by_vector_collection = {}
     for node in old_nodes:
-        collection_name = node.type + "_" + node.metadata["index_fields"][0]
+        node_metadata = node.metadata
+        collection_name = node.type + "_" + node_metadata["index_fields"][0]
         if collection_name not in old_nodes_by_vector_collection:
             old_nodes_by_vector_collection[collection_name] = []
         old_nodes_by_vector_collection[collection_name].append(node)
