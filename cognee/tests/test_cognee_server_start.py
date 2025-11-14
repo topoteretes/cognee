@@ -98,13 +98,12 @@ class TestCogneeServerStart(unittest.TestCase):
         if add_response.status_code not in [200, 201]:
             add_response.raise_for_status()
 
-        ontology_content = b"""<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-             xmlns:owl="http://www.w3.org/2002/07/owl#">
-            <owl:Class rdf:ID="Programmer"/>
-            <owl:Class rdf:ID="LightBulb"/>
-            <owl:Class rdf:ID="HardwareProblem"/>
-            <owl:Class rdf:ID="SoftwareProblem"/>
-        </rdf:RDF>"""
+        ontology_content = b"""<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#' xmlns:owl='http://www.w3.org/2002/07/owl#'>
+                            <owl:Class rdf:ID='Programmer'/><rdf:Description rdf:about='#Programmer'/>
+                            <owl:Class rdf:ID='LightBulb'/><rdf:Description rdf:about='#LightBulb'/>
+                            <owl:Class rdf:ID='HardwareProblem'/><rdf:Description rdf:about='#HardwareProblem'/>
+                            <owl:Class rdf:ID='SoftwareProblem'/><rdf:Description rdf:about='#SoftwareProblem'/>
+                            </rdf:RDF>"""
 
         ontology_response = requests.post(
             "http://127.0.0.1:8000/api/v1/ontologies",
