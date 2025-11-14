@@ -1,6 +1,6 @@
 from fastapi import APIRouter, File, Form, UploadFile, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from typing import Optional
+from typing import Optional, List
 
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
@@ -16,23 +16,27 @@ def get_ontology_router() -> APIRouter:
     @router.post("", response_model=dict)
     async def upload_ontology(
         ontology_key: str = Form(...),
-        ontology_file: UploadFile = File(...),
-        description: Optional[str] = Form(None),
+        ontology_file: List[UploadFile] = File(...),
+        descriptions: Optional[str] = Form(None),
         user: User = Depends(get_authenticated_user),
     ):
         """
-        Upload an ontology file with a named key for later use in cognify operations.
+        Upload ontology files with their respective keys for later use in cognify operations.
+
+        Supports both single and multiple file uploads:
+        - Single file: ontology_key=["key"], ontology_file=[file]
+        - Multiple files: ontology_key=["key1", "key2"], ontology_file=[file1, file2]
 
         ## Request Parameters
-        - **ontology_key** (str): User-defined identifier for the ontology
-        - **ontology_file** (UploadFile): OWL format ontology file
-        - **description** (Optional[str]): Optional description of the ontology
+        - **ontology_key** (str): JSON array string of user-defined identifiers for the ontologies
+        - **ontology_file** (List[UploadFile]): OWL format ontology files
+        - **descriptions** (Optional[str]): JSON array string of optional descriptions
 
         ## Response
-        Returns metadata about the uploaded ontology including key, filename, size, and upload timestamp.
+        Returns metadata about uploaded ontologies including keys, filenames, sizes, and upload timestamps.
 
         ## Error Codes
-        - **400 Bad Request**: Invalid file format, duplicate key, file size exceeded
+        - **400 Bad Request**: Invalid file format, duplicate keys, array length mismatches, file size exceeded
         - **500 Internal Server Error**: File system or processing errors
         """
         send_telemetry(
@@ -45,16 +49,31 @@ def get_ontology_router() -> APIRouter:
         )
 
         try:
-            result = await ontology_service.upload_ontology(
-                ontology_key, ontology_file, user, description
+            import json
+
+            ontology_keys = json.loads(ontology_key)
+            description_list = json.loads(descriptions) if descriptions else None
+
+            if not isinstance(ontology_keys, list):
+                raise ValueError("ontology_key must be a JSON array")
+
+            results = await ontology_service.upload_ontologies(
+                ontology_keys, ontology_file, user, description_list
             )
+
             return {
-                "ontology_key": result.ontology_key,
-                "filename": result.filename,
-                "size_bytes": result.size_bytes,
-                "uploaded_at": result.uploaded_at,
+                "uploaded_ontologies": [
+                    {
+                        "ontology_key": result.ontology_key,
+                        "filename": result.filename,
+                        "size_bytes": result.size_bytes,
+                        "uploaded_at": result.uploaded_at,
+                        "description": result.description,
+                    }
+                    for result in results
+                ]
             }
-        except ValueError as e:
+        except (json.JSONDecodeError, ValueError) as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
