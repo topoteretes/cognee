@@ -249,7 +249,7 @@ async def main(mock_create_structured_output: AsyncMock):
     for node in initial_nodes:
         node_data = node[1]
         node_metadata = node_data["metadata"]
-        node_metadata = json.loads(node_metadata) if type(node_metadata) == str else node_metadata
+        node_metadata = json.loads(node_metadata) if type(node_metadata) is str else node_metadata
         collection_name = node_data["type"] + "_" + node_metadata["index_fields"][0]
         if collection_name not in initial_nodes_by_vector_collection:
             initial_nodes_by_vector_collection[collection_name] = []
@@ -273,7 +273,7 @@ async def main(mock_create_structured_output: AsyncMock):
     for node in initial_nodes:
         node_data = node[1]
         node_metadata = node_data["metadata"]
-        node_metadata = json.loads(node_metadata) if type(node_metadata) == str else node_metadata
+        node_metadata = json.loads(node_metadata) if type(node_metadata) is str else node_metadata
         collection_name = node_data["type"] + "_" + node_metadata["index_fields"][0]
         if collection_name not in after_delete_nodes_by_vector_collection:
             after_delete_nodes_by_vector_collection[collection_name] = []
