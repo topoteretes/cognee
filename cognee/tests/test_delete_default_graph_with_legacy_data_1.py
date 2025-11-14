@@ -17,6 +17,7 @@ from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.engine.utils import generate_edge_id, generate_node_id
+from cognee.modules.graph.utils import deduplicate_nodes_and_edges, get_graph_from_model
 from cognee.modules.pipelines.models import DataItemStatus
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge, SummarizedContent
@@ -25,7 +26,7 @@ from cognee.tasks.storage import index_data_points, index_graph_edges
 from cognee.modules.graph.legacy.record_data_in_legacy_ledger import record_data_in_legacy_ledger
 
 
-def get_nodes_and_edges():
+async def get_nodes_and_edges():
     document = TextDocument(
         id=uuid5(NAMESPACE_OID, "text_test.txt"),
         name="text_test.txt",
@@ -71,8 +72,15 @@ def get_nodes_and_edges():
         name="amazon s3",
         description="A storage service provided by Amazon Web Services that allows storing graph data.",
     )
+    document_chunk.contains = [
+        graph_database,
+        neptune_analytics_entity,
+        neptune_database_entity,
+        storage,
+        storage_entity,
+    ]
 
-    nodes_data = [
+    data_points = [
         document,
         document_chunk,
         graph_database,
@@ -82,66 +90,32 @@ def get_nodes_and_edges():
         storage_entity,
     ]
 
-    edges_data = [
-        (
-            document_chunk.id,
-            storage_entity.id,
-            "contains",
-            {
-                "relationship_name": "contains",
-            },
-        ),
-        (
-            storage_entity.id,
-            storage.id,
-            "is_a",
-            {
-                "relationship_name": "is_a",
-            },
-        ),
-        (
-            document_chunk.id,
-            neptune_database_entity.id,
-            "contains",
-            {
-                "relationship_name": "contains",
-            },
-        ),
-        (
-            neptune_database_entity.id,
-            graph_database.id,
-            "is_a",
-            {
-                "relationship_name": "is_a",
-            },
-        ),
-        (
-            document_chunk.id,
-            document.id,
-            "is_part_of",
-            {
-                "relationship_name": "is_part_of",
-            },
-        ),
-        (
-            document_chunk.id,
-            neptune_analytics_entity.id,
-            "contains",
-            {
-                "relationship_name": "contains",
-            },
-        ),
-        (
-            neptune_analytics_entity.id,
-            graph_database.id,
-            "is_a",
-            {
-                "relationship_name": "is_a",
-            },
-        ),
-    ]
+    nodes = []
+    edges = []
 
-    return nodes_data, edges_data
+    added_nodes = {}
+    added_edges = {}
+    visited_properties = {}
+
+    results = await asyncio.gather(
+        *[
+            get_graph_from_model(
+                data_point,
+                added_nodes=added_nodes,
+                added_edges=added_edges,
+                visited_properties=visited_properties,
+            )
+            for data_point in data_points
+        ]
+    )
+
+    for result_nodes, result_edges in results:
+        nodes.extend(result_nodes)
+        edges.extend(result_edges)
+
+    nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
+
+    return nodes, edges
 
 
 @pytest.mark.asyncio
@@ -265,7 +239,7 @@ async def main(mock_create_structured_output: AsyncMock):
 
     graph_engine = await get_graph_engine()
     initial_nodes, initial_edges = await graph_engine.get_graph_data()
-    assert len(initial_nodes) == 22 and len(initial_edges) == 26, (
+    assert len(initial_nodes) == 22 and len(initial_edges) == 25, (
         "Number of nodes and edges is not correct."
     )
 
@@ -283,9 +257,11 @@ async def main(mock_create_structured_output: AsyncMock):
     await datasets.delete_data(dataset_id, johns_data_id, user)  # type: ignore
 
     nodes, edges = await graph_engine.get_graph_data()
-    assert len(nodes) == 16 and len(edges) == 17, "Nodes and edges are not deleted."
+    assert len(nodes) == 16 and len(edges) == 16, "Nodes and edges are not deleted."
     assert not any(
-        node[1]["name"] == "john" or node[1]["name"] == "food for hungry" for node in nodes
+        node[1]["name"] == "john" or node[1]["name"] == "food for hungry"
+        for node in nodes
+        if "name" in node[1]
     ), "Nodes are not deleted."
 
     after_first_delete_node_ids = set([node[0] for node in nodes])
@@ -312,7 +288,7 @@ async def main(mock_create_structured_output: AsyncMock):
     await datasets.delete_data(dataset_id, maries_data_id, user)  # type: ignore
 
     final_nodes, final_edges = await graph_engine.get_graph_data()
-    assert len(final_nodes) == 7 and len(final_edges) == 7, "Nodes and edges are not deleted."
+    assert len(final_nodes) == 7 and len(final_edges) == 6, "Nodes and edges are not deleted."
 
     old_nodes_by_vector_collection = {}
     for node in old_nodes:
@@ -336,7 +312,7 @@ async def main(mock_create_structured_output: AsyncMock):
 
 async def add_mocked_legacy_data(user):
     graph_engine = await get_graph_engine()
-    old_nodes, old_edges = get_nodes_and_edges()
+    old_nodes, old_edges = await get_nodes_and_edges()
     old_document = old_nodes[0]
 
     await graph_engine.add_nodes(old_nodes)
