@@ -50,6 +50,7 @@ class GenericAPIAdapter(LLMInterface):
         model: str,
         name: str,
         max_completion_tokens: int,
+        instructor_mode: str = None,
         fallback_model: str = None,
         fallback_api_key: str = None,
         fallback_endpoint: str = None,
@@ -64,15 +65,10 @@ class GenericAPIAdapter(LLMInterface):
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
 
-        from cognee.infrastructure.llm.config import get_llm_config
-
-        config_instructor_mode = get_llm_config().llm_instructor_mode
-        instructor_mode = (
-            config_instructor_mode if config_instructor_mode else self.default_instructor_mode
-        )
+        self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         self.aclient = instructor.from_litellm(
-            litellm.acompletion, mode=instructor.Mode(instructor_mode)
+            litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
         )
 
     @retry(

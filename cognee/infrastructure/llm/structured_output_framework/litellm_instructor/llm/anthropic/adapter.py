@@ -30,17 +30,14 @@ class AnthropicAdapter(LLMInterface):
     model: str
     default_instructor_mode = "anthropic_tools"
 
-    def __init__(self, max_completion_tokens: int, model: str = None):
+    def __init__(self, max_completion_tokens: int, model: str = None, instructor_mode: str = None):
         import anthropic
 
-        config_instructor_mode = get_llm_config().llm_instructor_mode
-        instructor_mode = (
-            config_instructor_mode if config_instructor_mode else self.default_instructor_mode
-        )
+        self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         self.aclient = instructor.patch(
             create=anthropic.AsyncAnthropic(api_key=get_llm_config().llm_api_key).messages.create,
-            mode=instructor.Mode(instructor_mode),
+            mode=instructor.Mode(self.instructor_mode),
         )
 
         self.model = model
