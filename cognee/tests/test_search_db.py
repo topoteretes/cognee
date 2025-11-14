@@ -1,7 +1,11 @@
-import pathlib
 import os
 import cognee
+import pathlib
+
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.environment.config.is_backend_access_control_enabled import (
+    is_backend_access_control_enabled,
+)
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -147,9 +151,7 @@ async def main():
             f"{name}: expected single-element list, got {len(search_results)}"
         )
 
-        from cognee.context_global_variables import backend_access_control_enabled
-
-        if backend_access_control_enabled():
+        if is_backend_access_control_enabled():
             text = search_results[0]["search_result"][0]
         else:
             text = search_results[0]

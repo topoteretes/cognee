@@ -2,6 +2,7 @@ import os
 import cognee
 import pathlib
 
+from cognee.modules.data.exceptions.exceptions import UnauthorizedDataAccessError
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
@@ -188,20 +189,26 @@ async def main():
         test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
         text_data_id = test_user_dataset_data[0].id
 
-        await cognee.delete(
-            data_id=text_data_id, dataset_id=test_user_dataset_id, user=default_user
+        await cognee.datasets.delete_data(
+            dataset_id=test_user_dataset_id,
+            data_id=text_data_id,
+            user=default_user,
         )
-    except PermissionDeniedError:
+    except UnauthorizedDataAccessError:
         delete_error = True
 
-    assert delete_error, "PermissionDeniedError was not raised during delete operation as expected"
+    assert delete_error, (
+        "UnauthorizedDataAccessError was not raised during delete operation as expected"
+    )
 
     # Try deleting data from test_user dataset with test_user
     # Get the dataset data to find the ID of the first data item (text)
     test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
     text_data_id = test_user_dataset_data[0].id
 
-    await cognee.delete(data_id=text_data_id, dataset_id=test_user_dataset_id, user=test_user)
+    await cognee.datasets.delete_data(
+        dataset_id=test_user_dataset_id, data_id=text_data_id, user=test_user
+    )
 
     # Actually give permission to default_user to delete data for test_users dataset
     await authorized_give_permission_on_datasets(
@@ -216,8 +223,10 @@ async def main():
     test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
     explanation_file_data_id = test_user_dataset_data[0].id
 
-    await cognee.delete(
-        data_id=explanation_file_data_id, dataset_id=test_user_dataset_id, user=default_user
+    await cognee.datasets.delete_data(
+        dataset_id=test_user_dataset_id,
+        data_id=explanation_file_data_id,
+        user=default_user,
     )
 
 
