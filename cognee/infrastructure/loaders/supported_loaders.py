@@ -24,3 +24,10 @@ try:
     supported_loaders[AdvancedPdfLoader.loader_name] = AdvancedPdfLoader
 except ImportError:
     pass
+
+try:
+    from cognee.infrastructure.loaders.external import BeautifulSoupLoader
+
+    supported_loaders[BeautifulSoupLoader.loader_name] = BeautifulSoupLoader
+except ImportError:
+    pass

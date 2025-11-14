@@ -10,6 +10,7 @@ from .get_authorized_dataset import get_authorized_dataset
 from .get_authorized_dataset_by_name import get_authorized_dataset_by_name
 from .get_data import get_data
 from .get_unique_dataset_id import get_unique_dataset_id
+from .get_unique_data_id import get_unique_data_id
 from .get_authorized_existing_datasets import get_authorized_existing_datasets
 from .get_dataset_ids import get_dataset_ids
 
@@ -23,3 +24,6 @@ from .create_authorized_dataset import create_authorized_dataset
 
 # Check
 from .check_dataset_name import check_dataset_name
+
+# Boolean check
+from .has_dataset_data import has_dataset_data

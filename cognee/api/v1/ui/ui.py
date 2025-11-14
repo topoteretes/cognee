@@ -503,7 +503,7 @@ def start_ui(
     if start_mcp:
         logger.info("Starting Cognee MCP server with Docker...")
         try:
-            image = "cognee/cognee-mcp:feature-standalone-mcp"  # TODO: change to "cognee/cognee-mcp:main" right before merging into main
+            image = "cognee/cognee-mcp:main"
             subprocess.run(["docker", "pull", image], check=True)
 
             import uuid
@@ -538,9 +538,7 @@ def start_ui(
                 env_file = os.path.join(cwd, ".env")
                 docker_cmd.extend(["--env-file", env_file])
 
-            docker_cmd.append(
-                image
-            )  # TODO: change to "cognee/cognee-mcp:main" right before merging into main
+            docker_cmd.append(image)
 
             mcp_process = subprocess.Popen(
                 docker_cmd,

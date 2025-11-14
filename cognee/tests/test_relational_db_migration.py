@@ -27,6 +27,9 @@ def normalize_node_name(node_name: str) -> str:
 
 
 async def setup_test_db():
+    # Disable backend access control to migrate relational data
+    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
+
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 

@@ -70,18 +70,18 @@ class S3FileStorage(Storage):
         if overwrite or not await self.file_exists(file_path):
 
             def save_data_to_file():
-                with self.s3.open(
-                    full_file_path,
-                    mode="w" if isinstance(data, str) else "wb",
-                    encoding="utf-8" if isinstance(data, str) else None,
-                ) as file:
-                    if hasattr(data, "read"):
-                        data.seek(0)
-                        file.write(data.read())
-                    else:
+                if isinstance(data, str):
+                    with self.s3.open(
+                        full_file_path, mode="w", encoding="utf-8", newline="\n"
+                    ) as file:
                         file.write(data)
-
-                    file.close()
+                else:
+                    with self.s3.open(full_file_path, mode="wb") as file:
+                        if hasattr(data, "read"):
+                            data.seek(0)
+                            file.write(data.read())
+                        else:
+                            file.write(data)
 
             await run_async(save_data_to_file)
 

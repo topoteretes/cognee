@@ -4,6 +4,8 @@ from typing import Union
 from uuid import UUID
 
 from cognee.base_config import get_base_config
+from cognee.infrastructure.databases.vector.config import get_vectordb_context_config
+from cognee.infrastructure.databases.graph.config import get_graph_context_config
 from cognee.infrastructure.databases.utils import get_or_create_dataset_database
 from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.modules.users.methods import get_user
@@ -13,12 +15,39 @@ from cognee.modules.users.methods import get_user
 vector_db_config = ContextVar("vector_db_config", default=None)
 graph_db_config = ContextVar("graph_db_config", default=None)
 session_user = ContextVar("session_user", default=None)
-soup_crawler_config = ContextVar("soup_crawler_config", default=None)
-tavily_config = ContextVar("tavily_config", default=None)
+
+VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "falkor"]
+GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["kuzu", "falkor"]
 
 
 async def set_session_user_context_variable(user):
     session_user.set(user)
+
+
+def multi_user_support_possible():
+    graph_db_config = get_graph_context_config()
+    vector_db_config = get_vectordb_context_config()
+    return (
+        graph_db_config["graph_database_provider"] in GRAPH_DBS_WITH_MULTI_USER_SUPPORT
+        and vector_db_config["vector_db_provider"] in VECTOR_DBS_WITH_MULTI_USER_SUPPORT
+    )
+
+
+def backend_access_control_enabled():
+    backend_access_control = os.environ.get("ENABLE_BACKEND_ACCESS_CONTROL", None)
+    if backend_access_control is None:
+        # If backend access control is not defined in environment variables,
+        # enable it by default if graph and vector DBs can support it, otherwise disable it
+        return multi_user_support_possible()
+    elif backend_access_control.lower() == "true":
+        # If enabled, ensure that the current graph and vector DBs can support it
+        multi_user_support = multi_user_support_possible()
+        if not multi_user_support:
+            raise EnvironmentError(
+                "ENABLE_BACKEND_ACCESS_CONTROL is set to true but the current graph and/or vector databases do not support multi-user access control. Please use supported databases or disable backend access control."
+            )
+        return True
+    return False
 
 
 async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):
@@ -40,9 +69,7 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
 
     """
 
-    base_config = get_base_config()
-
-    if not os.getenv("ENABLE_BACKEND_ACCESS_CONTROL", "false").lower() == "true":
+    if not backend_access_control_enabled():
         return
 
     user = await get_user(user_id)
@@ -50,6 +77,7 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     # To ensure permissions are enforced properly all datasets will have their own databases
     dataset_database = await get_or_create_dataset_database(dataset, user)
 
+    base_config = get_base_config()
     data_root_directory = os.path.join(
         base_config.data_root_directory, str(user.tenant_id or user.id)
     )
@@ -59,15 +87,17 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
 
     # Set vector and graph database configuration based on dataset database information
     vector_config = {
-        "vector_db_url": os.path.join(
-            databases_directory_path, dataset_database.vector_database_name
-        ),
-        "vector_db_key": "",
-        "vector_db_provider": "lancedb",
+        "vector_db_provider": dataset_database.vector_database_provider,
+        "vector_db_url": dataset_database.vector_database_url,
+        "vector_db_key": dataset_database.vector_database_key,
+        "vector_db_name": dataset_database.vector_database_name,
     }
 
     graph_config = {
-        "graph_database_provider": "kuzu",
+        "graph_database_provider": dataset_database.graph_database_provider,
+        "graph_database_url": dataset_database.graph_database_url,
+        "graph_database_name": dataset_database.graph_database_name,
+        "graph_database_key": dataset_database.graph_database_key,
         "graph_file_path": os.path.join(
             databases_directory_path, dataset_database.graph_database_name
         ),
