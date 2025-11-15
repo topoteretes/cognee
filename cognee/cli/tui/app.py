@@ -103,7 +103,7 @@ class HelpScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header()
         with VerticalScroll():
-            yield Static(self.help_text)
+            yield Markdown(self.help_text)
         yield Button("Close (Esc)", id="close", variant="primary")
         yield Footer()
     
@@ -117,11 +117,10 @@ class HelpScreen(Screen):
 
 
 def run_tui(mouse: bool = True) -> None:
-    """Entry point to run the TUI application
-
- 
+    """Entry point to run the TUI application.
+    
     Args:
         mouse: Enable mouse support (default: True)
-"""
+    """
     app = CogneeTUI()
     app.run(mouse=mouse)
