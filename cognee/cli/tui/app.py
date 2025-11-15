@@ -118,7 +118,7 @@ class HelpScreen(Screen):
             self.app.pop_screen()
 
 
-def run_tui():
+def run_tui(mouse: bool = True):
     """Entry point to run the TUI application
 
  
