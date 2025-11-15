@@ -197,6 +197,7 @@ SWE-bench_testsample/
 
 # ChromaDB Data
 .chromadb_data/
+# TUI development artifacts
 *.backup
 create_tui_files.sh
 add_tui_command.py

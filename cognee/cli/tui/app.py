@@ -2,11 +2,13 @@
 Cognee TUI - Main Application
 Text-based User Interface for managing Cognee knowledge graphs
 """
+from typing import ClassVar
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Header, Footer
+from textual.widgets import Header, Footer, Static, Button
+from textual.containers import VerticalScroll
 from textual.screen import Screen
-
+from textual.events import Key
 from cognee.cli.tui.screens.home import HomeScreen
 
 
@@ -57,12 +59,11 @@ class CogneeTUI(App):
     TITLE = "Cognee TUI - Knowledge Graph Manager"
     SUB_TITLE = "Navigate with arrow keys • Press ? for help"
     
-    BINDINGS = [
+    BINDINGS: ClassVar[list[Binding]] = [
         Binding("q", "quit", "Quit", priority=True),
         Binding("?", "help", "Help"),
         Binding("d", "toggle_dark", "Toggle Dark Mode"),
     ]
-    
     def on_mount(self) -> None:
         """Initialize the app with the home screen"""
         self.push_screen(HomeScreen())
@@ -100,25 +101,22 @@ class HelpScreen(Screen):
         self.help_text = help_text
     
     def compose(self) -> ComposeResult:
-        from textual.widgets import Static, Button
-        from textual.containers import VerticalScroll
-        
         yield Header()
         with VerticalScroll():
             yield Static(self.help_text, markup=False)
         yield Button("Close (Esc)", id="close", variant="primary")
         yield Footer()
     
-    def on_button_pressed(self, event) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "close":
             self.app.pop_screen()
     
-    def on_key(self, event) -> None:
+    def on_key(self, event: Key) -> None:
         if event.key == "escape":
             self.app.pop_screen()
 
 
-def run_tui(mouse: bool = True):
+def run_tui(mouse: bool = True) -> None:
     """Entry point to run the TUI application
 
  
