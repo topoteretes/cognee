@@ -5,7 +5,7 @@ Text-based User Interface for managing Cognee knowledge graphs
 from typing import ClassVar
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Header, Footer, Static, Button, Markdown
+from textual.widgets import Header, Footer, Button, Markdown
 from textual.containers import VerticalScroll
 from textual.screen import Screen
 from textual.events import Key
