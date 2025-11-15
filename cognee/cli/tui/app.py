@@ -119,6 +119,11 @@ class HelpScreen(Screen):
 
 
 def run_tui():
-    """Entry point to run the TUI application"""
+    """Entry point to run the TUI application
+
+ 
+    Args:
+        mouse: Enable mouse support (default: True)
+"""
     app = CogneeTUI()
-    app.run()
+    app.run(mouse=mouse)

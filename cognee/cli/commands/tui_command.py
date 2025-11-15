@@ -43,7 +43,7 @@ Perfect for managing Cognee from the terminal or SSH sessions!
             
             # Import and run TUI
             from cognee.cli.tui import run_tui
-            run_tui()
+            run_tui(mouse=not args.no_mouse)
             
         except KeyboardInterrupt:
             fmt.note("\nTUI closed by user")
