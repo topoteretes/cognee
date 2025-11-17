@@ -33,6 +33,7 @@ def create_graph_engine(
     graph_database_username="",
     graph_database_password="",
     graph_database_port="",
+    graph_database_key="",
 ):
     """
     Create a graph engine based on the specified provider type.
@@ -69,6 +70,7 @@ def create_graph_engine(
             graph_database_url=graph_database_url,
             graph_database_username=graph_database_username,
             graph_database_password=graph_database_password,
+            database_name=graph_database_name,
         )
 
     if graph_database_provider == "neo4j":

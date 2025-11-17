@@ -82,7 +82,9 @@ def get_add_router() -> APIRouter:
                 datasetName,
                 user=user,
                 dataset_id=datasetId,
-                node_set=node_set if node_set else None,
+                node_set=node_set
+                if node_set != [""]
+                else None,  # Transform default node_set endpoint value to None
             )
 
             if isinstance(add_run, PipelineRunErrored):
