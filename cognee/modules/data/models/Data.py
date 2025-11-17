@@ -13,7 +13,7 @@ class Data(Base):
     __tablename__ = "data"
 
     id = Column(UUID, primary_key=True, default=uuid4)
-
+    label = Column(String, nullable=True)
     name = Column(String)
     extension = Column(String)
     mime_type = Column(String)
@@ -49,6 +49,7 @@ class Data(Base):
         return {
             "id": str(self.id),
             "name": self.name,
+            "label": self.label,
             "extension": self.extension,
             "mimeType": self.mime_type,
             "rawDataLocation": self.raw_data_location,
