@@ -172,6 +172,7 @@ async def search(
                             "search_result": [context] if context else None,
                             "dataset_id": datasets[0].id,
                             "dataset_name": datasets[0].name,
+                            "dataset_tenant_id": datasets[0].tenant_id,
                             "graphs": graphs,
                         }
                     )
@@ -181,6 +182,7 @@ async def search(
                             "search_result": [result] if result else None,
                             "dataset_id": datasets[0].id,
                             "dataset_name": datasets[0].name,
+                            "dataset_tenant_id": datasets[0].tenant_id,
                             "graphs": graphs,
                         }
                     )
