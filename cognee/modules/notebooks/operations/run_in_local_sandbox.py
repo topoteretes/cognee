@@ -1,58 +1,48 @@
-import io
+import asyncio
 import sys
-import traceback
 
+async def run_in_local_sandbox(code: str) -> str:
+    """
+    Executes Python code in a separate process and captures its output.
 
-def wrap_in_async_handler(user_code: str) -> str:
-    return (
-        "import asyncio\n"
-        + "asyncio.set_event_loop(running_loop)\n\n"
-        + "from cognee.infrastructure.utils.run_sync import run_sync\n\n"
-        + "async def __user_main__():\n"
-        + "\n".join("    " + line for line in user_code.strip().split("\n"))
-        + "\n"
-        + "    globals().update(locals())\n\n"
-        + "run_sync(__user_main__(), running_loop)\n"
-    )
+    This function takes a string of Python code, executes it in an isolated
+    subprocess using asyncio, and captures its standard output and standard error.
 
+    Parameters:
+    - code (str): A string containing the Python code to be executed.
 
-def run_in_local_sandbox(code, environment=None, loop=None):
-    environment = environment or {}
-    code = wrap_in_async_handler(code.replace("\xa0", "\n"))
-
-    buffer = io.StringIO()
-    sys_stdout = sys.stdout
-    sys.stdout = buffer
-    sys.stderr = buffer
-
-    error = None
-
-    printOutput = []
-
-    def customPrintFunction(output):
-        printOutput.append(output)
-
-    environment["print"] = customPrintFunction
-    environment["running_loop"] = loop
-
+    Returns:
+    - str: The captured standard output from the executed code, or an error
+           message if the execution fails.
+    """
+    process = None
     try:
-        exec(code, environment)
-    except Exception:
-        error = traceback.format_exc()
-    finally:
-        sys.stdout = sys_stdout
-        sys.stderr = sys_stdout
+        # Create a subprocess to run the Python code
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, "-c", code,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
 
-    return printOutput, error
+        # Wait for the subprocess to finish, with a timeout
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=60.0)
 
+        if process.returncode == 0:
+            return stdout.decode()
+        else:
+            # If there was an error, return the decoded stderr
+            return f"An error occurred:\n{stderr.decode()}"
 
-if __name__ == "__main__":
-    run_in_local_sandbox("""
-import cognee
-
-await cognee.add("Test file with some random content 3.")
-
-a = "asd"
-
-b = {"c": "dfgh"}
-""")
+    except asyncio.TimeoutError:
+        # Ensure the process is terminated if it times out
+        if process and process.returncode is None:
+            try:
+                process.kill()
+                await process.wait()
+            except ProcessLookupError:
+                # Process might have finished just before kill, which is fine.
+                pass
+        return "An error occurred: Code execution timed out after 60 seconds."
+    except Exception as e:
+        # Capture other potential exceptions
+        return f"An error occurred: {e}"
