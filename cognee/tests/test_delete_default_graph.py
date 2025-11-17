@@ -1,17 +1,40 @@
 import os
-import pathlib
 import pytest
+import pathlib
+from uuid import NAMESPACE_OID, uuid5
 from unittest.mock import AsyncMock, patch
 
 import cognee
 from cognee.api.v1.datasets import datasets
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm import LLMGateway
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.data.processing.document_types.TextDocument import TextDocument
+from cognee.modules.engine.models import Entity
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge, SummarizedContent
 from cognee.shared.logging_utils import get_logger
+from cognee.tests.utils.assert_edges_vector_index_not_present import (
+    assert_edges_vector_index_not_present,
+)
+from cognee.tests.utils.assert_edges_vector_index_present import assert_edges_vector_index_present
+from cognee.tests.utils.assert_graph_edges_not_present import assert_graph_edges_not_present
+from cognee.tests.utils.assert_graph_edges_present import assert_graph_edges_present
+from cognee.tests.utils.assert_graph_nodes_not_present import assert_graph_nodes_not_present
+from cognee.tests.utils.assert_graph_nodes_present import assert_graph_nodes_present
+from cognee.tests.utils.assert_nodes_vector_index_not_present import (
+    assert_nodes_vector_index_not_present,
+)
+from cognee.tests.utils.assert_nodes_vector_index_present import assert_nodes_vector_index_present
+from cognee.tests.utils.extract_entities import extract_entities
+from cognee.tests.utils.extract_relationships import extract_relationships
+from cognee.tests.utils.extract_summary import extract_summary
+from cognee.tests.utils.filter_overlapping_entities import filter_overlapping_entities
+from cognee.tests.utils.filter_overlapping_relationships import filter_overlapping_relationships
+from cognee.tests.utils.get_contains_edge_text import get_contains_edge_text
+from cognee.tests.utils.isolate_relationships import isolate_relationships
 
 logger = get_logger()
 
@@ -107,92 +130,159 @@ async def main(mock_create_structured_output: AsyncMock):
 
     mock_create_structured_output.side_effect = mock_llm_output
 
+    user = await get_default_user()
+
+    await set_database_global_context_variables("main_dataset", user.id)
+
     vector_engine = get_vector_engine()
 
-    assert not await vector_engine.has_collection("EdgeType_relationship_name")
     assert not await vector_engine.has_collection("Entity_name")
     assert not await vector_engine.has_collection("DocumentChunk_text")
     assert not await vector_engine.has_collection("TextSummary_text")
     assert not await vector_engine.has_collection("TextDocument_text")
+    assert not await vector_engine.has_collection("EdgeType_relationship_name")
 
-    add_john_result = await cognee.add(
-        "John works for Apple. He is also affiliated with a non-profit organization called 'Food for Hungry'"
-    )
+    johns_text = "John works for Apple. He is also affiliated with a non-profit organization called 'Food for Hungry'"
+    add_john_result = await cognee.add(johns_text)
     johns_data_id = add_john_result.data_ingestion_info[0]["data_id"]
 
-    add_marie_result = await cognee.add(
-        "Marie works for Apple as well. She is a software engineer on MacOS project."
-    )
+    maries_text = "Marie works for Apple as well. She is a software engineer on MacOS project."
+    add_marie_result = await cognee.add(maries_text)
     maries_data_id = add_marie_result.data_ingestion_info[0]["data_id"]
 
     cognify_result: dict = await cognee.cognify()
     dataset_id = list(cognify_result.keys())[0]
 
-    graph_engine = await get_graph_engine()
-    initial_nodes, initial_edges = await graph_engine.get_graph_data()
-    assert len(initial_nodes) == 15 and len(initial_edges) == 19, (
-        "Number of nodes and edges is not correct."
+    johns_document = TextDocument(
+        id=johns_data_id,
+        name="John's Work",
+        raw_data_location="johns_data_location",
+        external_metadata="",
+    )
+    johns_chunk = DocumentChunk(
+        id=uuid5(NAMESPACE_OID, f"{str(johns_data_id)}-0"),
+        text=johns_text,
+        chunk_size=14,
+        chunk_index=0,
+        cut_type="sentence_end",
+        is_part_of=johns_document,
+    )
+    johns_summary = extract_summary(johns_chunk, mock_llm_output("John", "", SummarizedContent))  # type: ignore
+
+    maries_document = TextDocument(
+        id=maries_data_id,
+        name="Maries's Work",
+        raw_data_location="maries_data_location",
+        external_metadata="",
+    )
+    maries_chunk = DocumentChunk(
+        id=uuid5(NAMESPACE_OID, f"{str(maries_data_id)}-0"),
+        text=maries_text,
+        chunk_size=14,
+        chunk_index=0,
+        cut_type="sentence_end",
+        is_part_of=maries_document,
+    )
+    maries_summary = extract_summary(maries_chunk, mock_llm_output("Marie", "", SummarizedContent))  # type: ignore
+
+    johns_entities = extract_entities(mock_llm_output("John", "", KnowledgeGraph))  # type: ignore
+    maries_entities = extract_entities(mock_llm_output("Marie", "", KnowledgeGraph))  # type: ignore
+    (overlapping_entities, johns_entities, maries_entities) = filter_overlapping_entities(
+        johns_entities, maries_entities
     )
 
-    initial_nodes_by_vector_collection = {}
+    johns_data = [
+        johns_document,
+        johns_chunk,
+        johns_summary,
+        *johns_entities,
+    ]
+    maries_data = [
+        maries_document,
+        maries_chunk,
+        maries_summary,
+        *maries_entities,
+    ]
 
-    for node in initial_nodes:
-        node_data = node[1]
-        collection_name = node_data["type"] + "_" + node_data["metadata"]["index_fields"][0]
-        if collection_name not in initial_nodes_by_vector_collection:
-            initial_nodes_by_vector_collection[collection_name] = []
-        initial_nodes_by_vector_collection[collection_name].append(node)
+    # Assert data points presence in the graph, vector collections and nodes table
+    await assert_graph_nodes_present(johns_data + maries_data + overlapping_entities)
+    await assert_nodes_vector_index_present(johns_data + maries_data + overlapping_entities)
 
-    initial_node_ids = set([node[0] for node in initial_nodes])
+    johns_relationships = extract_relationships(
+        johns_chunk,
+        mock_llm_output("John", "", KnowledgeGraph),  # type: ignore
+    )
+    maries_relationships = extract_relationships(
+        maries_chunk,
+        mock_llm_output("Marie", "", KnowledgeGraph),  # type: ignore
+    )
+    (overlapping_relationships, johns_relationships, maries_relationships) = (
+        filter_overlapping_relationships(johns_relationships, maries_relationships)
+    )
 
-    user = await get_default_user()
+    johns_relationships = [
+        (johns_chunk.id, johns_document.id, "is_part_of"),
+        (johns_summary.id, johns_chunk.id, "made_from"),
+        *johns_relationships,
+    ]
+    johns_edge_text_relationships = [
+        (johns_chunk.id, entity.id, get_contains_edge_text(entity.name, entity.description))
+        for entity in johns_entities
+        if isinstance(entity, Entity)
+    ]
+    maries_relationships = [
+        (maries_chunk.id, maries_document.id, "is_part_of"),
+        (maries_summary.id, maries_chunk.id, "made_from"),
+        *maries_relationships,
+    ]
+    maries_edge_text_relationships = [
+        (maries_chunk.id, entity.id, get_contains_edge_text(entity.name, entity.description))
+        for entity in maries_entities
+        if isinstance(entity, Entity)
+    ]
+
+    expected_relationships = johns_relationships + maries_relationships + overlapping_relationships
+
+    await assert_graph_edges_present(expected_relationships)
+
+    await assert_edges_vector_index_present(
+        expected_relationships + johns_edge_text_relationships + maries_edge_text_relationships
+    )
+
+    # Delete John's data from cognee
     await datasets.delete_data(dataset_id, johns_data_id, user)  # type: ignore
 
-    nodes, edges = await graph_engine.get_graph_data()
-    assert len(nodes) == 9 and len(edges) == 10, "Nodes and edges are not deleted."
-    assert not any(
-        node[1]["name"] == "john" or node[1]["name"] == "food for hungry"
-        for node in nodes
-        if "name" in node[1]
-    ), "Nodes are not deleted."
+    # Assert data points presence in the graph, vector collections and nodes table
+    await assert_graph_nodes_present(maries_data + overlapping_entities)
+    await assert_nodes_vector_index_present(maries_data + overlapping_entities)
 
-    after_first_delete_node_ids = set([node[0] for node in nodes])
+    await assert_graph_nodes_not_present(johns_data)
+    await assert_nodes_vector_index_not_present(johns_data)
 
-    after_delete_nodes_by_vector_collection = {}
-    for node in initial_nodes:
-        node_data = node[1]
-        collection_name = node_data["type"] + "_" + node_data["metadata"]["index_fields"][0]
-        if collection_name not in after_delete_nodes_by_vector_collection:
-            after_delete_nodes_by_vector_collection[collection_name] = []
-        after_delete_nodes_by_vector_collection[collection_name].append(node)
+    # Assert relationships presence in the graph, vector collections and nodes table
+    await assert_graph_edges_present(maries_relationships + overlapping_relationships)
+    await assert_edges_vector_index_present(maries_relationships + maries_edge_text_relationships)
 
-    vector_engine = get_vector_engine()
+    await assert_graph_edges_not_present(johns_relationships)
 
-    removed_node_ids = initial_node_ids - after_first_delete_node_ids
+    strictly_johns_relationships = isolate_relationships(johns_relationships, maries_relationships)
+    # We check only by relationship name and we need edges that are created by John's data and no other.
+    await assert_edges_vector_index_not_present(
+        strictly_johns_relationships + johns_edge_text_relationships
+    )
 
-    for collection_name, initial_nodes in initial_nodes_by_vector_collection.items():
-        query_node_ids = [node[0] for node in initial_nodes if node[0] in removed_node_ids]
-
-        if query_node_ids:
-            vector_items = await vector_engine.retrieve(collection_name, query_node_ids)
-            assert len(vector_items) == 0, "Vector items are not deleted."
-
+    # Delete Marie's data from cognee
     await datasets.delete_data(dataset_id, maries_data_id, user)  # type: ignore
 
-    final_nodes, final_edges = await graph_engine.get_graph_data()
-    assert len(final_nodes) == 0 and len(final_edges) == 0, "Nodes and edges are not deleted."
+    await assert_graph_nodes_not_present(johns_data + maries_data + overlapping_entities)
+    await assert_nodes_vector_index_not_present(johns_data + maries_data + overlapping_entities)
 
-    for collection_name, initial_nodes in initial_nodes_by_vector_collection.items():
-        query_node_ids = [node[0] for node in initial_nodes]
+    # Assert relationships presence in the graph, vector collections and nodes table
+    await assert_graph_edges_not_present(
+        johns_relationships + maries_relationships + overlapping_relationships
+    )
 
-        if query_node_ids:
-            vector_items = await vector_engine.retrieve(collection_name, query_node_ids)
-            assert len(vector_items) == 0, "Vector items are not deleted."
-
-    query_edge_ids = [edge[0] for edge in initial_edges]
-
-    vector_items = await vector_engine.retrieve("EdgeType_relationship_name", query_edge_ids)
-    assert len(vector_items) == 0, "Vector items are not deleted."
+    await assert_edges_vector_index_not_present(maries_relationships)
 
 
 if __name__ == "__main__":

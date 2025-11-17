@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from cognee.base_config import get_base_config
-from cognee.modules.data.methods import create_dataset
+from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
@@ -66,7 +66,7 @@ async def get_or_create_dataset_database(
     async with db_engine.get_async_session() as session:
         # Create dataset if it doesn't exist
         if isinstance(dataset, str):
-            dataset = await create_dataset(dataset, user, session)
+            dataset = await create_authorized_dataset(dataset, user)
 
         # Try to fetch an existing row first
         stmt = select(DatasetDatabase).where(

@@ -1,11 +1,12 @@
 import os
+import pytest
 import pathlib
 from uuid import NAMESPACE_OID, uuid5
-import pytest
 from unittest.mock import AsyncMock, patch
 
 import cognee
 from cognee.api.v1.datasets import datasets
+from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -16,15 +17,34 @@ from cognee.modules.data.models import Data
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.engine.operations.setup import setup
-from cognee.modules.engine.utils import generate_edge_id, generate_node_id
+from cognee.modules.engine.utils import generate_node_id
 from cognee.modules.graph.legacy.record_data_in_legacy_ledger import record_data_in_legacy_ledger
 from cognee.modules.pipelines.models import DataItemStatus
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.data_models import KnowledgeGraph, Node, Edge, SummarizedContent
 from cognee.tasks.storage import index_data_points, index_graph_edges
+from cognee.tests.utils.assert_edges_vector_index_not_present import (
+    assert_edges_vector_index_not_present,
+)
+from cognee.tests.utils.assert_edges_vector_index_present import assert_edges_vector_index_present
+from cognee.tests.utils.assert_graph_edges_not_present import assert_graph_edges_not_present
+from cognee.tests.utils.assert_graph_edges_present import assert_graph_edges_present
+from cognee.tests.utils.assert_graph_nodes_not_present import assert_graph_nodes_not_present
+from cognee.tests.utils.assert_graph_nodes_present import assert_graph_nodes_present
+from cognee.tests.utils.assert_nodes_vector_index_not_present import (
+    assert_nodes_vector_index_not_present,
+)
+from cognee.tests.utils.assert_nodes_vector_index_present import assert_nodes_vector_index_present
+from cognee.tests.utils.extract_entities import extract_entities
+from cognee.tests.utils.extract_relationships import extract_relationships
+from cognee.tests.utils.extract_summary import extract_summary
+from cognee.tests.utils.filter_overlapping_entities import filter_overlapping_entities
+from cognee.tests.utils.filter_overlapping_relationships import filter_overlapping_relationships
+from cognee.tests.utils.get_contains_edge_text import get_contains_edge_text
+from cognee.tests.utils.isolate_relationships import isolate_relationships
 
 
-def get_nodes_and_edges():
+def create_nodes_and_edges():
     document = TextDocument(
         id=uuid5(NAMESPACE_OID, "text_test.txt"),
         name="text_test.txt",
@@ -146,8 +166,6 @@ def get_nodes_and_edges():
 @pytest.mark.asyncio
 @patch.object(LLMGateway, "acreate_structured_output", new_callable=AsyncMock)
 async def main(mock_create_structured_output: AsyncMock):
-    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
-
     data_directory_path = os.path.join(
         pathlib.Path(__file__).parent, ".data_storage/test_delete_default_graph_with_legacy_graph_2"
     )
@@ -163,6 +181,9 @@ async def main(mock_create_structured_output: AsyncMock):
     await cognee.prune.prune_system(metadata=True)
     await setup()
 
+    user = await get_default_user()
+    await set_database_global_context_variables("main_dataset", user.id)
+
     vector_engine = get_vector_engine()
 
     assert not await vector_engine.has_collection("EdgeType_relationship_name")
@@ -171,9 +192,10 @@ async def main(mock_create_structured_output: AsyncMock):
     assert not await vector_engine.has_collection("TextSummary_text")
     assert not await vector_engine.has_collection("TextDocument_text")
 
-    user = await get_default_user()
-
-    old_document, old_nodes, old_edges = await add_mocked_legacy_data(user)
+    # Add legacy data to the system
+    legacy_document, legacy_data_points, legacy_relationships = await create_mocked_legacy_data(
+        user
+    )
 
     def mock_llm_output(text_input: str, system_prompt: str, response_model):
         if text_input == "test":  # LLM connection test
@@ -249,100 +271,186 @@ async def main(mock_create_structured_output: AsyncMock):
 
     mock_create_structured_output.side_effect = mock_llm_output
 
-    add_john_result = await cognee.add(
-        "John works for Apple. He is also affiliated with a non-profit organization called 'Food for Hungry'"
-    )
+    johns_text = "John works for Apple. He is also affiliated with a non-profit organization called 'Food for Hungry'"
+    add_john_result = await cognee.add(johns_text)
     johns_data_id = add_john_result.data_ingestion_info[0]["data_id"]
 
-    await cognee.add("Marie works for Apple as well. She is a software engineer on MacOS project.")
+    maries_text = "Marie works for Apple as well. She is a software engineer on MacOS project."
+    add_marie_result = await cognee.add(maries_text)
+    maries_data_id = add_marie_result.data_ingestion_info[0]["data_id"]
 
     cognify_result: dict = await cognee.cognify()
     dataset_id = list(cognify_result.keys())[0]
 
-    graph_engine = await get_graph_engine()
-    initial_nodes, initial_edges = await graph_engine.get_graph_data()
-    assert len(initial_nodes) == 22 and len(initial_edges) == 26, (
-        "Number of nodes and edges is not correct."
+    johns_document = TextDocument(
+        id=johns_data_id,
+        name="John's Work",
+        raw_data_location="johns_data_location",
+        external_metadata="",
+    )
+    johns_chunk = DocumentChunk(
+        id=uuid5(NAMESPACE_OID, f"{str(johns_data_id)}-0"),
+        text=johns_text,
+        chunk_size=14,
+        chunk_index=0,
+        cut_type="sentence_end",
+        is_part_of=johns_document,
+    )
+    johns_summary = extract_summary(johns_chunk, mock_llm_output("John", "", SummarizedContent))  # type: ignore
+
+    maries_document = TextDocument(
+        id=maries_data_id,
+        name="Maries's Work",
+        raw_data_location="maries_data_location",
+        external_metadata="",
+    )
+    maries_chunk = DocumentChunk(
+        id=uuid5(NAMESPACE_OID, f"{str(maries_data_id)}-0"),
+        text=maries_text,
+        chunk_size=14,
+        chunk_index=0,
+        cut_type="sentence_end",
+        is_part_of=maries_document,
+    )
+    maries_summary = extract_summary(maries_chunk, mock_llm_output("Marie", "", SummarizedContent))  # type: ignore
+
+    johns_entities = extract_entities(mock_llm_output("John", "", KnowledgeGraph))  # type: ignore
+    maries_entities = extract_entities(mock_llm_output("Marie", "", KnowledgeGraph))  # type: ignore
+    (overlapping_entities, johns_entities, maries_entities) = filter_overlapping_entities(
+        johns_entities, maries_entities
     )
 
-    initial_nodes_by_vector_collection = {}
+    johns_data = [
+        johns_document,
+        johns_chunk,
+        johns_summary,
+        *johns_entities,
+    ]
+    maries_data = [
+        maries_document,
+        maries_chunk,
+        maries_summary,
+        *maries_entities,
+    ]
 
-    for node in initial_nodes:
-        node_data = node[1]
-        collection_name = node_data["type"] + "_" + node_data["metadata"]["index_fields"][0]
-        if collection_name not in initial_nodes_by_vector_collection:
-            initial_nodes_by_vector_collection[collection_name] = []
-        initial_nodes_by_vector_collection[collection_name].append(node)
+    expected_data_points = johns_data + maries_data + overlapping_entities + legacy_data_points
 
-    initial_node_ids = set([node[0] for node in initial_nodes])
+    # Assert data points presence in the graph, vector collections and nodes table
+    await assert_graph_nodes_present(expected_data_points)
+    await assert_nodes_vector_index_present(expected_data_points)
 
+    johns_relationships = extract_relationships(
+        johns_chunk,
+        mock_llm_output("John", "", KnowledgeGraph),  # type: ignore
+    )
+    maries_relationships = extract_relationships(
+        maries_chunk,
+        mock_llm_output("Marie", "", KnowledgeGraph),  # type: ignore
+    )
+    (overlapping_relationships, johns_relationships, maries_relationships, legacy_relationships) = (
+        filter_overlapping_relationships(
+            johns_relationships, maries_relationships, legacy_relationships
+        )
+    )
+
+    johns_relationships = [
+        (johns_chunk.id, johns_document.id, "is_part_of"),
+        (johns_summary.id, johns_chunk.id, "made_from"),
+        *johns_relationships,
+    ]
+    johns_edge_text_relationships = [
+        (johns_chunk.id, entity.id, get_contains_edge_text(entity.name, entity.description))
+        for entity in johns_entities
+        if isinstance(entity, Entity)
+    ]
+    maries_relationships = [
+        (maries_chunk.id, maries_document.id, "is_part_of"),
+        (maries_summary.id, maries_chunk.id, "made_from"),
+        *maries_relationships,
+    ]
+    maries_edge_text_relationships = [
+        (maries_chunk.id, entity.id, get_contains_edge_text(entity.name, entity.description))
+        for entity in maries_entities
+        if isinstance(entity, Entity)
+    ]
+
+    expected_relationships = (
+        johns_relationships
+        + maries_relationships
+        + overlapping_relationships
+        + legacy_relationships
+    )
+
+    await assert_graph_edges_present(expected_relationships)
+
+    await assert_edges_vector_index_present(
+        expected_relationships + johns_edge_text_relationships + maries_edge_text_relationships
+    )
+
+    # Delete John's data
     await datasets.delete_data(dataset_id, johns_data_id, user)  # type: ignore
 
-    nodes, edges = await graph_engine.get_graph_data()
-    assert len(nodes) == 16 and len(edges) == 17, "Nodes and edges are not deleted."
-    assert not any(
-        node[1]["name"] == "john" or node[1]["name"] == "food for hungry" for node in nodes
-    ), "Nodes are not deleted."
+    # Assert data points presence in the graph, vector collections and nodes table
+    await assert_graph_nodes_present(maries_data + overlapping_entities + legacy_data_points)
+    await assert_nodes_vector_index_present(maries_data + overlapping_entities + legacy_data_points)
 
-    after_first_delete_node_ids = set([node[0] for node in nodes])
+    await assert_graph_nodes_not_present(johns_data)
+    await assert_nodes_vector_index_not_present(johns_data)
 
-    after_delete_nodes_by_vector_collection = {}
-    for node in initial_nodes:
-        node_data = node[1]
-        collection_name = node_data["type"] + "_" + node_data["metadata"]["index_fields"][0]
-        if collection_name not in after_delete_nodes_by_vector_collection:
-            after_delete_nodes_by_vector_collection[collection_name] = []
-        after_delete_nodes_by_vector_collection[collection_name].append(node)
+    # Assert relationships presence in the graph, vector collections and nodes table
+    await assert_graph_edges_present(
+        maries_relationships + overlapping_relationships + legacy_relationships
+    )
+    await assert_edges_vector_index_present(
+        maries_relationships + maries_edge_text_relationships + legacy_relationships
+    )
 
-    vector_engine = get_vector_engine()
+    await assert_graph_edges_not_present(johns_relationships)
 
-    removed_node_ids = initial_node_ids - after_first_delete_node_ids
+    strictly_johns_relationships = isolate_relationships(
+        johns_relationships, maries_relationships, legacy_relationships
+    )
+    # We check only by relationship name and we need edges that are created by John's data and no other.
+    await assert_edges_vector_index_not_present(
+        strictly_johns_relationships + johns_edge_text_relationships
+    )
 
-    for collection_name, initial_nodes in initial_nodes_by_vector_collection.items():
-        query_node_ids = [node[0] for node in initial_nodes if node[0] in removed_node_ids]
+    # Delete legacy data
+    await datasets.delete_data(dataset_id, legacy_document.id, user)  # type: ignore
 
-        if query_node_ids:
-            vector_items = await vector_engine.retrieve(collection_name, query_node_ids)
-            assert len(vector_items) == 0, "Vector items are not deleted."
+    # Assert data points presence in the graph, vector collections and nodes table
+    await assert_graph_nodes_present(maries_data + overlapping_entities)
+    await assert_nodes_vector_index_present(maries_data + overlapping_entities)
 
-    # Delete old document
-    await datasets.delete_data(dataset_id, old_document.id, user)  # type: ignore
+    await assert_graph_nodes_not_present(johns_data + legacy_data_points)
+    await assert_nodes_vector_index_not_present(johns_data + legacy_data_points)
 
-    final_nodes, final_edges = await graph_engine.get_graph_data()
-    assert len(final_nodes) == 9 and len(final_edges) == 10, "Nodes and edges are not deleted."
+    # Assert relationships presence in the graph, vector collections and nodes table
+    await assert_graph_edges_present(maries_relationships + overlapping_relationships)
+    await assert_edges_vector_index_present(maries_relationships + maries_edge_text_relationships)
 
-    old_nodes_by_vector_collection = {}
-    for node in old_nodes:
-        collection_name = node.type + "_" + node.metadata["index_fields"][0]
-        if collection_name not in old_nodes_by_vector_collection:
-            old_nodes_by_vector_collection[collection_name] = []
-        old_nodes_by_vector_collection[collection_name].append(node)
+    await assert_graph_edges_not_present(johns_relationships + legacy_relationships)
 
-    for collection_name, old_nodes in old_nodes_by_vector_collection.items():
-        query_node_ids = [str(node.id) for node in old_nodes]
-
-        if query_node_ids:
-            vector_items = await vector_engine.retrieve(collection_name, query_node_ids)
-            assert len(vector_items) == 0, "Vector items are not deleted."
-
-    query_edge_ids = list(set([str(generate_edge_id(edge[2])) for edge in old_edges]))
-
-    vector_items = await vector_engine.retrieve("EdgeType_relationship_name", query_edge_ids)
-    assert len(vector_items) == len(query_edge_ids), "Vector items are not deleted."
+    strictly_legacy_relationships = isolate_relationships(
+        legacy_relationships, maries_relationships
+    )
+    # We check only by relationship name and we need edges that are created by legacy data and no other.
+    if strictly_legacy_relationships:
+        await assert_edges_vector_index_not_present(strictly_legacy_relationships)
 
 
-async def add_mocked_legacy_data(user):
+async def create_mocked_legacy_data(user):
     graph_engine = await get_graph_engine()
-    old_nodes, old_edges = get_nodes_and_edges()
-    old_document = old_nodes[0]
+    legacy_nodes, legacy_edges = create_nodes_and_edges()
+    legacy_document = legacy_nodes[0]
 
-    await graph_engine.add_nodes(old_nodes)
-    await graph_engine.add_edges(old_edges)
+    await graph_engine.add_nodes(legacy_nodes)
+    await graph_engine.add_edges(legacy_edges)
 
-    await index_data_points(old_nodes)
-    await index_graph_edges(old_edges)
+    await index_data_points(legacy_nodes)
+    await index_graph_edges(legacy_edges)
 
-    await record_data_in_legacy_ledger(old_nodes, old_edges, user)
+    await record_data_in_legacy_ledger(legacy_nodes, legacy_edges, user)
 
     db_engine = get_relational_engine()
 
@@ -350,12 +458,12 @@ async def add_mocked_legacy_data(user):
 
     async with db_engine.get_async_session() as session:
         old_data = Data(
-            id=old_document.id,
-            name=old_document.name,
+            id=legacy_document.id,
+            name=legacy_document.name,
             extension="txt",
-            raw_data_location=old_document.raw_data_location,
-            external_metadata=old_document.external_metadata,
-            mime_type=old_document.mime_type,
+            raw_data_location=legacy_document.raw_data_location,
+            external_metadata=legacy_document.external_metadata,
+            mime_type=legacy_document.mime_type,
             owner_id=user.id,
             pipeline_status={
                 "cognify_pipeline": {
@@ -370,7 +478,7 @@ async def add_mocked_legacy_data(user):
 
         await session.commit()
 
-    return old_document, old_nodes, old_edges
+    return legacy_document, legacy_nodes, legacy_edges
 
 
 if __name__ == "__main__":
