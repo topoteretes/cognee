@@ -445,7 +445,7 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 - **cognify**: Turns your data into a structured knowledge graph and stores it in memory
 
-- **cognify_add_developer_rules**: Ingest core developer rule files into memory
+- **cognee_add_developer_rules**: Ingest core developer rule files into memory
 
 - **codify**: Analyse a code repository, build a code graph, stores it in memory
 
