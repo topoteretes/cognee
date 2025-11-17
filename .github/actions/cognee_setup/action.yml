@@ -1,44 +1,55 @@
-name: cognee-setup
-description: "Sets up Python, installs uv, and installs dependencies for Cognee."
-
+name: 'Cognee Setup'
+description: 'Setup Cognee environment'
 inputs:
   python-version:
-    description: "Which Python version to use"
+    description: 'Python version to use'
     required: false
-    default: "3.11.x"
-  extra-dependencies:
-    description: "Additional extra dependencies to install (space-separated)"
+    default: '3.11'
+  install-dependencies:
+    description: 'Whether to install dependencies'
     required: false
-    default: ""
+    default: 'true'
+  create-pr:
+    description: 'Whether to create a PR'
+    required: false
+    default: 'false'
+  new-version:
+    description: 'New version to update to'
+    required: false
+    default: ''
 
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
-
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4
       with:
         python-version: ${{ inputs.python-version }}
 
-    - name: Install uv
-      uses: astral-sh/setup-uv@v4
-      with:
-        enable-cache: true
-
-    - name: Rebuild uv lockfile
+    - name: Install Poetry
       shell: bash
       run: |
-        rm uv.lock
-        uv lock
+        curl -sSL https://install.python-poetry.org | python3 -
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Create PR with updated version
+      if: ${{ inputs.create-pr == 'true' }}
+      env:
+        NEW_VERSION: ${{ inputs.new-version }}
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+        GH_TOKEN: ${{ github.token }}
+      shell: bash
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        BRANCH_NAME="chore/update-version-$NEW_VERSION"
+        git checkout -b "$BRANCH_NAME"
+        git add .
+        git commit -m "chore: update version to $NEW_VERSION"
+        git push origin "$BRANCH_NAME"
+        gh pr create --base "$BASE_REF" --head "$BRANCH_NAME" --title "chore: update version to $NEW_VERSION" --body "This PR updates the version to $NEW_VERSION"
 
     - name: Install dependencies
+      if: ${{ inputs.install-dependencies == 'true' }}
       shell: bash
-      run: |
-        EXTRA_ARGS=""
-        if [ -n "${{ inputs.extra-dependencies }}" ]; then
-          IFS=' ' read -r -a deps <<< "${{ inputs.extra-dependencies }}"
-          for extra in "${deps[@]}"; do
-            EXTRA_ARGS="$EXTRA_ARGS --extra $extra"
-          done
-        fi
-        uv sync --extra api --extra docs --extra evals --extra codegraph --extra ollama --extra dev --extra neo4j --extra redis $EXTRA_ARGS
+      run: poetry install
