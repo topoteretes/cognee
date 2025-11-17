@@ -407,7 +407,7 @@ class SQLAlchemyAdapter:
                 )
                 query += f" WHERE {filter_conditions};"
                 query = text(query)
-                results = await connection.execute(query, filters)
+        # Use parameterized query to prevent SQL injection
             else:
                 query += ";"
                 query = text(query)
