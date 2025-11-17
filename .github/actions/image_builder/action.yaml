@@ -25,11 +25,17 @@ runs:
       env:
         STAGE: ${{ inputs.stage }}
       run: |
-        export SHA_SHORT="$(git rev-parse --short HEAD)"
-        export CUR_DATE="$(date +%Y%m%d%H%M%S)"
-        export VERSION="${{ inputs.stage }}-$CUR_DATE-$SHA_SHORT"
-        export STAGE="${{ inputs.stage }}"
-        export APP_DIR="$PWD/${{ inputs.dockerfile_location }}"
-        image_name="${{ inputs.ecr_image_repo_name }}" version="$VERSION" account="${{ inputs.aws_account_id }}" app_dir="$APP_DIR" publish="${{ inputs.should_publish }}" ./bin/dockerize
-        echo "Docker tag is: $VERSION"
-        echo $VERSION > /tmp/.DOCKER_IMAGE_VERSION
+    - name: Build and push
+      id: docker_build
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: ${{ env.DOCKERFILE_PATH }}
+        push: ${{ env.PUSH_FLAG }}
+        tags: ${{ env.IMAGE_TAGS }}
+        labels: ${{ env.IMAGE_LABELS }}
+      env:
+        DOCKERFILE_PATH: ${{ inputs.dockerfile }}
+        PUSH_FLAG: ${{ github.event_name != 'pull_request' }}
+        IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        IMAGE_LABELS: ${{ steps.meta.outputs.labels }}
