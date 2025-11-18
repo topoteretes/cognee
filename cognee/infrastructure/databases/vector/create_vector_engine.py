@@ -1,10 +1,6 @@
 from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
 
-from functools import lru_cache
-
-
-@lru_cache
 def create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
