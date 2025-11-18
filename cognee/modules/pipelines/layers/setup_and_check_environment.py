@@ -12,7 +12,14 @@ from cognee.infrastructure.databases.vector.pgvector import (
 )
 
 _first_run_done = False
-_first_run_lock = asyncio.Lock()
+_first_run_lock = None
+
+
+def get_first_run_lock():
+    global _first_run_lock
+    if _first_run_lock is None:
+        _first_run_lock = asyncio.Lock()
+    return _first_run_lock
 
 
 async def setup_and_check_environment(
@@ -29,7 +36,7 @@ async def setup_and_check_environment(
     await create_pgvector_db_and_tables()
 
     global _first_run_done
-    async with _first_run_lock:
+    async with get_first_run_lock():
         if not _first_run_done:
             from cognee.infrastructure.llm.utils import (
                 test_llm_connection,

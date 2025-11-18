@@ -29,7 +29,13 @@ class LexicalRetriever(BaseRetriever):
         self.chunks: dict[str, Any] = {}  # {chunk_id: tokens}
         self.payloads: dict[str, Any] = {}  # {chunk_id: original_document}
         self._initialized = False
-        self._init_lock = asyncio.Lock()
+        self._lock = None
+
+    @property
+    def _init_lock(self):
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     async def initialize(self):
         """Initialize retriever by reading all DocumentChunks from graph_engine."""
