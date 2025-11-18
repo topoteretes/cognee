@@ -1,4 +1,5 @@
 """Context Management Screen"""
+
 import asyncio
 import io
 import os
@@ -16,7 +17,7 @@ from cognee.api.v1.datasets.datasets import datasets as ds_api
 
 class ContextScreen(Screen):
     """Context management screen"""
-    
+
     BINDINGS = [
         Binding("escape", "back", "Back"),
         Binding("up", "arrow_up", show=False),
@@ -25,7 +26,7 @@ class ContextScreen(Screen):
         Binding("right", "arrow_right", show=False),
     ]
     DEFAULT_DATASET = "main_dataset"
-    
+
     def __init__(self) -> None:
         super().__init__()
         self._datasets: list[dict] = []
@@ -37,7 +38,7 @@ class ContextScreen(Screen):
         self._file_row_keys: list[DataTable.RowKey] = []
         self._selected_dataset_id: str | None = None
         self._selected_data_id: str | None = None
-    
+
     def compose(self) -> ComposeResult:
         yield Header()
         with Container():
@@ -49,28 +50,36 @@ class ContextScreen(Screen):
                 yield DataTable(id="files_table")
                 # Tables are the primary UI (no dropdowns)
                 yield Input(placeholder="comma-separated node sets (optional)", id="nodeset_input")
-                yield Static("\nEnter text or a file path to add to the selected dataset:", classes="center")
+                yield Static(
+                    "\nEnter text or a file path to add to the selected dataset:", classes="center"
+                )
                 yield Input(placeholder="Text or /absolute/path/to/file.pdf", id="data_input")
                 yield Button("Add to Context", id="add_btn", variant="primary")
                 yield Button("Cognify (process data)", id="cognify_btn", variant="success")
                 yield Static("\nSearch (runs against selected dataset context):", classes="center")
                 yield Input(placeholder="e.g., What are the main topics?", id="search_input")
                 yield Button("Search", id="search_btn", variant="default")
-                yield Checkbox("Save search output to searched_context.md", id="save_search_checkbox", value=False)
-                yield Static("\nExport context to Markdown (runs one or more queries):", classes="center")
+                yield Checkbox(
+                    "Save search output to searched_context.md",
+                    id="save_search_checkbox",
+                    value=False,
+                )
+                yield Static(
+                    "\nExport context to Markdown (runs one or more queries):", classes="center"
+                )
                 yield Input(placeholder="Queries to export (comma-separated)", id="export_queries")
                 yield Button("Export Context to MD", id="export_btn", variant="default")
                 yield Static("", id="status")
             yield Button("← Back", id="back_btn")
         yield Footer()
-    
+
     async def _set_status(self, message: str) -> None:
         try:
             status = self.query_one("#status", Static)
             status.update(message)
         except Exception:
             pass
-    
+
     async def on_mount(self) -> None:
         # Load datasets and populate select
         try:
@@ -93,7 +102,9 @@ class ContextScreen(Screen):
             self._dataset_row_to_id.clear()
             self._dataset_row_keys = []
             for d in normalized:
-                row_key = ds_table.add_row(d.get("name", ""), d.get("id", ""), d.get("created_at", "") or "")
+                row_key = ds_table.add_row(
+                    d.get("name", ""), d.get("id", ""), d.get("created_at", "") or ""
+                )
                 self._dataset_row_to_id[row_key] = d["id"]
                 self._dataset_row_keys.append(row_key)
             # Focus datasets table and preselect first row if available
@@ -110,7 +121,7 @@ class ContextScreen(Screen):
             await self._set_status("Datasets loaded. Select a dataset to view files.")
         except Exception as ex:
             await self._set_status(f"[red]Failed to load datasets:[/red] {ex}")
-    
+
     async def _load_dataset_files(self, dataset_id: str) -> None:
         try:
             await self._set_status("Loading dataset files...")
@@ -149,14 +160,24 @@ class ContextScreen(Screen):
             self._file_row_to_id.clear()
             self._file_row_keys = []
             for i in normalized:
-                row_key = files_table.add_row(i.get("name", ""), i.get("id", ""), (i.get("original_data_location") or i.get("raw_data_location") or i.get("orig") or i.get("raw") or "") )
+                row_key = files_table.add_row(
+                    i.get("name", ""),
+                    i.get("id", ""),
+                    (
+                        i.get("original_data_location")
+                        or i.get("raw_data_location")
+                        or i.get("orig")
+                        or i.get("raw")
+                        or ""
+                    ),
+                )
                 self._file_row_to_id[row_key] = i["id"]
                 self._file_row_keys.append(row_key)
             self._selected_data_id = None
             await self._set_status(f"Loaded {len(normalized)} file(s) for the dataset.")
         except Exception as ex:
             await self._set_status(f"[red]Failed to load dataset files:[/red] {ex}")
-    
+
     async def _handle_add(self) -> None:
         data_input = self.query_one("#data_input", Input)
         nodeset_input = self.query_one("#nodeset_input", Input)
@@ -169,14 +190,16 @@ class ContextScreen(Screen):
             await self._set_status("[red]Please enter text or a file path[/red]")
             return
         try:
-            await self._set_status(f"Adding data to dataset [b]{dataset_name}[/b] "
-                                   f"{'(with node sets: ' + ', '.join(node_set) + ')' if node_set else ''}...")
+            await self._set_status(
+                f"Adding data to dataset [b]{dataset_name}[/b] "
+                f"{'(with node sets: ' + ', '.join(node_set) + ')' if node_set else ''}..."
+            )
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 await cognee.add(content, dataset_name=dataset_name, node_set=node_set)
             await self._set_status("[green]✓ Added successfully.[/green] You can now run Cognify.")
         except Exception as ex:
             await self._set_status(f"[red]Add failed:[/red] {ex}")
-    
+
     async def _handle_cognify(self) -> None:
         try:
             await self._set_status("Processing data into knowledge graph (cognify)...")
@@ -185,7 +208,7 @@ class ContextScreen(Screen):
             await self._set_status("[green]✓ Cognify complete.[/green]")
         except Exception as ex:
             await self._set_status(f"[red]Cognify failed:[/red] {ex}")
-    
+
     async def _handle_search(self) -> None:
         try:
             dataset_id = self._selected_dataset_id
@@ -202,7 +225,11 @@ class ContextScreen(Screen):
             if ds_name:
                 kwargs["datasets"] = [ds_name]
             results = await cognee.search(query_text=query_text, **kwargs)
-            rendered = "\n".join(f"- {str(item)}" for item in results) if isinstance(results, list) else str(results)
+            rendered = (
+                "\n".join(f"- {str(item)}" for item in results)
+                if isinstance(results, list)
+                else str(results)
+            )
             await self._set_status(f"[b]Search results[/b]:\n{rendered}")
             # Optionally save to searched_context.md
             if save_cb.value:
@@ -211,10 +238,17 @@ class ContextScreen(Screen):
                 if self._selected_data_id:
                     data_item = self._data_items_by_id.get(self._selected_data_id)
                     if data_item:
-                        loc = data_item.get("original_data_location") or data_item.get("raw_data_location") or data_item.get("orig") or data_item.get("raw")
+                        loc = (
+                            data_item.get("original_data_location")
+                            or data_item.get("raw_data_location")
+                            or data_item.get("orig")
+                            or data_item.get("raw")
+                        )
                         if isinstance(loc, str) and loc.startswith("file://"):
                             loc = loc[len("file://") :]
-                        if isinstance(loc, str) and (loc.startswith("/") or (len(loc) > 2 and loc[1:3] in (":\\", ":/"))):
+                        if isinstance(loc, str) and (
+                            loc.startswith("/") or (len(loc) > 2 and loc[1:3] in (":\\", ":/"))
+                        ):
                             try:
                                 p = Path(loc)
                                 target_dir = p.parent if p.exists() or p.parent.exists() else None
@@ -232,7 +266,7 @@ class ContextScreen(Screen):
                     await self._set_status(f"[red]Failed to save search output:[/red] {ex}")
         except Exception as ex:
             await self._set_status(f"[red]Search failed:[/red] {ex}")
-    
+
     def _choose_export_path(self, data_item: dict) -> Path | None:
         # Prefer original path; fallback to raw path
         loc = data_item.get("orig") or data_item.get("raw")
@@ -241,7 +275,9 @@ class ContextScreen(Screen):
         # Accept absolute POSIX paths or file:// URIs
         if isinstance(loc, str) and loc.startswith("file://"):
             loc = loc[len("file://") :]
-        if not isinstance(loc, str) or not (loc.startswith("/") or loc[1:3] == ":\\" or loc[1:3] == ":/"):
+        if not isinstance(loc, str) or not (
+            loc.startswith("/") or loc[1:3] == ":\\" or loc[1:3] == ":/"
+        ):
             return None
         try:
             p = Path(loc)
@@ -252,7 +288,7 @@ class ContextScreen(Screen):
             return p.with_name(f"{stem}_context.md")
         except Exception:
             return None
-    
+
     async def _handle_export(self) -> None:
         try:
             export_queries = self.query_one("#export_queries", Input)
@@ -266,17 +302,21 @@ class ContextScreen(Screen):
                 return
             export_path = self._choose_export_path(data_item)
             if not export_path:
-                await self._set_status("[red]Can't determine a local file path to save Markdown next to the original file.[/red]")
+                await self._set_status(
+                    "[red]Can't determine a local file path to save Markdown next to the original file.[/red]"
+                )
                 return
             raw_queries = (export_queries.value or "").strip()
             queries = [q.strip() for q in raw_queries.split(",") if q.strip()]
             await self._set_status("Running export...")
             md_parts: list[str] = []
-            md_parts.append(f"# Context Export for {data_item.get('name','selected item')}")
+            md_parts.append(f"# Context Export for {data_item.get('name', 'selected item')}")
             # Include simple metadata block
             md_parts.append("")
             md_parts.append("## Source")
-            md_parts.append(f"- Dataset: {self._dataset_id_to_name.get(self._selected_dataset_id, self.DEFAULT_DATASET)}")
+            md_parts.append(
+                f"- Dataset: {self._dataset_id_to_name.get(self._selected_dataset_id, self.DEFAULT_DATASET)}"
+            )
             if data_item.get("orig"):
                 md_parts.append(f"- Original: {data_item.get('orig')}")
             if data_item.get("raw"):
@@ -309,7 +349,7 @@ class ContextScreen(Screen):
             await self._set_status(f"[green]✓ Exported to:[/green] {export_path}")
         except Exception as ex:
             await self._set_status(f"[red]Export failed:[/red] {ex}")
-    
+
     def on_button_pressed(self, event) -> None:
         if event.button.id == "back_btn":
             self.app.pop_screen()
@@ -326,7 +366,7 @@ class ContextScreen(Screen):
         if event.button.id == "export_btn":
             asyncio.create_task(self._handle_export())
             return
-    
+
     def on_data_table_row_selected(self, message: DataTable.RowSelected) -> None:
         # Selecting a dataset row loads its files and syncs dropdown
         try:
@@ -343,7 +383,7 @@ class ContextScreen(Screen):
                     self._selected_data_id = data_id
         except Exception:
             pass
-    
+
     def _active_table(self) -> DataTable | None:
         try:
             files_table = self.query_one("#files_table", DataTable)
@@ -353,7 +393,7 @@ class ContextScreen(Screen):
             return datasets_table
         except Exception:
             return None
-    
+
     def action_arrow_up(self) -> None:
         table = self._active_table()
         if table:
@@ -361,7 +401,7 @@ class ContextScreen(Screen):
                 table.action_cursor_up()
             except Exception:
                 pass
-    
+
     def action_arrow_down(self) -> None:
         table = self._active_table()
         if table:
@@ -369,7 +409,7 @@ class ContextScreen(Screen):
                 table.action_cursor_down()
             except Exception:
                 pass
-    
+
     def action_arrow_left(self) -> None:
         table = self._active_table()
         if table:
@@ -381,7 +421,7 @@ class ContextScreen(Screen):
                     table.action_cursor_left()
             except Exception:
                 pass
-    
+
     def action_arrow_right(self) -> None:
         table = self._active_table()
         if table:
@@ -409,7 +449,11 @@ class ContextScreen(Screen):
             except Exception:
                 pass
             if event.key in ("up", "down"):
-                max_rows = len(self._file_row_keys) if table.id == "files_table" else len(self._dataset_row_keys)
+                max_rows = (
+                    len(self._file_row_keys)
+                    if table.id == "files_table"
+                    else len(self._dataset_row_keys)
+                )
                 if max_rows <= 0:
                     return
                 if event.key == "up":
@@ -431,6 +475,6 @@ class ContextScreen(Screen):
                     event.stop()
         except Exception:
             pass
-    
+
     def action_back(self) -> None:
         self.app.pop_screen()

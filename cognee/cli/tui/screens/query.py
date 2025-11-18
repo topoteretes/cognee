@@ -1,4 +1,5 @@
 """Query Screen"""
+
 import asyncio
 from textual.screen import Screen
 from textual.app import ComposeResult
@@ -10,9 +11,9 @@ import cognee
 
 class QueryScreen(Screen):
     """Query screen"""
-    
+
     BINDINGS = [Binding("escape", "back", "Back")]
-    
+
     def compose(self) -> ComposeResult:
         yield Header()
         with Container():
@@ -25,14 +26,14 @@ class QueryScreen(Screen):
                 yield Markdown("", id="results_md")
             yield Button("← Back", id="back_btn")
         yield Footer()
-    
+
     async def _set_results(self, content: str) -> None:
         try:
             md = self.query_one("#results_md", Markdown)
             md.update(content)
         except Exception:
             pass
-    
+
     async def _run_search(self) -> None:
         query_input = self.query_one("#query_input", Input)
         query_text = (query_input.value or "").strip()
@@ -50,7 +51,7 @@ class QueryScreen(Screen):
             await self._set_results(f"### Results\n\n{rendered}")
         except Exception as ex:
             await self._set_results(f"**Search failed:** {ex}")
-    
+
     def on_button_pressed(self, event) -> None:
         if event.button.id == "back_btn":
             self.app.pop_screen()
@@ -58,6 +59,6 @@ class QueryScreen(Screen):
         if event.button.id == "run_btn":
             asyncio.create_task(self._run_search())
             return
-    
+
     def action_back(self) -> None:
         self.app.pop_screen()
