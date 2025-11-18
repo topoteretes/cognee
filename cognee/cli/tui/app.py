@@ -54,9 +54,20 @@ class CogneeTUI(App):
     .center {
         align: center middle;
     }
+
+    /* Brand color for Manage Context button only */
+    #context {
+        background: #5C10F4;
+        color: #F4F4F4;
+        border: tall #5C10F4;
+    }
+    #context:hover {
+        background: #A550FF;
+        border: tall #A550FF;
+    }
     """
     
-    TITLE = "Cognee TUI - Knowledge Graph Manager"
+    TITLE = "Cognee TUI - AI Memory and Context Manager"
     SUB_TITLE = "Navigate with arrow keys • Press ? for help"
     
     BINDINGS: ClassVar[list[Binding]] = [
@@ -91,6 +102,7 @@ class CogneeTUI(App):
 4. Settings: Configure API keys
 """
         self.push_screen(HelpScreen(help_text))
+
 
 
 class HelpScreen(Screen):

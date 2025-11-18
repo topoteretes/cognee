@@ -12,8 +12,8 @@ class HomeScreen(Screen):
         yield Header()
         
         with Container(id="menu-container", classes="center"):
-            yield Static("[bold cyan]🧠 Cognee Knowledge Graph Manager[/bold cyan]", classes="title")
-            yield Static("\nManage your AI memory and knowledge graphs\n", classes="center")
+            yield Static("[bold cyan]🧠 Cognee Context Manager[/bold cyan]", classes="title")
+            yield Static("\nManage your AI memory and context\n", classes="center")
             
             with Vertical():
                 yield Button("📁 Manage Context", id="context", variant="primary")
@@ -46,3 +46,12 @@ class HomeScreen(Screen):
         
         elif button_id == "exit":
             self.app.exit()
+
+    def on_mount(self) -> None:
+        # Ensure initial focus so arrow keys can move between buttons
+        try:
+            first_button = self.query_one("#context", Button)
+            first_button.focus()
+        except Exception:
+            # If the button isn't found for any reason, ignore
+            pass
