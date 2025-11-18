@@ -315,22 +315,21 @@ async def _delete_unused_nodes(unused_nodes: Dict[str, list]) -> Dict[str, int]:
         "TextSummary": "TextSummary_text"    
     }    
         
-    for node_type, collection_name in vector_collections.items():    
-        node_ids = unused_nodes[node_type]    
-        if not node_ids:    
-            continue    
-            
-        logger.info(f"Deleting {len(node_ids)} {node_type} embeddings from vector database")    
-            
-        try:    
-            # Delete from vector collection    
-            if await vector_engine.has_collection(collection_name):    
-                for node_id in node_ids:    
-                    try:    
-                        await vector_engine.delete(collection_name, {"id": str(node_id)})    
-                    except Exception as e:    
-                        logger.warning(f"Failed to delete {node_id} from {collection_name}: {e}")    
-        except Exception as e:    
-            logger.error(f"Error deleting from vector collection {collection_name}: {e}")    
+
+    for node_type, collection_name in vector_collections.items():
+        node_ids = unused_nodes[node_type]
+        if not node_ids:
+            continue
+
+        logger.info(f"Deleting {len(node_ids)} {node_type} embeddings from vector database")
+
+        try:
+            if await vector_engine.has_collection(collection_name):
+                await vector_engine.delete_data_points(
+                    collection_name,
+                    [str(node_id) for node_id in node_ids]
+                )
+        except Exception as e:
+            logger.error(f"Error deleting from vector collection {collection_name}: {e}")
         
     return deleted_counts
