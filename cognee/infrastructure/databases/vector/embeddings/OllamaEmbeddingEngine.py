@@ -124,7 +124,15 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                 self.endpoint, json=payload, headers=headers, timeout=60.0
             ) as response:
                 data = await response.json()
-                return data["embeddings"][0]
+                # Handle both "embedding" (singular, Ollama API) and "embeddings" (plural, backwards compatibility)
+                if "embedding" in data:
+                    return data["embedding"]
+                elif "embeddings" in data:
+                    return data["embeddings"][0]
+                else:
+                    raise KeyError(
+                        "No 'embedding' or 'embeddings' key found in Ollama API response"
+                    )
 
     def get_vector_size(self) -> int:
         """
