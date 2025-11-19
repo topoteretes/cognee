@@ -54,7 +54,7 @@ async def legacy_delete(data: Data, mode: str = "soft"):
 async def delete_document_subgraph(document_id: UUID, mode: str = "soft"):
     """Delete a document and all its related nodes in the correct order."""
     graph_db = await get_graph_engine()
-    subgraph = await graph_db.get_document_subgraph(document_id)
+    subgraph = await graph_db.get_document_subgraph(str(document_id))
     if not subgraph:
         raise DocumentSubgraphNotFoundError(f"Document not found with id: {document_id}")
 

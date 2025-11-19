@@ -9,7 +9,7 @@ def filter_overlapping_relationships(*relationship_groups):
         for relationship in group:
             relationship_id = f"{relationship[0]}_{relationship[2]}_{relationship[1]}"
 
-            if not relationship_id in relationship_count:
+            if relationship_id not in relationship_count:
                 relationship_count[relationship_id] = 1
             else:
                 relationship_count[relationship_id] += 1

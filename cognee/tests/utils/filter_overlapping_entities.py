@@ -4,7 +4,7 @@ def filter_overlapping_entities(*entity_groups):
 
     for group in entity_groups:
         for entity in group:
-            if not entity.id in entity_count:
+            if entity.id not in entity_count:
                 entity_count[entity.id] = 1
             else:
                 entity_count[entity.id] += 1
