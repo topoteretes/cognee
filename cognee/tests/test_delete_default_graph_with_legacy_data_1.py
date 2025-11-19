@@ -41,7 +41,6 @@ from cognee.tests.utils.extract_summary import extract_summary
 from cognee.tests.utils.filter_overlapping_entities import filter_overlapping_entities
 from cognee.tests.utils.filter_overlapping_relationships import filter_overlapping_relationships
 from cognee.tests.utils.get_contains_edge_text import get_contains_edge_text
-from cognee.tests.utils.isolate_relationships import isolate_relationships
 
 
 def create_nodes_and_edges():
@@ -356,20 +355,10 @@ async def main(mock_create_structured_output: AsyncMock):
         (johns_summary.id, johns_chunk.id, "made_from"),
         *johns_relationships,
     ]
-    johns_edge_text_relationships = [
-        (johns_chunk.id, entity.id, get_contains_edge_text(entity.name, entity.description))
-        for entity in johns_entities
-        if isinstance(entity, Entity)
-    ]
     maries_relationships = [
         (maries_chunk.id, maries_document.id, "is_part_of"),
         (maries_summary.id, maries_chunk.id, "made_from"),
         *maries_relationships,
-    ]
-    maries_edge_text_relationships = [
-        (maries_chunk.id, entity.id, get_contains_edge_text(entity.name, entity.description))
-        for entity in maries_entities
-        if isinstance(entity, Entity)
     ]
 
     expected_relationships = (
@@ -381,9 +370,7 @@ async def main(mock_create_structured_output: AsyncMock):
 
     await assert_graph_edges_present(expected_relationships)
 
-    await assert_edges_vector_index_present(
-        expected_relationships + johns_edge_text_relationships + maries_edge_text_relationships
-    )
+    await assert_edges_vector_index_present(expected_relationships)
 
     # Delete John's data
     await datasets.delete_data(dataset_id, johns_data_id, user)  # type: ignore
@@ -399,19 +386,24 @@ async def main(mock_create_structured_output: AsyncMock):
     await assert_graph_edges_present(
         maries_relationships + overlapping_relationships + legacy_relationships
     )
-    await assert_edges_vector_index_present(
-        maries_relationships + maries_edge_text_relationships + legacy_relationships
-    )
+    await assert_edges_vector_index_present(maries_relationships + legacy_relationships)
 
     await assert_graph_edges_not_present(johns_relationships)
 
-    strictly_johns_relationships = isolate_relationships(
-        johns_relationships, maries_relationships, legacy_relationships
-    )
+    johns_contains_relationships = [
+        (
+            johns_chunk.id,
+            entity.id,
+            get_contains_edge_text(entity.name, entity.description),
+            {
+                "relationship_name": get_contains_edge_text(entity.name, entity.description),
+            },
+        )
+        for entity in johns_entities
+        if isinstance(entity, Entity)
+    ]
     # We check only by relationship name and we need edges that are created by John's data and no other.
-    await assert_edges_vector_index_not_present(
-        strictly_johns_relationships + johns_edge_text_relationships
-    )
+    await assert_edges_vector_index_not_present(johns_contains_relationships)
 
     # Delete Marie's data
     await datasets.delete_data(dataset_id, maries_data_id, user)  # type: ignore
@@ -431,12 +423,20 @@ async def main(mock_create_structured_output: AsyncMock):
         johns_relationships + maries_relationships + overlapping_relationships
     )
 
-    strictly_maries_relationships = isolate_relationships(
-        maries_relationships, legacy_relationships
-    )
+    maries_contains_relationships = [
+        (
+            maries_chunk.id,
+            entity.id,
+            get_contains_edge_text(entity.name, entity.description),
+            {
+                "relationship_name": get_contains_edge_text(entity.name, entity.description),
+            },
+        )
+        for entity in maries_entities
+        if isinstance(entity, Entity)
+    ]
     # We check only by relationship name and we need edges that are created by legacy data and no other.
-    if strictly_maries_relationships:
-        await assert_edges_vector_index_not_present(strictly_maries_relationships)
+    await assert_edges_vector_index_not_present(maries_contains_relationships)
 
 
 async def create_mocked_legacy_data(user):
@@ -447,8 +447,29 @@ async def create_mocked_legacy_data(user):
     await graph_engine.add_nodes(legacy_nodes)
     await graph_engine.add_edges(legacy_edges)
 
+    nodes_by_id = {node.id: node for node in legacy_nodes}
+
+    def format_relationship_name(relationship):
+        if relationship[2] == "contains":
+            node = nodes_by_id[relationship[1]]
+            return get_contains_edge_text(node.name, node.description)
+        return relationship[2]
+
     await index_data_points(legacy_nodes)
-    await index_graph_edges(legacy_edges)
+    await index_graph_edges(
+        [
+            (
+                edge[0],
+                edge[1],
+                format_relationship_name(edge),
+                {
+                    **(edge[3] or {}),
+                    "relationship_name": format_relationship_name(edge),
+                },
+            )
+            for edge in legacy_edges
+        ]  # type: ignore
+    )
 
     await record_data_in_legacy_ledger(legacy_nodes, legacy_edges, user)
 

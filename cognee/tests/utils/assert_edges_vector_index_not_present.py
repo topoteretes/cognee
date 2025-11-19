@@ -1,10 +1,10 @@
 from uuid import UUID
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.engine.utils import generate_edge_id
 
 
-async def assert_edges_vector_index_not_present(relationships: List[Tuple[UUID, UUID, str]]):
+async def assert_edges_vector_index_not_present(relationships: List[Tuple[UUID, UUID, str, Dict]]):
     vector_engine = get_vector_engine()
 
     query_edge_ids = {
