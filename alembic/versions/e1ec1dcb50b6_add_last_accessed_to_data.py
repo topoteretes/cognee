@@ -34,7 +34,7 @@ def upgrade() -> None:
             sa.Column('last_accessed', sa.DateTime(timezone=True), nullable=True)  
         )  
         # Optionally initialize with created_at values for existing records  
-        op.execute("UPDATE data SET last_accessed = created_at")  
+        op.execute("UPDATE data SET last_accessed = CURRENT_TIMESTAMP")  
   
   
 def downgrade() -> None:  
