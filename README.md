@@ -98,7 +98,7 @@ Let’s try Cognee in just a few lines of code. For detailed setup and configura
 
 ### Prerequisites
 
-- Python 3.10 to 3.12
+- Python 3.10 to 3.13
 
 ### Step 1: Install Cognee
 
@@ -180,17 +180,17 @@ cognee-cli -ui
 
 See Cognee in action:
 
-### Cognee Cloud Beta Demo
+### Persistent Agent Memory
 
-[Watch Demo](https://github.com/user-attachments/assets/fa520cd2-2913-4246-a444-902ea5242cb0)
+[Cognee Memory for LangGraph Agents](https://github.com/user-attachments/assets/e113b628-7212-4a2b-b288-0be39a93a1c3)
 
-### Simple GraphRAG Demo
+### Simple GraphRAG
 
-[Watch Demo](https://github.com/user-attachments/assets/d80b0776-4eb9-4b8e-aa22-3691e2d44b8f)
+[Watch Demo](https://github.com/user-attachments/assets/f2186b2e-305a-42b0-9c2d-9f4473f15df8)
 
 ### Cognee with Ollama
 
-[Watch Demo](https://github.com/user-attachments/assets/8621d3e8-ecb8-4860-afb2-5594f2ee17db)
+[Watch Demo](https://github.com/user-attachments/assets/39672858-f774-4136-b957-1e2de67b8981)
 
 
 ## Community & Support
