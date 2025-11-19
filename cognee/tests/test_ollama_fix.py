@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Test script to verify OllamaEmbeddingEngine fix with real Ollama server.
 Tests that the fix correctly handles Ollama's API response format.
@@ -21,10 +20,10 @@ async def test_ollama_embedding():
     ollama_endpoint = "http://10.0.10.9:11434/api/embeddings"
     ollama_model = "nomic-embed-text"
 
-    print(f"\nConfiguration:")
+    print("\nConfiguration:")
     print(f"  Endpoint: {ollama_endpoint}")
     print(f"  Model: {ollama_model}")
-    print(f"  Expected dimensions: 768")
+    print("  Expected dimensions: 768")
 
     # Initialize the embedding engine
     print("\n1. Initializing OllamaEmbeddingEngine...")
@@ -46,13 +45,13 @@ async def test_ollama_embedding():
 
     try:
         embeddings = await engine.embed_text(test_texts)
-        print(f"   ✅ Embedding generated successfully")
+        print("   ✅ Embedding generated successfully")
         print(f"   📊 Embedding shape: {len(embeddings)} texts, {len(embeddings[0])} dimensions")
         print(f"   📊 First 5 values: {embeddings[0][:5]}")
 
         # Verify dimensions
         if len(embeddings[0]) == 768:
-            print(f"   ✅ Dimensions match expected (768)")
+            print("   ✅ Dimensions match expected (768)")
         else:
             print(f"   ⚠️  Dimensions mismatch: got {len(embeddings[0])}, expected 768")
 
@@ -73,7 +72,7 @@ async def test_ollama_embedding():
 
     try:
         embeddings = await engine.embed_text(test_texts_multiple)
-        print(f"   ✅ Multiple embeddings generated successfully")
+        print("   ✅ Multiple embeddings generated successfully")
         print(f"   📊 Generated {len(embeddings)} embeddings")
         for i, emb in enumerate(embeddings):
             print(f"   📊 Text {i+1}: {len(emb)} dimensions, first 3 values: {emb[:3]}")

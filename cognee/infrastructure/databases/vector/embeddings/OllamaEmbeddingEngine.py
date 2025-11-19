@@ -26,6 +26,9 @@ from cognee.shared.utils import create_secure_ssl_context
 
 logger = get_logger("OllamaEmbeddingEngine")
 
+# Error message constants
+_MISSING_EMBEDDING_KEY_MSG = "No 'embedding' or 'embeddings' key found in Ollama API response"
+
 
 class OllamaEmbeddingEngine(EmbeddingEngine):
     """
@@ -123,16 +126,14 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             async with session.post(
                 self.endpoint, json=payload, headers=headers, timeout=60.0
             ) as response:
+                response.raise_for_status()
                 data = await response.json()
                 # Handle both "embedding" (singular, Ollama API) and "embeddings" (plural, backwards compatibility)
                 if "embedding" in data:
                     return data["embedding"]
-                elif "embeddings" in data:
+                if "embeddings" in data:
                     return data["embeddings"][0]
-                else:
-                    raise KeyError(
-                        "No 'embedding' or 'embeddings' key found in Ollama API response"
-                    )
+                raise KeyError(_MISSING_EMBEDDING_KEY_MSG)
 
     def get_vector_size(self) -> int:
         """
