@@ -1,6 +1,6 @@
 """Factory function to get the appropriate graph client based on the graph type."""
 
-from functools import lru_cache
+from cognee.shared.cache_utils import cacheable
 
 from .config import get_graph_context_config
 from .graph_db_interface import GraphDBInterface
@@ -24,7 +24,7 @@ async def get_graph_engine() -> GraphDBInterface:
     return graph_client
 
 
-@lru_cache
+@cacheable(key="GRAPH_ENGINE")
 def create_graph_engine(
     graph_database_provider,
     graph_file_path,

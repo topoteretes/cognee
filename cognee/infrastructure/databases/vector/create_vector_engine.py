@@ -1,6 +1,9 @@
 from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
+from cognee.shared.cache_utils import cacheable
 
+
+@cacheable(key="VECTOR_ENGINE")
 def create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
