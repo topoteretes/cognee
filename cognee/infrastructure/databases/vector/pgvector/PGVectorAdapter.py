@@ -54,7 +54,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         self.api_key = api_key
         self.embedding_engine = embedding_engine
         self.db_uri: str = connection_string
-        self._lock = None
+        self.VECTOR_DB_LOCK = asyncio.Lock()
 
         relational_db = get_relational_engine()
 
@@ -72,12 +72,6 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         from pgvector.sqlalchemy import Vector
 
         self.Vector = Vector
-
-    @property
-    def VECTOR_DB_LOCK(self):
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        return self._lock
 
     async def embed_data(self, data: list[str]) -> list[list[float]]:
         """

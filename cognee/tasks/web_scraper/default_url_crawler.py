@@ -78,13 +78,7 @@ class DefaultUrlCrawler:
         self._last_request_time_per_domain: Dict[str, float] = {}
         self._robots_cache: Dict[str, RobotsTxtCache] = {}
         self._client: Optional[httpx.AsyncClient] = None
-        self._lock = None
-
-    @property
-    def _robots_lock(self):
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        return self._lock
+        self._robots_lock = asyncio.Lock()
 
     async def _ensure_client(self):
         """Initialize the HTTP client if not already created."""

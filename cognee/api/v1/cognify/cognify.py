@@ -35,6 +35,8 @@ from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
 
 logger = get_logger("cognify")
 
+update_status_lock = asyncio.Lock()
+
 
 async def cognify(
     datasets: Union[str, list[str], list[UUID]] = None,

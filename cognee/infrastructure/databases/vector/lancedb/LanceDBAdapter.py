@@ -51,13 +51,7 @@ class LanceDBAdapter(VectorDBInterface):
         self.url = url
         self.api_key = api_key
         self.embedding_engine = embedding_engine
-        self._lock = None
-
-    @property
-    def VECTOR_DB_LOCK(self):
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        return self._lock
+        self.VECTOR_DB_LOCK = asyncio.Lock()
 
     async def get_connection(self):
         """

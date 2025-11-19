@@ -56,20 +56,8 @@ class KuzuAdapter(GraphDBInterface):
         else:
             self.executor = ThreadPoolExecutor()
             self._initialize_connection()
-        self._async_lock = None
-        self._conn_change_lock = None
-
-    @property
-    def KUZU_ASYNC_LOCK(self):
-        if self._async_lock is None:
-            self._async_lock = asyncio.Lock()
-        return self._async_lock
-
-    @property
-    def _connection_change_lock(self):
-        if self._conn_change_lock is None:
-            self._conn_change_lock = asyncio.Lock()
-        return self._conn_change_lock
+        self.KUZU_ASYNC_LOCK = asyncio.Lock()
+        self._connection_change_lock = asyncio.Lock()
 
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""

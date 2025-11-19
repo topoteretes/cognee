@@ -24,14 +24,7 @@ from typing import Any
 
 logger = get_logger("cognee.pipeline")
 
-_update_status_lock = None
-
-
-def get_update_status_lock():
-    global _update_status_lock
-    if _update_status_lock is None:
-        _update_status_lock = asyncio.Lock()
-    return _update_status_lock
+update_status_lock = asyncio.Lock()
 
 
 async def run_pipeline(
