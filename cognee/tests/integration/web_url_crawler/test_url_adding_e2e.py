@@ -14,9 +14,7 @@ async def test_url_saves_as_html_file():
     await cognee.prune.prune_system(metadata=True)
 
     try:
-        original_file_path = await save_data_item_to_storage(
-            "https://httpbin.org/html"
-        )
+        original_file_path = await save_data_item_to_storage("https://httpbin.org/html")
         file_path = get_data_file_path(original_file_path)
         assert file_path.endswith(".html")
         file = Path(file_path)
@@ -44,9 +42,7 @@ async def test_saved_html_is_valid():
     await cognee.prune.prune_system(metadata=True)
 
     try:
-        original_file_path = await save_data_item_to_storage(
-            "https://httpbin.org/html"
-        )
+        original_file_path = await save_data_item_to_storage("https://httpbin.org/html")
         file_path = get_data_file_path(original_file_path)
         content = Path(file_path).read_text()
 
@@ -163,9 +159,7 @@ async def test_loader_is_none_by_default():
     }
 
     try:
-        original_file_path = await save_data_item_to_storage(
-            "https://httpbin.org/html"
-        )
+        original_file_path = await save_data_item_to_storage("https://httpbin.org/html")
         file_path = get_data_file_path(original_file_path)
         assert file_path.endswith(".html")
         file = Path(file_path)
@@ -196,9 +190,7 @@ async def test_beautiful_soup_loader_is_selected_loader_if_preferred_loader_prov
     }
 
     try:
-        original_file_path = await save_data_item_to_storage(
-            "https://httpbin.org/html"
-        )
+        original_file_path = await save_data_item_to_storage("https://httpbin.org/html")
         file_path = get_data_file_path(original_file_path)
         assert file_path.endswith(".html")
         file = Path(file_path)
@@ -225,9 +217,7 @@ async def test_beautiful_soup_loader_works_with_and_without_arguments():
     await cognee.prune.prune_system(metadata=True)
 
     try:
-        original_file_path = await save_data_item_to_storage(
-            "https://httpbin.org/html"
-        )
+        original_file_path = await save_data_item_to_storage("https://httpbin.org/html")
         file_path = get_data_file_path(original_file_path)
         assert file_path.endswith(".html")
         file = Path(file_path)
@@ -263,9 +253,7 @@ async def test_beautiful_soup_loader_successfully_loads_file_if_required_args_pr
     await cognee.prune.prune_system(metadata=True)
 
     try:
-        original_file_path = await save_data_item_to_storage(
-            "https://httpbin.org/html"
-        )
+        original_file_path = await save_data_item_to_storage("https://httpbin.org/html")
         file_path = get_data_file_path(original_file_path)
         assert file_path.endswith(".html")
         file = Path(file_path)
@@ -302,9 +290,7 @@ async def test_beautiful_soup_loads_file_successfully():
     }
 
     try:
-        original_file_path = await save_data_item_to_storage(
-            "https://httpbin.org/html"
-        )
+        original_file_path = await save_data_item_to_storage("https://httpbin.org/html")
         file_path = get_data_file_path(original_file_path)
         assert file_path.endswith(".html")
         original_file = Path(file_path)
