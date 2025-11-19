@@ -1,4 +1,4 @@
-"""Add sync_operations table
+"""Add label column to data table
 
 Revision ID: a1b2c3d4e5f6
 Revises: 211ab850ef3d
