@@ -15,7 +15,7 @@ async def test_url_saves_as_html_file():
 
     try:
         original_file_path = await save_data_item_to_storage(
-            "https://en.wikipedia.org/wiki/Large_language_model"
+            "https://httpbin.org/html"
         )
         file_path = get_data_file_path(original_file_path)
         assert file_path.endswith(".html")
@@ -45,7 +45,7 @@ async def test_saved_html_is_valid():
 
     try:
         original_file_path = await save_data_item_to_storage(
-            "https://en.wikipedia.org/wiki/Large_language_model"
+            "https://httpbin.org/html"
         )
         file_path = get_data_file_path(original_file_path)
         content = Path(file_path).read_text()
@@ -72,7 +72,7 @@ async def test_add_url():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    await cognee.add("https://en.wikipedia.org/wiki/Large_language_model")
+    await cognee.add("https://httpbin.org/html")
 
 
 skip_in_ci = pytest.mark.skipif(
@@ -88,7 +88,7 @@ async def test_add_url_with_tavily():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    await cognee.add("https://en.wikipedia.org/wiki/Large_language_model")
+    await cognee.add("https://httpbin.org/html")
 
 
 @pytest.mark.asyncio
@@ -98,7 +98,7 @@ async def test_add_url_without_incremental_loading():
 
     try:
         await cognee.add(
-            "https://en.wikipedia.org/wiki/Large_language_model",
+            "https://httpbin.org/html",
             incremental_loading=False,
         )
     except Exception as e:
@@ -112,7 +112,7 @@ async def test_add_url_with_incremental_loading():
 
     try:
         await cognee.add(
-            "https://en.wikipedia.org/wiki/Large_language_model",
+            "https://httpbin.org/html",
             incremental_loading=True,
         )
     except Exception as e:
@@ -125,7 +125,7 @@ async def test_add_url_can_define_preferred_loader_as_list_of_str():
     await cognee.prune.prune_system(metadata=True)
 
     await cognee.add(
-        "https://en.wikipedia.org/wiki/Large_language_model",
+        "https://httpbin.org/html",
         preferred_loaders=["beautiful_soup_loader"],
     )
 
@@ -144,7 +144,7 @@ async def test_add_url_with_extraction_rules():
 
     try:
         await cognee.add(
-            "https://en.wikipedia.org/wiki/Large_language_model",
+            "https://httpbin.org/html",
             preferred_loaders={"beautiful_soup_loader": {"extraction_rules": extraction_rules}},
         )
     except Exception as e:
@@ -164,7 +164,7 @@ async def test_loader_is_none_by_default():
 
     try:
         original_file_path = await save_data_item_to_storage(
-            "https://en.wikipedia.org/wiki/Large_language_model"
+            "https://httpbin.org/html"
         )
         file_path = get_data_file_path(original_file_path)
         assert file_path.endswith(".html")
@@ -197,7 +197,7 @@ async def test_beautiful_soup_loader_is_selected_loader_if_preferred_loader_prov
 
     try:
         original_file_path = await save_data_item_to_storage(
-            "https://en.wikipedia.org/wiki/Large_language_model"
+            "https://httpbin.org/html"
         )
         file_path = get_data_file_path(original_file_path)
         assert file_path.endswith(".html")
@@ -226,7 +226,7 @@ async def test_beautiful_soup_loader_works_with_and_without_arguments():
 
     try:
         original_file_path = await save_data_item_to_storage(
-            "https://en.wikipedia.org/wiki/Large_language_model"
+            "https://httpbin.org/html"
         )
         file_path = get_data_file_path(original_file_path)
         assert file_path.endswith(".html")
@@ -264,7 +264,7 @@ async def test_beautiful_soup_loader_successfully_loads_file_if_required_args_pr
 
     try:
         original_file_path = await save_data_item_to_storage(
-            "https://en.wikipedia.org/wiki/Large_language_model"
+            "https://httpbin.org/html"
         )
         file_path = get_data_file_path(original_file_path)
         assert file_path.endswith(".html")
@@ -303,7 +303,7 @@ async def test_beautiful_soup_loads_file_successfully():
 
     try:
         original_file_path = await save_data_item_to_storage(
-            "https://en.wikipedia.org/wiki/Large_language_model"
+            "https://httpbin.org/html"
         )
         file_path = get_data_file_path(original_file_path)
         assert file_path.endswith(".html")
