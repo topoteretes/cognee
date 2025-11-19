@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 import uuid
 
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, stop_after_attempt, wait_fixed, wait_incrementing
 
 from cognee.api.health import HealthStatus
 
@@ -32,8 +32,7 @@ class TestCogneeServerStart(unittest.TestCase):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             preexec_fn=os.setsid,
-        )        
-        cls.wait_for_server_startup()
+        )                
 
         # Check if server started with errors
         if cls.server_process.poll() is not None:
@@ -53,18 +52,22 @@ class TestCogneeServerStart(unittest.TestCase):
                 cls.server_process.terminate()
             cls.server_process.wait()
 
-    @classmethod
-    @retry(wait=wait_fixed(2), stop=stop_after_attempt(5))
-    def wait_for_server_startup(cls):        
+    
+    @retry(wait=wait_incrementing(start=5, increment=3), stop=stop_after_attempt(5))
+    def wait_for_server_startup(self):
+        print("Waiting for server to start...")
         response = requests.get("http://localhost:8000/health", timeout=15)
+        response.raise_for_status()
+        
         status_str = response.json().get("status")
         if response.status_code == 200 and status_str == "ready":
             return True
         else:
             getLogger().info(f"Health check status {response.status_code} : {status_str}, retrying...")
-            raise requests.exceptions.RequestException(f"Server is {status_str}")
+        raise requests.exceptions.RequestException(f"Server is {status_str}")
         
     def test_server_is_running(self):
+        self.wait_for_server_startup()
         # Test root endpoint
         root_response = requests.get("http://localhost:8000/", timeout=15)
         self.assertEqual(root_response.status_code, 200)
