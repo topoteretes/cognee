@@ -374,6 +374,8 @@ jobs:
       - name: Run Entity Extraction Test
         env:
           ENV: 'dev'
+          # remove when https://github.com/BerriAI/litellm/issues/16810 is fixed
+          LITELLM_LOCAL_MODEL_COST_MAP: "True" 
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -402,6 +404,8 @@ jobs:
       - name: Run Feedback Enrichment Test
         env:
           ENV: 'dev'
+          # remove when https://github.com/BerriAI/litellm/issues/16810 is fixed
+          LITELLM_LOCAL_MODEL_COST_MAP: "True" 
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}

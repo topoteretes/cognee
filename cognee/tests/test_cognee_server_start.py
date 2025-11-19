@@ -9,9 +9,7 @@ from pathlib import Path
 import sys
 import uuid
 
-from tenacity import retry, stop_after_attempt, wait_fixed, wait_incrementing
-
-from cognee.api.health import HealthStatus
+from tenacity import retry, stop_after_attempt, wait_incrementing
 
 
 class TestCogneeServerStart(unittest.TestCase):
