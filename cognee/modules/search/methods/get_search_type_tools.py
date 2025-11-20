@@ -37,7 +37,7 @@ async def get_search_type_tools(
     node_name: Optional[List[str]] = None,
     save_interaction: bool = False,
     last_k: Optional[int] = None,
-    wide_search_top_k: Optional[int] = 100,
+    wide_search_top_k: Optional[int] = 50,
 ) -> list:
     search_tasks: dict[SearchType, List[Callable]] = {
         SearchType.SUMMARIES: [

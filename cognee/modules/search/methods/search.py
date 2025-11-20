@@ -47,7 +47,7 @@ async def search(
     only_context: bool = False,
     use_combined_context: bool = False,
     session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = 100,
+    wide_search_top_k: Optional[int] = 50,
 ) -> Union[CombinedSearchResult, List[SearchResult]]:
     """
 
@@ -222,7 +222,7 @@ async def authorized_search(
     only_context: bool = False,
     use_combined_context: bool = False,
     session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = 100,
+    wide_search_top_k: Optional[int] = 50,
 ) -> Union[
     Tuple[Any, Union[List[Edge], str], List[Dataset]],
     List[Tuple[Any, Union[List[Edge], str], List[Dataset]]],
@@ -250,6 +250,7 @@ async def authorized_search(
             last_k=last_k,
             only_context=True,
             session_id=session_id,
+            wide_search_top_k=wide_search_top_k,
         )
 
         context = {}
@@ -311,6 +312,7 @@ async def authorized_search(
         last_k=last_k,
         only_context=only_context,
         session_id=session_id,
+        wide_search_top_k=wide_search_top_k,
     )
 
     return search_results
@@ -330,6 +332,7 @@ async def search_in_datasets_context(
     only_context: bool = False,
     context: Optional[Any] = None,
     session_id: Optional[str] = None,
+    wide_search_top_k: Optional[int] = 50,
 ) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
@@ -350,6 +353,7 @@ async def search_in_datasets_context(
         only_context: bool = False,
         context: Optional[Any] = None,
         session_id: Optional[str] = None,
+        wide_search_top_k: Optional[int] = 50,
     ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)
@@ -383,6 +387,7 @@ async def search_in_datasets_context(
             node_name=node_name,
             save_interaction=save_interaction,
             last_k=last_k,
+            wide_search_top_k=wide_search_top_k,
         )
         search_tools = specific_search_tools
         if len(search_tools) == 2:
@@ -418,6 +423,7 @@ async def search_in_datasets_context(
                 only_context=only_context,
                 context=context,
                 session_id=session_id,
+                wide_search_top_k=wide_search_top_k,
             )
         )
 

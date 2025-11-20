@@ -47,7 +47,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
-        wide_search_top_k: Optional[int] = 100,
+        wide_search_top_k: Optional[int] = 50,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
