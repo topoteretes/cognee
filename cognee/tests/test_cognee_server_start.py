@@ -98,15 +98,56 @@ class TestCogneeServerStart(unittest.TestCase):
         if add_response.status_code not in [200, 201]:
             add_response.raise_for_status()
 
-        ontology_content = b"""<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#' xmlns:owl='http://www.w3.org/2002/07/owl#'>
-                            <owl:Class rdf:ID='Programmer'/><rdf:Description rdf:about='#Programmer'/>
-                            <owl:Class rdf:ID='LightBulb'/><rdf:Description rdf:about='#LightBulb'/>
-                            <owl:Class rdf:ID='HardwareProblem'/><rdf:Description rdf:about='#HardwareProblem'/>
-                            <owl:Class rdf:ID='SoftwareProblem'/><rdf:Description rdf:about='#SoftwareProblem'/>
-                            </rdf:RDF>"""
+        ontology_content = b"""<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:owl="http://www.w3.org/2002/07/owl#"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+         xmlns="http://example.org/ontology#"
+         xml:base="http://example.org/ontology">
+
+                <owl:Ontology rdf:about="http://example.org/ontology"/>
+
+                <!-- Classes -->
+                <owl:Class rdf:ID="Problem"/>
+                <owl:Class rdf:ID="HardwareProblem"/>
+                <owl:Class rdf:ID="SoftwareProblem"/>
+                <owl:Class rdf:ID="Concept"/>
+                <owl:Class rdf:ID="Object"/>
+                <owl:Class rdf:ID="Joke"/>
+                <owl:Class rdf:ID="Image"/>
+                <owl:Class rdf:ID="Person"/>
+
+                <rdf:Description rdf:about="#HardwareProblem">
+                    <rdfs:subClassOf rdf:resource="#Problem"/>
+                    <rdfs:comment>A failure caused by physical components.</rdfs:comment>
+                </rdf:Description>
+
+                <rdf:Description rdf:about="#SoftwareProblem">
+                    <rdfs:subClassOf rdf:resource="#Problem"/>
+                    <rdfs:comment>An error caused by software logic or configuration.</rdfs:comment>
+                </rdf:Description>
+
+                <rdf:Description rdf:about="#Person">
+                    <rdfs:comment>A human being or individual.</rdfs:comment>
+                </rdf:Description>
+
+                <!-- Individuals -->
+                <Person rdf:ID="programmers">
+                    <rdfs:label>Programmers</rdfs:label>
+                </Person>
+
+                <Object rdf:ID="light_bulb">
+                    <rdfs:label>Light Bulb</rdfs:label>
+                </Object>
+
+                <HardwareProblem rdf:ID="hardware_problem">
+                    <rdfs:label>Hardware Problem</rdfs:label>
+                </HardwareProblem>
+
+            </rdf:RDF>"""
 
         ontology_response = requests.post(
             "http://127.0.0.1:8000/api/v1/ontologies",
+            headers=headers,
             files=[("ontology_file", ("test.owl", ontology_content, "application/xml"))],
             data={
                 "ontology_key": json.dumps([ontology_key]),
