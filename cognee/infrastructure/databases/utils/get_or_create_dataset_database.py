@@ -25,7 +25,7 @@ async def _get_vector_db_info(dataset_id: UUID, user: User) -> dict:
         # TODO: Have the create_database method be called from interface adapter automatically for all providers instead of specifically here
         from cognee.infrastructure.databases.vector.lancedb.LanceDBAdapter import LanceDBAdapter
 
-        return await LanceDBAdapter.create_database(dataset_id, user)
+        return await LanceDBAdapter.create_dataset(dataset_id, user)
 
     else:
         # Note: for hybrid databases both graph and vector DB name have to be the same
@@ -42,75 +42,11 @@ async def _get_vector_db_info(dataset_id: UUID, user: User) -> dict:
 
 async def _get_graph_db_info(dataset_id: UUID, user: User) -> dict:
     graph_config = get_graph_config()
-
     # Determine graph database URL
     if graph_config.graph_database_provider == "neo4j":
-        graph_db_name = f"{dataset_id}"
-        # Auto deploy instance to Aura DB
-        # OAuth2 token endpoint
+        from cognee.infrastructure.databases.graph.neo4j_driver.adapter import Neo4jAdapter
 
-        # Your client credentials
-        client_id = os.environ.get("NEO4J_CLIENT_ID", None)
-        client_secret = os.environ.get("NEO4J_CLIENT_SECRET", None)
-        tenant_id = os.environ.get("NEO4J_TENANT_ID", None)
-
-        # Make the request with HTTP Basic Auth
-        def get_aura_token(client_id: str, client_secret: str) -> dict:
-            url = "https://api.neo4j.io/oauth/token"
-            data = {"grant_type": "client_credentials"}  # sent as application/x-www-form-urlencoded
-
-            resp = requests.post(url, data=data, auth=(client_id, client_secret))
-            resp.raise_for_status()  # raises if the request failed
-            return resp.json()
-
-        resp = get_aura_token(client_id, client_secret)
-
-        url = "https://api.neo4j.io/v1/instances"
-
-        headers = {
-            "accept": "application/json",
-            "Authorization": f"Bearer {resp['access_token']}",
-            "Content-Type": "application/json",
-        }
-
-        payload = {
-            "version": "5",
-            "region": "europe-west1",
-            "memory": "1GB",
-            "name": graph_db_name[0:29],
-            "type": "professional-db",
-            "tenant_id": tenant_id,
-            "cloud_provider": "gcp",
-        }
-
-        response = requests.post(url, headers=headers, json=payload)
-
-        print(response.status_code)
-        print(response.text)
-        # TODO: Find better name to name Neo4j instance within 30 character limit
-        print(graph_db_name[0:29])
-        graph_db_name = "neo4j"
-        graph_db_url = response.json()["data"]["connection_url"]
-        graph_db_key = resp["access_token"]
-        graph_db_username = response.json()["data"]["username"]
-        graph_db_password = response.json()["data"]["password"]
-
-        async def _wait_for_neo4j_instance_provisioning(instance_id: str, headers: dict):
-            # Poll until the instance is running
-            status_url = f"https://api.neo4j.io/v1/instances/{instance_id}"
-            status = ""
-            for attempt in range(30):  # Try for up to ~5 minutes
-                status_resp = requests.get(status_url, headers=headers)
-                status = status_resp.json()["data"]["status"]
-                if status.lower() == "running":
-                    return
-                await asyncio.sleep(10)
-            raise TimeoutError(
-                f"Neo4j instance '{graph_db_name}' did not become ready within 5 minutes. Status: {status}"
-            )
-
-        instance_id = response.json()["data"]["id"]
-        await _wait_for_neo4j_instance_provisioning(instance_id, headers)
+        return await Neo4jAdapter.create_dataset(dataset_id, user)
 
     elif graph_config.graph_database_provider == "kuzu":
         # TODO: Add graph file path info for kuzu (also in DatasetDatabase model)
@@ -175,6 +111,8 @@ async def get_or_create_dataset_database(
 
     • If the row already exists, it is fetched and returned.
     • Otherwise a new one is created atomically and returned.
+
+    DatasetDatabase row contains connection and provider info for vector and graph databases.
 
     Parameters
     ----------

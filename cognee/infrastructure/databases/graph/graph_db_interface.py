@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any, List, Tuple, Type, Union
 from uuid import NAMESPACE_OID, UUID, uuid5
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.users.models.User import User
 from cognee.modules.data.models.graph_relationship_ledger import GraphRelationshipLedger
 from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engine
 
@@ -398,3 +399,36 @@ class GraphDBInterface(ABC):
             - node_id (Union[str, UUID]): Unique identifier of the node for which to retrieve connections.
         """
         raise NotImplementedError
+
+    @classmethod
+    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+        """
+        Return a dictionary with connection info for a graph database for the given dataset.
+        Function can auto handle deploying of the actual database if needed, but is not necessary.
+        Only providing connection info is sufficient, this info will be mapped when trying to connect to the provided dataset in the future.
+        Needed for Cognee multi-tenant/multi-user and backend access control support.
+
+        Dictionary returned from this function will be used to create a DatasetDatabase row in the relational database.
+        From which internal mapping of dataset -> database connection info will be done.
+
+        Each dataset needs to map to a unique graph database when backend access control is enabled to facilitate a separation of concern for data.
+
+        Args:
+            dataset_id: UUID of the dataset if needed by the database creation logic
+            user: User object if needed by the database creation logic
+        Returns:
+            dict: Connection info for the created graph database instance.
+        """
+        pass
+
+    async def delete_dataset(self, dataset_id: UUID, user: User) -> None:
+        """
+        Delete the graph database for the given dataset.
+        Function should auto handle deleting of the actual database or send a request to the proper service to delete the database.
+        Needed for maintaining a database for Cognee multi-tenant/multi-user and backend access control.
+
+        Args:
+            dataset_id: UUID of the dataset
+            user: User object
+        """
+        pass

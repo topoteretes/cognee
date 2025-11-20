@@ -221,16 +221,17 @@ class VectorDBInterface(Protocol):
         return model_type
 
     @classmethod
-    async def create_database(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
         """
-        Return a dictionary with connection info for a vector database for the given dataset and user.
-        Function should auto handle deploying of the actual database if needed.
+        Return a dictionary with connection info for a vector database for the given dataset.
+        Function can auto handle deploying of the actual database if needed, but is not necessary.
+        Only providing connection info is sufficient, this info will be mapped when trying to connect to the provided dataset in the future.
         Needed for Cognee multi-tenant/multi-user and backend access control support.
 
         Dictionary returned from this function will be used to create a DatasetDatabase row in the relational database.
         From which internal mapping of dataset -> database connection info will be done.
 
-        Each dataset needs to map to a unique vector database instance when backend access control is enabled.
+        Each dataset needs to map to a unique vector database when backend access control is enabled to facilitate a separation of concern for data.
 
         Args:
             dataset_id: UUID of the dataset if needed by the database creation logic
@@ -240,10 +241,10 @@ class VectorDBInterface(Protocol):
         """
         pass
 
-    async def delete_database(self, dataset_id: UUID, user: User) -> None:
+    async def delete_dataset(self, dataset_id: UUID, user: User) -> None:
         """
-        Delete the vector database instance for the given dataset and user.
-        Function should auto handle deleting of the actual database.
+        Delete the vector database for the given dataset.
+        Function should auto handle deleting of the actual database or send a request to the proper service to delete the database.
         Needed for maintaining a database for Cognee multi-tenant/multi-user and backend access control.
 
         Args:

@@ -364,7 +364,7 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     @classmethod
-    async def create_database(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
         vector_config = get_vectordb_config()
         base_config = get_base_config()
         databases_directory_path = os.path.join(
