@@ -94,7 +94,9 @@ class datasets:
         except PermissionDeniedError:
             raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
 
-        data = await get_data(dataset.owner_id, data_id)
+        dataset_data = [data for data in await get_dataset_data(dataset.id) if data.id == data_id]
+
+        data = dataset_data[0] if len(dataset_data) > 0 else None
 
         if not data:
             # If data is not found in the system, user is using a custom graph model.
