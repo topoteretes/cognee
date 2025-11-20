@@ -5,7 +5,7 @@ from cognee.tasks.web_scraper import DefaultUrlCrawler
 @pytest.mark.asyncio
 async def test_fetch():
     crawler = DefaultUrlCrawler()
-    url = "https://httpbin.org/html"
+    url = "http://example.com/"
     results = await crawler.fetch_urls(url)
     assert len(results) == 1
     assert isinstance(results, dict)
