@@ -104,7 +104,7 @@ def test_upload_ontology_unauthorized(mock_get_default_user, client, mock_defaul
 
 
 @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-async def test_upload_multiple_ontologies(mock_get_default_user, client, mock_default_user):
+def test_upload_multiple_ontologies(mock_get_default_user, client, mock_default_user):
     """Test uploading multiple ontology files in single request"""
     import io
 
@@ -132,7 +132,7 @@ async def test_upload_multiple_ontologies(mock_get_default_user, client, mock_de
 
 
 @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-async def test_upload_endpoint_accepts_arrays(mock_get_default_user, client, mock_default_user):
+def test_upload_endpoint_accepts_arrays(mock_get_default_user, client, mock_default_user):
     """Test that upload endpoint accepts array parameters"""
     import io
     import json
@@ -153,7 +153,7 @@ async def test_upload_endpoint_accepts_arrays(mock_get_default_user, client, moc
 
 
 @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-async def test_cognify_with_multiple_ontologies(mock_get_default_user, client, mock_default_user):
+def test_cognify_with_multiple_ontologies(mock_get_default_user, client, mock_default_user):
     """Test cognify endpoint accepts multiple ontology keys"""
     payload = {
         "datasets": ["test_dataset"],
@@ -168,7 +168,7 @@ async def test_cognify_with_multiple_ontologies(mock_get_default_user, client, m
 
 
 @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-async def test_complete_multifile_workflow(mock_get_default_user, client, mock_default_user):
+def test_complete_multifile_workflow(mock_get_default_user, client, mock_default_user):
     """Test complete workflow: upload multiple ontologies → cognify with multiple keys"""
     import io
     import json
@@ -218,7 +218,7 @@ async def test_complete_multifile_workflow(mock_get_default_user, client, mock_d
 
 
 @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-async def test_multifile_error_handling(mock_get_default_user, client, mock_default_user):
+def test_multifile_error_handling(mock_get_default_user, client, mock_default_user):
     """Test error handling for invalid multifile uploads"""
     import io
     import json
@@ -251,7 +251,7 @@ async def test_multifile_error_handling(mock_get_default_user, client, mock_defa
 
 
 @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-async def test_cognify_missing_ontology_key(mock_get_default_user, client, mock_default_user):
+def test_cognify_missing_ontology_key(mock_get_default_user, client, mock_default_user):
     """Test cognify with non-existent ontology key"""
     payload = {
         "datasets": ["test_dataset"],
