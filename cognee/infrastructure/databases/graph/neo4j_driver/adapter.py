@@ -1519,7 +1519,9 @@ class Neo4jAdapter(GraphDBInterface):
             "version": "5",
             "region": "europe-west1",
             "memory": "1GB",
-            "name": graph_db_name[0:29],
+            "name": graph_db_name[
+                0:29
+            ],  # TODO: Find better name to name Neo4j instance within 30 character limit
             "type": "professional-db",
             "tenant_id": tenant_id,
             "cloud_provider": "gcp",
@@ -1527,10 +1529,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         response = requests.post(url, headers=headers, json=payload)
 
-        print(response.status_code)
-        print(response.text)
-        # TODO: Find better name to name Neo4j instance within 30 character limit
-        print(graph_db_name[0:29])
         graph_db_name = "neo4j"
         graph_db_url = response.json()["data"]["connection_url"]
         graph_db_key = resp["access_token"]
