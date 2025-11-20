@@ -105,7 +105,7 @@ async def test_brute_force_triplet_search_wide_search_default():
         await brute_force_triplet_search(query="test", node_name=None)
 
         for call in mock_vector_engine.search.call_args_list:
-            assert call[1]["limit"] == 100
+            assert call[1]["limit"] == 50
 
 
 @pytest.mark.asyncio
