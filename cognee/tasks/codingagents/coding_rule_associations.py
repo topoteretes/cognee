@@ -130,6 +130,7 @@ async def add_rule_associations(
         if context and hasattr(context["data"], "id"):
             await upsert_edges(
                 edges_to_save,
+                tenant_id=context["user"].tenant_id,
                 user_id=context["user"].id,
                 dataset_id=context["dataset"].id,
                 data_id=context["data"].id,

@@ -10,7 +10,12 @@ from cognee.infrastructure.databases.relational.with_async_session import with_a
 
 @with_async_session
 async def upsert_nodes(
-    nodes: List[DataPoint], user_id: UUID, dataset_id: UUID, data_id: UUID, session: AsyncSession
+    nodes: List[DataPoint],
+    tenant_id: UUID,
+    user_id: UUID,
+    dataset_id: UUID,
+    data_id: UUID,
+    session: AsyncSession,
 ):
     """
     Adds nodes to the nodes table.
@@ -25,7 +30,12 @@ async def upsert_nodes(
             [
                 {
                     "id": uuid5(
-                        NAMESPACE_OID, str(user_id) + str(dataset_id) + str(data_id) + str(node.id)
+                        NAMESPACE_OID,
+                        str(tenant_id)
+                        + str(user_id)
+                        + str(dataset_id)
+                        + str(data_id)
+                        + str(node.id),
                     ),
                     "slug": node.id,
                     "user_id": user_id,

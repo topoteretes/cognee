@@ -92,12 +92,17 @@ async def integrate_chunk_graphs(
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
         await index_graph_edges(graph_edges)
-        await upsert_edges(
-            graph_edges,
-            user_id=context["user"].id,
-            dataset_id=context["dataset"].id,
-            data_id=context["data"].id,
-        )
+
+        user = context["user"] if "user" in context else None
+
+        if user:
+            await upsert_edges(
+                graph_edges,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=context["dataset"].id,
+                data_id=context["data"].id,
+            )
 
     return data_chunks
 

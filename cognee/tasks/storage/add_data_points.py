@@ -83,8 +83,12 @@ async def add_data_points(
     await index_data_points(nodes)
 
     if user and dataset and data:
-        await upsert_nodes(nodes, user_id=user.id, dataset_id=dataset.id, data_id=data.id)
-        await upsert_edges(edges, user_id=user.id, dataset_id=dataset.id, data_id=data.id)
+        await upsert_nodes(
+            nodes, tenant_id=user.tenant_id, user_id=user.id, dataset_id=dataset.id, data_id=data.id
+        )
+        await upsert_edges(
+            edges, tenant_id=user.tenant_id, user_id=user.id, dataset_id=dataset.id, data_id=data.id
+        )
 
     await graph_engine.add_edges(edges)
     await index_graph_edges(edges)

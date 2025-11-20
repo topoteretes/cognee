@@ -79,7 +79,10 @@ class datasets:
 
     @staticmethod
     async def delete_data(
-        dataset_id: UUID, data_id: UUID, user: Optional[User] = None, mode: str = "soft"
+        dataset_id: UUID,
+        data_id: UUID,
+        user: Optional[User] = None,
+        mode: str = "soft",  # mode is there for backwards compatibility. Don't use "hard", it it dangerous.
     ):
         from cognee.modules.data.methods import delete_data, get_data
 
@@ -91,7 +94,7 @@ class datasets:
         except PermissionDeniedError:
             raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
 
-        data = await get_data(user.id, data_id)
+        data = await get_data(dataset.owner_id, data_id)
 
         if not data:
             # If data is not found in the system, user is using a custom graph model.
@@ -107,7 +110,7 @@ class datasets:
         await set_database_global_context_variables(dataset_id, dataset.owner_id)
 
         if not await has_data_related_nodes(dataset_id, data_id):
-            await legacy_delete(data, mode)
+            await legacy_delete(data, "soft")
         else:
             await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 

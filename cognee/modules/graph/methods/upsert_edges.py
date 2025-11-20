@@ -12,6 +12,7 @@ from cognee.infrastructure.databases.relational.with_async_session import with_a
 @with_async_session
 async def upsert_edges(
     edges: List[Tuple[UUID, UUID, str, Dict[str, Any]]],
+    tenant_id: UUID,
     user_id: UUID,
     data_id: UUID,
     dataset_id: UUID,
@@ -35,7 +36,12 @@ async def upsert_edges(
             {
                 "id": uuid5(
                     NAMESPACE_OID,
-                    str(user_id) + str(dataset_id) + str(edge[0]) + str(edge_text) + str(edge[1]),
+                    str(tenant_id)
+                    + str(user_id)
+                    + str(dataset_id)
+                    + str(edge[0])
+                    + str(edge_text)
+                    + str(edge[1]),
                 ),
                 "slug": generate_edge_id(edge_text),
                 "user_id": user_id,

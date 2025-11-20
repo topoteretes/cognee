@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, patch
 
 import cognee
 from cognee.api.v1.datasets import datasets
-from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -362,12 +361,6 @@ async def main(mock_create_structured_output: AsyncMock):
 
     # Delete legacy data
     await datasets.delete_data(dataset_id, legacy_document.id, user)  # type: ignore
-
-    graph_file_path = os.path.join(
-        pathlib.Path(__file__).parent,
-        ".artifacts/graph_visualization.html",
-    )
-    await visualize_graph(graph_file_path)
 
     # Assert data points presence in the graph, vector collections and nodes table
     await assert_graph_nodes_present(maries_data + overlapping_entities)

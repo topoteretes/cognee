@@ -29,7 +29,7 @@ class Edge(Base):
     source_node_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     destination_node_id: Mapped[UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
-    relationship_name: Mapped[str | None] = mapped_column(Text, nullable=False)
+    relationship_name: Mapped[str] = mapped_column(Text, nullable=False)
 
     label: Mapped[str | None] = mapped_column(Text)
     attributes: Mapped[dict | None] = mapped_column(JSON)

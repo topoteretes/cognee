@@ -196,19 +196,25 @@ async def chunk_naive_llm_classifier(
 
         graph_engine = await get_graph_engine()
 
+        user = context["user"] if "user" in context else None
+
         await graph_engine.add_nodes(nodes)
-        await upsert_nodes(
-            nodes,
-            user_id=context["user"].id,
-            dataset_id=context["dataset"].id,
-            data_id=context["data"].id,
-        )
         await graph_engine.add_edges(edges)
-        await upsert_edges(
-            edges,
-            user_id=context["user"].id,
-            dataset_id=context["dataset"].id,
-            data_id=context["data"].id,
-        )
+
+        if user:
+            await upsert_nodes(
+                nodes,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=context["dataset"].id,
+                data_id=context["data"].id,
+            )
+            await upsert_edges(
+                edges,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=context["dataset"].id,
+                data_id=context["data"].id,
+            )
 
     return data_chunks
