@@ -7,7 +7,7 @@ categories:
   - title: 'Bug Fixes'
     labels: ['bug', 'fix']
   - title: 'Maintenance'
-    labels: ['chore', 'refactor']
+    labels: ['chore', 'refactor', 'ci']
 
 change-template: '- $TITLE (#$NUMBER) @$AUTHOR'
 template: |
