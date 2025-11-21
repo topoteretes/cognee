@@ -3,7 +3,6 @@ pull_request_rules:
     conditions:
       - label=backport_main
       - base=dev
-      - merged=true
     actions:
       backport:
         branches:
