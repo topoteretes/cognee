@@ -1,3 +1,4 @@
+import json
 import os
 import pathlib
 
@@ -58,7 +59,12 @@ async def main():
 
     for node in initial_nodes:
         node_data = node[1]
-        collection_name = node_data["type"] + "_" + node_data["metadata"]["index_fields"][0]
+        node_metadata = (
+            node_data["metadata"]
+            if type(node_data["metadata"]) is dict
+            else json.loads(node_data["metadata"])
+        )
+        collection_name = node_data["type"] + "_" + node_metadata["index_fields"][0]
         if collection_name not in initial_nodes_by_vector_collection:
             initial_nodes_by_vector_collection[collection_name] = []
         initial_nodes_by_vector_collection[collection_name].append(node)
@@ -83,7 +89,12 @@ async def main():
     after_delete_nodes_by_vector_collection = {}
     for node in initial_nodes:
         node_data = node[1]
-        collection_name = node_data["type"] + "_" + node_data["metadata"]["index_fields"][0]
+        node_metadata = (
+            node_data["metadata"]
+            if type(node_data["metadata"]) is dict
+            else json.loads(node_data["metadata"])
+        )
+        collection_name = node_data["type"] + "_" + node_metadata["index_fields"][0]
         if collection_name not in after_delete_nodes_by_vector_collection:
             after_delete_nodes_by_vector_collection[collection_name] = []
         after_delete_nodes_by_vector_collection[collection_name].append(node)
