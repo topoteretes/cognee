@@ -1,13 +1,8 @@
-import inspect
-from functools import wraps
+from uuid import UUID
 from abc import abstractmethod, ABC
-from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Tuple, Type, Union
-from uuid import NAMESPACE_OID, UUID, uuid5
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.engine import DataPoint
-from cognee.modules.data.models.graph_relationship_ledger import GraphRelationshipLedger
-from cognee.infrastructure.databases.relational.get_relational_engine import get_relational_engine
 
 logger = get_logger()
 
@@ -17,121 +12,6 @@ EdgeData = Tuple[
     str, str, str, Dict[str, Any]
 ]  # (source_id, target_id, relationship_name, properties)
 Node = Tuple[str, NodeData]  # (node_id, properties)
-
-
-def record_graph_changes(func):
-    """
-    Decorator to record graph changes in the relationship database.
-
-    Parameters:
-    -----------
-
-        - func: The asynchronous function to wrap, which likely modifies graph data.
-
-    Returns:
-    --------
-
-        Returns the wrapped function that manages database relationships.
-    """
-
-    @wraps(func)
-    async def wrapper(self, *args, **kwargs):
-        """
-        Wraps the given asynchronous function to handle database relationships.
-
-        Tracks the caller's function and class name for context. When the wrapped function is
-        called, it manages database relationships for nodes or edges by adding entries to a
-        ledger and committing the changes to the database session. Errors during relationship
-        addition or session commit are logged and will not disrupt the execution of the wrapped
-        function.
-
-        Parameters:
-        -----------
-
-            - *args: Positional arguments passed to the wrapped function.
-            - **kwargs: Keyword arguments passed to the wrapped function.
-
-        Returns:
-        --------
-
-            Returns the result of the wrapped function call.
-        """
-        db_engine = get_relational_engine()
-        frame = inspect.currentframe()
-        while frame:
-            if frame.f_back and frame.f_back.f_code.co_name != "wrapper":
-                caller_frame = frame.f_back
-                break
-            frame = frame.f_back
-
-        caller_name = caller_frame.f_code.co_name
-        caller_class = (
-            caller_frame.f_locals.get("self", None).__class__.__name__
-            if caller_frame.f_locals.get("self", None)
-            else None
-        )
-        creator = f"{caller_class}.{caller_name}" if caller_class else caller_name
-
-        result = await func(self, *args, **kwargs)
-
-        async with db_engine.get_async_session() as session:
-            if func.__name__ == "add_nodes":
-                nodes: List[DataPoint] = args[0]
-
-                relationship_ledgers = []
-
-                for node in nodes:
-                    node_id = UUID(str(node.id))
-                    relationship_ledgers.append(
-                        GraphRelationshipLedger(
-                            id=uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
-                            source_node_id=node_id,
-                            destination_node_id=node_id,
-                            creator_function=f"{creator}.node",
-                            node_label=getattr(node, "name", None) or str(node.id),
-                        )
-                    )
-
-                try:
-                    session.add_all(relationship_ledgers)
-                    await session.flush()
-                except Exception as e:
-                    logger.debug(f"Error adding relationship: {e}")
-                    await session.rollback()
-
-            elif func.__name__ == "add_edges":
-                edges = args[0]
-
-                relationship_ledgers = []
-
-                for edge in edges:
-                    source_id = UUID(str(edge[0]))
-                    target_id = UUID(str(edge[1]))
-                    rel_type = str(edge[2])
-                    relationship_ledgers.append(
-                        GraphRelationshipLedger(
-                            id=uuid5(NAMESPACE_OID, f"{datetime.now(timezone.utc).timestamp()}"),
-                            source_node_id=source_id,
-                            destination_node_id=target_id,
-                            creator_function=f"{creator}.{rel_type}",
-                        )
-                    )
-
-                try:
-                    session.add_all(relationship_ledgers)
-                    await session.flush()
-                except Exception as e:
-                    logger.debug(f"Error adding relationship: {e}")
-                    await session.rollback()
-
-            try:
-                await session.commit()
-            except Exception as e:
-                logger.debug(f"Error committing session: {e}")
-
-        return result
-
-    return wrapper
 
 
 class GraphDBInterface(ABC):
@@ -194,7 +74,6 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    @record_graph_changes
     async def add_nodes(self, nodes: Union[List[Node], List[DataPoint]]) -> None:
         """
         Add multiple nodes to the graph in a single operation.
@@ -278,7 +157,6 @@ class GraphDBInterface(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    @record_graph_changes
     async def add_edges(
         self, edges: Union[List[EdgeData], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]
     ) -> None:

@@ -11,7 +11,10 @@ Tests the complete feedback enrichment pipeline:
 
 import os
 import pathlib
+from uuid import UUID, uuid4
 from collections import Counter
+
+from pydantic import BaseModel
 
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -129,10 +132,13 @@ async def main():
         Task(link_enrichments_to_feedback),
     ]
 
+    class EnrichmentData(BaseModel):
+        id: UUID
+
     await cognee.memify(
         extraction_tasks=extraction_tasks,
         enrichment_tasks=enrichment_tasks,
-        data=[{}],
+        data=[EnrichmentData(id=uuid4())],
         dataset=dataset_name,
     )
 
