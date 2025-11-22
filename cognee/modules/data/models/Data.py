@@ -36,6 +36,7 @@ class Data(Base):
     data_size = Column(Integer, nullable=True)  # File size in bytes
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+    last_accessed = Column(DateTime(timezone=True), nullable=True)
 
     datasets = relationship(
         "Dataset",
