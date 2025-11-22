@@ -36,6 +36,7 @@ def upgrade() -> None:
             sa.Column("dataset_id", sa.UUID, index=True),
             sa.Column("label", sa.String()),
             sa.Column("type", sa.String(), nullable=False),
+            sa.Column("attributes", sa.JSON()),
             sa.Column("indexed_fields", sa.JSON(), nullable=False),
             sa.Column(
                 "created_at", sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -54,7 +55,7 @@ def upgrade() -> None:
             sa.Column("destination_node_id", sa.UUID, nullable=False),
             sa.Column("label", sa.Text()),
             sa.Column("relationship_name", sa.Text(), nullable=False),
-            sa.Column("props", sa.JSON()),
+            sa.Column("attributes", sa.JSON()),
             sa.Column(
                 "created_at", sa.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
             ),

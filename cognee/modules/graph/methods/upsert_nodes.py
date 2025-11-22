@@ -1,5 +1,6 @@
 from typing import List
 from uuid import NAMESPACE_OID, UUID, uuid5
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert
 
@@ -44,6 +45,7 @@ async def upsert_nodes(
                     "type": node.type,
                     "indexed_fields": DataPoint.get_embeddable_property_names(node),
                     "label": getattr(node, "label", getattr(node, "name", str(node.id))),
+                    "attributes": jsonable_encoder(node),
                 }
                 for node in nodes
             ]
