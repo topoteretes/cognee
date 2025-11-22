@@ -74,6 +74,41 @@ class LLMConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
+    @model_validator(mode="after")
+    def strip_quotes_from_strings(self) -> "LLMConfig":
+        """
+        Strip surrounding quotes from specific string fields that often come from
+        environment variables with extra quotes (e.g., via Docker's --env-file).
+
+        Only applies to known config keys where quotes are invalid or cause issues.
+        """
+        string_fields_to_strip = [
+            "llm_api_key",
+            "llm_endpoint",
+            "llm_api_version",
+            "baml_llm_api_key",
+            "baml_llm_endpoint",
+            "baml_llm_api_version",
+            "fallback_api_key",
+            "fallback_endpoint",
+            "fallback_model",
+            "llm_provider",
+            "llm_model",
+            "baml_llm_provider",
+            "baml_llm_model",
+        ]
+
+        cls = self.__class__
+        for field_name in string_fields_to_strip:
+            if field_name not in cls.model_fields:
+                continue
+            value = getattr(self, field_name, None)
+            if isinstance(value, str) and len(value) >= 2:
+                if value[0] == value[-1] and value[0] in ("'", '"'):
+                    setattr(self, field_name, value[1:-1])
+
+        return self
+
     def model_post_init(self, __context) -> None:
         """Initialize the BAML registry after the model is created."""
         # Check if BAML is selected as structured output framework but not available
