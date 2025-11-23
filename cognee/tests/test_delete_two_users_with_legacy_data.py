@@ -326,7 +326,7 @@ async def create_mocked_data_points(user):
         ]  # type: ignore
     )
 
-    await record_data_in_legacy_ledger(graph_nodes, graph_edges, user)
+    await record_data_in_legacy_ledger(graph_nodes, graph_edges)
 
     db_engine = get_relational_engine()
 
