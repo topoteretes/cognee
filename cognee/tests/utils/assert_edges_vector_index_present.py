@@ -21,7 +21,9 @@ def format_relationship(relationship: Tuple[UUID, UUID, str, Dict], node: Dict):
     return {str(generate_edge_id(relationship[2])): relationship[2]}
 
 
-async def assert_edges_vector_index_present(relationships: List[Tuple[UUID, UUID, str, Dict]]):
+async def assert_edges_vector_index_present(
+    relationships: List[Tuple[UUID, UUID, str, Dict]], convert_to_new_format: bool = True
+):
     vector_engine = get_vector_engine()
 
     graph_engine = await get_graph_engine()
@@ -33,7 +35,11 @@ async def assert_edges_vector_index_present(relationships: List[Tuple[UUID, UUID
     for relationship in relationships:
         query_edge_ids = {
             **query_edge_ids,
-            **format_relationship(relationship, nodes_by_id[str(relationship[1])]),
+            **(
+                format_relationship(relationship, nodes_by_id[str(relationship[1])])
+                if convert_to_new_format
+                else {str(generate_edge_id(relationship[2])): relationship[2]}
+            ),
         }
 
     vector_items = await vector_engine.retrieve(

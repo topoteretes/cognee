@@ -18,6 +18,7 @@ from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.engine.utils import generate_node_id
+from cognee.modules.engine.utils.generate_node_name import generate_node_name
 from cognee.modules.graph.legacy.record_data_in_legacy_ledger import record_data_in_legacy_ledger
 from cognee.modules.graph.utils.deduplicate_nodes_and_edges import deduplicate_nodes_and_edges
 from cognee.modules.graph.utils.get_graph_from_model import get_graph_from_model
@@ -45,6 +46,36 @@ from cognee.tests.utils.filter_overlapping_relationships import filter_overlappi
 from cognee.tests.utils.get_contains_edge_text import get_contains_edge_text
 
 
+async def assert_relationships_vector_index_present(formatted_relationships, legacy_relationships):
+    """Helper to check both formatted (new) and unformatted (legacy) relationships."""
+    if formatted_relationships:
+        await assert_edges_vector_index_present(formatted_relationships, convert_to_new_format=True)
+    if legacy_relationships:
+        await assert_edges_vector_index_present(legacy_relationships, convert_to_new_format=False)
+
+
+def build_relationships(chunk, document, summary, graph):
+    """Build all relationships for a chunk including structural and extracted ones."""
+    return [
+        (chunk.id, document.id, "is_part_of", {"relationship_name": "is_part_of"}),
+        (summary.id, chunk.id, "made_from", {"relationship_name": "made_from"}),
+    ] + extract_relationships(chunk, graph)
+
+
+def build_contains_relationships(chunk_id, entities, entity_names):
+    """Build contains relationships for specific entities."""
+    return [
+        (
+            chunk_id,
+            entity.id,
+            get_contains_edge_text(entity.name, entity.description),
+            {"relationship_name": get_contains_edge_text(entity.name, entity.description)},
+        )
+        for entity in entities
+        if isinstance(entity, Entity) and entity.name in entity_names
+    ]
+
+
 def create_legacy_data_points():
     document = TextDocument(
         id=uuid5(NAMESPACE_OID, "text_test.txt"),
@@ -56,51 +87,43 @@ def create_legacy_data_points():
     document_chunk = DocumentChunk(
         id=uuid5(
             NAMESPACE_OID,
-            "Neptune Analytics is an ideal choice for investigatory, exploratory, or data-science workloads \n    that require fast iteration for data, analytical and algorithmic processing, or vector search on graph data. It \n    complements Amazon Neptune Database, a popular managed graph database. To perform intensive analysis, you can load \n    the data from a Neptune Database graph or snapshot into Neptune Analytics. You can also load graph data that's \n    stored in Amazon S3.\n    ",
+            "Apple announced their new vector embeddings visualization tool called Embedding Atlas.",
         ),
-        text="Neptune Analytics is an ideal choice for investigatory, exploratory, or data-science workloads \n    that require fast iteration for data, analytical and algorithmic processing, or vector search on graph data. It \n    complements Amazon Neptune Database, a popular managed graph database. To perform intensive analysis, you can load \n    the data from a Neptune Database graph or snapshot into Neptune Analytics. You can also load graph data that's \n    stored in Amazon S3.\n    ",
+        text="Apple announced their new vector embeddings visualization tool called Embedding Atlas.",
         chunk_size=187,
         chunk_index=0,
         cut_type="paragraph_end",
         is_part_of=document,
     )
 
-    graph_database = EntityType(
-        id=uuid5(NAMESPACE_OID, "graph_database"),
-        name="graph database",
-        description="graph database",
+    company = EntityType(
+        id=generate_node_id("Company"),
+        name=generate_node_name("Company"),
+        description=generate_node_name("Company"),
     )
-    neptune_analytics_entity = Entity(
-        id=generate_node_id("neptune analytics"),
-        name="neptune analytics",
-        description="A memory-optimized graph database engine for analytics that processes large amounts of graph data quickly.",
-        is_a=graph_database,
+    apple = Entity(
+        id=generate_node_id("Apple"),
+        name=generate_node_name("Apple"),
+        description="Apple is a company",
+        is_a=company,
     )
-    neptune_database_entity = Entity(
-        id=generate_node_id("amazon neptune database"),
-        name="amazon neptune database",
-        description="A popular managed graph database that complements Neptune Analytics.",
-        is_a=graph_database,
+    product = EntityType(
+        id=generate_node_id("Product"),
+        name=generate_node_name("Product"),
+        description=generate_node_name("Product"),
     )
-
-    storage = EntityType(
-        id=generate_node_id("storage"),
-        name="storage",
-        description="storage",
-    )
-    storage_entity = Entity(
-        id=generate_node_id("amazon s3"),
-        name="amazon s3",
-        description="A storage service provided by Amazon Web Services that allows storing graph data.",
-        is_a=storage,
+    embedding_atlas = Entity(
+        id=generate_node_id("Embedding Atlas"),
+        name=generate_node_name("Embedding Atlas"),
+        description="Embedding Atlas",
+        is_a=product,
     )
 
     entities = [
-        graph_database,
-        neptune_analytics_entity,
-        neptune_database_entity,
-        storage,
-        storage_entity,
+        company,
+        product,
+        apple,
+        embedding_atlas,
     ]
 
     document_chunk.contains = entities
@@ -143,7 +166,7 @@ async def main(mock_create_structured_output: AsyncMock):
     assert not await vector_engine.has_collection("TextDocument_text")
 
     # Add legacy data to the system
-    __, legacy_data_points, legacy_relationships = await create_mocked_legacy_data(user)
+    __, all_legacy_data_points, all_legacy_relationships = await create_mocked_legacy_data(user)
 
     def mock_llm_output(text_input: str, system_prompt: str, response_model):
         if text_input == "test":  # LLM connection test
@@ -262,132 +285,153 @@ async def main(mock_create_structured_output: AsyncMock):
     )
     maries_summary = extract_summary(maries_chunk, mock_llm_output("Marie", "", SummarizedContent))  # type: ignore
 
-    johns_entities = extract_entities(mock_llm_output("John", "", KnowledgeGraph))  # type: ignore
-    maries_entities = extract_entities(mock_llm_output("Marie", "", KnowledgeGraph))  # type: ignore
-    (overlapping_entities, johns_entities, maries_entities) = filter_overlapping_entities(
-        johns_entities, maries_entities
-    )
+    all_johns_entities = extract_entities(mock_llm_output("John", "", KnowledgeGraph))  # type: ignore
+    all_maries_entities = extract_entities(mock_llm_output("Marie", "", KnowledgeGraph))  # type: ignore
 
-    johns_data = [
+    expected_johns_data = [
         johns_document,
         johns_chunk,
         johns_summary,
-        *johns_entities,
+        *all_johns_entities,
     ]
-    maries_data = [
+    expected_maries_data = [
         maries_document,
         maries_chunk,
         maries_summary,
-        *maries_entities,
+        *all_maries_entities,
     ]
 
-    expected_data_points = johns_data + maries_data + overlapping_entities + legacy_data_points
+    expected_data_points = expected_johns_data + expected_maries_data + all_legacy_data_points
 
     # Assert data points presence in the graph, vector collections and nodes table
     await assert_graph_nodes_present(expected_data_points)
     await assert_nodes_vector_index_present(expected_data_points)
 
-    johns_relationships = extract_relationships(
+    all_johns_relationships = build_relationships(
         johns_chunk,
+        johns_document,
+        johns_summary,
         mock_llm_output("John", "", KnowledgeGraph),  # type: ignore
     )
-    maries_relationships = extract_relationships(
+    all_maries_relationships = build_relationships(
         maries_chunk,
+        maries_document,
+        maries_summary,
         mock_llm_output("Marie", "", KnowledgeGraph),  # type: ignore
     )
-    (overlapping_relationships, johns_relationships, maries_relationships, legacy_relationships) = (
-        filter_overlapping_relationships(
-            johns_relationships, maries_relationships, legacy_relationships
-        )
-    )
-
-    johns_relationships = [
-        (johns_chunk.id, johns_document.id, "is_part_of"),
-        (johns_summary.id, johns_chunk.id, "made_from"),
-        *johns_relationships,
-    ]
-    maries_relationships = [
-        (maries_chunk.id, maries_document.id, "is_part_of"),
-        (maries_summary.id, maries_chunk.id, "made_from"),
-        *maries_relationships,
-    ]
 
     expected_relationships = (
-        johns_relationships
-        + maries_relationships
-        + overlapping_relationships
-        + legacy_relationships
+        all_johns_relationships + all_maries_relationships + all_legacy_relationships
     )
 
     await assert_graph_edges_present(expected_relationships)
-
-    await assert_edges_vector_index_present(expected_relationships)
+    await assert_relationships_vector_index_present(
+        all_johns_relationships + all_maries_relationships, all_legacy_relationships
+    )
 
     # Delete John's data
     await datasets.delete_data(dataset_id, johns_data_id, user)  # type: ignore
 
-    # Assert data points presence in the graph, vector collections and nodes table
-    await assert_graph_nodes_present(maries_data + overlapping_entities + legacy_data_points)
-    await assert_nodes_vector_index_present(maries_data + overlapping_entities + legacy_data_points)
+    expected_data_points = [
+        maries_document,
+        maries_chunk,
+        maries_summary,
+        *all_maries_entities,
+        *all_legacy_data_points,
+    ]
 
-    await assert_graph_nodes_not_present(johns_data)
-    await assert_nodes_vector_index_not_present(johns_data)
+    # Assert data points presence in the graph, vector collections and nodes table
+    await assert_graph_nodes_present(expected_data_points)
+    await assert_nodes_vector_index_present(expected_data_points)
+
+    (__, strictly_johns_entities, __, __) = filter_overlapping_entities(
+        all_johns_entities, all_maries_entities, all_legacy_data_points
+    )
+
+    not_expected_data_points = [
+        johns_document,
+        johns_chunk,
+        johns_summary,
+        *strictly_johns_entities,
+    ]
+
+    await assert_graph_nodes_not_present(not_expected_data_points)
+    await assert_nodes_vector_index_not_present(not_expected_data_points)
 
     # Assert relationships presence in the graph, vector collections and nodes table
-    await assert_graph_edges_present(
-        maries_relationships + overlapping_relationships + legacy_relationships
+    await assert_graph_edges_present(all_maries_relationships + all_legacy_relationships)
+    await assert_relationships_vector_index_present(
+        all_maries_relationships, all_legacy_relationships
     )
-    await assert_edges_vector_index_present(maries_relationships + legacy_relationships)
 
-    await assert_graph_edges_not_present(johns_relationships)
+    (__, strictly_johns_relationships, __, __) = filter_overlapping_relationships(
+        all_johns_relationships,
+        all_maries_relationships,
+        all_legacy_relationships,
+    )
 
-    johns_contains_relationships = [
-        (
-            johns_chunk.id,
-            entity.id,
-            get_contains_edge_text(entity.name, entity.description),
-            {
-                "relationship_name": get_contains_edge_text(entity.name, entity.description),
-            },
-        )
-        for entity in johns_entities
-        if isinstance(entity, Entity)
-    ]
-    # We check only by relationship name and we need edges that are created by John's data and no other.
-    await assert_edges_vector_index_not_present(johns_contains_relationships)
+    await assert_graph_edges_not_present(strictly_johns_relationships)
+
+    # Check that John's unique contains relationships are not in vector index
+    not_expected_relationships = build_contains_relationships(
+        johns_chunk.id,
+        all_johns_entities,
+        [generate_node_name("John"), generate_node_name("Food for Hungry")],
+    )
+    await assert_edges_vector_index_not_present(not_expected_relationships)
 
     # Delete Marie's data
     await datasets.delete_data(dataset_id, maries_data_id, user)  # type: ignore
 
     # Assert data points presence in the graph, vector collections and nodes table
-    await assert_graph_nodes_present(legacy_data_points)
-    await assert_nodes_vector_index_present(legacy_data_points)
+    await assert_graph_nodes_present(all_legacy_data_points)
+    await assert_nodes_vector_index_present(all_legacy_data_points)
 
-    await assert_graph_nodes_not_present(johns_data + maries_data + overlapping_entities)
-    await assert_nodes_vector_index_not_present(johns_data + maries_data + overlapping_entities)
-
-    # Assert relationships presence in the graph, vector collections and nodes table
-    await assert_graph_edges_present(legacy_relationships)
-    await assert_edges_vector_index_present(legacy_relationships)
-
-    await assert_graph_edges_not_present(
-        johns_relationships + maries_relationships + overlapping_relationships
+    (__, strictly_johns_entities, strictly_maries_entities, __) = filter_overlapping_entities(
+        all_johns_entities, all_maries_entities, all_legacy_data_points
     )
 
-    maries_contains_relationships = [
-        (
-            maries_chunk.id,
-            entity.id,
-            get_contains_edge_text(entity.name, entity.description),
-            {
-                "relationship_name": get_contains_edge_text(entity.name, entity.description),
-            },
-        )
-        for entity in maries_entities
-        if isinstance(entity, Entity)
+    not_expected_data_points = [
+        johns_document,
+        johns_chunk,
+        johns_summary,
+        *strictly_johns_entities,
+        maries_document,
+        maries_chunk,
+        maries_summary,
+        *strictly_maries_entities,
     ]
-    # We check only by relationship name and we need edges that are created by legacy data and no other.
-    await assert_edges_vector_index_not_present(maries_contains_relationships)
+
+    await assert_graph_nodes_not_present(not_expected_data_points)
+    await assert_nodes_vector_index_not_present(not_expected_data_points)
+
+    # Assert relationships presence in the graph, vector collections and nodes table
+    await assert_graph_edges_present(all_legacy_relationships)
+    await assert_relationships_vector_index_present([], all_legacy_relationships)
+
+    (__, strictly_johns_relationships, strictly_maries_relationships, __) = (
+        filter_overlapping_relationships(
+            all_maries_relationships,
+            all_johns_relationships,
+            all_legacy_relationships,
+        )
+    )
+
+    await assert_graph_edges_not_present(
+        strictly_johns_relationships + strictly_maries_relationships
+    )
+
+    # Check that John's and Marie's unique contains relationships are not in vector index
+    not_expected_relationships = build_contains_relationships(
+        johns_chunk.id,
+        all_johns_entities,
+        [generate_node_name("John"), generate_node_name("Food for Hungry")],
+    ) + build_contains_relationships(
+        maries_chunk.id,
+        all_maries_entities,
+        [generate_node_name("Marie"), generate_node_name("MacOS")],
+    )
+    await assert_edges_vector_index_not_present(not_expected_relationships)
 
 
 async def create_mocked_legacy_data(user):
@@ -423,31 +467,11 @@ async def create_mocked_legacy_data(user):
     await graph_engine.add_nodes(graph_nodes)
     await graph_engine.add_edges(graph_edges)
 
-    nodes_by_id = {node.id: node for node in graph_nodes}
-
-    def format_relationship_name(relationship):
-        if relationship[2] == "contains":
-            node = nodes_by_id[relationship[1]]
-            return get_contains_edge_text(node.name, node.description)
-        return relationship[2]
-
     await index_data_points(graph_nodes)
-    await index_graph_edges(
-        [
-            (
-                edge[0],
-                edge[1],
-                format_relationship_name(edge),
-                {
-                    **(edge[3] or {}),
-                    "relationship_name": format_relationship_name(edge),
-                },
-            )
-            for edge in graph_edges
-        ]  # type: ignore
-    )
+    # Legacy relationships should NOT be formatted - index them as-is
+    await index_graph_edges(graph_edges)
 
-    await record_data_in_legacy_ledger(graph_nodes, graph_edges, user)
+    await record_data_in_legacy_ledger(graph_nodes, graph_edges)
 
     db_engine = get_relational_engine()
 

@@ -1,11 +1,10 @@
 from uuid import UUID
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.engine.models.DataPoint import DataPoint
 
 
-async def assert_graph_edges_not_present(relationships: List[Tuple[UUID, UUID, str]]):
+async def assert_graph_edges_not_present(relationships: List[Tuple[UUID, UUID, str, Dict]]):
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
 
@@ -15,7 +14,11 @@ async def assert_graph_edges_not_present(relationships: List[Tuple[UUID, UUID, s
 
     for relationship in relationships:
         relationship_id = f"{str(relationship[0])}_{relationship[2]}_{str(relationship[1])}"
-        relationship_name = relationship[2]
-        assert relationship_id not in edge_ids, (
-            f"Edge '{relationship_name}' still present between '{nodes_by_id[str(relationship[0])]['name']}' and '{nodes_by_id[str(relationship[1])]['name']}' in graph database."
-        )
+
+        if relationship_id in edge_ids:
+            relationship_name = relationship[2]
+            source_node = nodes_by_id[str(relationship[0])]
+            destination_node = nodes_by_id[str(relationship[1])]
+            assert False, (
+                f"Edge '{relationship_name}' still present between '{source_node['name'] if 'node' in source_node else source_node['id']}' and '{destination_node['name'] if 'node' in destination_node else destination_node['id']}' in graph database."
+            )

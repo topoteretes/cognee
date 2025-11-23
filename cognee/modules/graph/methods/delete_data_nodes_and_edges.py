@@ -25,10 +25,10 @@ async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: 
         if len(affected_nodes) == 0:
             return
 
-        is_legacy_node = await has_nodes_in_legacy_ledger(affected_nodes, user_id)
+        is_legacy_node = await has_nodes_in_legacy_ledger(affected_nodes)
 
         affected_relationships = await get_data_related_edges(dataset_id, data_id)
-        is_legacy_relationship = await has_edges_in_legacy_ledger(affected_relationships, user_id)
+        is_legacy_relationship = await has_edges_in_legacy_ledger(affected_relationships)
 
         non_legacy_nodes = [
             node for index, node in enumerate(affected_nodes) if not is_legacy_node[index]
@@ -71,10 +71,10 @@ async def delete_data_nodes_and_edges(dataset_id: UUID, data_id: UUID, user_id: 
         if len(affected_nodes) == 0:
             return
 
-        is_legacy_node = await has_nodes_in_legacy_ledger(affected_nodes, user_id)
+        is_legacy_node = await has_nodes_in_legacy_ledger(affected_nodes)
 
         affected_relationships = await get_global_data_related_edges(data_id)
-        is_legacy_relationship = await has_edges_in_legacy_ledger(affected_relationships, user_id)
+        is_legacy_relationship = await has_edges_in_legacy_ledger(affected_relationships)
 
         non_legacy_nodes = [
             node for index, node in enumerate(affected_nodes) if not is_legacy_node[index]
