@@ -55,6 +55,10 @@ def guess_file_type(file: BinaryIO, name: Optional[str] = None) -> filetype.Type
         file_type = Type("text/plain", "txt")
         return file_type
 
+    if ext in [".csv"]:
+        file_type = Type("text/csv", "csv")
+        return file_type
+
     file_type = filetype.guess(file)
 
     # If file type could not be determined consider it a plain text file as they don't have magic number encoding
