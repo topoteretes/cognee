@@ -8,7 +8,6 @@ from cognee.modules.users.models import User
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.utils import send_telemetry
 from cognee.tasks.documents import (
-    check_permissions_on_dataset,
     classify_documents,
     extract_chunks_from_documents,
 )
@@ -31,7 +30,6 @@ async def get_cascade_graph_tasks(
         cognee_config = get_cognify_config()
         default_tasks = [
             Task(classify_documents),
-            Task(check_permissions_on_dataset, user=user, permissions=["write"]),
             Task(
                 extract_chunks_from_documents, max_chunk_tokens=get_max_chunk_tokens()
             ),  # Extract text chunks based on the document type.

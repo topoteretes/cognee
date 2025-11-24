@@ -19,10 +19,10 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
 from cognee.modules.users.models import User
 
 from cognee.tasks.documents import (
-    check_permissions_on_dataset,
     classify_documents,
     extract_chunks_from_documents,
 )
+
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
@@ -69,7 +69,41 @@ async def cognify(
 
     Input Requirements:
         - **Datasets**: Must contain data previously added via `cognee.add()`
-        - **Content Types**: Works with any text-extractable content including:
+import asyncio
+from pydantic import BaseModel
+from typing import Union, Optional
+from uuid import UUID
+
+from cognee.modules.ontology.ontology_env_config import get_ontology_env_co>
+from cognee.shared.logging_utils import get_logger
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.infrastructure.llm import get_max_chunk_tokens
+
+from cognee.modules.pipelines import run_pipeline
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.chunking.TextChunker import TextChunker
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_default_ontology_resolver,
+    get_ontology_resolver_from_env,
+)
+from cognee.modules.users.models import User
+
+from cognee.tasks.documents import (
+    classify_documents,
+    extract_chunks_from_documents,
+)
+from cognee.tasks.graph import extract_graph_from_data
+from cognee.tasks.storage import add_data_points
+from cognee.tasks.summarization import summarize_text
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pip>
+from cognee.tasks.temporal_graph.extract_events_and_entities import extract>
+from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import>
+    extract_knowledge_graph_from_events,
+)
+
+
+logger = get_logger("cognify")        - **Content Types**: Works with any text-extractable content including:
             * Natural language documents
             * Structured data (CSV, JSON)
             * Code repositories
@@ -274,7 +308,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     default_tasks = [
         Task(classify_documents),
-        Task(check_permissions_on_dataset, user=user, permissions=["write"]),
         Task(
             extract_chunks_from_documents,
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
@@ -325,7 +358,6 @@ async def get_temporal_tasks(
 
     temporal_tasks = [
         Task(classify_documents),
-        Task(check_permissions_on_dataset, user=user, permissions=["write"]),
         Task(
             extract_chunks_from_documents,
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
