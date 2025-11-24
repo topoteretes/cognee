@@ -1,40 +1,34 @@
 import os
 from typing import List
+import csv
 from cognee.infrastructure.loaders.LoaderInterface import LoaderInterface
 from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
 from cognee.infrastructure.files.utils.get_file_metadata import get_file_metadata
 
 
-class TextLoader(LoaderInterface):
+class CsvLoader(LoaderInterface):
     """
-    Core text file loader that handles basic text file formats.
-
-    This loader is always available and serves as the fallback for
-    text-based files when no specialized loader is available.
+    Core CSV file loader that handles basic CSV file formats.
     """
 
     @property
     def supported_extensions(self) -> List[str]:
         """Supported text file extensions."""
-        return ["txt", "md", "json", "xml", "yaml", "yml", "log"]
+        return [
+            "csv",
+        ]
 
     @property
     def supported_mime_types(self) -> List[str]:
         """Supported MIME types for text content."""
         return [
-            "text/plain",
-            "text/markdown",
-            "application/json",
-            "text/xml",
-            "application/xml",
-            "text/yaml",
-            "application/yaml",
+            "text/csv",
         ]
 
     @property
     def loader_name(self) -> str:
         """Unique identifier for this loader."""
-        return "text_loader"
+        return "csv_loader"
 
     def can_handle(self, extension: str, mime_type: str) -> bool:
         """
@@ -54,7 +48,7 @@ class TextLoader(LoaderInterface):
 
     async def load(self, file_path: str, encoding: str = "utf-8", **kwargs):
         """
-        Load and process the text file.
+        Load and process the csv file.
 
         Args:
             file_path: Path to the file to load
@@ -77,8 +71,18 @@ class TextLoader(LoaderInterface):
         # Name ingested file of current loader based on original file content hash
         storage_file_name = "text_" + file_metadata["content_hash"] + ".txt"
 
-        with open(file_path, "r", encoding=encoding) as f:
-            content = f.read()
+        row_texts = []
+        row_index = 1
+
+        with open(file_path, "r", encoding=encoding, newline="") as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                pairs = [f"{str(k)}: {str(v)}" for k, v in row.items()]
+                row_text = ", ".join(pairs)
+                row_texts.append(f"Row {row_index}:\n{row_text}\n")
+                row_index += 1
+
+        content = "\n".join(row_texts)
 
         storage_config = get_storage_config()
         data_root_directory = storage_config["data_root_directory"]
