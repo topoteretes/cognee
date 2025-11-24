@@ -268,7 +268,7 @@ async def test_map_vector_distances_partial_node_coverage(setup_graph):
 
     assert graph.get_node("1").attributes.get("vector_distance") == 0.95
     assert graph.get_node("2").attributes.get("vector_distance") == 0.87
-    assert graph.get_node("3").attributes.get("vector_distance") == 42
+    assert graph.get_node("3").attributes.get("vector_distance") == 3.5
 
 
 @pytest.mark.asyncio
@@ -301,7 +301,7 @@ async def test_map_vector_distances_multiple_categories(setup_graph):
     assert graph.get_node("1").attributes.get("vector_distance") == 0.95
     assert graph.get_node("2").attributes.get("vector_distance") == 0.87
     assert graph.get_node("3").attributes.get("vector_distance") == 0.92
-    assert graph.get_node("4").attributes.get("vector_distance") == 42
+    assert graph.get_node("4").attributes.get("vector_distance") == 3.5
 
 
 @pytest.mark.asyncio
@@ -393,7 +393,7 @@ async def test_map_vector_distances_partial_edge_coverage(setup_graph, mock_vect
     )
 
     assert graph.edges[0].attributes.get("vector_distance") == 0.92
-    assert graph.edges[1].attributes.get("vector_distance") == 42
+    assert graph.edges[1].attributes.get("vector_distance") == 3.5
 
 
 @pytest.mark.asyncio
@@ -455,7 +455,7 @@ async def test_map_vector_distances_no_edge_matches(setup_graph, mock_vector_eng
         edge_distances=edge_distances,
     )
 
-    assert graph.edges[0].attributes.get("vector_distance") == 42
+    assert graph.edges[0].attributes.get("vector_distance") == 3.5
 
 
 @pytest.mark.asyncio
