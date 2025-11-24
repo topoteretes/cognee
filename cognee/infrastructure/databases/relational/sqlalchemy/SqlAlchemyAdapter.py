@@ -57,7 +57,12 @@ class SQLAlchemyAdapter:
             )
         else:
             self.engine = create_async_engine(
-                connection_string, pool_size=12, max_overflow=12, poolclass=None
+                connection_string,
+                pool_size=20,
+                max_overflow=20,
+                pool_recycle=280,
+                pool_pre_ping=True,
+                pool_timeout=280,
             )
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
@@ -278,7 +283,7 @@ class SQLAlchemyAdapter:
             try:
                 data_entity = (await session.scalars(select(Data).where(Data.id == data_id))).one()
             except (ValueError, NoResultFound) as e:
-                raise EntityNotFoundError(message=f"Entity not found: {str(e)}")
+                raise EntityNotFoundError(message=f"Entity not found: {str(e)}") from e
 
             # Check if other data objects point to the same raw data location
             raw_data_location_entities = (

@@ -7,6 +7,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 logger = get_logger("CodeRetriever")
@@ -41,7 +42,7 @@ class CodeRetriever(BaseRetriever):
             f"Processing query with LLM: '{query[:100]}{'...' if len(query) > 100 else ''}'"
         )
 
-        system_prompt = LLMGateway.read_query_prompt("codegraph_retriever_system.txt")
+        system_prompt = read_query_prompt("codegraph_retriever_system.txt")
 
         try:
             result = await LLMGateway.acreate_structured_output(
@@ -206,8 +207,26 @@ class CodeRetriever(BaseRetriever):
         logger.info(f"Returning {len(result)} code file contexts")
         return result
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
-        """Returns the code files context."""
+    async def get_completion(
+        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
+    ) -> Any:
+        """
+        Returns the code files context.
+
+        Parameters:
+        -----------
+
+            - query (str): The query string to retrieve code context for.
+            - context (Optional[Any]): Optional pre-fetched context; if None, it retrieves
+              the context for the query. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
+
+        Returns:
+        --------
+
+            - Any: The code files context, either provided or retrieved.
+        """
         if context is None:
             context = await self.get_context(query)
         return context

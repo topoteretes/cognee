@@ -46,6 +46,12 @@ class StorageManager:
         else:
             return self.storage.is_file(file_path)
 
+    async def get_size(self, file_path: str) -> int:
+        if inspect.iscoroutinefunction(self.storage.get_size):
+            return await self.storage.get_size(file_path)
+        else:
+            return self.storage.get_size(file_path)
+
     async def store(self, file_path: str, data: BinaryIO, overwrite: bool = False) -> str:
         """
         Store data at the specified file path.
@@ -84,7 +90,7 @@ class StorageManager:
         """
         # Check the actual storage type by class name to determine if open() is async or sync
 
-        if self.storage.__class__.__name__ == "S3FileStorage" and file_path.startswith("s3://"):
+        if self.storage.__class__.__name__ == "S3FileStorage":
             # S3FileStorage.open() is async
             async with self.storage.open(file_path, *args, **kwargs) as file:
                 yield file
@@ -128,6 +134,24 @@ class StorageManager:
             return await self.storage.remove(file_path)
         else:
             return self.storage.remove(file_path)
+
+    async def list_files(self, directory_path: str, recursive: bool = False) -> list[str]:
+        """
+        List all files in the specified directory.
+
+        Parameters:
+        -----------
+            - directory_path (str): The directory path to list files from
+            - recursive (bool): If True, list files recursively in subdirectories
+
+        Returns:
+        --------
+            - list[str]: List of file paths relative to the storage root
+        """
+        if inspect.iscoroutinefunction(self.storage.list_files):
+            return await self.storage.list_files(directory_path, recursive)
+        else:
+            return self.storage.list_files(directory_path, recursive)
 
     async def remove_all(self, tree_path: str = None):
         """

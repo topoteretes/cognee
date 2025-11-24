@@ -68,6 +68,44 @@ async def test_getting_of_documents(dataset_name_1):
     )
 
 
+async def test_vector_engine_search_none_limit():
+    file_path_quantum = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
+    )
+
+    file_path_nlp = os.path.join(
+        pathlib.Path(__file__).parent,
+        "test_data/Natural_language_processing.txt",
+    )
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    await cognee.add(file_path_quantum)
+
+    await cognee.add(file_path_nlp)
+
+    await cognee.cognify()
+
+    query_text = "Tell me about Quantum computers"
+
+    from cognee.infrastructure.databases.vector import get_vector_engine
+
+    vector_engine = get_vector_engine()
+
+    collection_name = "Entity_name"
+
+    query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
+
+    result = await vector_engine.search(
+        collection_name=collection_name, query_vector=query_vector, limit=None
+    )
+
+    # Check that we did not accidentally use any default value for limit
+    # in vector search along the way (like 5, 10, or 15)
+    assert len(result) > 15
+
+
 async def main():
     cognee.config.set_vector_db_config(
         {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "pgvector"}
@@ -103,10 +141,10 @@ async def main():
     dataset_name_1 = "natural_language"
     dataset_name_2 = "quantum"
 
-    explanation_file_path = os.path.join(
+    explanation_file_path_nlp = os.path.join(
         pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
     )
-    await cognee.add([explanation_file_path], dataset_name_1)
+    await cognee.add([explanation_file_path_nlp], dataset_name_1)
 
     text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
     At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
@@ -129,7 +167,7 @@ async def main():
     random_node_name = random_node.payload["text"]
 
     search_results = await cognee.search(
-        query_type=SearchType.INSIGHTS, query_text=random_node_name
+        query_type=SearchType.GRAPH_COMPLETION, query_text=random_node_name
     )
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
@@ -164,7 +202,7 @@ async def main():
     history = await get_history(user.id)
     assert len(history) == 8, "Search history is not correct."
 
-    await test_local_file_deletion(text, explanation_file_path)
+    await test_local_file_deletion(text, explanation_file_path_nlp)
 
     await cognee.prune.prune_data()
     data_root_directory = get_storage_config()["data_root_directory"]
@@ -173,6 +211,8 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
     tables_in_database = await vector_engine.get_table_names()
     assert len(tables_in_database) == 0, "PostgreSQL database is not empty"
+
+    await test_vector_engine_search_none_limit()
 
 
 if __name__ == "__main__":

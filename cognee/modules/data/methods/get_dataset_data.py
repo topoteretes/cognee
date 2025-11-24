@@ -9,9 +9,12 @@ async def get_dataset_data(dataset_id: UUID) -> list[Data]:
 
     async with db_engine.get_async_session() as session:
         result = await session.execute(
-            select(Data).join(Data.datasets).filter((Dataset.id == dataset_id))
+            select(Data)
+            .join(Data.datasets)
+            .filter((Dataset.id == dataset_id))
+            .order_by(Data.data_size.desc())
         )
 
-        data = result.scalars().all()
+        data = list(result.scalars().all())
 
         return data

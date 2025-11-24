@@ -234,7 +234,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         collection_name: str,
         query_text: Optional[str] = None,
         query_vector: Optional[List[float]] = None,
-        limit: int = None,
+        limit: Optional[int] = None,
         with_vector: bool = False,
     ):
         """
@@ -265,10 +265,10 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
                 "Use this option only when vector data is required."
             )
 
-        # In the case of excessive limit, or zero / negative value, limit will be set to 10.
+        # In the case of excessive limit, or None / zero / negative value, limit will be set to 10.
         if not limit or limit <= self._TOPK_LOWER_BOUND or limit > self._TOPK_UPPER_BOUND:
             logger.warning(
-                "Provided limit (%s) is invalid (zero, negative, or exceeds maximum). "
+                "Provided limit (%s) is invalid (None, zero, negative, or exceeds maximum). "
                 "Defaulting to limit=10.",
                 limit,
             )
@@ -415,6 +415,15 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         # Run actual truncate
         self._client.query(f"MATCH (n :{self._VECTOR_NODE_LABEL}) DETACH DELETE n")
         pass
+
+    async def is_empty(self) -> bool:
+        query = """
+        MATCH (n)
+        RETURN true
+        LIMIT 1;
+        """
+        query_result = await self._client.query(query)
+        return len(query_result) == 0
 
     @staticmethod
     def _get_scored_result(

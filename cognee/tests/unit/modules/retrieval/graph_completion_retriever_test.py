@@ -5,8 +5,8 @@ from typing import Optional, Union
 
 import cognee
 from cognee.low_level import setup, DataPoint
+from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.tasks.storage import add_data_points
-from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 
 
@@ -67,7 +67,7 @@ class TestGraphCompletionRetriever:
 
         retriever = GraphCompletionRetriever()
 
-        context, _ = await retriever.get_context("Who works at Canva?")
+        context = await resolve_edges_to_text(await retriever.get_context("Who works at Canva?"))
 
         # Ensure the top-level sections are present
         assert "Nodes:" in context, "Missing 'Nodes:' section in context"
@@ -191,7 +191,7 @@ class TestGraphCompletionRetriever:
 
         retriever = GraphCompletionRetriever(top_k=20)
 
-        context, _ = await retriever.get_context("Who works at Figma?")
+        context = await resolve_edges_to_text(await retriever.get_context("Who works at Figma?"))
 
         print(context)
 
@@ -217,10 +217,7 @@ class TestGraphCompletionRetriever:
 
         retriever = GraphCompletionRetriever()
 
-        with pytest.raises(DatabaseNotCreatedError):
-            await retriever.get_context("Who works at Figma?")
-
         await setup()
 
-        context, _ = await retriever.get_context("Who works at Figma?")
-        assert context == "", "Context should be empty on an empty graph"
+        context = await retriever.get_context("Who works at Figma?")
+        assert context == [], "Context should be empty on an empty graph"

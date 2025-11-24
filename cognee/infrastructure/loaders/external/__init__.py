@@ -20,3 +20,17 @@ try:
     __all__.append("UnstructuredLoader")
 except ImportError:
     pass
+
+try:
+    from .advanced_pdf_loader import AdvancedPdfLoader
+
+    __all__.append("AdvancedPdfLoader")
+except ImportError:
+    pass
+
+try:
+    from .beautiful_soup_loader import BeautifulSoupLoader
+
+    __all__.append("BeautifulSoupLoader")
+except ImportError:
+    pass

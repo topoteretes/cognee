@@ -1,8 +1,13 @@
-export { default as Modal } from "./Modal";
+export { default as Modal } from "./Modal/Modal";
 export { default as Input } from "./Input";
 export { default as Select } from "./Select";
 export { default as TextArea } from "./TextArea";
 export { default as CTAButton } from "./CTAButton";
+export { default as PopupMenu } from "./PopupMenu";
+export { default as IconButton } from "./IconButton";
 export { default as GhostButton } from "./GhostButton";
 export { default as NeutralButton } from "./NeutralButton";
 export { default as StatusIndicator } from "./StatusIndicator";
+export { default as StatusDot } from "./StatusDot";
+export { default as Accordion } from "./Accordion";
+export { default as Notebook } from "./Notebook"; 

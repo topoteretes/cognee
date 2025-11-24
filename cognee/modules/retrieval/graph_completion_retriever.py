@@ -1,25 +1,31 @@
-from typing import Any, Optional, Type, List, Coroutine
-from collections import Counter
+import asyncio
+from typing import Any, Optional, Type, List
 from uuid import NAMESPACE_OID, uuid5
-import string
 
 from cognee.infrastructure.engine import DataPoint
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.tasks.storage import add_data_points
+from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
-from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.base_graph_retriever import BaseGraphRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
-from cognee.modules.retrieval.utils.completion import generate_completion
-from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
+from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
+from cognee.modules.retrieval.utils.session_cache import (
+    save_conversation_history,
+    get_conversation_history,
+)
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.utils.extract_uuid_from_node import extract_uuid_from_node
 from cognee.modules.retrieval.utils.models import CogneeUserInteraction
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache.config import CacheConfig
 
 logger = get_logger("GraphCompletionRetriever")
 
 
-class GraphCompletionRetriever(BaseRetriever):
+class GraphCompletionRetriever(BaseGraphRetriever):
     """
     Retriever for handling graph-based completion searches.
 
@@ -36,38 +42,20 @@ class GraphCompletionRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "graph_context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
-        system_prompt: str = None,
+        system_prompt: Optional[str] = None,
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
         save_interaction: bool = False,
-        only_context: bool = False,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.save_interaction = save_interaction
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.system_prompt = system_prompt
-        self.only_context = only_context
         self.top_k = top_k if top_k is not None else 5
         self.node_type = node_type
         self.node_name = node_name
-
-    def _get_nodes(self, retrieved_edges: list) -> dict:
-        """Creates a dictionary of nodes with their names and content."""
-        nodes = {}
-        for edge in retrieved_edges:
-            for node in (edge.node1, edge.node2):
-                if node.id not in nodes:
-                    text = node.attributes.get("text")
-                    if text:
-                        name = self._get_title(text)
-                        content = text
-                    else:
-                        name = node.attributes.get("name", "Unnamed Node")
-                        content = node.attributes.get("description", name)
-                    nodes[node.id] = {"node": node, "name": name, "content": content}
-        return nodes
 
     async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
         """
@@ -83,18 +71,9 @@ class GraphCompletionRetriever(BaseRetriever):
 
             - str: A formatted string representation of the nodes and their connections.
         """
-        nodes = self._get_nodes(retrieved_edges)
-        node_section = "\n".join(
-            f"Node: {info['name']}\n__node_content_start__\n{info['content']}\n__node_content_end__\n"
-            for info in nodes.values()
-        )
-        connection_section = "\n".join(
-            f"{nodes[edge.node1.id]['name']} --[{edge.attributes['relationship_type']}]--> {nodes[edge.node2.id]['name']}"
-            for edge in retrieved_edges
-        )
-        return f"Nodes:\n{node_section}\n\nConnections:\n{connection_section}"
+        return await resolve_edges_to_text(retrieved_edges)
 
-    async def get_triplets(self, query: str) -> list:
+    async def get_triplets(self, query: str) -> List[Edge]:
         """
         Retrieves relevant graph triplets based on a query string.
 
@@ -109,7 +88,7 @@ class GraphCompletionRetriever(BaseRetriever):
             - list: A list of found triplets that match the query.
         """
         subclasses = get_all_subclasses(DataPoint)
-        vector_index_collections = []
+        vector_index_collections: List[str] = []
 
         for subclass in subclasses:
             if "metadata" in subclass.model_fields:
@@ -130,7 +109,7 @@ class GraphCompletionRetriever(BaseRetriever):
 
         return found_triplets
 
-    async def get_context(self, query: str) -> str | tuple[str, list]:
+    async def get_context(self, query: str) -> List[Edge]:
         """
         Retrieves and resolves graph triplets into context based on a query.
 
@@ -145,21 +124,30 @@ class GraphCompletionRetriever(BaseRetriever):
             - str: A string representing the resolved context from the retrieved triplets, or an
               empty string if no triplets are found.
         """
+        graph_engine = await get_graph_engine()
+        is_empty = await graph_engine.is_empty()
+
+        if is_empty:
+            logger.warning("Search attempt on an empty knowledge graph")
+            return []
+
         triplets = await self.get_triplets(query)
 
         if len(triplets) == 0:
             logger.warning("Empty context was provided to the completion")
-            return "", triplets
+            return []
 
-        context = await self.resolve_edges_to_text(triplets)
+        # context = await self.resolve_edges_to_text(triplets)
 
-        return context, triplets
+        return triplets
 
     async def get_completion(
         self,
         query: str,
-        context: Optional[Any] = None,
-    ) -> Any:
+        context: Optional[List[Edge]] = None,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
+    ) -> List[Any]:
         """
         Generates a completion using graph connections context based on a query.
 
@@ -169,52 +157,65 @@ class GraphCompletionRetriever(BaseRetriever):
             - query (str): The query string for which a completion is generated.
             - context (Optional[Any]): Optional context to use for generating the completion; if
               not provided, context is retrieved based on the query. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
 
         Returns:
         --------
 
             - Any: A generated completion based on the query and context provided.
         """
-        triplets = None
+        triplets = context
 
-        if context is None:
-            context, triplets = await self.get_context(query)
+        if triplets is None:
+            triplets = await self.get_context(query)
 
-        completion = await generate_completion(
-            query=query,
-            context=context,
-            user_prompt_path=self.user_prompt_path,
-            system_prompt_path=self.system_prompt_path,
-            system_prompt=self.system_prompt,
-            only_context=self.only_context,
-        )
+        context_text = await resolve_edges_to_text(triplets)
+
+        cache_config = CacheConfig()
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+        session_save = user_id and cache_config.caching
+
+        if session_save:
+            conversation_history = await get_conversation_history(session_id=session_id)
+
+            context_summary, completion = await asyncio.gather(
+                summarize_text(context_text),
+                generate_completion(
+                    query=query,
+                    context=context_text,
+                    user_prompt_path=self.user_prompt_path,
+                    system_prompt_path=self.system_prompt_path,
+                    system_prompt=self.system_prompt,
+                    conversation_history=conversation_history,
+                    response_model=response_model,
+                ),
+            )
+        else:
+            completion = await generate_completion(
+                query=query,
+                context=context_text,
+                user_prompt_path=self.user_prompt_path,
+                system_prompt_path=self.system_prompt_path,
+                system_prompt=self.system_prompt,
+                response_model=response_model,
+            )
 
         if self.save_interaction and context and triplets and completion:
             await self.save_qa(
-                question=query, answer=completion, context=context, triplets=triplets
+                question=query, answer=completion, context=context_text, triplets=triplets
+            )
+
+        if session_save:
+            await save_conversation_history(
+                query=query,
+                context_summary=context_summary,
+                answer=completion,
+                session_id=session_id,
             )
 
         return [completion]
-
-    def _top_n_words(self, text, stop_words=None, top_n=3, separator=", "):
-        """Concatenates the top N frequent words in text."""
-        if stop_words is None:
-            stop_words = DEFAULT_STOP_WORDS
-
-        words = [word.lower().strip(string.punctuation) for word in text.split()]
-
-        if stop_words:
-            words = [word for word in words if word and word not in stop_words]
-
-        top_words = [word for word, freq in Counter(words).most_common(top_n)]
-
-        return separator.join(top_words)
-
-    def _get_title(self, text: str, first_n_words: int = 7, top_n_words: int = 3) -> str:
-        """Creates a title, by combining first words with most frequent words from the text."""
-        first_n_words = text.split()[:first_n_words]
-        top_n_words = self._top_n_words(text, top_n=top_n_words)
-        return f"{' '.join(first_n_words)}... [{top_n_words}]"
 
     async def save_qa(self, question: str, answer: str, context: str, triplets: List) -> None:
         """
@@ -240,7 +241,7 @@ class GraphCompletionRetriever(BaseRetriever):
             belongs_to_set=interactions_node_set,
         )
 
-        await add_data_points(data_points=[cognee_user_interaction], update_edge_collection=False)
+        await add_data_points(data_points=[cognee_user_interaction])
 
         relationships = []
         relationship_name = "used_graph_element_to_answer"

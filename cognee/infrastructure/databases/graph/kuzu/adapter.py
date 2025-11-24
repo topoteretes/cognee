@@ -4,7 +4,7 @@ import os
 import json
 import asyncio
 import tempfile
-from uuid import UUID
+from uuid import UUID, uuid5, NAMESPACE_OID
 from kuzu import Connection
 from kuzu.database import Database
 from datetime import datetime, timezone
@@ -23,8 +23,13 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.tasks.temporal_graph.models import Timestamp
+from cognee.infrastructure.databases.cache.config import get_cache_config
 
 logger = get_logger()
+
+cache_config = get_cache_config()
+if cache_config.shared_kuzu_lock:
+    from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
 
 
 class KuzuAdapter(GraphDBInterface):
@@ -39,15 +44,46 @@ class KuzuAdapter(GraphDBInterface):
 
     def __init__(self, db_path: str):
         """Initialize Kuzu database connection and schema."""
+        self.open_connections = 0
+        self._is_closed = False
         self.db_path = db_path  # Path for the database directory
         self.db: Optional[Database] = None
         self.connection: Optional[Connection] = None
-        self.executor = ThreadPoolExecutor()
-        self._initialize_connection()
+        if cache_config.shared_kuzu_lock:
+            self.redis_lock = get_cache_engine(
+                lock_key="kuzu-lock-" + str(uuid5(NAMESPACE_OID, db_path))
+            )
+        else:
+            self.executor = ThreadPoolExecutor()
+            self._initialize_connection()
         self.KUZU_ASYNC_LOCK = asyncio.Lock()
+        self._connection_change_lock = asyncio.Lock()
 
     def _initialize_connection(self) -> None:
         """Initialize the Kuzu database connection and schema."""
+
+        def _install_json_extension():
+            """
+            Function handles installing of the json extension for the current Kuzu version.
+            This has to be done with an empty graph db before connecting to an existing database otherwise
+            missing json extension errors will be raised.
+            """
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", delete=True) as temp_file:
+                    temp_graph_file = temp_file.name
+                    tmp_db = Database(
+                        temp_graph_file,
+                        buffer_pool_size=2048 * 1024 * 1024,  # 2048MB buffer pool
+                        max_db_size=4096 * 1024 * 1024,
+                    )
+                    tmp_db.init_database()
+                    connection = Connection(tmp_db)
+                    connection.execute("INSTALL JSON;")
+            except Exception as e:
+                logger.info(f"JSON extension already installed or not needed: {e}")
+
+        _install_json_extension()
+
         try:
             if "s3://" in self.db_path:
                 with tempfile.NamedTemporaryFile(mode="w", delete=False) as temp_file:
@@ -110,11 +146,6 @@ class KuzuAdapter(GraphDBInterface):
             self.connection = Connection(self.db)
 
             try:
-                self.connection.execute("INSTALL JSON;")
-            except Exception as e:
-                logger.info(f"JSON extension already installed or not needed: {e}")
-
-            try:
                 self.connection.execute("LOAD EXTENSION JSON;")
                 logger.info("Loaded JSON extension")
             except Exception as e:
@@ -167,6 +198,15 @@ class KuzuAdapter(GraphDBInterface):
         except FileNotFoundError:
             logger.warning(f"Kuzu S3 storage file not found: {self.db_path}")
 
+    async def is_empty(self) -> bool:
+        query = """
+        MATCH (n)
+        RETURN true
+        LIMIT 1;
+        """
+        query_result = await self.query(query)
+        return len(query_result) == 0
+
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
         """
         Execute a Kuzu query asynchronously with automatic reconnection.
@@ -191,9 +231,13 @@ class KuzuAdapter(GraphDBInterface):
         params = params or {}
 
         def blocking_query():
+            lock_acquired = False
             try:
+                if cache_config.shared_kuzu_lock:
+                    self.redis_lock.acquire_lock()
+                    lock_acquired = True
                 if not self.connection:
-                    logger.debug("Reconnecting to Kuzu database...")
+                    logger.info("Reconnecting to Kuzu database...")
                     self._initialize_connection()
 
                 result = self.connection.execute(query, params)
@@ -207,12 +251,47 @@ class KuzuAdapter(GraphDBInterface):
                             val = val.as_py()
                         processed_rows.append(val)
                     rows.append(tuple(processed_rows))
+
                 return rows
             except Exception as e:
                 logger.error(f"Query execution failed: {str(e)}")
                 raise
+            finally:
+                if cache_config.shared_kuzu_lock and lock_acquired:
+                    try:
+                        self.close()
+                    finally:
+                        self.redis_lock.release_lock()
 
-        return await loop.run_in_executor(self.executor, blocking_query)
+        if cache_config.shared_kuzu_lock:
+            async with self._connection_change_lock:
+                self.open_connections += 1
+                logger.info(f"Open connections after open: {self.open_connections}")
+                try:
+                    result = blocking_query()
+                finally:
+                    self.open_connections -= 1
+                    logger.info(f"Open connections after close: {self.open_connections}")
+                return result
+        else:
+            result = await loop.run_in_executor(self.executor, blocking_query)
+            return result
+
+    def close(self):
+        if self.connection:
+            del self.connection
+            self.connection = None
+        if self.db:
+            del self.db
+            self.db = None
+        self._is_closed = True
+        logger.info("Kuzu database closed successfully")
+
+    def reopen(self):
+        if self._is_closed:
+            self._is_closed = False
+            self._initialize_connection()
+            logger.info("Kuzu database re-opened successfully")
 
     @asynccontextmanager
     async def get_session(self):
@@ -1277,7 +1356,6 @@ class KuzuAdapter(GraphDBInterface):
             A tuple containing a list of filtered node properties and a list of filtered edge
             properties.
         """
-
         where_clauses = []
         params = {}
 
@@ -1288,16 +1366,56 @@ class KuzuAdapter(GraphDBInterface):
                 params[param_name] = values
 
         where_clause = " AND ".join(where_clauses)
-        nodes_query = f"MATCH (n:Node) WHERE {where_clause} RETURN properties(n)"
+        nodes_query = f"""
+        MATCH (n:Node)
+        WHERE {where_clause}
+        RETURN n.id, {{
+            name: n.name,
+            type: n.type,
+            properties: n.properties
+        }}
+        """
         edges_query = f"""
         MATCH (n1:Node)-[r:EDGE]->(n2:Node)
         WHERE {where_clause.replace("n.", "n1.")} AND {where_clause.replace("n.", "n2.")}
-        RETURN properties(r)
+        RETURN n1.id, n2.id, r.relationship_name, r.properties
         """
         nodes, edges = await asyncio.gather(
             self.query(nodes_query, params), self.query(edges_query, params)
         )
-        return ([n[0] for n in nodes], [e[0] for e in edges])
+        formatted_nodes = []
+        for n in nodes:
+            if n[0]:
+                node_id = str(n[0])
+                props = n[1]
+                if props.get("properties"):
+                    try:
+                        additional_props = json.loads(props["properties"])
+                        props.update(additional_props)
+                        del props["properties"]
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse properties JSON for node {node_id}")
+                formatted_nodes.append((node_id, props))
+        if not formatted_nodes:
+            logger.warning("No nodes found in the database")
+            return [], []
+
+        formatted_edges = []
+        for e in edges:
+            if e and len(e) >= 3:
+                source_id = str(e[0])
+                target_id = str(e[1])
+                rel_type = str(e[2])
+                props = {}
+                if len(e) > 3 and e[3]:
+                    try:
+                        props = json.loads(e[3])
+                    except (json.JSONDecodeError, TypeError):
+                        logger.warning(
+                            f"Failed to parse edge properties for {source_id}->{target_id}"
+                        )
+                formatted_edges.append((source_id, target_id, rel_type, props))
+        return formatted_nodes, formatted_edges
 
     async def get_graph_metrics(self, include_optional=False) -> Dict[str, Any]:
         """
@@ -1504,44 +1622,6 @@ class KuzuAdapter(GraphDBInterface):
 
         except Exception as e:
             logger.error(f"Failed to delete graph data: {e}")
-            raise
-
-    async def clear_database(self) -> None:
-        """
-        Clear all data from the database by deleting the database files and reinitializing.
-
-        This method removes all files associated with the database and reinitializes the Kuzu
-        database structure, ensuring a completely empty state. It handles exceptions that might
-        occur during file deletions or initializations carefully.
-        """
-        try:
-            if self.connection:
-                self.connection = None
-            if self.db:
-                self.db.close()
-                self.db = None
-
-            db_dir = os.path.dirname(self.db_path)
-            db_name = os.path.basename(self.db_path)
-            file_storage = get_file_storage(db_dir)
-
-            if await file_storage.file_exists(db_name):
-                await file_storage.remove_all()
-                logger.info(f"Deleted Kuzu database files at {self.db_path}")
-
-            # Reinitialize the database
-            self._initialize_connection()
-            # Verify the database is empty
-            result = self.connection.execute("MATCH (n:Node) RETURN COUNT(n)")
-            count = result.get_next()[0] if result.has_next() else 0
-            if count > 0:
-                logger.warning(
-                    f"Database still contains {count} nodes after clearing, forcing deletion"
-                )
-                self.connection.execute("MATCH (n:Node) DETACH DELETE n")
-            logger.info("Database cleared successfully")
-        except Exception as e:
-            logger.error(f"Error during database clearing: {e}")
             raise
 
     async def get_document_subgraph(self, data_id: str):

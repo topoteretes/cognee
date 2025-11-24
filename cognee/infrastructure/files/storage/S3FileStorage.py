@@ -1,6 +1,5 @@
 import os
-import s3fs
-from typing import BinaryIO, Union
+from typing import BinaryIO, Union, TYPE_CHECKING
 from contextlib import asynccontextmanager
 
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
@@ -8,23 +7,34 @@ from cognee.infrastructure.utils.run_async import run_async
 from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
 from .storage import Storage
 
+if TYPE_CHECKING:
+    import s3fs
+
 
 class S3FileStorage(Storage):
     """
-    Manage local file storage operations such as storing, retrieving, and managing files on
-    the filesystem.
+    Manage S3 file storage operations such as storing, retrieving, and managing files on
+    S3-compatible storage.
     """
 
     storage_path: str
-    s3: s3fs.S3FileSystem
+    s3: "s3fs.S3FileSystem"
 
     def __init__(self, storage_path: str):
+        try:
+            import s3fs
+        except ImportError:
+            raise ImportError(
+                's3fs is required for S3FileStorage. Install it with: pip install cognee"[aws]"'
+            )
+
         self.storage_path = storage_path
         s3_config = get_s3_config()
         if s3_config.aws_access_key_id is not None and s3_config.aws_secret_access_key is not None:
             self.s3 = s3fs.S3FileSystem(
                 key=s3_config.aws_access_key_id,
                 secret=s3_config.aws_secret_access_key,
+                token=s3_config.aws_session_token,
                 anon=False,
                 endpoint_url=s3_config.aws_endpoint_url,
                 client_kwargs={"region_name": s3_config.aws_region},
@@ -60,18 +70,18 @@ class S3FileStorage(Storage):
         if overwrite or not await self.file_exists(file_path):
 
             def save_data_to_file():
-                with self.s3.open(
-                    full_file_path,
-                    mode="w" if isinstance(data, str) else "wb",
-                    encoding="utf-8" if isinstance(data, str) else None,
-                ) as file:
-                    if hasattr(data, "read"):
-                        data.seek(0)
-                        file.write(data.read())
-                    else:
+                if isinstance(data, str):
+                    with self.s3.open(
+                        full_file_path, mode="w", encoding="utf-8", newline="\n"
+                    ) as file:
                         file.write(data)
-
-                    file.close()
+                else:
+                    with self.s3.open(full_file_path, mode="wb") as file:
+                        if hasattr(data, "read"):
+                            data.seek(0)
+                            file.write(data.read())
+                        else:
+                            file.write(data)
 
             await run_async(save_data_to_file)
 
@@ -146,25 +156,28 @@ class S3FileStorage(Storage):
             self.s3.isfile, os.path.join(self.storage_path.replace("s3://", ""), file_path)
         )
 
+    async def get_size(self, file_path: str) -> int:
+        return await run_async(
+            self.s3.size, os.path.join(self.storage_path.replace("s3://", ""), file_path)
+        )
+
     async def ensure_directory_exists(self, directory_path: str = ""):
         """
         Ensure that the specified directory exists, creating it if necessary.
 
-        If the directory already exists, no action is taken.
+        For S3 storage, this is a no-op since directories are created implicitly
+        when files are written to paths. S3 doesn't have actual directories,
+        just object keys with prefixes that appear as directories.
 
         Parameters:
         -----------
 
             - directory_path (str): The path of the directory to check or create.
         """
-        if not directory_path.strip():
-            directory_path = self.storage_path.replace("s3://", "")
-
-        def ensure_directory():
-            if not self.s3.exists(directory_path):
-                self.s3.makedirs(directory_path, exist_ok=True)
-
-        await run_async(ensure_directory)
+        # In S3, directories don't exist as separate entities - they're just prefixes
+        # When you write a file to s3://bucket/path/to/file.txt, the "directories"
+        # path/ and path/to/ are implicitly created. No explicit action needed.
+        pass
 
     async def copy_file(self, source_file_path: str, destination_file_path: str):
         """
@@ -207,6 +220,55 @@ class S3FileStorage(Storage):
                 self.s3.rm_file(full_file_path)
 
         await run_async(remove_file)
+
+    async def list_files(self, directory_path: str, recursive: bool = False) -> list[str]:
+        """
+        List all files in the specified directory.
+
+        Parameters:
+        -----------
+            - directory_path (str): The directory path to list files from
+            - recursive (bool): If True, list files recursively in subdirectories
+
+        Returns:
+        --------
+            - list[str]: List of file paths relative to the storage root
+        """
+
+        def list_files_sync():
+            if directory_path:
+                # Combine storage path with directory path
+                full_path = os.path.join(self.storage_path.replace("s3://", ""), directory_path)
+            else:
+                full_path = self.storage_path.replace("s3://", "")
+
+            if recursive:
+                # Use ** for recursive search
+                pattern = f"{full_path}/**"
+            else:
+                # Just files in the immediate directory
+                pattern = f"{full_path}/*"
+
+            # Use s3fs glob to find files
+            try:
+                all_paths = self.s3.glob(pattern)
+                # Filter to only files (not directories)
+                files = [path for path in all_paths if self.s3.isfile(path)]
+
+                # Convert back to relative paths from storage root
+                storage_prefix = self.storage_path.replace("s3://", "")
+                relative_files = []
+                for file_path in files:
+                    if file_path.startswith(storage_prefix):
+                        relative_path = file_path[len(storage_prefix) :].lstrip("/")
+                        relative_files.append(relative_path)
+
+                return relative_files
+            except Exception:
+                # If directory doesn't exist or other error, return empty list
+                return []
+
+        return await run_async(list_files_sync)
 
     async def remove_all(self, tree_path: str):
         """

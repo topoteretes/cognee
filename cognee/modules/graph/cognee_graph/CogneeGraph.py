@@ -76,7 +76,7 @@ class CogneeGraph(CogneeAbstractGraph):
             start_time = time.time()
 
             # Determine projection strategy
-            if node_type is not None and node_name not in [None, []]:
+            if node_type is not None and node_name not in [None, [], ""]:
                 nodes_data, edges_data = await adapter.get_nodeset_subgraph(
                     node_type=node_type, node_name=node_name
                 )
@@ -161,7 +161,7 @@ class CogneeGraph(CogneeAbstractGraph):
                 edge_distances = await vector_engine.search(
                     collection_name="EdgeType_relationship_name",
                     query_vector=query_vector,
-                    limit=0,
+                    limit=None,
                 )
                 projection_time = time.time() - start_time
                 logger.info(
@@ -171,8 +171,10 @@ class CogneeGraph(CogneeAbstractGraph):
             embedding_map = {result.payload["text"]: result.score for result in edge_distances}
 
             for edge in self.edges:
-                relationship_type = edge.attributes.get("relationship_type")
-                distance = embedding_map.get(relationship_type, None)
+                edge_key = edge.attributes.get("edge_text") or edge.attributes.get(
+                    "relationship_type"
+                )
+                distance = embedding_map.get(edge_key, None)
                 if distance is not None:
                     edge.attributes["vector_distance"] = distance
 
@@ -180,7 +182,7 @@ class CogneeGraph(CogneeAbstractGraph):
             logger.error(f"Error mapping vector distances to edges: {str(ex)}")
             raise ex
 
-    async def calculate_top_triplet_importances(self, k: int) -> List:
+    async def calculate_top_triplet_importances(self, k: int) -> List[Edge]:
         def score(edge):
             n1 = edge.node1.attributes.get("vector_distance", 1)
             n2 = edge.node2.attributes.get("vector_distance", 1)

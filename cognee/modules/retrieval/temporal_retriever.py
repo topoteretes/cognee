@@ -1,15 +1,22 @@
 import os
+import asyncio
 from typing import Any, Optional, List, Type
-
+from datetime import datetime
 
 from operator import itemgetter
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
+from cognee.modules.retrieval.utils.session_cache import (
+    save_conversation_history,
+    get_conversation_history,
+)
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.shared.logging_utils import get_logger
-
+from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache.config import CacheConfig
 
 from cognee.tasks.temporal_graph.models import QueryInterval
 
@@ -72,7 +79,11 @@ class TemporalRetriever(GraphCompletionRetriever):
         else:
             base_directory = None
 
-        system_prompt = LLMGateway.render_prompt(prompt_path, {}, base_directory=base_directory)
+        time_now = datetime.now().strftime("%d-%m-%Y")
+
+        system_prompt = render_prompt(
+            prompt_path, {"time_now": time_now}, base_directory=base_directory
+        )
 
         interval = await LLMGateway.acreate_structured_output(query, system_prompt, QueryInterval)
 
@@ -127,23 +138,77 @@ class TemporalRetriever(GraphCompletionRetriever):
         query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
 
         vector_search_results = await vector_engine.search(
-            collection_name="Event_name", query_vector=query_vector, limit=0
+            collection_name="Event_name", query_vector=query_vector, limit=None
         )
 
         top_k_events = await self.filter_top_k_events(relevant_events, vector_search_results)
 
         return self.descriptions_to_string(top_k_events)
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
-        """Generates a response using the query and optional context."""
+    async def get_completion(
+        self,
+        query: str,
+        context: Optional[str] = None,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
+    ) -> List[Any]:
+        """
+        Generates a response using the query and optional context.
 
-        context = await self.get_context(query=query)
+        Parameters:
+        -----------
 
-        completion = await generate_completion(
-            query=query,
-            context=context,
-            user_prompt_path=self.user_prompt_path,
-            system_prompt_path=self.system_prompt_path,
-        )
+            - query (str): The query string for which a completion is generated.
+            - context (Optional[str]): Optional context to use; if None, it will be
+              retrieved based on the query. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
+            - response_model (Type): The Pydantic model type for structured output. (default str)
+
+        Returns:
+        --------
+
+            - List[str]: A list containing the generated completion.
+        """
+        if not context:
+            context = await self.get_context(query=query)
+
+        if context:
+            # Check if we need to generate context summary for caching
+            cache_config = CacheConfig()
+            user = session_user.get()
+            user_id = getattr(user, "id", None)
+            session_save = user_id and cache_config.caching
+
+            if session_save:
+                conversation_history = await get_conversation_history(session_id=session_id)
+
+                context_summary, completion = await asyncio.gather(
+                    summarize_text(context),
+                    generate_completion(
+                        query=query,
+                        context=context,
+                        user_prompt_path=self.user_prompt_path,
+                        system_prompt_path=self.system_prompt_path,
+                        conversation_history=conversation_history,
+                        response_model=response_model,
+                    ),
+                )
+            else:
+                completion = await generate_completion(
+                    query=query,
+                    context=context,
+                    user_prompt_path=self.user_prompt_path,
+                    system_prompt_path=self.system_prompt_path,
+                    response_model=response_model,
+                )
+
+            if session_save:
+                await save_conversation_history(
+                    query=query,
+                    context_summary=context_summary,
+                    answer=completion,
+                    session_id=session_id,
+                )
 
         return [completion]

@@ -16,6 +16,15 @@ from cognee.modules.users.models import (
 
 
 async def give_default_permission_to_user(user_id: UUID, permission_name: str):
+    """
+        Give the permission with given name to the user with the given id as a default permission.
+    Args:
+        user_id: Id of the tenant
+        permission_name: Name of the permission
+
+    Returns:
+        None
+    """
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         user = (await session.execute(select(User).where(User.id == user_id))).scalars().first()

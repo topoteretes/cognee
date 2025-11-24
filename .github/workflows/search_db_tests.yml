@@ -51,20 +51,6 @@ jobs:
     name: Search test for Neo4j/LanceDB/Sqlite
     runs-on: ubuntu-22.04
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'neo4j/lance/sqlite') }}
-    services:
-      neo4j:
-        image: neo4j:5.11
-        env:
-          NEO4J_AUTH: neo4j/pleaseletmein
-          NEO4J_PLUGINS: '["apoc","graph-data-science"]'
-        ports:
-          - 7474:7474
-          - 7687:7687
-        options: >-
-          --health-cmd="cypher-shell -u neo4j -p pleaseletmein 'RETURN 1'"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
 
     steps:
       - name: Check out
@@ -76,6 +62,10 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: ${{ inputs.python-version }}
+
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
 
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
@@ -94,9 +84,10 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'neo4j'
           VECTOR_DB_PROVIDER: 'lancedb'
           DB_PROVIDER: 'sqlite'
-          GRAPH_DATABASE_URL: bolt://localhost:7687
-          GRAPH_DATABASE_USERNAME: neo4j
-          GRAPH_DATABASE_PASSWORD: pleaseletmein
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
+          GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
+          GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
+          GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
         run: uv run python ./cognee/tests/test_search_db.py
 
   run-kuzu-pgvector-postgres-search-tests:
@@ -145,6 +136,7 @@ jobs:
             EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
             GRAPH_DATABASE_PROVIDER: 'kuzu'
             VECTOR_DB_PROVIDER: 'pgvector'
+            ENABLE_BACKEND_ACCESS_CONTROL: 'false'
             DB_PROVIDER: 'postgres'
             DB_NAME: 'cognee_db'
             DB_HOST: '127.0.0.1'
@@ -158,19 +150,6 @@ jobs:
     runs-on: ubuntu-22.04
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'neo4j/pgvector/postgres') }}
     services:
-      neo4j:
-        image: neo4j:5.11
-        env:
-          NEO4J_AUTH: neo4j/pleaseletmein
-          NEO4J_PLUGINS: '["apoc","graph-data-science"]'
-        ports:
-          - 7474:7474
-          - 7687:7687
-        options: >-
-          --health-cmd="cypher-shell -u neo4j -p pleaseletmein 'RETURN 1'"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
       postgres:
         image: pgvector/pgvector:pg17
         env:
@@ -196,6 +175,10 @@ jobs:
           python-version: ${{ inputs.python-version }}
           extra-dependencies: "postgres"
 
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
+
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
 
@@ -213,9 +196,10 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'neo4j'
           VECTOR_DB_PROVIDER: 'pgvector'
           DB_PROVIDER: 'postgres'
-          GRAPH_DATABASE_URL: bolt://localhost:7687
-          GRAPH_DATABASE_USERNAME: neo4j
-          GRAPH_DATABASE_PASSWORD: pleaseletmein
+          GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
+          GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
+          GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
           DB_NAME: cognee_db
           DB_HOST: 127.0.0.1
           DB_PORT: 5432

@@ -6,6 +6,7 @@ from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
+from cognee import update
 
 logger = get_logger()
 
@@ -42,7 +43,7 @@ async def main():
 
     await cognee.add([text], dataset_name)
 
-    await cognee.cognify([dataset_name])
+    cognify_run_info = await cognee.cognify([dataset_name])
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
@@ -51,7 +52,7 @@ async def main():
     random_node_name = random_node.payload["text"]
 
     search_results = await cognee.search(
-        query_type=SearchType.INSIGHTS, query_text=random_node_name
+        query_type=SearchType.GRAPH_COMPLETION, query_text=random_node_name
     )
     assert len(search_results) != 0, "The search results list is empty."
     print("\n\nExtracted sentences are:\n")
@@ -76,6 +77,37 @@ async def main():
     history = await get_history(user.id)
 
     assert len(history) == 6, "Search history is not correct."
+
+    # Test updating of documents
+    # Get Pipeline Run object
+    pipeline_run_obj = list(cognify_run_info.values())[0]
+    for data_item in pipeline_run_obj.data_ingestion_info:
+        # Update all documents in dataset to only contain Mark and Cindy information
+        await update(
+            dataset_id=pipeline_run_obj.dataset_id,
+            data_id=data_item["data_id"],
+            data="Mark met with Cindy at a cafe.",
+        )
+
+    search_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="What information do you contain?",
+        dataset_ids=[pipeline_run_obj.dataset_id],
+    )
+    assert "Mark" in search_results[0]["search_result"][0], (
+        "Failed to update document, no mention of Mark in search results"
+    )
+    assert "Cindy" in search_results[0]["search_result"][0], (
+        "Failed to update document, no mention of Cindy in search results"
+    )
+    assert "Artificial intelligence" not in search_results[0]["search_result"][0], (
+        "Failed to update document, Artificial intelligence still mentioned in search results"
+    )
+
+    # Test visualization
+    from cognee import visualize_graph
+
+    await visualize_graph()
 
     # Assert local data files are cleaned properly
     await cognee.prune.prune_data()

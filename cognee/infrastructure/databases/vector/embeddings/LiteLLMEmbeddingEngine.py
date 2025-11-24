@@ -1,15 +1,21 @@
 import asyncio
+import logging
+
 from cognee.shared.logging_utils import get_logger
 from typing import List, Optional
 import numpy as np
 import math
+from tenacity import (
+    retry,
+    stop_after_delay,
+    wait_exponential_jitter,
+    retry_if_not_exception_type,
+    before_sleep_log,
+)
 import litellm
 import os
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions import EmbeddingException
-from cognee.infrastructure.llm.tokenizer.Gemini import (
-    GeminiTokenizer,
-)
 from cognee.infrastructure.llm.tokenizer.HuggingFace import (
     HuggingFaceTokenizer,
 )
@@ -18,10 +24,6 @@ from cognee.infrastructure.llm.tokenizer.Mistral import (
 )
 from cognee.infrastructure.llm.tokenizer.TikToken import (
     TikTokenTokenizer,
-)
-from cognee.infrastructure.databases.vector.embeddings.embedding_rate_limiter import (
-    embedding_rate_limit_async,
-    embedding_sleep_and_retry_async,
 )
 
 litellm.set_verbose = False
@@ -58,6 +60,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         endpoint: str = None,
         api_version: str = None,
         max_completion_tokens: int = 512,
+        batch_size: int = 100,
     ):
         self.api_key = api_key
         self.endpoint = endpoint
@@ -68,14 +71,20 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.max_completion_tokens = max_completion_tokens
         self.tokenizer = self.get_tokenizer()
         self.retry_count = 0
+        self.batch_size = batch_size
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
         if isinstance(enable_mocking, bool):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
-    @embedding_sleep_and_retry_async()
-    @embedding_rate_limit_async
+    @retry(
+        stop=stop_after_delay(128),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        reraise=True,
+    )
     async def embed_text(self, text: List[str]) -> List[List[float]]:
         """
         Embed a list of text strings into vector representations.
@@ -148,7 +157,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             litellm.exceptions.NotFoundError,
         ) as e:
             logger.error(f"Embedding error with model {self.model}: {str(e)}")
-            raise EmbeddingException(f"Failed to index data points using model {self.model}")
+            raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
 
         except Exception as error:
             logger.error("Error embedding text: %s", str(error))
@@ -164,6 +173,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             - int: The size (dimensionality) of the embedding vectors.
         """
         return self.dimensions
+
+    def get_batch_size(self) -> int:
+        """
+        Return the desired batch size for embedding calls
+
+        Returns:
+
+        """
+        return self.batch_size
 
     def get_tokenizer(self):
         """
@@ -183,9 +201,15 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 model=model, max_completion_tokens=self.max_completion_tokens
             )
         elif "gemini" in self.provider.lower():
-            tokenizer = GeminiTokenizer(
-                model=model, max_completion_tokens=self.max_completion_tokens
+            # Since Gemini tokenization needs to send an API request to get the token count we will use TikToken to
+            # count tokens as we calculate tokens word by word
+            tokenizer = TikTokenTokenizer(
+                model=None, max_completion_tokens=self.max_completion_tokens
             )
+            # Note: Gemini Tokenizer expects an LLM model as input and not the embedding model
+            # tokenizer = GeminiTokenizer(
+            #     llm_model=llm_model, max_completion_tokens=self.max_completion_tokens
+            # )
         elif "mistral" in self.provider.lower():
             tokenizer = MistralTokenizer(
                 model=model, max_completion_tokens=self.max_completion_tokens

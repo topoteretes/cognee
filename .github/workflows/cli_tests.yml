@@ -39,6 +39,7 @@ jobs:
     name: CLI Unit Tests
     runs-on: ubuntu-22.04
     env:
+      ENV: 'dev'
       LLM_PROVIDER: openai
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
       LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -60,12 +61,13 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Run CLI Unit Tests
-        run: uv run pytest cognee/tests/unit/cli/ -v
+        run: uv run pytest cognee/tests/cli_tests/cli_unit_tests/ -v
 
   cli-integration-tests:
     name: CLI Integration Tests
     runs-on: ubuntu-22.04
     env:
+      ENV: 'dev'
       LLM_PROVIDER: openai
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
       LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -87,12 +89,13 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Run CLI Integration Tests
-        run: uv run pytest cognee/tests/integration/cli/ -v
+        run: uv run pytest cognee/tests/cli_tests/cli_integration_tests/ -v
 
   cli-functionality-tests:
     name: CLI Functionality Tests
     runs-on: ubuntu-22.04
     env:
+      ENV: 'dev'
       LLM_PROVIDER: openai
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
       LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -135,12 +138,12 @@ jobs:
         run: |
           # Test invalid command (should fail gracefully)
           ! uv run python -m cognee.cli._cognee invalid_command
-          
+
           # Test missing required arguments (should fail gracefully)
           ! uv run python -m cognee.cli._cognee search
-          
+
           # Test invalid search type (should fail gracefully)
           ! uv run python -m cognee.cli._cognee search "test" --query-type INVALID_TYPE
-          
+
           # Test invalid chunker (should fail gracefully)
           ! uv run python -m cognee.cli._cognee cognify --chunker InvalidChunker

@@ -3,8 +3,16 @@ from cognee.shared.logging_utils import get_logger
 import aiohttp
 from typing import List, Optional
 import os
-
+import litellm
+import logging
 import aiohttp.http_exceptions
+from tenacity import (
+    retry,
+    stop_after_delay,
+    wait_exponential_jitter,
+    retry_if_not_exception_type,
+    before_sleep_log,
+)
 
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.llm.tokenizer.HuggingFace import (
@@ -14,6 +22,7 @@ from cognee.infrastructure.databases.vector.embeddings.embedding_rate_limiter im
     embedding_rate_limit_async,
     embedding_sleep_and_retry_async,
 )
+from cognee.shared.utils import create_secure_ssl_context
 
 logger = get_logger("OllamaEmbeddingEngine")
 
@@ -53,12 +62,14 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         max_completion_tokens: int = 512,
         endpoint: Optional[str] = "http://localhost:11434/api/embeddings",
         huggingface_tokenizer: str = "Salesforce/SFR-Embedding-Mistral",
+        batch_size: int = 100,
     ):
         self.model = model
         self.dimensions = dimensions
         self.max_completion_tokens = max_completion_tokens
         self.endpoint = endpoint
         self.huggingface_tokenizer_name = huggingface_tokenizer
+        self.batch_size = batch_size
         self.tokenizer = self.get_tokenizer()
 
         enable_mocking = os.getenv("MOCK_EMBEDDING", "false")
@@ -66,7 +77,6 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
 
-    @embedding_rate_limit_async
     async def embed_text(self, text: List[str]) -> List[List[float]]:
         """
         Generate embedding vectors for a list of text prompts.
@@ -89,26 +99,32 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         embeddings = await asyncio.gather(*[self._get_embedding(prompt) for prompt in text])
         return embeddings
 
-    @embedding_sleep_and_retry_async()
+    @retry(
+        stop=stop_after_delay(128),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        reraise=True,
+    )
     async def _get_embedding(self, prompt: str) -> List[float]:
         """
         Internal method to call the Ollama embeddings endpoint for a single prompt.
         """
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-        }
+        payload = {"model": self.model, "prompt": prompt, "input": prompt}
+
         headers = {}
         api_key = os.getenv("LLM_API_KEY")
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        async with aiohttp.ClientSession() as session:
+        ssl_context = create_secure_ssl_context()
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.post(
                 self.endpoint, json=payload, headers=headers, timeout=60.0
             ) as response:
                 data = await response.json()
-                return data["embedding"]
+                return data["embeddings"][0]
 
     def get_vector_size(self) -> int:
         """
@@ -120,6 +136,15 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
             - int: The dimension of the embedding vectors.
         """
         return self.dimensions
+
+    def get_batch_size(self) -> int:
+        """
+        Return the desired batch size for embedding calls
+
+        Returns:
+
+        """
+        return self.batch_size
 
     def get_tokenizer(self):
         """

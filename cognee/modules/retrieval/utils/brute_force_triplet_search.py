@@ -8,7 +8,7 @@ from cognee.infrastructure.databases.vector.exceptions import CollectionNotFound
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
-from cognee.modules.users.methods import get_default_user
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 
@@ -63,14 +63,15 @@ async def get_memory_fragment(
     if properties_to_project is None:
         properties_to_project = ["id", "description", "name", "type", "text"]
 
+    memory_fragment = CogneeGraph()
+
     try:
         graph_engine = await get_graph_engine()
-        memory_fragment = CogneeGraph()
 
         await memory_fragment.project_graph_from_db(
             graph_engine,
             node_properties_to_project=properties_to_project,
-            edge_properties_to_project=["relationship_name"],
+            edge_properties_to_project=["relationship_name", "edge_text"],
             node_type=node_type,
             node_name=node_name,
         )
@@ -88,46 +89,18 @@ async def get_memory_fragment(
 
 async def brute_force_triplet_search(
     query: str,
-    user: User = None,
     top_k: int = 5,
-    collections: List[str] = None,
-    properties_to_project: List[str] = None,
+    collections: Optional[List[str]] = None,
+    properties_to_project: Optional[List[str]] = None,
     memory_fragment: Optional[CogneeGraph] = None,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
-) -> list:
-    if user is None:
-        user = await get_default_user()
-
-    retrieved_results = await brute_force_search(
-        query,
-        user,
-        top_k,
-        collections=collections,
-        properties_to_project=properties_to_project,
-        memory_fragment=memory_fragment,
-        node_type=node_type,
-        node_name=node_name,
-    )
-    return retrieved_results
-
-
-async def brute_force_search(
-    query: str,
-    user: User,
-    top_k: int,
-    collections: List[str] = None,
-    properties_to_project: List[str] = None,
-    memory_fragment: Optional[CogneeGraph] = None,
-    node_type: Optional[Type] = None,
-    node_name: Optional[List[str]] = None,
-) -> list:
+) -> List[Edge]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
 
     Args:
         query (str): The search query.
-        user (User): The user performing the search.
         top_k (int): The number of top results to retrieve.
         collections (Optional[List[str]]): List of collections to query.
         properties_to_project (Optional[List[str]]): List of properties to project.
@@ -164,12 +137,10 @@ async def brute_force_search(
 
     query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
 
-    send_telemetry("cognee.brute_force_triplet_search EXECUTION STARTED", user.id)
-
     async def search_in_collection(collection_name: str):
         try:
             return await vector_engine.search(
-                collection_name=collection_name, query_vector=query_vector, limit=0
+                collection_name=collection_name, query_vector=query_vector, limit=None
             )
         except CollectionNotFoundError:
             return []
@@ -201,20 +172,14 @@ async def brute_force_search(
 
         results = await memory_fragment.calculate_top_triplet_importances(k=top_k)
 
-        send_telemetry("cognee.brute_force_triplet_search EXECUTION COMPLETED", user.id)
-
         return results
 
     except CollectionNotFoundError:
         return []
     except Exception as error:
         logger.error(
-            "Error during brute force search for user: %s, query: %s. Error: %s",
-            user.id,
+            "Error during brute force search for query: %s. Error: %s",
             query,
             error,
-        )
-        send_telemetry(
-            "cognee.brute_force_triplet_search EXECUTION FAILED", user.id, {"error": str(error)}
         )
         raise error

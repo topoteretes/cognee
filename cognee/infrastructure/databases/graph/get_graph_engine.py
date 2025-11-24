@@ -33,6 +33,7 @@ def create_graph_engine(
     graph_database_username="",
     graph_database_password="",
     graph_database_port="",
+    graph_database_key="",
 ):
     """
     Create a graph engine based on the specified provider type.
@@ -44,16 +45,14 @@ def create_graph_engine(
     Parameters:
     -----------
 
-        - graph_database_provider: The type of graph database provider to use (e.g., neo4j,
-          falkordb, kuzu).
-        - graph_database_url: The URL for the graph database instance. Required for neo4j
-          and falkordb providers.
+        - graph_database_provider: The type of graph database provider to use (e.g., neo4j, falkor, kuzu).
+        - graph_database_url: The URL for the graph database instance. Required for neo4j and falkordb providers.
         - graph_database_username: The username for authentication with the graph database.
           Required for neo4j provider.
         - graph_database_password: The password for authentication with the graph database.
           Required for neo4j provider.
         - graph_database_port: The port number for the graph database connection. Required
-          for the falkordb provider.
+          for the falkordb provider
         - graph_file_path: The filesystem path to the graph file. Required for the kuzu
           provider.
 
@@ -71,6 +70,7 @@ def create_graph_engine(
             graph_database_url=graph_database_url,
             graph_database_username=graph_database_username,
             graph_database_password=graph_database_password,
+            database_name=graph_database_name,
         )
 
     if graph_database_provider == "neo4j":
@@ -84,21 +84,6 @@ def create_graph_engine(
             graph_database_username=graph_database_username or None,
             graph_database_password=graph_database_password or None,
             graph_database_name=graph_database_name or None,
-        )
-
-    elif graph_database_provider == "falkordb":
-        if not (graph_database_url and graph_database_port):
-            raise EnvironmentError("Missing required FalkorDB credentials.")
-
-        from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
-        from cognee.infrastructure.databases.hybrid.falkordb.FalkorDBAdapter import FalkorDBAdapter
-
-        embedding_engine = get_embedding_engine()
-
-        return FalkorDBAdapter(
-            database_url=graph_database_url,
-            database_port=graph_database_port,
-            embedding_engine=embedding_engine,
         )
 
     elif graph_database_provider == "kuzu":
@@ -179,5 +164,5 @@ def create_graph_engine(
 
     raise EnvironmentError(
         f"Unsupported graph database provider: {graph_database_provider}. "
-        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'falkordb', 'kuzu', 'kuzu-remote', 'memgraph', 'neptune', 'neptune_analytics'])}"
+        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'kuzu', 'kuzu-remote', 'neptune', 'neptune_analytics'])}"
     )

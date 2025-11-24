@@ -5,6 +5,7 @@ from typing import List, Optional
 from typing_extensions import Annotated
 from fastapi import status
 from fastapi import APIRouter
+from fastapi.encoders import jsonable_encoder
 from fastapi import HTTPException, Query, Depends
 from fastapi.responses import JSONResponse, FileResponse
 
@@ -23,6 +24,7 @@ from cognee.modules.users.permissions.methods import (
 from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.pipelines.models import PipelineRunStatus
 from cognee.shared.utils import send_telemetry
+from cognee import __version__ as cognee_version
 
 logger = get_logger()
 
@@ -47,6 +49,7 @@ class DataDTO(OutDTO):
     extension: str
     mime_type: str
     raw_data_location: str
+    dataset_id: UUID
 
 
 class GraphNodeDTO(OutDTO):
@@ -98,6 +101,7 @@ def get_datasets_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "GET /v1/datasets",
+                "cognee_version": cognee_version,
             },
         )
 
@@ -114,7 +118,8 @@ def get_datasets_router() -> APIRouter:
 
     @router.post("", response_model=DatasetDTO)
     async def create_new_dataset(
-        dataset_data: DatasetCreationPayload, user: User = Depends(get_authenticated_user)
+        dataset_data: DatasetCreationPayload,
+        user: User = Depends(get_authenticated_user),
     ):
         """
         Create a new dataset or return existing dataset with the same name.
@@ -144,6 +149,7 @@ def get_datasets_router() -> APIRouter:
             user.id,
             additional_properties={
                 "endpoint": "POST /v1/datasets",
+                "cognee_version": cognee_version,
             },
         )
 
@@ -198,6 +204,7 @@ def get_datasets_router() -> APIRouter:
             additional_properties={
                 "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}",
                 "dataset_id": str(dataset_id),
+                "cognee_version": cognee_version,
             },
         )
 
@@ -243,6 +250,7 @@ def get_datasets_router() -> APIRouter:
                 "endpoint": f"DELETE /v1/datasets/{str(dataset_id)}/data/{str(data_id)}",
                 "dataset_id": str(dataset_id),
                 "data_id": str(data_id),
+                "cognee_version": cognee_version,
             },
         )
 
@@ -324,10 +332,11 @@ def get_datasets_router() -> APIRouter:
             additional_properties={
                 "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data",
                 "dataset_id": str(dataset_id),
+                "cognee_version": cognee_version,
             },
         )
 
-        from cognee.modules.data.methods import get_dataset_data, get_dataset
+        from cognee.modules.data.methods import get_dataset_data
 
         # Verify user has permission to read dataset
         dataset = await get_authorized_existing_datasets([dataset_id], "read", user)
@@ -338,12 +347,20 @@ def get_datasets_router() -> APIRouter:
                 content=ErrorResponseDTO(f"Dataset ({str(dataset_id)}) not found."),
             )
 
-        dataset_data = await get_dataset_data(dataset_id=dataset[0].id)
+        dataset_id = dataset[0].id
+
+        dataset_data = await get_dataset_data(dataset_id=dataset_id)
 
         if dataset_data is None:
             return []
 
-        return dataset_data
+        return [
+            dict(
+                **jsonable_encoder(data),
+                dataset_id=dataset_id,
+            )
+            for data in dataset_data
+        ]
 
     @router.get("/status", response_model=dict[str, PipelineRunStatus])
     async def get_dataset_status(
@@ -376,6 +393,7 @@ def get_datasets_router() -> APIRouter:
             additional_properties={
                 "endpoint": "GET /v1/datasets/status",
                 "datasets": [str(dataset_id) for dataset_id in datasets],
+                "cognee_version": cognee_version,
             },
         )
 
@@ -422,6 +440,7 @@ def get_datasets_router() -> APIRouter:
                 "endpoint": f"GET /v1/datasets/{str(dataset_id)}/data/{str(data_id)}/raw",
                 "dataset_id": str(dataset_id),
                 "data_id": str(data_id),
+                "cognee_version": cognee_version,
             },
         )
 

@@ -13,7 +13,7 @@ services:
       - DEBUG=false # Change to true if debugging
       - HOST=0.0.0.0
       - ENVIRONMENT=local
-      - LOG_LEVEL=ERROR
+      - LOG_LEVEL=INFO
     extra_hosts:
       # Allows the container to reach your local machine using "host.docker.internal" instead of "localhost"
       - "host.docker.internal:host-gateway"
@@ -96,17 +96,6 @@ services:
     networks:
       - cognee-network
 
-  falkordb:
-    image: falkordb/falkordb:edge
-    container_name: falkordb
-    profiles:
-      - falkordb
-    ports:
-      - 6379:6379
-      - 3001:3000
-    networks:
-      - cognee-network
-
   chromadb:
     image: chromadb/chroma:0.6.3
     container_name: chromadb
@@ -140,6 +129,30 @@ services:
     networks:
       - cognee-network
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    profiles:
+      - redis
+    ports:
+      - "6379:6379"
+    networks:
+      - cognee-network
+    volumes:
+      - redis_data:/data
+    command: [ "redis-server", "--appendonly", "yes" ]
+
+
+  redisinsight:
+    image: redislabs/redisinsight:latest
+    container_name: redisinsight
+    restart: always
+    ports:
+      - "5540:5540"
+    networks:
+      - cognee-network
+
+
 networks:
   cognee-network:
     name: cognee-network
@@ -147,3 +160,4 @@ networks:
 volumes:
   chromadb_data:
   postgres_data:
+  redis_data:

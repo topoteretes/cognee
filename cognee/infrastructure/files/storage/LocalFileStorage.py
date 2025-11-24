@@ -82,16 +82,16 @@ class LocalFileStorage(Storage):
         self.ensure_directory_exists(file_dir_path)
 
         if overwrite or not os.path.exists(full_file_path):
-            with open(
-                full_file_path,
-                mode="w" if isinstance(data, str) else "wb",
-                encoding="utf-8" if isinstance(data, str) else None,
-            ) as file:
-                if hasattr(data, "read"):
-                    data.seek(0)
-                    file.write(data.read())
-                else:
+            if isinstance(data, str):
+                with open(full_file_path, mode="w", encoding="utf-8", newline="\n") as file:
                     file.write(data)
+            else:
+                with open(full_file_path, mode="wb") as file:
+                    if hasattr(data, "read"):
+                        data.seek(0)
+                        file.write(data.read())
+                    else:
+                        file.write(data)
 
                 file.close()
 
@@ -189,6 +189,15 @@ class LocalFileStorage(Storage):
 
         return os.path.isfile(os.path.join(parsed_storage_path, file_path))
 
+    def get_size(self, file_path: str) -> int:
+        parsed_storage_path = get_parsed_path(self.storage_path)
+
+        return (
+            os.path.getsize(os.path.join(parsed_storage_path, file_path))
+            if self.file_exists(file_path)
+            else 0
+        )
+
     def ensure_directory_exists(self, directory_path: str = ""):
         """
         Ensure that the specified directory exists, creating it if necessary.
@@ -243,6 +252,56 @@ class LocalFileStorage(Storage):
 
         if os.path.exists(full_file_path):
             os.remove(full_file_path)
+
+    def list_files(self, directory_path: str, recursive: bool = False) -> list[str]:
+        """
+        List all files in the specified directory.
+
+        Parameters:
+        -----------
+            - directory_path (str): The directory path to list files from
+            - recursive (bool): If True, list files recursively in subdirectories
+
+        Returns:
+        --------
+            - list[str]: List of file paths relative to the storage root
+        """
+        from pathlib import Path
+
+        parsed_storage_path = get_parsed_path(self.storage_path)
+
+        if directory_path:
+            full_directory_path = os.path.join(parsed_storage_path, directory_path)
+        else:
+            full_directory_path = parsed_storage_path
+
+        directory_pathlib = Path(full_directory_path)
+
+        if not directory_pathlib.exists() or not directory_pathlib.is_dir():
+            return []
+
+        files = []
+
+        if recursive:
+            # Use rglob for recursive search
+            for file_path in directory_pathlib.rglob("*"):
+                if file_path.is_file():
+                    # Get relative path from storage root
+                    relative_path = os.path.relpath(str(file_path), parsed_storage_path)
+                    # Normalize path separators for consistency
+                    relative_path = relative_path.replace(os.sep, "/")
+                    files.append(relative_path)
+        else:
+            # Use iterdir for just immediate directory
+            for file_path in directory_pathlib.iterdir():
+                if file_path.is_file():
+                    # Get relative path from storage root
+                    relative_path = os.path.relpath(str(file_path), parsed_storage_path)
+                    # Normalize path separators for consistency
+                    relative_path = relative_path.replace(os.sep, "/")
+                    files.append(relative_path)
+
+        return files
 
     def remove_all(self, tree_path: str = None):
         """

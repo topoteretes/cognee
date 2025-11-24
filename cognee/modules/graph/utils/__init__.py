@@ -4,3 +4,4 @@ from .get_model_instance_from_graph import get_model_instance_from_graph
 from .retrieve_existing_edges import retrieve_existing_edges
 from .convert_node_to_data_point import convert_node_to_data_point
 from .deduplicate_nodes_and_edges import deduplicate_nodes_and_edges
+from .resolve_edges_to_text import resolve_edges_to_text

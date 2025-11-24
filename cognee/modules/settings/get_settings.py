@@ -15,11 +15,12 @@ class ModelName(Enum):
     ollama = "ollama"
     anthropic = "anthropic"
     gemini = "gemini"
+    mistral = "mistral"
     bedrock = "bedrock"
 
 
 class LLMConfig(BaseModel):
-    api_key: Optional[str]
+    api_key: str
     model: str
     provider: str
     endpoint: Optional[str]
@@ -74,8 +75,12 @@ def get_settings() -> SettingsDict:
             "label": "Gemini",
         },
         {
+            "value": "mistral",
+            "label": "Mistral",
+        },
+        {
             "value": "bedrock",
-            "label": "AWS Bedrock",
+            "label": "Bedrock",
         },
     ]
 
@@ -137,6 +142,24 @@ def get_settings() -> SettingsDict:
                         {
                             "value": "gemini-2.0-flash-exp",
                             "label": "Gemini 2.0 Flash",
+                        },
+                    ],
+                    "mistral": [
+                        {
+                            "value": "mistral-medium-2508",
+                            "label": "Mistral Medium 3.1",
+                        },
+                        {
+                            "value": "magistral-medium-2509",
+                            "label": "Magistral Medium 1.2",
+                        },
+                        {
+                            "value": "magistral-medium-2507",
+                            "label": "Magistral Medium 1.1",
+                        },
+                        {
+                            "value": "mistral-large-2411",
+                            "label": "Mistral Large 2.1",
                         },
                     ],
                     "bedrock": [

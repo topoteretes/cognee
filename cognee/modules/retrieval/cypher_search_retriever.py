@@ -1,4 +1,6 @@
 from typing import Any, Optional
+from fastapi.encoders import jsonable_encoder
+
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.completion import generate_completion
@@ -44,13 +46,21 @@ class CypherSearchRetriever(BaseRetriever):
         """
         try:
             graph_engine = await get_graph_engine()
-            result = await graph_engine.query(query)
+            is_empty = await graph_engine.is_empty()
+
+            if is_empty:
+                logger.warning("Search attempt on an empty knowledge graph")
+                return []
+
+            result = jsonable_encoder(await graph_engine.query(query))
         except Exception as e:
             logger.error("Failed to execture cypher search retrieval: %s", str(e))
             raise CypherSearchError() from e
         return result
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
+    async def get_completion(
+        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
+    ) -> Any:
         """
         Returns the graph connections context.
 
@@ -62,6 +72,8 @@ class CypherSearchRetriever(BaseRetriever):
             - query (str): The query to retrieve context.
             - context (Optional[Any]): Optional context to use, otherwise fetched using the
               query. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
 
         Returns:
         --------

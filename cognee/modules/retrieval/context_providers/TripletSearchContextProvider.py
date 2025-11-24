@@ -42,7 +42,6 @@ class TripletSearchContextProvider(BaseContextProvider):
         self,
         entities: List[DataPoint],
         query: str,
-        user: User,
         memory_fragment: CogneeGraph,
     ) -> List:
         """Creates search tasks for valid entities."""
@@ -83,9 +82,8 @@ class TripletSearchContextProvider(BaseContextProvider):
         if not entities:
             return "No entities provided for context search."
 
-        user = await get_default_user()
         memory_fragment = await get_memory_fragment(self.properties_to_project)
-        search_tasks = self._get_search_tasks(entities, query, user, memory_fragment)
+        search_tasks = self._get_search_tasks(entities, query, memory_fragment)
 
         if not search_tasks:
             return "No valid entities found for context search."

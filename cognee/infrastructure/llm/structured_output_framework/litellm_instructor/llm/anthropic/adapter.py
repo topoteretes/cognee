@@ -1,17 +1,23 @@
+import logging
 from typing import Type
 from pydantic import BaseModel
+import litellm
 import instructor
+from cognee.shared.logging_utils import get_logger
+from tenacity import (
+    retry,
+    stop_after_delay,
+    wait_exponential_jitter,
+    retry_if_not_exception_type,
+    before_sleep_log,
+)
 
-from cognee.infrastructure.llm.exceptions import MissingSystemPromptPathError
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
-    rate_limit_async,
-    sleep_and_retry_async,
-)
+from cognee.infrastructure.llm.config import get_llm_config
 
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+logger = get_logger()
 
 
 class AnthropicAdapter(LLMInterface):
@@ -27,14 +33,20 @@ class AnthropicAdapter(LLMInterface):
         import anthropic
 
         self.aclient = instructor.patch(
-            create=anthropic.AsyncAnthropic().messages.create, mode=instructor.Mode.ANTHROPIC_TOOLS
+            create=anthropic.AsyncAnthropic(api_key=get_llm_config().llm_api_key).messages.create,
+            mode=instructor.Mode.ANTHROPIC_TOOLS,
         )
 
         self.model = model
         self.max_completion_tokens = max_completion_tokens
 
-    @sleep_and_retry_async()
-    @rate_limit_async
+    @retry(
+        stop=stop_after_delay(128),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        reraise=True,
+    )
     async def acreate_structured_output(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> BaseModel:
@@ -57,7 +69,7 @@ class AnthropicAdapter(LLMInterface):
 
         return await self.aclient(
             model=self.model,
-            max_completion_tokens=4096,
+            max_tokens=4096,
             max_retries=5,
             messages=[
                 {
@@ -68,35 +80,3 @@ class AnthropicAdapter(LLMInterface):
             ],
             response_model=response_model,
         )
-
-    def show_prompt(self, text_input: str, system_prompt: str) -> str:
-        """
-        Format and display the prompt for a user query.
-
-        Parameters:
-        -----------
-
-            - text_input (str): The input text from the user, defaults to a placeholder if
-              empty.
-            - system_prompt (str): The path to the system prompt to be read and formatted.
-
-        Returns:
-        --------
-
-            - str: A formatted string displaying the system prompt and user input.
-        """
-
-        if not text_input:
-            text_input = "No user input provided."
-        if not system_prompt:
-            raise MissingSystemPromptPathError()
-
-        system_prompt = LLMGateway.read_query_prompt(system_prompt)
-
-        formatted_prompt = (
-            f"""System Prompt:\n{system_prompt}\n\nUser Input:\n{text_input}\n"""
-            if system_prompt
-            else None
-        )
-
-        return formatted_prompt

@@ -1,19 +1,24 @@
 from uuid import UUID
 from typing import Union, Optional, List, Type
 
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
-from cognee.modules.search.types import SearchType
+from cognee.modules.search.types import SearchResult, SearchType, CombinedSearchResult
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.exceptions import DatasetNotFoundError
+from cognee.context_global_variables import set_session_user_context_variable
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 async def search(
     query_text: str,
     query_type: SearchType = SearchType.GRAPH_COMPLETION,
-    user: User = None,
+    user: Optional[User] = None,
     datasets: Optional[Union[list[str], str]] = None,
     dataset_ids: Optional[Union[list[UUID], UUID]] = None,
     system_prompt_path: str = "answer_simple_question.txt",
@@ -22,9 +27,11 @@ async def search(
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
     save_interaction: bool = False,
-    last_k: Optional[int] = None,
+    last_k: Optional[int] = 1,
     only_context: bool = False,
-) -> list:
+    use_combined_context: bool = False,
+    session_id: Optional[str] = None,
+) -> Union[List[SearchResult], CombinedSearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -51,11 +58,6 @@ async def search(
             Best for: Direct document retrieval, specific fact-finding.
             Returns: LLM responses based on relevant text chunks.
 
-        **INSIGHTS**:
-            Structured entity relationships and semantic connections.
-            Best for: Understanding concept relationships, knowledge mapping.
-            Returns: Formatted relationship data and entity connections.
-
         **CHUNKS**:
             Raw text segments that match the query semantically.
             Best for: Finding specific passages, citations, exact content.
@@ -81,6 +83,9 @@ async def search(
             Best for: General-purpose queries or when you're unsure which search type is best.
             Returns: The results from the automatically selected search type.
 
+        **CHUNKS_LEXICAL**:
+            Token-based lexical chunk search (e.g., Jaccard). Best for: exact-term matching, stopword-aware lookups.
+            Returns: Ranked text chunks (optionally with scores).
 
     Args:
         query_text: Your question or search query in natural language.
@@ -114,14 +119,13 @@ async def search(
 
         save_interaction: Save interaction (query, context, answer connected to triplet endpoints) results into the graph or not
 
+        session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
+
     Returns:
         list: Search results in format determined by query_type:
 
             **GRAPH_COMPLETION/RAG_COMPLETION**:
                 [List of conversational AI response strings]
-
-            **INSIGHTS**:
-                [List of formatted relationship descriptions and entity connections]
 
             **CHUNKS**:
                 [List of relevant text passages with source metadata]
@@ -142,7 +146,6 @@ async def search(
     Performance & Optimization:
         - **GRAPH_COMPLETION**: Slower but most intelligent, uses LLM + graph context
         - **RAG_COMPLETION**: Medium speed, uses LLM + document chunks (no graph traversal)
-        - **INSIGHTS**: Fast, returns structured relationships without LLM processing
         - **CHUNKS**: Fastest, pure vector similarity search without LLM
         - **SUMMARIES**: Fast, returns pre-computed summaries
         - **CODE**: Medium speed, specialized for code understanding
@@ -173,6 +176,8 @@ async def search(
     if user is None:
         user = await get_default_user()
 
+    await set_session_user_context_variable(user)
+
     # Transform string based datasets to UUID - String based datasets can only be found for current user
     if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
         datasets = await get_authorized_existing_datasets(datasets, "read", user)
@@ -193,6 +198,8 @@ async def search(
         save_interaction=save_interaction,
         last_k=last_k,
         only_context=only_context,
+        use_combined_context=use_combined_context,
+        session_id=session_id,
     )
 
     return filtered_search_results

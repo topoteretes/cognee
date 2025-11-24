@@ -18,33 +18,35 @@ class VectorConfig(BaseSettings):
     Instance variables:
     - vector_db_url: The URL of the vector database.
     - vector_db_port: The port for the vector database.
+    - vector_db_name: The name of the vector database.
     - vector_db_key: The key for accessing the vector database.
     - vector_db_provider: The provider for the vector database.
     """
 
     vector_db_url: str = ""
     vector_db_port: int = 1234
+    vector_db_name: str = ""
     vector_db_key: str = ""
     vector_db_provider: str = "lancedb"
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
     @pydantic.model_validator(mode="after")
-    def validate_paths(cls, values):
+    def validate_paths(self):
         base_config = get_base_config()
 
         # If vector_db_url is provided and is not a path skip checking if path is absolute (as it can also be a url)
-        if values.vector_db_url and Path(values.vector_db_url).exists():
+        if self.vector_db_url and Path(self.vector_db_url).exists():
             # Relative path to absolute
-            values.vector_db_url = ensure_absolute_path(
-                values.vector_db_url,
+            self.vector_db_url = ensure_absolute_path(
+                self.vector_db_url,
             )
-        else:
+        elif not self.vector_db_url:
             # Default path
             databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
-            values.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
+            self.vector_db_url = os.path.join(databases_directory_path, "cognee.lancedb")
 
-        return values
+        return self
 
     def to_dict(self) -> dict:
         """
@@ -58,6 +60,7 @@ class VectorConfig(BaseSettings):
         return {
             "vector_db_url": self.vector_db_url,
             "vector_db_port": self.vector_db_port,
+            "vector_db_name": self.vector_db_name,
             "vector_db_key": self.vector_db_key,
             "vector_db_provider": self.vector_db_provider,
         }

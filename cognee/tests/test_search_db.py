@@ -1,11 +1,9 @@
-import os
 import pathlib
-
-from dns.e164 import query
-
+import os
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
@@ -14,11 +12,8 @@ from cognee.modules.retrieval.graph_completion_cot_retriever import GraphComplet
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
-from cognee.modules.search.operations import get_history
-from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
-from cognee.modules.engine.models import NodeSet
 from collections import Counter
 
 logger = get_logger()
@@ -34,28 +29,24 @@ async def main():
     text_1 = """Germany is located in europe right next to the Netherlands"""
     await cognee.add(text_1, dataset_name)
 
-    text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
-    At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
-    Classical physics cannot explain the operation of these quantum devices, and a scalable quantum computer could perform some calculations exponentially faster (with respect to input size scaling) than any modern "classical" computer. In particular, a large-scale quantum computer could break widely used encryption schemes and aid physicists in performing physical simulations; however, the current state of the technology is largely experimental and impractical, with several obstacles to useful applications. Moreover, scalable quantum computers do not hold promise for many practical tasks, and for many important tasks quantum speedups are proven impossible.
-    The basic unit of information in quantum computing is the qubit, similar to the bit in traditional digital electronics. Unlike a classical bit, a qubit can exist in a superposition of its two "basis" states. When measuring a qubit, the result is a probabilistic output of a classical bit, therefore making quantum computers nondeterministic in general. If a quantum computer manipulates the qubit in a particular way, wave interference effects can amplify the desired measurement results. The design of quantum algorithms involves creating procedures that allow a quantum computer to perform calculations efficiently and quickly.
-    Physically engineering high-quality qubits has proven challenging. If a physical qubit is not sufficiently isolated from its environment, it suffers from quantum decoherence, introducing noise into calculations. Paradoxically, perfectly isolating qubits is also undesirable because quantum computations typically need to initialize qubits, perform controlled qubit interactions, and measure the resulting quantum states. Each of those operations introduces errors and suffers from noise, and such inaccuracies accumulate.
-    In principle, a non-quantum (classical) computer can solve the same computational problems as a quantum computer, given enough time. Quantum advantage comes in the form of time complexity rather than computability, and quantum complexity theory shows that some quantum algorithms for carefully selected tasks require exponentially fewer computational steps than the best known non-quantum algorithms. Such tasks can in theory be solved on a large-scale quantum computer whereas classical computers would not finish computations in any reasonable amount of time. However, quantum speedup is not universal or even typical across computational tasks, since basic tasks such as sorting are proven to not allow any asymptotic quantum speedup. Claims of quantum supremacy have drawn significant attention to the discipline, but are demonstrated on contrived tasks, while near-term practical use cases remain limited.
-    """
+    explanation_file_path_quantum = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
+    )
 
-    await cognee.add([text], dataset_name)
+    await cognee.add([explanation_file_path_quantum], dataset_name)
 
     await cognee.cognify([dataset_name])
 
-    context_gk, _ = await GraphCompletionRetriever().get_context(
+    context_gk = await GraphCompletionRetriever().get_context(
         query="Next to which country is Germany located?"
     )
-    context_gk_cot, _ = await GraphCompletionCotRetriever().get_context(
+    context_gk_cot = await GraphCompletionCotRetriever().get_context(
         query="Next to which country is Germany located?"
     )
-    context_gk_ext, _ = await GraphCompletionContextExtensionRetriever().get_context(
+    context_gk_ext = await GraphCompletionContextExtensionRetriever().get_context(
         query="Next to which country is Germany located?"
     )
-    context_gk_sum, _ = await GraphSummaryCompletionRetriever().get_context(
+    context_gk_sum = await GraphSummaryCompletionRetriever().get_context(
         query="Next to which country is Germany located?"
     )
 
@@ -65,9 +56,11 @@ async def main():
         ("GraphCompletionContextExtensionRetriever", context_gk_ext),
         ("GraphSummaryCompletionRetriever", context_gk_sum),
     ]:
-        assert isinstance(context, str), f"{name}: Context should be a string"
-        assert context.strip(), f"{name}: Context should not be empty"
-        lower = context.lower()
+        assert isinstance(context, list), f"{name}: Context should be a list"
+        assert len(context) > 0, f"{name}: Context should not be empty"
+
+        context_text = await resolve_edges_to_text(context)
+        lower = context_text.lower()
         assert "germany" in lower or "netherlands" in lower, (
             f"{name}: Context did not contain 'germany' or 'netherlands'; got: {context!r}"
         )
@@ -143,15 +136,23 @@ async def main():
         last_k=1,
     )
 
-    for name, completion in [
+    for name, search_results in [
         ("GRAPH_COMPLETION", completion_gk),
         ("GRAPH_COMPLETION_COT", completion_cot),
         ("GRAPH_COMPLETION_CONTEXT_EXTENSION", completion_ext),
         ("GRAPH_SUMMARY_COMPLETION", completion_sum),
     ]:
-        assert isinstance(completion, list), f"{name}: should return a list"
-        assert len(completion) == 1, f"{name}: expected single-element list, got {len(completion)}"
-        text = completion[0]
+        assert isinstance(search_results, list), f"{name}: should return a list"
+        assert len(search_results) == 1, (
+            f"{name}: expected single-element list, got {len(search_results)}"
+        )
+
+        from cognee.context_global_variables import backend_access_control_enabled
+
+        if backend_access_control_enabled():
+            text = search_results[0]["search_result"][0]
+        else:
+            text = search_results[0]
         assert isinstance(text, str), f"{name}: element should be a string"
         assert text.strip(), f"{name}: string should not be empty"
         assert "netherlands" in text.lower(), (

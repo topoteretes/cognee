@@ -21,6 +21,17 @@ from cognee.modules.users.models import (
 
 
 async def add_user_to_role(user_id: UUID, role_id: UUID, owner_id: UUID):
+    """
+        Add a user with the given id to the role with the given id.
+    Args:
+        user_id: Id of the user.
+        role_id: Id of the role.
+        owner_id: Id of the request owner.
+
+    Returns:
+        None
+
+    """
     db_engine = get_relational_engine()
     async with db_engine.get_async_session() as session:
         user = (await session.execute(select(User).where(User.id == user_id))).scalars().first()
@@ -31,11 +42,13 @@ async def add_user_to_role(user_id: UUID, role_id: UUID, owner_id: UUID):
             .first()
         )
 
+        user_tenants = await user.awaitable_attrs.tenants
+
         if not user:
             raise UserNotFoundError
         elif not role:
             raise RoleNotFoundError
-        elif user.tenant_id != role.tenant_id:
+        elif role.tenant_id not in [tenant.id for tenant in user_tenants]:
             raise TenantNotFoundError(
                 message="User tenant does not match role tenant. User cannot be added to role."
             )

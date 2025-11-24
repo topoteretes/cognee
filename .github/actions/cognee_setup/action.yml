@@ -24,7 +24,7 @@ runs:
       uses: astral-sh/setup-uv@v4
       with:
         enable-cache: true
-    
+
     - name: Rebuild uv lockfile
       shell: bash
       run: |
@@ -41,4 +41,9 @@ runs:
             EXTRA_ARGS="$EXTRA_ARGS --extra $extra"
           done
         fi
-        uv sync --extra api --extra docs --extra evals --extra gemini --extra codegraph --extra ollama --extra dev --extra neo4j $EXTRA_ARGS
+        uv sync --extra api --extra docs --extra evals --extra codegraph --extra ollama --extra dev --extra neo4j --extra redis $EXTRA_ARGS
+
+    - name: Add telemetry identifier for telemetry test and in case telemetry is enabled by accident
+      shell: bash
+      run: |
+        echo "test-machine" > .anon_id

@@ -1,5 +1,5 @@
 from uuid import UUID
-from typing import Union, Tuple, List
+from typing import Union, Tuple, List, Optional
 
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.users.models import User
@@ -13,7 +13,7 @@ from cognee.modules.data.methods import (
 
 
 async def resolve_authorized_user_datasets(
-    datasets: Union[str, UUID, list[str], list[UUID]], user: User = None
+    datasets: Union[str, UUID, list[str], list[UUID]], user: Optional[User] = None
 ) -> Tuple[User, List[Dataset]]:
     """
     Function handles creation and dataset authorization if datasets already exist for Cognee.
@@ -25,7 +25,7 @@ async def resolve_authorized_user_datasets(
         datasets: Dataset names or Dataset UUID (in case Datasets already exist)
 
     Returns:
-
+        Tuple[User, List[Dataset]]: A tuple containing the user and the list of authorized datasets.
     """
     # If no user is provided use default user
     if user is None:

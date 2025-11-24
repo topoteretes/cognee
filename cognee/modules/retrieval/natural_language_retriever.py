@@ -2,6 +2,7 @@ from typing import Any, Optional
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions import SearchTypeNotSupported
 from cognee.infrastructure.databases.graph.graph_db_interface import GraphDBInterface
@@ -49,7 +50,7 @@ class NaturalLanguageRetriever(BaseRetriever):
 
     async def _generate_cypher_query(self, query: str, edge_schemas, previous_attempts=None) -> str:
         """Generate a Cypher query using LLM based on natural language query and schema information."""
-        system_prompt = LLMGateway.render_prompt(
+        system_prompt = render_prompt(
             self.system_prompt_path,
             context={
                 "edge_schemas": edge_schemas,
@@ -121,10 +122,17 @@ class NaturalLanguageRetriever(BaseRetriever):
               query.
         """
         graph_engine = await get_graph_engine()
+        is_empty = await graph_engine.is_empty()
+
+        if is_empty:
+            logger.warning("Search attempt on an empty knowledge graph")
+            return []
 
         return await self._execute_cypher_query(query, graph_engine)
 
-    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
+    async def get_completion(
+        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
+    ) -> Any:
         """
         Returns a completion based on the query and context.
 
@@ -138,6 +146,8 @@ class NaturalLanguageRetriever(BaseRetriever):
             - query (str): The natural language query to get a completion from.
             - context (Optional[Any]): The context in which to base the completion; if not
               provided, it will be retrieved using the query. (default None)
+            - session_id (Optional[str]): Optional session identifier for caching. If None,
+              defaults to 'default_session'. (default None)
 
         Returns:
         --------

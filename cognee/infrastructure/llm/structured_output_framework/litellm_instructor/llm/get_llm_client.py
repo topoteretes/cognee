@@ -23,6 +23,7 @@ class LLMProvider(Enum):
     - ANTHROPIC: Represents the Anthropic provider.
     - CUSTOM: Represents a custom provider option.
     - GEMINI: Represents the Gemini provider.
+    - MISTRAL: Represents the Mistral AI provider.
     - BEDROCK: Represents the AWS Bedrock provider.
     """
 
@@ -31,10 +32,11 @@ class LLMProvider(Enum):
     ANTHROPIC = "anthropic"
     CUSTOM = "custom"
     GEMINI = "gemini"
+    MISTRAL = "mistral"
     BEDROCK = "bedrock"
 
 
-def get_llm_client():
+def get_llm_client(raise_api_key_error: bool = True):
     """
     Get the LLM client based on the configuration using Enums.
 
@@ -67,7 +69,7 @@ def get_llm_client():
     )
 
     if provider == LLMProvider.OPENAI:
-        if llm_config.llm_api_key is None:
+        if llm_config.llm_api_key is None and raise_api_key_error:
             raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.openai.adapter import (
@@ -88,7 +90,7 @@ def get_llm_client():
         )
 
     elif provider == LLMProvider.OLLAMA:
-        if llm_config.llm_api_key is None:
+        if llm_config.llm_api_key is None and raise_api_key_error:
             raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
@@ -113,7 +115,7 @@ def get_llm_client():
         )
 
     elif provider == LLMProvider.CUSTOM:
-        if llm_config.llm_api_key is None:
+        if llm_config.llm_api_key is None and raise_api_key_error:
             raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
@@ -132,7 +134,7 @@ def get_llm_client():
         )
 
     elif provider == LLMProvider.GEMINI:
-        if llm_config.llm_api_key is None:
+        if llm_config.llm_api_key is None and raise_api_key_error:
             raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.gemini.adapter import (
@@ -145,10 +147,27 @@ def get_llm_client():
             max_completion_tokens=max_completion_tokens,
             endpoint=llm_config.llm_endpoint,
             api_version=llm_config.llm_api_version,
-            streaming=llm_config.llm_streaming,
+        )
+
+    elif provider == LLMProvider.MISTRAL:
+        if llm_config.llm_api_key is None and raise_api_key_error:
+            raise LLMAPIKeyNotSetError()
+
+        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.mistral.adapter import (
+            MistralAdapter,
+        )
+
+        return MistralAdapter(
+            api_key=llm_config.llm_api_key,
+            model=llm_config.llm_model,
+            max_completion_tokens=max_completion_tokens,
+            endpoint=llm_config.llm_endpoint,
         )
 
     elif provider == LLMProvider.BEDROCK:
+        if llm_config.llm_api_key is None and raise_api_key_error:
+            raise LLMAPIKeyNotSetError()
+
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.bedrock.adapter import (
             BedrockAdapter,
         )

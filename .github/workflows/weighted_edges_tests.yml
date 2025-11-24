@@ -2,7 +2,7 @@ name: Weighted Edges Tests
 
 on:
   push:
-    branches: [ main, weighted_edges ]
+    branches: [ main, dev, weighted_edges ]
     paths:
       - 'cognee/modules/graph/utils/get_graph_from_model.py'
       - 'cognee/infrastructure/engine/models/Edge.py'
@@ -10,7 +10,7 @@ on:
       - 'examples/python/weighted_edges_example.py'
       - '.github/workflows/weighted_edges_tests.yml'
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev ]
     paths:
       - 'cognee/modules/graph/utils/get_graph_from_model.py'
       - 'cognee/infrastructure/engine/models/Edge.py'
@@ -32,7 +32,7 @@ jobs:
     env:
       LLM_PROVIDER: openai
       LLM_MODEL: gpt-5-mini
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
     steps:
       - name: Check out repository
@@ -67,14 +67,13 @@ jobs:
     env:
       LLM_PROVIDER: openai
       LLM_MODEL: gpt-5-mini
-      LLM_ENDPOINT: https://api.openai.com/v1/
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_ENDPOINT: https://api.openai.com/v1
+      LLM_API_KEY: ${{ secrets.OPENAI_API_KEY  }}
       LLM_API_VERSION: "2024-02-01"
-      EMBEDDING_PROVIDER: openai
-      EMBEDDING_MODEL: text-embedding-3-small
-      EMBEDDING_ENDPOINT: https://api.openai.com/v1/
-      EMBEDDING_API_KEY: ${{ secrets.LLM_API_KEY }}
-      EMBEDDING_API_VERSION: "2024-02-01"
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -86,12 +85,19 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
+
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
 
       - name: Run Weighted Edges Tests
         env:
           GRAPH_DATABASE_PROVIDER: ${{ matrix.graph_db_provider }}
+          GRAPH_DATABASE_URL: ${{ matrix.graph_db_provider == 'neo4j' && steps.neo4j.outputs.neo4j-url || '' }}
+          GRAPH_DATABASE_USERNAME: ${{ matrix.graph_db_provider == 'neo4j' && steps.neo4j.outputs.neo4j-username || '' }}
+          GRAPH_DATABASE_PASSWORD: ${{ matrix.graph_db_provider == 'neo4j' && steps.neo4j.outputs.neo4j-password || '' }}
         run: |
           uv run pytest cognee/tests/unit/interfaces/graph/test_weighted_edges.py -v --tb=short
 
@@ -101,14 +107,14 @@ jobs:
     env:
       LLM_PROVIDER: openai
       LLM_MODEL: gpt-5-mini
-      LLM_ENDPOINT: https://api.openai.com/v1/
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_ENDPOINT: https://api.openai.com/v1
+      LLM_API_KEY: ${{ secrets.OPENAI_API_KEY  }}
       LLM_API_VERSION: "2024-02-01"
-      EMBEDDING_PROVIDER: openai
-      EMBEDDING_MODEL: text-embedding-3-small
-      EMBEDDING_ENDPOINT: https://api.openai.com/v1/
-      EMBEDDING_API_KEY: ${{ secrets.LLM_API_KEY }}
-      EMBEDDING_API_VERSION: "2024-02-01"
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
