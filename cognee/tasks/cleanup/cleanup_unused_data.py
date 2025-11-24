@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timezone, timedelta    
 from typing import Optional, Dict, Any    
 from uuid import UUID    
-    
+import os    
 from cognee.infrastructure.databases.graph import get_graph_engine    
 from cognee.infrastructure.databases.vector import get_vector_engine    
 from cognee.infrastructure.databases.relational import get_relational_engine  
@@ -47,7 +47,43 @@ async def cleanup_unused_data(
     -------    
     Dict[str, Any]    
         Cleanup results with status, counts, and timestamp    
-    """    
+    """   
+    # Check 1: Environment variable must be enabled  
+    if os.getenv("ENABLE_LAST_ACCESSED", "false").lower() != "true":  
+        logger.warning(  
+            "Cleanup skipped: ENABLE_LAST_ACCESSED is not enabled."  
+        )  
+        return {  
+            "status": "skipped",  
+            "reason": "ENABLE_LAST_ACCESSED not enabled",  
+            "unused_count": 0,  
+            "deleted_count": {},  
+            "cleanup_date": datetime.now(timezone.utc).isoformat()  
+        }  
+      
+    # Check 2: Verify tracking has actually been running  
+    db_engine = get_relational_engine()  
+    async with db_engine.get_async_session() as session:  
+        # Count records with non-NULL last_accessed  
+        tracked_count = await session.execute(  
+            select(sa.func.count(Data.id)).where(Data.last_accessed.isnot(None))  
+        )  
+        tracked_records = tracked_count.scalar()  
+          
+        if tracked_records == 0:  
+            logger.warning(  
+                "Cleanup skipped: No records have been tracked yet. "  
+                "ENABLE_LAST_ACCESSED may have been recently enabled. "  
+                "Wait for retrievers to update timestamps before running cleanup."  
+            )  
+            return {  
+                "status": "skipped",  
+                "reason": "No tracked records found - tracking may be newly enabled",  
+                "unused_count": 0,  
+                "deleted_count": {},  
+                "cleanup_date": datetime.now(timezone.utc).isoformat()  
+            }  
+      
     logger.info(    
         "Starting cleanup task",    
         days_threshold=days_threshold,    

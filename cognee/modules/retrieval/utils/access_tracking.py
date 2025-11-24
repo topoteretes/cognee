@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone  
 from typing import List, Any  
 from uuid import UUID  
-  
+import os 
 from cognee.infrastructure.databases.graph import get_graph_engine  
 from cognee.infrastructure.databases.relational import get_relational_engine  
 from cognee.modules.data.models import Data  
@@ -27,7 +27,10 @@ async def update_node_access_timestamps(items: List[Any]):
     ----------  
     items : List[Any]  
         List of items with payload containing 'id' field (from vector search results)  
-    """  
+    """ 
+    if os.getenv("ENABLE_LAST_ACCESSED", "false").lower() != "true":  
+        return  
+          
     if not items:  
         return  
       
