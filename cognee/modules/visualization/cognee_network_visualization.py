@@ -404,6 +404,11 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
                     .on("drag", function(d){ dragged(d); updateDensity(); showAdjacency(d); })
                     .on("end", dragended));
 
+                                var nodeLabel = nodeGroup.append("text")
+                .attr("class", "node-label")
+                .attr("dy", 20)
+                .text(function(d){ return d.name || d.id; });
+
             // Show links only for hovered node adjacency
             function isAdjacent(linkDatum, nodeId) {
                 var sid = linkDatum && linkDatum.source && (linkDatum.source.id || linkDatum.source);
