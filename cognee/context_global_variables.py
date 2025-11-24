@@ -27,6 +27,7 @@ async def set_session_user_context_variable(user):
 def multi_user_support_possible():
     graph_db_config = get_graph_context_config()
     vector_db_config = get_vectordb_context_config()
+    # TODO: Make sure dataset database handler and provider match, remove multi_user support check, add error if no dataset database handler exists for provider
     return (
         graph_db_config["graph_database_provider"] in GRAPH_DBS_WITH_MULTI_USER_SUPPORT
         and vector_db_config["vector_db_provider"] in VECTOR_DBS_WITH_MULTI_USER_SUPPORT

@@ -362,20 +362,3 @@ class LanceDBAdapter(VectorDBInterface):
             },
             exclude_fields=["metadata"] + related_models_fields,
         )
-
-    @classmethod
-    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
-        vector_config = get_vectordb_config()
-        base_config = get_base_config()
-        databases_directory_path = os.path.join(
-            base_config.system_root_directory, "databases", str(user.id)
-        )
-
-        vector_db_name = f"{dataset_id}.lance.db"
-
-        return {
-            "vector_database_name": vector_db_name,
-            "vector_database_url": os.path.join(databases_directory_path, vector_db_name),
-            "vector_database_provider": vector_config.vector_db_provider,
-            "vector_database_key": vector_config.vector_db_key,
-        }
