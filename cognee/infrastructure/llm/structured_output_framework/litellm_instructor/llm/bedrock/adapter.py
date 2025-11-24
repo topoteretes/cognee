@@ -11,6 +11,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     LLMInterface,
 )
 from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
+from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
     rate_limit_async,
@@ -34,10 +35,6 @@ class BedrockAdapter(LLMInterface):
     name = "Bedrock"
     model: str
     api_key: str
-    aws_access_key_id: str
-    aws_secret_access_key: str
-    aws_region_name: str
-    aws_profile_name: str
 
     MAX_RETRIES = 5
 
@@ -45,12 +42,6 @@ class BedrockAdapter(LLMInterface):
         self,
         model: str,
         api_key: str = None,
-        aws_access_key_id: str = None,
-        aws_secret_access_key: str = None,
-        aws_session_token: str = None,
-        aws_region_name: str = "us-east-1",
-        aws_profile_name: str = None,
-        aws_bedrock_runtime_endpoint: str = None,
         max_tokens: int = 16384,
         streaming: bool = False,
     ):
@@ -58,12 +49,6 @@ class BedrockAdapter(LLMInterface):
         self.client = instructor.from_litellm(litellm.completion)
         self.model = model
         self.api_key = api_key
-        self.aws_access_key_id = aws_access_key_id
-        self.aws_secret_access_key = aws_secret_access_key
-        self.aws_session_token = aws_session_token
-        self.aws_region_name = aws_region_name
-        self.aws_profile_name = aws_profile_name
-        self.aws_bedrock_runtime_endpoint = aws_bedrock_runtime_endpoint
         self.max_tokens = max_tokens
         self.streaming = streaming
 
@@ -89,22 +74,24 @@ IMPORTANT: You must respond with valid JSON only. Do not include any text before
             "stream": self.streaming,
         }
 
+        s3_config = get_s3_config()
+
         # Add authentication parameters
         if self.api_key:
             request_params["api_key"] = self.api_key
-        elif self.aws_access_key_id and self.aws_secret_access_key:
-            request_params["aws_access_key_id"] = self.aws_access_key_id
-            request_params["aws_secret_access_key"] = self.aws_secret_access_key
-            if self.aws_session_token:
-                request_params["aws_session_token"] = self.aws_session_token
-        elif self.aws_profile_name:
-            request_params["aws_profile_name"] = self.aws_profile_name
+        elif s3_config.aws_access_key_id and s3_config.aws_secret_access_key:
+            request_params["aws_access_key_id"] = s3_config.aws_access_key_id
+            request_params["aws_secret_access_key"] = s3_config.aws_secret_access_key
+            if s3_config.aws_session_token:
+                request_params["aws_session_token"] = s3_config.aws_session_token
+        elif s3_config.aws_profile_name:
+            request_params["aws_profile_name"] = s3_config.aws_profile_name
 
         # Add optional parameters
-        if self.aws_region_name:
-            request_params["aws_region_name"] = self.aws_region_name
-        if self.aws_bedrock_runtime_endpoint:
-            request_params["aws_bedrock_runtime_endpoint"] = self.aws_bedrock_runtime_endpoint
+        if s3_config.aws_region_name:
+            request_params["aws_region_name"] = s3_config.aws_region_name
+        if s3_config.aws_bedrock_runtime_endpoint:
+            request_params["aws_bedrock_runtime_endpoint"] = s3_config.aws_bedrock_runtime_endpoint
 
         return request_params
 

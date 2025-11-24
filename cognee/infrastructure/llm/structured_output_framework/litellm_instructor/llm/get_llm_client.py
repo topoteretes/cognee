@@ -156,13 +156,7 @@ def get_llm_client():
         return BedrockAdapter(
             model=llm_config.llm_model,
             api_key=llm_config.llm_api_key,
-            aws_access_key_id=llm_config.aws_access_key_id,
-            aws_secret_access_key=llm_config.aws_secret_access_key,
-            aws_session_token=llm_config.aws_session_token,
-            aws_region_name=llm_config.aws_region_name,
-            aws_profile_name=llm_config.aws_profile_name,
-            aws_bedrock_runtime_endpoint=llm_config.aws_bedrock_runtime_endpoint,
-            max_tokens=max_tokens,
+            max_tokens=max_completion_tokens,
             streaming=llm_config.llm_streaming,
         )
 
