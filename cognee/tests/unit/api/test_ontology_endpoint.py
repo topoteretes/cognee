@@ -110,7 +110,7 @@ def test_upload_ontology_unauthorized(mock_get_default_user, client, mock_defaul
 def test_upload_multiple_ontologies(mock_get_default_user, client, mock_default_user):
     """Test uploading multiple ontology files in single request"""
     import io
-
+    mock_get_default_user.return_value = mock_default_user
     # Create mock files
     file1_content = b"<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'></rdf:RDF>"
     file2_content = b"<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'></rdf:RDF>"
@@ -139,7 +139,7 @@ def test_upload_endpoint_accepts_arrays(mock_get_default_user, client, mock_defa
     """Test that upload endpoint accepts array parameters"""
     import io
     import json
-
+    mock_get_default_user.return_value = mock_default_user
     file_content = b"<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'></rdf:RDF>"
 
     files = [("ontology_file", ("single.owl", io.BytesIO(file_content), "application/xml"))]
@@ -175,7 +175,7 @@ def test_complete_multifile_workflow(mock_get_default_user, client, mock_default
     """Test complete workflow: upload multiple ontologies → cognify with multiple keys"""
     import io
     import json
-
+    mock_get_default_user.return_value = mock_default_user
     # Step 1: Upload multiple ontologies
     file1_content = b"""<?xml version="1.0"?>
     <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -256,6 +256,8 @@ def test_multifile_error_handling(mock_get_default_user, client, mock_default_us
 @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
 def test_cognify_missing_ontology_key(mock_get_default_user, client, mock_default_user):
     """Test cognify with non-existent ontology key"""
+    mock_get_default_user.return_value = mock_default_user
+
     payload = {
         "datasets": ["test_dataset"],
         "ontology_key": ["nonexistent_key"],
