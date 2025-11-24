@@ -25,7 +25,10 @@ def mock_user():
 def mock_default_user():
     """Mock default user for testing."""
     return SimpleNamespace(
-        id=uuid.uuid4(), email="default@example.com", is_active=True, tenant_id=uuid.uuid4()
+        id=str(uuid.uuid4()),
+        email="default@example.com",
+        is_active=True,
+        tenant_id=str(uuid.uuid4()),
     )
 
 
