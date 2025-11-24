@@ -18,6 +18,7 @@ from cognee.modules.data.models import Data, DatasetData
 from cognee.shared.logging_utils import get_logger    
 from sqlalchemy import select, or_  
 import cognee  
+import sqlalchemy as sa
     
 logger = get_logger(__name__)    
     
