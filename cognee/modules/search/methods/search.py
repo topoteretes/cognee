@@ -47,7 +47,7 @@ async def search(
     only_context: bool = False,
     use_combined_context: bool = False,
     session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = 50,
+    wide_search_top_k: Optional[int] = 100,
 ) -> Union[CombinedSearchResult, List[SearchResult]]:
     """
 
@@ -222,7 +222,7 @@ async def authorized_search(
     only_context: bool = False,
     use_combined_context: bool = False,
     session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = 50,
+    wide_search_top_k: Optional[int] = 100,
 ) -> Union[
     Tuple[Any, Union[List[Edge], str], List[Dataset]],
     List[Tuple[Any, Union[List[Edge], str], List[Dataset]]],
@@ -332,7 +332,7 @@ async def search_in_datasets_context(
     only_context: bool = False,
     context: Optional[Any] = None,
     session_id: Optional[str] = None,
-    wide_search_top_k: Optional[int] = 50,
+    wide_search_top_k: Optional[int] = 100,
 ) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
@@ -353,7 +353,7 @@ async def search_in_datasets_context(
         only_context: bool = False,
         context: Optional[Any] = None,
         session_id: Optional[str] = None,
-        wide_search_top_k: Optional[int] = 50,
+        wide_search_top_k: Optional[int] = 100,
     ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)

@@ -39,7 +39,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
         save_interaction: bool = False,
-        wide_search_top_k: Optional[int] = 50,
+        wide_search_top_k: Optional[int] = 100,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
