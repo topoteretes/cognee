@@ -48,6 +48,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         node_name: Optional[List[str]] = None,
         save_interaction: bool = False,
         wide_search_top_k: Optional[int] = 100,
+        triplet_distance_penalty: Optional[float] = 3.5,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.save_interaction = save_interaction
@@ -58,6 +59,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         self.wide_search_top_k = wide_search_top_k
         self.node_type = node_type
         self.node_name = node_name
+        self.triplet_distance_penalty = triplet_distance_penalty
 
     async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
         """
@@ -108,6 +110,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
             node_type=self.node_type,
             node_name=self.node_name,
             wide_search_top_k=self.wide_search_top_k,
+            triplet_distance_penalty=self.triplet_distance_penalty,
         )
 
         return found_triplets

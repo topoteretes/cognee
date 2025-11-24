@@ -59,6 +59,7 @@ async def get_memory_fragment(
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
     relevant_ids_to_filter: Optional[List[str]] = None,
+    triplet_distance_penalty: Optional[float] = 3.5,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     if properties_to_project is None:
@@ -76,6 +77,7 @@ async def get_memory_fragment(
             node_type=node_type,
             node_name=node_name,
             relevant_ids_to_filter=relevant_ids_to_filter,
+            triplet_distance_penalty=triplet_distance_penalty,
         )
 
     except EntityNotFoundError:
@@ -98,6 +100,7 @@ async def brute_force_triplet_search(
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
     wide_search_top_k: Optional[int] = 100,
+    triplet_distance_penalty: Optional[float] = 3.5,
 ) -> List[Edge]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
@@ -111,6 +114,7 @@ async def brute_force_triplet_search(
         node_type: node type to filter
         node_name: node name to filter
         wide_search_top_k (Optional[int]): Number of initial elements to retrieve from collections
+        triplet_distance_penalty (Optional[float]): Default distance penalty in graph projection
 
     Returns:
         list: The top triplet results.
@@ -189,6 +193,7 @@ async def brute_force_triplet_search(
                 node_type=node_type,
                 node_name=node_name,
                 relevant_ids_to_filter=relevant_ids_to_filter,
+                triplet_distance_penalty=triplet_distance_penalty,
             )
 
         await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)

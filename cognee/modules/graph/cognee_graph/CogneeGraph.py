@@ -130,6 +130,7 @@ class CogneeGraph(CogneeAbstractGraph):
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
         relevant_ids_to_filter: Optional[List[str]] = None,
+        triplet_distance_penalty: float = 3.5,
     ) -> None:
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidDimensionsError()
@@ -153,7 +154,14 @@ class CogneeGraph(CogneeAbstractGraph):
             # Process nodes
             for node_id, properties in nodes_data:
                 node_attributes = {key: properties.get(key) for key in node_properties_to_project}
-                self.add_node(Node(str(node_id), node_attributes, dimension=node_dimension))
+                self.add_node(
+                    Node(
+                        str(node_id),
+                        node_attributes,
+                        dimension=node_dimension,
+                        node_penalty=triplet_distance_penalty,
+                    )
+                )
 
             # Process edges
             for source_id, target_id, relationship_type, properties in edges_data:
@@ -171,6 +179,7 @@ class CogneeGraph(CogneeAbstractGraph):
                         attributes=edge_attributes,
                         directed=directed,
                         dimension=edge_dimension,
+                        edge_penalty=triplet_distance_penalty,
                     )
                     self.add_edge(edge)
 
