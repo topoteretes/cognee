@@ -1,15 +1,10 @@
 import asyncio
 from os import path
-import os
-from uuid import UUID
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
 from typing import Generic, List, Optional, TypeVar, Union, get_args, get_origin, get_type_hints
 
-from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.vector import get_vectordb_config
-from cognee.modules.users.models import User
 from cognee.infrastructure.databases.exceptions import MissingQueryParameterError
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.utils import parse_id
