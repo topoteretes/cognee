@@ -3,8 +3,7 @@
 language: en
 early_access: false
 enable_free_tier: true
-reviews:
-  enabled: true
+reviews:  
   profile: chill
   instructions: >-
     # Code Review Instructions
@@ -28,7 +27,7 @@ reviews:
     # Misc.
     - Confirm that the code meets the project's requirements and objectives.
     - Confirm that copyright years are up-to date whenever a file is changed.
-  request_changes_workflow: true
+  request_changes_workflow: false
   high_level_summary: true
   high_level_summary_placeholder: '@coderabbitai summary'
   auto_title_placeholder: '@coderabbitai'
