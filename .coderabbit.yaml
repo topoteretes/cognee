@@ -123,6 +123,6 @@ reviews:
     markdownlint:
       enabled: true
     yamllint:
-      enabled: true      
+      enabled: true
 chat:
   auto_reply: true
