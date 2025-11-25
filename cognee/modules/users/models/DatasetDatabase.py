@@ -24,6 +24,9 @@ class DatasetDatabase(Base):
     vector_database_key = Column(String, unique=False, nullable=True)
     graph_database_key = Column(String, unique=False, nullable=True)
 
+    # TODO: Instead of specifying and forwawrding all these individual fields, consider using a JSON field to store
+    # configuration details for different database types. This would make it more flexible to add new database types
+    # without changing the database schema.
     graph_database_username = Column(String, unique=False, nullable=True)
     graph_database_password = Column(String, unique=False, nullable=True)
 
