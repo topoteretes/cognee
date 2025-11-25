@@ -50,7 +50,9 @@ class BedrockAdapter(LLMInterface):
     ):
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
-        self.aclient = instructor.from_litellm(litellm.acompletion, mode=instructor.Mode(self.instructor_mode))
+        self.aclient = instructor.from_litellm(
+            litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
+        )
         self.client = instructor.from_litellm(litellm.completion)
         self.model = model
         self.api_key = api_key
