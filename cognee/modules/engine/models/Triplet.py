@@ -7,4 +7,3 @@ class Triplet(DataPoint):
     to_node_id: str
 
     metadata: dict = {"index_fields": ["text"]}
-

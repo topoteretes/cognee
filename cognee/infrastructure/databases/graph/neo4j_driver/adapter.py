@@ -1471,9 +1471,7 @@ class Neo4jAdapter(GraphDBInterface):
 
         return ", ".join(f"'{uid}'" for uid in time_ids_list)
 
-    async def get_triplets_batch(
-        self, offset: int, limit: int
-    ) -> list[dict[str, Any]]:
+    async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """
         Retrieve a batch of triplets (start_node, relationship, end_node) from the graph.
 

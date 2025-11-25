@@ -1909,9 +1909,7 @@ class KuzuAdapter(GraphDBInterface):
 
         return ", ".join(f"'{uid}'" for uid in time_ids_list)
 
-    async def get_triplets_batch(
-        self, offset: int, limit: int
-    ) -> list[dict[str, Any]]:
+    async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
         """
         Retrieve a batch of triplets (start_node, relationship, end_node) from the graph.
 
@@ -1957,7 +1955,7 @@ class KuzuAdapter(GraphDBInterface):
         } AS triplet
         SKIP $offset LIMIT $limit
         """
-        
+
         try:
             results = await self.query(query, {"offset": offset, "limit": limit})
         except Exception as e:
@@ -1972,36 +1970,42 @@ class KuzuAdapter(GraphDBInterface):
                 if not row or len(row) == 0:
                     logger.warning(f"Skipping empty row at index {idx} in triplet batch")
                     continue
-                
+
                 if not isinstance(row[0], dict):
-                    logger.warning(f"Skipping invalid row at index {idx}: expected dict, got {type(row[0])}")
+                    logger.warning(
+                        f"Skipping invalid row at index {idx}: expected dict, got {type(row[0])}"
+                    )
                     continue
-                
+
                 triplet = row[0]
-                
+
                 # Validate and parse start_node
                 if "start_node" not in triplet:
                     logger.warning(f"Skipping triplet at index {idx}: missing 'start_node' key")
                     continue
-                    
+
                 if not isinstance(triplet["start_node"], dict):
                     logger.warning(f"Skipping triplet at index {idx}: 'start_node' is not a dict")
                     continue
-                    
+
                 triplet["start_node"] = self._parse_node_properties(triplet["start_node"].copy())
-                
+
                 # Validate and parse relationship_properties
                 if "relationship_properties" not in triplet:
-                    logger.warning(f"Skipping triplet at index {idx}: missing 'relationship_properties' key")
+                    logger.warning(
+                        f"Skipping triplet at index {idx}: missing 'relationship_properties' key"
+                    )
                     continue
-                    
+
                 if not isinstance(triplet["relationship_properties"], dict):
-                    logger.warning(f"Skipping triplet at index {idx}: 'relationship_properties' is not a dict")
+                    logger.warning(
+                        f"Skipping triplet at index {idx}: 'relationship_properties' is not a dict"
+                    )
                     continue
-                    
+
                 rel_props = triplet["relationship_properties"].copy()
                 relationship_name = rel_props.get("relationship_name") or ""
-                
+
                 # Parse JSON properties if present
                 if rel_props.get("properties"):
                     try:
@@ -2017,27 +2021,27 @@ class KuzuAdapter(GraphDBInterface):
                         logger.warning(
                             f"Failed to parse relationship properties JSON for triplet at index {idx}: {e}"
                         )
-                
+
                 # Ensure relationship_name is present
                 rel_props["relationship_name"] = relationship_name
                 triplet["relationship_properties"] = rel_props
-                
+
                 # Validate and parse end_node
                 if "end_node" not in triplet:
                     logger.warning(f"Skipping triplet at index {idx}: missing 'end_node' key")
                     continue
-                    
+
                 if not isinstance(triplet["end_node"], dict):
                     logger.warning(f"Skipping triplet at index {idx}: 'end_node' is not a dict")
                     continue
-                    
+
                 triplet["end_node"] = self._parse_node_properties(triplet["end_node"].copy())
-                
+
                 triplets.append(triplet)
-                
+
             except Exception as e:
                 logger.error(f"Error processing triplet at index {idx}: {e}", exc_info=True)
                 # Continue processing other triplets instead of failing completely
                 continue
-        
+
         return triplets
