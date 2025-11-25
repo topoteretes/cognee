@@ -1,18 +1,19 @@
 import litellm
 import instructor
-from typing import Type, Optional
+from typing import Type
 from pydantic import BaseModel
 from litellm.exceptions import ContentPolicyViolationError
 from instructor.exceptions import InstructorRetryException
 
-from cognee.exceptions import InvalidValueError
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
     LLMInterface,
 )
-from cognee.infrastructure.llm.exceptions import ContentPolicyFilterError
+from cognee.infrastructure.llm.exceptions import (
+    ContentPolicyFilterError,
+    MissingSystemPromptPathError,
+)
 from cognee.infrastructure.files.storage.s3_config import get_s3_config
-from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.rate_limiter import (
     rate_limit_async,
     rate_limit_sync,
@@ -35,6 +36,7 @@ class BedrockAdapter(LLMInterface):
     name = "Bedrock"
     model: str
     api_key: str
+    default_instructor_mode = "json_schema_mode"
 
     MAX_RETRIES = 5
 
@@ -42,23 +44,23 @@ class BedrockAdapter(LLMInterface):
         self,
         model: str,
         api_key: str = None,
-        max_tokens: int = 16384,
+        max_completion_tokens: int = 16384,
         streaming: bool = False,
+        instructor_mode: str = None,
     ):
-        self.aclient = instructor.from_litellm(litellm.acompletion)
+        self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
+
+        self.aclient = instructor.from_litellm(litellm.acompletion, mode=instructor.Mode(self.instructor_mode))
         self.client = instructor.from_litellm(litellm.completion)
         self.model = model
         self.api_key = api_key
-        self.max_tokens = max_tokens
+        self.max_completion_tokens = max_completion_tokens
         self.streaming = streaming
 
     def _create_bedrock_request(
         self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
     ) -> dict:
-        """Create Bedrock request with authentication and enhanced JSON formatting."""
-        enhanced_system_prompt = f"""{system_prompt}
-
-IMPORTANT: You must respond with valid JSON only. Do not include any text before or after the JSON. The response must be a valid JSON object that can be parsed directly."""
+        """Create Bedrock request with authentication."""
 
         request_params = {
             "model": self.model,
@@ -66,11 +68,11 @@ IMPORTANT: You must respond with valid JSON only. Do not include any text before
             "drop_params": True,
             "messages": [
                 {"role": "user", "content": text_input},
-                {"role": "system", "content": enhanced_system_prompt},
+                {"role": "system", "content": system_prompt},
             ],
             "response_model": response_model,
             "max_retries": self.MAX_RETRIES,
-            "max_tokens": self.max_tokens,
+            "max_completion_tokens": self.max_completion_tokens,
             "stream": self.streaming,
         }
 
@@ -87,9 +89,10 @@ IMPORTANT: You must respond with valid JSON only. Do not include any text before
         elif s3_config.aws_profile_name:
             request_params["aws_profile_name"] = s3_config.aws_profile_name
 
+        if s3_config.aws_region:
+            request_params["aws_region_name"] = s3_config.aws_region
+
         # Add optional parameters
-        if s3_config.aws_region_name:
-            request_params["aws_region_name"] = s3_config.aws_region_name
         if s3_config.aws_bedrock_runtime_endpoint:
             request_params["aws_bedrock_runtime_endpoint"] = s3_config.aws_bedrock_runtime_endpoint
 
@@ -137,7 +140,7 @@ IMPORTANT: You must respond with valid JSON only. Do not include any text before
         if not text_input:
             text_input = "No user input provided."
         if not system_prompt:
-            raise InvalidValueError(message="No system prompt path provided.")
+            raise MissingSystemPromptPathError()
         system_prompt = LLMGateway.read_query_prompt(system_prompt)
 
         formatted_prompt = (

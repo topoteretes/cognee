@@ -164,16 +164,16 @@ def get_settings() -> SettingsDict:
                     ],
                     "bedrock": [
                         {
-                            "value": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
-                            "label": "Claude 3.5 Sonnet",
+                            "value": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+                            "label": "Claude 4.5 Sonnet",
                         },
                         {
-                            "value": "us.anthropic.claude-3-5-haiku-20241022-v1:0",
-                            "label": "Claude 3.5 Haiku",
+                            "value": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+                            "label": "Claude 4.5 Haiku",
                         },
                         {
-                            "value": "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
-                            "label": "Claude 3.5 Sonnet (June)",
+                            "value": "eu.amazon.nova-lite-v1:0",
+                            "label": "Amazon Nova Lite",
                         },
                     ],
                 },

@@ -172,8 +172,8 @@ def get_llm_client(raise_api_key_error: bool = True):
         )
 
     elif provider == LLMProvider.BEDROCK:
-        if llm_config.llm_api_key is None and raise_api_key_error:
-            raise LLMAPIKeyNotSetError()
+        # if llm_config.llm_api_key is None and raise_api_key_error:
+        #     raise LLMAPIKeyNotSetError()
 
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.bedrock.adapter import (
             BedrockAdapter,
@@ -182,8 +182,9 @@ def get_llm_client(raise_api_key_error: bool = True):
         return BedrockAdapter(
             model=llm_config.llm_model,
             api_key=llm_config.llm_api_key,
-            max_tokens=max_completion_tokens,
+            max_completion_tokens=max_completion_tokens,
             streaming=llm_config.llm_streaming,
+            instructor_mode=llm_config.llm_instructor_mode.lower(),
         )
 
     else:
