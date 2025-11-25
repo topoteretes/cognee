@@ -103,31 +103,6 @@ reviews:
       - dev
       - main
   tools:
-    languagetool:
-      enabled: true
-      language: en-US
-      configuration:
-        level: picky
-        mother_tongue: en
-        dictionary:
-          - 'reactive-firewall'
-          - 'CEP-9'
-          - 'CEP-8'
-          - 'CEP-7'
-          - 'CEP-5'
-          - 'Shellscript'
-          - 'bash'
-        disabled_rules:
-          - EN_QUOTES
-          - CONSECUTIVE_SPACES
-        enabled_rules:
-          - STYLE
-          - EN_CONTRACTION_SPELLING
-          - EN_WORD_COHERENCY
-          - IT_IS_OBVIOUS
-          - TWELFTH_OF_NEVER
-          - OXFORD_SPELLING
-          - PASSIVE_VOICE
     shellcheck:
       enabled: true
     ruff:
@@ -148,7 +123,6 @@ reviews:
     markdownlint:
       enabled: true
     yamllint:
-      enabled: true
-      configuration_file: ".yamllint.conf"
+      enabled: true      
 chat:
   auto_reply: true
