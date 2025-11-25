@@ -9,7 +9,10 @@ from cognee.infrastructure.databases.graph.kuzu.KuzuDatasetDatabaseHandler impor
 )
 
 supported_dataset_database_handlers = {
-    "neo4j_aura": Neo4jAuraDatasetDatabaseHandler,
-    "lancedb": LanceDBDatasetDatabaseHandler,
-    "kuzu": KuzuDatasetDatabaseHandler,
+    "neo4j_aura": {
+        "handler_instance": Neo4jAuraDatasetDatabaseHandler,
+        "handler_provider": "neo4j",
+    },
+    "lancedb": {"handler_instance": LanceDBDatasetDatabaseHandler, "handler_provider": "lancedb"},
+    "kuzu": {"handler_instance": KuzuDatasetDatabaseHandler, "handler_provider": "kuzu"},
 }

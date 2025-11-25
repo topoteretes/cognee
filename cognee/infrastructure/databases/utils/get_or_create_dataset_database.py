@@ -1,13 +1,9 @@
-import os
-import asyncio
-import requests
 from uuid import UUID
 from typing import Union, Optional
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from cognee.base_config import get_base_config
 from cognee.modules.data.methods import create_dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vectordb_config
@@ -25,7 +21,7 @@ async def _get_vector_db_info(dataset_id: UUID, user: User) -> dict:
     )
 
     handler = supported_dataset_database_handlers[vector_config.vector_dataset_database_handler]
-    return await handler.create_dataset(dataset_id, user)
+    return await handler["handler_instance"].create_dataset(dataset_id, user)
 
 
 async def _get_graph_db_info(dataset_id: UUID, user: User) -> dict:
@@ -36,7 +32,7 @@ async def _get_graph_db_info(dataset_id: UUID, user: User) -> dict:
     )
 
     handler = supported_dataset_database_handlers[graph_config.graph_dataset_database_handler]
-    return await handler.create_dataset(dataset_id, user)
+    return await handler["handler_instance"].create_dataset(dataset_id, user)
 
 
 async def _existing_dataset_database(
