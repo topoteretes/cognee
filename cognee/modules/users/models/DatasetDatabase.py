@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, String, UUID, ForeignKey
+from sqlalchemy import Column, DateTime, String, UUID, ForeignKey, JSON
 from cognee.infrastructure.databases.relational import Base
 
 
@@ -27,8 +27,8 @@ class DatasetDatabase(Base):
     # TODO: Instead of specifying and forwawrding all these individual fields, consider using a JSON field to store
     # configuration details for different database types. This would make it more flexible to add new database types
     # without changing the database schema.
-    graph_database_username = Column(String, unique=False, nullable=True)
-    graph_database_password = Column(String, unique=False, nullable=True)
+    graph_database_connection_info = Column(JSON, unique=False, nullable=True)
+    vector_database_connection_info = Column(JSON, unique=False, nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))

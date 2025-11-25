@@ -7,6 +7,7 @@ from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.vector.config import get_vectordb_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.utils import get_or_create_dataset_database
+from cognee.infrastructure.databases.utils import resolve_dataset_database_connection_info
 from cognee.infrastructure.files.storage.config import file_storage_config
 from cognee.modules.users.methods import get_user
 
@@ -108,6 +109,8 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
 
     # To ensure permissions are enforced properly all datasets will have their own databases
     dataset_database = await get_or_create_dataset_database(dataset, user)
+    # Ensure that all connection info is resolved properly
+    dataset_database = await resolve_dataset_database_connection_info(dataset_database)
 
     base_config = get_base_config()
     data_root_directory = os.path.join(
@@ -133,8 +136,12 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
         "graph_file_path": os.path.join(
             databases_directory_path, dataset_database.graph_database_name
         ),
-        "graph_database_username": dataset_database.graph_database_username,
-        "graph_database_password": dataset_database.graph_database_password,
+        "graph_database_username": dataset_database.graph_database_connection_info.get(
+            "graph_database_username", ""
+        ),
+        "graph_database_password": dataset_database.graph_database_connection_info.get(
+            "graph_database_password", ""
+        ),
     }
 
     storage_config = {

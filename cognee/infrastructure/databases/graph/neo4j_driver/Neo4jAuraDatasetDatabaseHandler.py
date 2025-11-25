@@ -108,9 +108,11 @@ class Neo4jAuraDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             "graph_database_name": graph_db_name,
             "graph_database_url": graph_db_url,
             "graph_database_provider": "neo4j",
-            "graph_database_key": graph_db_key,  # TODO: Hashing of keys/passwords in relational DB
-            "graph_database_username": graph_db_username,
-            "graph_database_password": graph_db_password,
+            "graph_database_key": graph_db_key,
+            "graph_database_connection_info": {  # TODO: Hashing of keys/passwords in relational DB
+                "graph_database_username": graph_db_username,
+                "graph_database_password": graph_db_password,
+            },
         }
 
     @classmethod
