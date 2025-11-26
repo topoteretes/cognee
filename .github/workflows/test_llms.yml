@@ -84,3 +84,93 @@ jobs:
           EMBEDDING_DIMENSIONS: "3072"
           EMBEDDING_MAX_TOKENS: "8191"
         run: uv run python ./examples/python/simple_example.py
+
+  test-bedrock-api-key:
+    name: Run Bedrock API Key Test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "aws"
+
+      - name: Run Bedrock API Key Simple Example
+        env:
+          LLM_PROVIDER: "bedrock"
+          LLM_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
+          LLM_MODEL: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+          LLM_MAX_TOKENS: "16384"
+          AWS_REGION_NAME: "eu-west-1"
+          EMBEDDING_PROVIDER: "bedrock"
+          EMBEDDING_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
+          EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
+          EMBEDDING_DIMENSIONS: "1024"
+          EMBEDDING_MAX_TOKENS: "8191"
+        run: uv run python ./examples/python/simple_example.py
+
+  test-bedrock-aws-credentials:
+    name: Run Bedrock AWS Credentials Test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "aws"
+
+      - name: Run Bedrock AWS Credentials Simple Example
+        env:
+          LLM_PROVIDER: "bedrock"
+          LLM_MODEL: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+          LLM_MAX_TOKENS: "16384"
+          AWS_REGION_NAME: "eu-west-1"
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          EMBEDDING_PROVIDER: "bedrock"
+          EMBEDDING_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
+          EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
+          EMBEDDING_DIMENSIONS: "1024"
+          EMBEDDING_MAX_TOKENS: "8191"
+        run: uv run python ./examples/python/simple_example.py
+
+  test-bedrock-aws-profile:
+    name: Run Bedrock AWS Profile Test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "aws"
+
+      - name: Configure AWS Profile
+        run: |
+          mkdir -p ~/.aws
+          cat > ~/.aws/credentials << EOF
+          [bedrock-test]
+          aws_access_key_id = ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          EOF
+
+      - name: Run Bedrock AWS Profile Simple Example
+        env:
+          LLM_PROVIDER: "bedrock"
+          LLM_MODEL: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+          LLM_MAX_TOKENS: "16384"
+          AWS_PROFILE_NAME: "bedrock-test"
+          AWS_REGION_NAME: "eu-west-1"
+          EMBEDDING_PROVIDER: "bedrock"
+          EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
+          EMBEDDING_DIMENSIONS: "1024"
+          EMBEDDING_MAX_TOKENS: "8191"
+        run: uv run python ./examples/python/simple_example.py

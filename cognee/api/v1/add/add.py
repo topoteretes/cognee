@@ -155,7 +155,7 @@ async def add(
         - LLM_API_KEY: API key for your LLM provider (OpenAI, Anthropic, etc.)
 
         Optional:
-        - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama", "mistral"
+        - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama", "mistral", "bedrock"
         - LLM_MODEL: Model name (default: "gpt-5-mini")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password

@@ -9,6 +9,8 @@ class S3Config(BaseSettings):
     aws_access_key_id: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
     aws_session_token: Optional[str] = None
+    aws_profile_name: Optional[str] = None
+    aws_bedrock_runtime_endpoint: Optional[str] = None
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
 
