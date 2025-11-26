@@ -33,7 +33,7 @@ export default function NotebookCellHeader({
     setFalse: setIsNotRunningCell,
   } = useBoolean(false);
 
-  const [runInstance, setRunInstance] = useState<string>(isCloudEnvironment() ? "cloud" : "local");
+  const [runInstance] = useState<string>(isCloudEnvironment() ? "cloud" : "local");
 
   const handleCellRun = () => {
     if (runCell) {
