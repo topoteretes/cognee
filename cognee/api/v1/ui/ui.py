@@ -621,7 +621,7 @@ def start_ui(
             if nvm_path.exists():
                 # Use bash to source nvm and run npm
                 process = subprocess.Popen(
-                    ["bash", "-c", f"source ~/.nvm/nvm.sh 2>/dev/null && npm run dev"],
+                    ["bash", "-c", "source ~/.nvm/nvm.sh 2>/dev/null && npm run dev"],
                     cwd=frontend_path,
                     env=env,
                     stdout=subprocess.PIPE,
