@@ -6,7 +6,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.models import Triplet
 from cognee.tasks.storage import index_data_points
 
-logger = get_logger('get_triplet_datapoints')
+logger = get_logger("get_triplet_datapoints")
 
 
 def _extract_embeddable_text(node_or_edge: Dict[str, Any], index_fields: List[str]) -> str:
@@ -59,7 +59,7 @@ async def get_triplet_datapoints(
         - List[Dict[str, Any]]: A batch of triplets, each enriched with embeddable text.
     """
     logger.info(f"Starting triplet datapoints extraction with batch size: {triplets_batch_size}")
-    
+
     graph_engine = await get_graph_engine()
     graph_engine_type = type(graph_engine).__name__
     logger.debug(f"Using graph engine: {graph_engine_type}")
@@ -94,12 +94,14 @@ async def get_triplet_datapoints(
     offset = 0
     total_triplets_processed = 0
     batch_number = 0
-    
+
     while True:
         try:
             batch_number += 1
-            logger.debug(f"Fetching triplet batch {batch_number} (offset: {offset}, limit: {triplets_batch_size})")
-            
+            logger.debug(
+                f"Fetching triplet batch {batch_number} (offset: {offset}, limit: {triplets_batch_size})"
+            )
+
             triplets_batch = await graph_engine.get_triplets_batch(
                 offset=offset, limit=triplets_batch_size
             )
@@ -112,7 +114,7 @@ async def get_triplet_datapoints(
 
             triplet_datapoints = []
             skipped_count = 0
-            
+
             for idx, triplet_datapoint in enumerate(triplets_batch):
                 try:
                     start_node = triplet_datapoint.get("start_node", {})
@@ -140,7 +142,9 @@ async def get_triplet_datapoints(
                         if edge_text and isinstance(edge_text, str) and edge_text.strip():
                             relationship_text = edge_text.strip()
                         else:
-                            edge_type_index_fields = datapoint_type_index_property.get("EdgeType", [])
+                            edge_type_index_fields = datapoint_type_index_property.get(
+                                "EdgeType", []
+                            )
                             relationship_text = _extract_embeddable_text(
                                 relationship, edge_type_index_fields
                             )
@@ -159,8 +163,10 @@ async def get_triplet_datapoints(
                         skipped_count += 1
                         continue
 
-                    embeddable_text = f"{start_node_text} {relationship_text} {end_node_text}".strip()
-                    
+                    embeddable_text = (
+                        f"{start_node_text} {relationship_text} {end_node_text}".strip()
+                    )
+
                     if not embeddable_text:
                         logger.warning(
                             f"Skipping triplet at offset {offset + idx}: empty embeddable text "
@@ -174,7 +180,7 @@ async def get_triplet_datapoints(
                     )
 
                     triplet_datapoints.append(triplet_obj)
-                    
+
                 except Exception as e:
                     logger.warning(
                         f"Error processing triplet at offset {offset + idx}: {e}. "
@@ -189,13 +195,17 @@ async def get_triplet_datapoints(
                 )
 
             if not triplet_datapoints:
-                logger.warning(f"No valid triplet datapoints in batch {batch_number} after processing")
+                logger.warning(
+                    f"No valid triplet datapoints in batch {batch_number} after processing"
+                )
                 offset += len(triplets_batch)
                 if len(triplets_batch) < triplets_batch_size:
                     break
                 continue
 
-            logger.debug(f"Indexing {len(triplet_datapoints)} triplet datapoints from batch {batch_number}")
+            logger.debug(
+                f"Indexing {len(triplet_datapoints)} triplet datapoints from batch {batch_number}"
+            )
             await index_data_points(triplet_datapoints)
             logger.debug(f"Successfully indexed {len(triplet_datapoints)} triplet datapoints")
 
