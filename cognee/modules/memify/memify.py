@@ -18,6 +18,7 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
+from cognee.tasks.memify.create_chunk_associations import create_chunk_associations
 from cognee.tasks.codingagents.coding_rule_associations import (
     add_rule_associations,
 )
@@ -74,7 +75,12 @@ async def memify(
                 add_rule_associations,
                 rules_nodeset_name="coding_agent_rules",
                 task_config={"batch_size": 1},
-            )
+            ),
+            Task(
+                create_chunk_associations,
+                similarity_threshold=0.7,
+                task_config={"batch_size": 1},
+            ),
         ]
 
     await setup()
