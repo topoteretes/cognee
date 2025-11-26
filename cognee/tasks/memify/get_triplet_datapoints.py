@@ -203,12 +203,6 @@ async def get_triplet_datapoints(
                     break
                 continue
 
-            logger.debug(
-                f"Indexing {len(triplet_datapoints)} triplet datapoints from batch {batch_number}"
-            )
-            await index_data_points(triplet_datapoints)
-            logger.debug(f"Successfully indexed {len(triplet_datapoints)} triplet datapoints")
-
             total_triplets_processed += len(triplet_datapoints)
             logger.info(
                 f"Batch {batch_number} complete: processed {len(triplet_datapoints)} triplets "
