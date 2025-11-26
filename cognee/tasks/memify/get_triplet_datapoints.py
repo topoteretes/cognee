@@ -41,8 +41,9 @@ def _extract_embeddable_text(node_or_edge: Dict[str, Any], index_fields: List[st
 
 
 async def get_triplet_datapoints(
+    data,
     triplets_batch_size: int = 100,
-) -> AsyncGenerator[List[Dict[str, Any]], None]:
+) -> AsyncGenerator[Triplet, None]:
     """
     Async generator that yields batches of triplet datapoints with embeddable text extracted.
 
@@ -58,6 +59,9 @@ async def get_triplet_datapoints(
     -------
         - List[Dict[str, Any]]: A batch of triplets, each enriched with embeddable text.
     """
+    if not data or data == [{}]:
+        logger.info("Fetching graph data for current user")
+
     logger.info(f"Starting triplet datapoints extraction with batch size: {triplets_batch_size}")
 
     graph_engine = await get_graph_engine()
@@ -181,6 +185,8 @@ async def get_triplet_datapoints(
 
                     triplet_datapoints.append(triplet_obj)
 
+                    yield triplet_obj
+
                 except Exception as e:
                     logger.warning(
                         f"Error processing triplet at offset {offset + idx}: {e}. "
@@ -208,8 +214,6 @@ async def get_triplet_datapoints(
                 f"Batch {batch_number} complete: processed {len(triplet_datapoints)} triplets "
                 f"(total processed: {total_triplets_processed})"
             )
-
-            yield triplet_datapoints
 
             offset += len(triplets_batch)
             if len(triplets_batch) < triplets_batch_size:
