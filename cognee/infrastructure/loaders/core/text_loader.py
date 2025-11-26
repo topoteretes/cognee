@@ -16,7 +16,7 @@ class TextLoader(LoaderInterface):
     @property
     def supported_extensions(self) -> List[str]:
         """Supported text file extensions."""
-        return ["txt", "md", "csv", "json", "xml", "yaml", "yml", "log"]
+        return ["txt", "md", "json", "xml", "yaml", "yml", "log"]
 
     @property
     def supported_mime_types(self) -> List[str]:
@@ -24,7 +24,6 @@ class TextLoader(LoaderInterface):
         return [
             "text/plain",
             "text/markdown",
-            "text/csv",
             "application/json",
             "text/xml",
             "application/xml",

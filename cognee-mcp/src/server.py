@@ -103,7 +103,6 @@ async def cognify(
 
     Prerequisites:
         - **LLM_API_KEY**: Must be configured (required for entity extraction and graph generation)
-        - **Data Added**: Must have data previously added via `cognee.add()`
         - **Vector Database**: Must be accessible for embeddings storage
         - **Graph Database**: Must be accessible for relationship storage
 
@@ -855,6 +854,10 @@ async def main():
 
     # Skip migrations when in API mode (the API server handles its own database)
     if not args.no_migration and not args.api_url:
+        from cognee.modules.engine.operations.setup import setup
+
+        await setup()
+
         # Run Alembic migrations from the main cognee directory where alembic.ini is located
         logger.info("Running database migrations...")
         migration_result = subprocess.run(

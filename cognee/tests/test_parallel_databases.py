@@ -33,11 +33,13 @@ async def main():
         "vector_db_url": "cognee1.test",
         "vector_db_key": "",
         "vector_db_provider": "lancedb",
+        "vector_db_name": "",
     }
     task_2_config = {
         "vector_db_url": "cognee2.test",
         "vector_db_key": "",
         "vector_db_provider": "lancedb",
+        "vector_db_name": "",
     }
 
     task_1_graph_config = {

@@ -23,6 +23,7 @@ from cognee.api.v1.settings.routers import get_settings_router
 from cognee.api.v1.datasets.routers import get_datasets_router
 from cognee.api.v1.cognify.routers import get_cognify_router
 from cognee.api.v1.search.routers import get_search_router
+from cognee.api.v1.ontologies.routers.get_ontology_router import get_ontology_router
 from cognee.api.v1.memify.routers import get_memify_router
 from cognee.api.v1.add.routers import get_add_router
 from cognee.api.v1.delete.routers import get_delete_router
@@ -39,6 +40,8 @@ from cognee.api.v1.users.routers import (
 )
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
+# Ensure application logging is configured for container stdout/stderr
+setup_logging()
 logger = get_logger()
 
 if os.getenv("ENV", "prod") == "prod":
@@ -73,6 +76,9 @@ async def lifespan(app: FastAPI):
     from cognee.modules.users.methods import get_default_user
 
     await get_default_user()
+
+    # Emit a clear startup message for docker logs
+    logger.info("Backend server has started")
 
     yield
 
@@ -257,6 +263,8 @@ app.include_router(
 )
 
 app.include_router(get_datasets_router(), prefix="/api/v1/datasets", tags=["datasets"])
+
+app.include_router(get_ontology_router(), prefix="/api/v1/ontologies", tags=["ontologies"])
 
 app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["settings"])
 
