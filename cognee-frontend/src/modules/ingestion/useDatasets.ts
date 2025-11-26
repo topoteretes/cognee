@@ -13,7 +13,6 @@ export interface Dataset {
 
 function useDatasets(useCloud = false) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   // const statusTimeout = useRef<any>(null);
 
   // const fetchDatasetStatuses = useCallback((datasets: Dataset[]) => {

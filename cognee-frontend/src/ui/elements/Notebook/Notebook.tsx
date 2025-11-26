@@ -2,7 +2,7 @@
 
 import { v4 as uuid4 } from "uuid";
 import classNames from "classnames";
-import { Fragment, MouseEvent, MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, MouseEvent, RefObject, useCallback, useEffect, useRef, useState } from "react";
 
 import { useModal } from "@/ui/elements/Modal";
 import { CaretIcon, CloseIcon, PlusIcon } from "@/ui/Icons";
@@ -282,7 +282,7 @@ export default function Notebook({ notebook, updateNotebook, runCell }: Notebook
 function CellResult({ content }: { content: [] }) {
   const parsedContent = [];
 
-  const graphRef = useRef<GraphVisualizationAPI>();
+  const graphRef = useRef<GraphVisualizationAPI>(null);
   const graphControls = useRef<GraphControlsAPI>({
     setSelectedNode: () => {},
     getSelectedNode: () => null,
@@ -298,7 +298,7 @@ function CellResult({ content }: { content: [] }) {
               <span className="text-sm pl-2 mb-4">reasoning graph</span>
               <GraphVisualization
                 data={transformInsightsGraphData(line)}
-                ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
+                ref={graphRef as RefObject<GraphVisualizationAPI>}
                 graphControls={graphControls}
                 className="min-h-80"
               />
@@ -346,7 +346,7 @@ function CellResult({ content }: { content: [] }) {
                   <span className="text-sm pl-2 mb-4">reasoning graph (datasets: {datasetName})</span>
                   <GraphVisualization
                     data={transformToVisualizationData(graph)}
-                    ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
+                    ref={graphRef as RefObject<GraphVisualizationAPI>}
                     graphControls={graphControls}
                     className="min-h-80"
                   />
@@ -377,7 +377,7 @@ function CellResult({ content }: { content: [] }) {
               <span className="text-sm pl-2 mb-4">reasoning graph (datasets: {datasetName})</span>
               <GraphVisualization
                 data={transformToVisualizationData(graph)}
-                ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
+                ref={graphRef as RefObject<GraphVisualizationAPI>}
                 graphControls={graphControls}
                 className="min-h-80"
               />
