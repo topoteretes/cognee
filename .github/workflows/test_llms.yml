@@ -98,11 +98,11 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "aws"
 
-      - name: Run Bedrock API Key Test
+      - name: Run Bedrock API Key Simple Example
         env:
           LLM_PROVIDER: "bedrock"
           LLM_API_KEY: ${{ secrets.BEDROCK_API_KEY }}
-          LLM_MODEL: "eu.amazon.nova-lite-v1:0"
+          LLM_MODEL: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
           LLM_MAX_TOKENS: "16384"
           AWS_REGION_NAME: "eu-west-1"
           EMBEDDING_PROVIDER: "bedrock"
@@ -125,10 +125,10 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "aws"
 
-      - name: Run Bedrock API Key Test
+      - name: Run Bedrock AWS Credentials Simple Example
         env:
           LLM_PROVIDER: "bedrock"
-          LLM_MODEL: "eu.amazon.nova-lite-v1:0"
+          LLM_MODEL: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
           LLM_MAX_TOKENS: "16384"
           AWS_REGION_NAME: "eu-west-1"
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -162,10 +162,11 @@ jobs:
           aws_secret_access_key = ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           EOF
 
-      - name: Run Bedrock AWS Profile Test
+      - name: Run Bedrock AWS Profile Simple Example
         env:
           LLM_PROVIDER: "bedrock"
-          LLM_MODEL: "eu.amazon.nova-lite-v1:0"
+          LLM_MODEL: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+          LLM_MAX_TOKENS: "16384"
           AWS_PROFILE_NAME: "bedrock-test"
           AWS_REGION_NAME: "eu-west-1"
           EMBEDDING_PROVIDER: "bedrock"

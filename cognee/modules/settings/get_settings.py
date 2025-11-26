@@ -164,7 +164,7 @@ def get_settings() -> SettingsDict:
                     ],
                     "bedrock": [
                         {
-                            "value": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+                            "value": "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                             "label": "Claude 4.5 Sonnet",
                         },
                         {
