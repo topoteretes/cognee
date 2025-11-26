@@ -41,7 +41,7 @@ def upgrade() -> None:
                 sa.JSON(),
                 unique=False,
                 nullable=False,
-                default={},
+                server_default=sa.text("'{}'"),
             ),
         )
 
@@ -56,7 +56,7 @@ def upgrade() -> None:
                 sa.JSON(),
                 unique=False,
                 nullable=False,
-                default={},
+                server_default=sa.text("'{}'"),
             ),
         )
 
