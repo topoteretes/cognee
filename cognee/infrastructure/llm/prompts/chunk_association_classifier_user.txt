@@ -1,0 +1,11 @@
+Analyze whether these two document chunks should be semantically associated:
+
+**Chunk 1:**
+{{chunk1_text}}
+
+**Chunk 2:**
+{{chunk2_text}}
+
+**Computed Similarity Score:** {{similarity_score}}
+
+Based on the content and context of both chunks, should they be associated in the knowledge graph?

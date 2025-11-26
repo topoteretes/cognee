@@ -1,3 +1,4 @@
+from .create_chunk_associations import create_chunk_associations
 from .extract_subgraph import extract_subgraph
 from .extract_subgraph_chunks import extract_subgraph_chunks
 from .cognify_session import cognify_session
