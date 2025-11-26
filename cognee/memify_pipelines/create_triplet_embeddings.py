@@ -18,7 +18,7 @@ logger = get_logger("create_triplet_embeddings")
 
 
 async def create_triplet_embeddings(
-    user: User,
+    user: None,
     dataset: str = "main_dataset",
     run_in_background: bool = False,
     triplets_batch_size: int = 100,
@@ -48,6 +48,7 @@ async def create_triplet_embeddings(
         enrichment_tasks=enrichment_tasks,
         dataset=dataset_to_write[0].id,
         data=[{}],
+        user=user,
         run_in_background=run_in_background,
     )
 
