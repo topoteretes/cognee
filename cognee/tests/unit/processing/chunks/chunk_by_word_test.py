@@ -1,8 +1,9 @@
-import numpy as np
 import pytest
 
 from cognee.tasks.chunks import chunk_by_word
 from cognee.tests.unit.processing.chunks.test_input import INPUT_TEXTS, INPUT_TEXTS_LONGWORDS
+
+np = pytest.importorskip("numpy")
 
 
 @pytest.mark.parametrize(

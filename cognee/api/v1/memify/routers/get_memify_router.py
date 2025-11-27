@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from fastapi import Depends
-from pydantic import Field
+from pydantic import Field, conint
 from typing import List, Optional, Union, Literal
 
 from cognee.api.DTO import InDTO
@@ -29,6 +29,7 @@ class MemifyPayloadDTO(InDTO):
     dataset_id: Union[UUID, Literal[""], None] = Field(default=None, examples=[""])
     node_name: Optional[List[str]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
+    sentiment_last_k: Optional[conint(ge=0)] = Field(default=20)
 
 
 def get_memify_router() -> APIRouter:
@@ -52,6 +53,7 @@ def get_memify_router() -> APIRouter:
         - **dataset_id** (Optional[UUID]): List of UUIDs of an already existing dataset
         - **node_name** (Optional[List[str]]):  Filter graph to specific named entities (for targeted search). Used when no data is provided.
         - **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).
+        - **sentiment_last_k** (Optional[int]): Number of recent interactions to analyse for sentiment (0 disables sentiment tasks).
 
         Either datasetName or datasetId must be provided.
 
@@ -90,6 +92,7 @@ def get_memify_router() -> APIRouter:
                 dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
                 node_name=payload.node_name,
                 user=user,
+                sentiment_last_k=payload.sentiment_last_k,
             )
 
             if isinstance(memify_run, PipelineRunErrored):

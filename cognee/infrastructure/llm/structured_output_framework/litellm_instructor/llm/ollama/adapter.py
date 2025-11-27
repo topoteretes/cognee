@@ -42,7 +42,7 @@ class OllamaAPIAdapter(LLMInterface):
     - aclient
     """
 
-    default_instructor_mode = "json_mode"
+    default_instructor_mode = instructor.Mode.JSON
 
     def __init__(
         self,
@@ -51,7 +51,7 @@ class OllamaAPIAdapter(LLMInterface):
         model: str,
         name: str,
         max_completion_tokens: int,
-        instructor_mode: str = None,
+        instructor_mode: str | instructor.Mode | None = None,
     ):
         self.name = name
         self.model = model
@@ -59,11 +59,16 @@ class OllamaAPIAdapter(LLMInterface):
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
 
-        self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
+        if instructor_mode is None:
+            self.instructor_mode = self.default_instructor_mode
+        elif isinstance(instructor_mode, instructor.Mode):
+            self.instructor_mode = instructor_mode
+        else:
+            self.instructor_mode = instructor.Mode(instructor_mode)
 
         self.aclient = instructor.from_openai(
             OpenAI(base_url=self.endpoint, api_key=self.api_key),
-            mode=instructor.Mode(self.instructor_mode),
+            mode=self.instructor_mode,
         )
 
     @retry(
@@ -96,18 +101,26 @@ class OllamaAPIAdapter(LLMInterface):
             - BaseModel: A structured output that conforms to the specified response model.
         """
 
-        response = self.aclient.chat.completions.create(
-            model=self.model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"{text_input}",
-                },
+        messages = []
+
+        if system_prompt:
+            messages.append(
                 {
                     "role": "system",
                     "content": system_prompt,
-                },
-            ],
+                }
+            )
+
+        messages.append(
+            {
+                "role": "user",
+                "content": str(text_input),
+            }
+        )
+
+        response = self.aclient.chat.completions.create(
+            model=self.model,
+            messages=messages,
             max_retries=5,
             response_model=response_model,
         )
