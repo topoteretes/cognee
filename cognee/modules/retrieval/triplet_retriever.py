@@ -65,7 +65,7 @@ class TripletRetriever(BaseRetriever):
                 logger.error("Triplet_text collection not found")
                 raise NoDataError(
                     "In order to use TRIPLET_COMPLETION first use the create_triplet_embeddings memify pipeline. "
-                ) from error
+                )
 
             found_triplets = await vector_engine.search("Triplet_text", query, limit=self.top_k)
 
