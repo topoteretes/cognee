@@ -47,6 +47,8 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
         save_interaction: bool = False,
+        wide_search_top_k: Optional[int] = 100,
+        triplet_distance_penalty: Optional[float] = 3.5,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.save_interaction = save_interaction
@@ -54,8 +56,10 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         self.system_prompt_path = system_prompt_path
         self.system_prompt = system_prompt
         self.top_k = top_k if top_k is not None else 5
+        self.wide_search_top_k = wide_search_top_k
         self.node_type = node_type
         self.node_name = node_name
+        self.triplet_distance_penalty = triplet_distance_penalty
 
     async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
         """
@@ -105,6 +109,8 @@ class GraphCompletionRetriever(BaseGraphRetriever):
             collections=vector_index_collections or None,
             node_type=self.node_type,
             node_name=self.node_name,
+            wide_search_top_k=self.wide_search_top_k,
+            triplet_distance_penalty=self.triplet_distance_penalty,
         )
 
         return found_triplets
@@ -140,6 +146,10 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         # context = await self.resolve_edges_to_text(triplets)
 
         return triplets
+
+    async def convert_retrieved_objects_to_context(self, triplets: List[Edge]):
+        context = await self.resolve_edges_to_text(triplets)
+        return context
 
     async def get_completion(
         self,

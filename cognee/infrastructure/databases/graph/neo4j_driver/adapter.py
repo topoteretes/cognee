@@ -961,6 +961,63 @@ class Neo4jAdapter(GraphDBInterface):
             logger.error(f"Error during graph data retrieval: {str(e)}")
             raise
 
+    async def get_id_filtered_graph_data(self, target_ids: list[str]):
+        """
+        Retrieve graph data filtered by specific node IDs, including their direct neighbors
+        and only edges where one endpoint matches those IDs.
+
+        This version uses a single Cypher query for efficiency.
+        """
+        import time
+
+        start_time = time.time()
+
+        try:
+            if not target_ids:
+                logger.warning("No target IDs provided for ID-filtered graph retrieval.")
+                return [], []
+
+            query = """
+            MATCH ()-[r]-()
+            WHERE startNode(r).id IN $target_ids
+               OR endNode(r).id IN $target_ids
+            WITH DISTINCT r, startNode(r) AS a, endNode(r) AS b
+            RETURN
+                properties(a) AS n_properties,
+                properties(b) AS m_properties,
+                type(r) AS type,
+                properties(r) AS properties
+            """
+
+            result = await self.query(query, {"target_ids": target_ids})
+
+            nodes_dict = {}
+            edges = []
+
+            for record in result:
+                n_props = record["n_properties"]
+                m_props = record["m_properties"]
+                r_props = record["properties"]
+                r_type = record["type"]
+
+                nodes_dict[n_props["id"]] = (n_props["id"], n_props)
+                nodes_dict[m_props["id"]] = (m_props["id"], m_props)
+
+                source_id = r_props.get("source_node_id", n_props["id"])
+                target_id = r_props.get("target_node_id", m_props["id"])
+                edges.append((source_id, target_id, r_type, r_props))
+
+            retrieval_time = time.time() - start_time
+            logger.info(
+                f"ID-filtered retrieval: {len(nodes_dict)} nodes and {len(edges)} edges in {retrieval_time:.2f}s"
+            )
+
+            return list(nodes_dict.values()), edges
+
+        except Exception as e:
+            logger.error(f"Error during ID-filtered graph data retrieval: {str(e)}")
+            raise
+
     async def get_nodeset_subgraph(
         self, node_type: Type[Any], node_name: List[str]
     ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
