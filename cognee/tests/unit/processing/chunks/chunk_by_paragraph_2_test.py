@@ -1,11 +1,11 @@
 from itertools import product
 
-import numpy as np
 import pytest
-
 from cognee.tests.unit.processing.chunks.test_input import INPUT_TEXTS
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.tasks.chunks import chunk_by_paragraph
+
+np = pytest.importorskip("numpy")
 
 batch_paragraphs_vals = [True, False]
 max_chunk_size_vals = [512, 1024, 4096]

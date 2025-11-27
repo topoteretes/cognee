@@ -1,8 +1,9 @@
-import numpy as np
 import pytest
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
 from cognee.modules.graph.exceptions import InvalidDimensionsError, DimensionOutOfRangeError
+
+np = pytest.importorskip("numpy")
 
 
 def test_node_initialization():

@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from fastapi import Depends
-from pydantic import Field
+from pydantic import Field, conint
 from typing import List, Optional, Union, Literal
 
 from cognee.api.DTO import InDTO
@@ -29,7 +29,7 @@ class MemifyPayloadDTO(InDTO):
     dataset_id: Union[UUID, Literal[""], None] = Field(default=None, examples=[""])
     node_name: Optional[List[str]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
-    sentiment_last_k: Optional[int] = Field(default=20)
+    sentiment_last_k: Optional[conint(ge=0)] = Field(default=20)
 
 
 def get_memify_router() -> APIRouter:

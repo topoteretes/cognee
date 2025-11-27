@@ -1,10 +1,10 @@
 from itertools import product
 
-import numpy as np
 import pytest
-
 from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
 from cognee.tasks.chunks import chunk_by_row
+
+np = pytest.importorskip("numpy")
 
 INPUT_TEXTS = "name: John, age: 30, city: New York, country: USA"
 max_chunk_size_vals = [8, 32]
