@@ -15,3 +15,8 @@ jobs:
     name: Load Tests
     uses: ./.github/workflows/load_tests.yml
     secrets: inherit
+
+  docs-tests:
+    name: Docs Tests
+    uses: ./.github/workflows/docs_tests.yml
+    secrets: inherit
