@@ -1140,7 +1140,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.3,<4" },
     { name = "kuzu", specifier = "==0.11.3" },
     { name = "lance-namespace", specifier = "<=0.0.21" },
-    { name = "lancedb", specifier = ">=0.24.0,<1.0.0" },
+    { name = "lancedb", specifier = ">=0.24.0,<=0.25.3" },
     { name = "langchain-aws", marker = "extra == 'neptune'", specifier = ">=0.2.22" },
     { name = "langchain-text-splitters", marker = "extra == 'langchain'", specifier = ">=0.3.2,<1.0.0" },
     { name = "langfuse", marker = "extra == 'monitoring'", specifier = ">=2.32.0,<3" },
