@@ -4703,29 +4703,36 @@ files = [
 
 [[package]]
 name = "lance-namespace"
-version = "0.2.0"
-description = "Lance Namespace interface and plugin registry"
+version = "0.0.6"
+description = "Python client for Lance Namespace API"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "lance_namespace-0.2.0-py3-none-any.whl", hash = "sha256:66903a5bb9773b3f9a06e8a3e366fe499a50bd5712d5438260c12969bbc184f5"},
-    {file = "lance_namespace-0.2.0.tar.gz", hash = "sha256:9cc2c8c8fa6ea86f4563d6afefa46b91a9f2561a14b641c874ea2aa46efdd25a"},
+    {file = "lance_namespace-0.0.6-py3-none-any.whl", hash = "sha256:fd102aec0ca3672b15cae65f4b9bf15086f7a73cedb7f5c12c47b5b48f9090b4"},
+    {file = "lance_namespace-0.0.6.tar.gz", hash = "sha256:3eeeba5f6bb8d01504cda33d86e6c22bd9cefb1f6f3aac1f963d46a9ff09b9a0"},
 ]
 
 [package.dependencies]
 lance-namespace-urllib3-client = "*"
+pyarrow = ">=14.0.0"
+pylance = ">=0.18.0"
+typing-extensions = ">=4.0.0"
+
+[package.extras]
+dir = ["opendal"]
+test = ["pytest (>=7.0.0)", "pytest-cov (>=4.0.0)"]
 
 [[package]]
 name = "lance-namespace-urllib3-client"
-version = "0.2.0"
+version = "0.0.14"
 description = "Lance Namespace Specification"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "lance_namespace_urllib3_client-0.2.0-py3-none-any.whl", hash = "sha256:285fcde83b88677da54b434b0c158ad006619c7c9a38d8c633d4bfe2b6b20158"},
-    {file = "lance_namespace_urllib3_client-0.2.0.tar.gz", hash = "sha256:39fa5bac2b6212476febd477c22e0ed7cf40d7850d8df6a8b2086ed6bb5554f8"},
+    {file = "lance_namespace_urllib3_client-0.0.14-py3-none-any.whl", hash = "sha256:40277cfcf7c9084419c2784e7924b3e316f6fe5b8057f4dc62a49f3b40c2d80c"},
+    {file = "lance_namespace_urllib3_client-0.0.14.tar.gz", hash = "sha256:911c6a3b5c2c98f4239b6d96609cf840e740c3af5482f5fb22096afb9db1dc1c"},
 ]
 
 [package.dependencies]
@@ -4736,26 +4743,26 @@ urllib3 = ">=1.25.3,<3.0.0"
 
 [[package]]
 name = "lancedb"
-version = "0.25.3"
+version = "0.25.0"
 description = "lancedb"
 optional = false
 python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "lancedb-0.25.3-cp39-abi3-macosx_10_15_x86_64.whl", hash = "sha256:1cfa4dd97b33ca8f73288aa4b1baaddc9545ce0d3c8e5d06fba8feb77f42363f"},
-    {file = "lancedb-0.25.3-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:8a7bfe0cb2146f6e78e9f376673ed2f906b93dab84df97dad2ba9fa52f97e152"},
-    {file = "lancedb-0.25.3-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:25a395d07d31da1e13e2631fd9911b15e6d4fb903d34358cea0bd450006364e3"},
-    {file = "lancedb-0.25.3-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:500beac161f73e3e6826a711efb1d24397d892d07dfdce2c9fb1da73f8de506c"},
-    {file = "lancedb-0.25.3-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:2d0fce4187582e48b69430d204665e164002f1b49b03e67747ca8ec2c3083481"},
-    {file = "lancedb-0.25.3-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:3035665fb8e4aaff8dff2602747cc77aeba6bc39f1a95345abc3275c97a044cb"},
-    {file = "lancedb-0.25.3-cp39-abi3-win_amd64.whl", hash = "sha256:8c153d976bec79358d328e4c8a287a7b9c918b35b3912fff6864ced6b2a15943"},
+    {file = "lancedb-0.25.0-cp39-abi3-macosx_10_15_x86_64.whl", hash = "sha256:ae2e80b7b3be3fa4d92fc8d500f47549dd1f8d28ca5092f1c898b92d0cfd4393"},
+    {file = "lancedb-0.25.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:a9d67ea9edffa596c6f190151fdd535da8e355a4fd1979c1dc19d540a5665916"},
+    {file = "lancedb-0.25.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d8fe20079ed86b1ab75c65dcfc920a9646c835e9c40ef825cadd148c11b0001e"},
+    {file = "lancedb-0.25.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b37bc402d85c83e454d9f2e79480b31acc5904bb159a4fc715032c7560494157"},
+    {file = "lancedb-0.25.0-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:f9bbc20bd1e64be359ca11c90428c00b0062d26b0291bddf32ab5471a3525c76"},
+    {file = "lancedb-0.25.0-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:1306be9c08e208a5bcb5188275f47f962c2eda96369fad5949a3ddaf592afc6d"},
+    {file = "lancedb-0.25.0-cp39-abi3-win_amd64.whl", hash = "sha256:f66283e5d63c99c2bfbd4eaa134d9a5c5b0145eb26a972648214f8ba87777e24"},
 ]
 
 [package.dependencies]
 deprecation = "*"
-lance-namespace = ">=0.0.16"
+lance-namespace = "0.0.6"
 numpy = "*"
-overrides = {version = ">=0.7", markers = "python_full_version < \"3.12.0\""}
+overrides = ">=0.7"
 packaging = "*"
 pyarrow = ">=16"
 pydantic = ">=1.10"
@@ -7616,7 +7623,6 @@ description = "A decorator to automatically detect mismatch when overriding a me
 optional = false
 python-versions = ">=3.6"
 groups = ["main"]
-markers = "extra == \"chromadb\" or python_version < \"3.12\""
 files = [
     {file = "overrides-7.7.0-py3-none-any.whl", hash = "sha256:c7ed9d062f78b8e4c1a7b70bd8796b35ead4d9f510227ef9c5dc7626c60d7e49"},
     {file = "overrides-7.7.0.tar.gz", hash = "sha256:55158fa3d93b98cc75299b1e67078ad9003ca27945c76162c1c0766d6f91820a"},
@@ -13677,4 +13683,4 @@ scraping = ["APScheduler", "beautifulsoup4", "lxml", "playwright", "protego", "t
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.14"
-content-hash = "f498fa325f840ca9a1f3c4638d79bf4b7713c94ebb35fdcbc22e0d83fee1ed3e"
+content-hash = "b6ede4c196d086f7159f84142c16d16fcc19bc73fcb9ab274a3b6351e6fcbb7e"
