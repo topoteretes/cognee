@@ -29,7 +29,7 @@ async def create_triplet_embeddings(
 
     if not dataset_to_write:
         raise CogneeValidationError(
-            message=f"User (id: {str(user.id)}) does not have write access to dataset: {dataset}",
+            message=f"User does not have write access to dataset: {dataset}",
             log=False,
         )
 
