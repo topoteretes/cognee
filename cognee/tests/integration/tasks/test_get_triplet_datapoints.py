@@ -24,7 +24,7 @@ async def setup_test_environment():
 
     dataset_name = "test_triplets"
 
-    text = "Alice knows Bob. Bob works at Tech Corp."
+    text = "Volkswagen is a german car manufacturer from Wolfsburg. They produce different models such as Golf, Polo and Touareg."
     await cognee.add(text, dataset_name)
     await cognee.cognify([dataset_name])
 
