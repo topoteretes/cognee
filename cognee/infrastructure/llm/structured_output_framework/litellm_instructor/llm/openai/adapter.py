@@ -111,7 +111,7 @@ class OpenAIAdapter(LLMInterface):
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
     ) -> BaseModel:
         """
         Generate a response from a user query.
@@ -152,6 +152,7 @@ class OpenAIAdapter(LLMInterface):
                 api_version=self.api_version,
                 response_model=response_model,
                 max_retries=self.MAX_RETRIES,
+                **kwargs,
             )
         except (
             ContentFilterFinishReasonError,
@@ -177,6 +178,7 @@ class OpenAIAdapter(LLMInterface):
                     # api_base=self.fallback_endpoint,
                     response_model=response_model,
                     max_retries=self.MAX_RETRIES,
+                    **kwargs,
                 )
             except (
                 ContentFilterFinishReasonError,
@@ -202,7 +204,7 @@ class OpenAIAdapter(LLMInterface):
         reraise=True,
     )
     def create_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
     ) -> BaseModel:
         """
         Generate a response from a user query.
@@ -242,6 +244,7 @@ class OpenAIAdapter(LLMInterface):
             api_version=self.api_version,
             response_model=response_model,
             max_retries=self.MAX_RETRIES,
+            **kwargs,
         )
 
     @retry(
@@ -251,7 +254,7 @@ class OpenAIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def create_transcript(self, input):
+    async def create_transcript(self, input, **kwargs):
         """
         Generate an audio transcript from a user query.
 
@@ -278,6 +281,7 @@ class OpenAIAdapter(LLMInterface):
                 api_base=self.endpoint,
                 api_version=self.api_version,
                 max_retries=self.MAX_RETRIES,
+                **kwargs,
             )
 
         return transcription
@@ -289,7 +293,7 @@ class OpenAIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def transcribe_image(self, input) -> BaseModel:
+    async def transcribe_image(self, input, **kwargs) -> BaseModel:
         """
         Generate a transcription of an image from a user query.
 
@@ -334,4 +338,5 @@ class OpenAIAdapter(LLMInterface):
             api_version=self.api_version,
             max_completion_tokens=300,
             max_retries=self.MAX_RETRIES,
+            **kwargs,
         )

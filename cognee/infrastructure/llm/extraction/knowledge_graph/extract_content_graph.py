@@ -10,7 +10,7 @@ from cognee.infrastructure.llm.config import (
 
 
 async def extract_content_graph(
-    content: str, response_model: Type[BaseModel], custom_prompt: Optional[str] = None
+    content: str, response_model: Type[BaseModel], custom_prompt: Optional[str] = None, **kwargs
 ):
     if custom_prompt:
         system_prompt = custom_prompt
@@ -30,7 +30,7 @@ async def extract_content_graph(
         system_prompt = render_prompt(prompt_path, {}, base_directory=base_directory)
 
     content_graph = await LLMGateway.acreate_structured_output(
-        content, system_prompt, response_model
+        content, system_prompt, response_model, **kwargs
     )
 
     return content_graph
