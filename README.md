@@ -157,6 +157,12 @@ As you can see, the output is generated from the document we previously stored i
   Cognee turns documents into AI memory.
 ```
 
+#### Interaction Sentiment Classification
+
+When `cognee.memify()` runs it now also classifies the sentiment of the most recent saved `CogneeUserInteraction` records. The task batch size is configurable through the `sentiment_last_k` parameter (default `20`). Each analysed interaction receives a linked `InteractionSentiment` node via a `has_sentiment` edge, enabling downstream analytics over conversation tone without requiring additional configuration.
+
+##### Via CLI
+
 ### Use the Cognee CLI 
 
 As an alternative, you can get started with these essential commands:

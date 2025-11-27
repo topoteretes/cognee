@@ -18,9 +18,13 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
-from cognee.tasks.codingagents.coding_rule_associations import (
-    add_rule_associations,
+from cognee.tasks.codingagents.coding_rule_associations import add_rule_associations
+from cognee.tasks.sentiment import (
+    extract_recent_interactions,
+    classify_interaction_sentiment,
+    link_sentiment_to_interactions,
 )
+from cognee.tasks.storage import add_data_points
 
 logger = get_logger("memify")
 
@@ -36,6 +40,7 @@ async def memify(
     vector_db_config: Optional[dict] = None,
     graph_db_config: Optional[dict] = None,
     run_in_background: bool = False,
+    sentiment_last_k: int = 20,
 ):
     """
     Enrichment pipeline in Cognee, can work with already built graphs. If no data is provided existing knowledge graph will be used as data,
@@ -63,6 +68,7 @@ async def memify(
                           If False, waits for completion before returning.
                           Background mode recommended for large datasets (>100MB).
                           Use pipeline_run_id from return value to monitor progress.
+        sentiment_last_k: Number of recent interactions to analyse for sentiment (0 disables).
     """
 
     # Use default coding rules tasks if no tasks were provided
@@ -96,6 +102,18 @@ async def memify(
         *extraction_tasks,  # Unpack tasks provided to memify pipeline
         *enrichment_tasks,
     ]
+
+    if sentiment_last_k:
+        sentiment_tasks = [
+            Task(
+                extract_recent_interactions,
+                last_k=sentiment_last_k,
+            ),
+            Task(classify_interaction_sentiment),
+            Task(add_data_points, task_config={"batch_size": 10}),
+            Task(link_sentiment_to_interactions),
+        ]
+        memify_tasks.extend(sentiment_tasks)
 
     await reset_dataset_pipeline_run_status(
         authorized_dataset.id, user, pipeline_names=["memify_pipeline"]
