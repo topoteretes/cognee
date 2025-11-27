@@ -1,10 +1,14 @@
-from typing import List, Union
+from typing import List, Optional, Union
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.processing.document_types import Document
 from cognee.modules.engine.models import Entity
 from cognee.tasks.temporal_graph.models import Event
-
+from cognee.tasks.translation.models import TranslatedContent, LanguageMetadata
+class DocumentChunk(...):
+    ...
+    translated: Optional[TranslatedContent] = None
+    language_metadata: Optional[LanguageMetadata] = None
 
 class DocumentChunk(DataPoint):
     """
