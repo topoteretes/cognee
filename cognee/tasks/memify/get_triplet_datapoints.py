@@ -168,7 +168,7 @@ async def get_triplet_datapoints(
                         continue
 
                     embeddable_text = (
-                        f"{start_node_text} {relationship_text} {end_node_text}".strip()
+                        f"{start_node_text}-›{relationship_text}-›{end_node_text}".strip()
                     )
 
                     if not embeddable_text:
