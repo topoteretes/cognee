@@ -22,7 +22,6 @@ from cognee.modules.retrieval.graph_completion_cot_retriever import GraphComplet
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
 )
-from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 
@@ -131,10 +130,6 @@ async def get_search_type_tools(
                 system_prompt=system_prompt,
             ).get_context,
         ],
-        SearchType.CODE: [
-            CodeRetriever(top_k=top_k).get_completion,
-            CodeRetriever(top_k=top_k).get_context,
-        ],
         SearchType.CYPHER: [
             CypherSearchRetriever().get_completion,
             CypherSearchRetriever().get_context,
@@ -169,7 +164,18 @@ async def get_search_type_tools(
     ):
         raise UnsupportedSearchTypeError("Cypher query search types are disabled.")
 
-    search_type_tools = search_tasks.get(query_type)
+    from cognee.modules.retrieval.registered_community_retrievers import (
+        registered_community_retrievers,
+    )
+
+    if query_type in registered_community_retrievers:
+        retriever = registered_community_retrievers[query_type]
+        search_type_tools = [
+            retriever(top_k=top_k).get_completion,
+            retriever(top_k=top_k).get_context,
+        ]
+    else:
+        search_type_tools = search_tasks.get(query_type)
 
     if not search_type_tools:
         raise UnsupportedSearchTypeError(str(query_type))
