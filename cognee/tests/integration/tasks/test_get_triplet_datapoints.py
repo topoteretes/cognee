@@ -46,7 +46,9 @@ async def test_get_triplet_datapoints_integration(setup_test_environment):
         pytest.skip("Graph engine does not support get_triplets_batch")
 
     triplets = []
-    with patch("cognee.tasks.memify.get_triplet_datapoints.index_data_points", new_callable=AsyncMock):
+    with patch(
+        "cognee.tasks.memify.get_triplet_datapoints.index_data_points", new_callable=AsyncMock
+    ):
         async for triplet in get_triplet_datapoints([{}], triplets_batch_size=10):
             triplets.append(triplet)
 
@@ -57,4 +59,3 @@ async def test_get_triplet_datapoints_integration(setup_test_environment):
         assert triplet.from_node_id, "Triplet should have from_node_id"
         assert triplet.to_node_id, "Triplet should have to_node_id"
         assert triplet.text, "Triplet should have embeddable text"
-
