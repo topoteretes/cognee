@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Any
 
 from cognee import memify
 from cognee.context_global_variables import (
@@ -18,11 +18,11 @@ logger = get_logger("create_triplet_embeddings")
 
 
 async def create_triplet_embeddings(
-    user: None,
+    user: User,
     dataset: str = "main_dataset",
     run_in_background: bool = False,
     triplets_batch_size: int = 100,
-):
+) -> dict[str, Any]:
     dataset_to_write = await get_authorized_existing_datasets(
         user=user, datasets=[dataset], permission_type="write"
     )
