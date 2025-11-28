@@ -1,6 +1,6 @@
 """LLM Interface"""
 
-from typing import Type, Protocol
+from typing import Type, Protocol, Optional
 from abc import abstractmethod
 from pydantic import BaseModel
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
@@ -8,13 +8,12 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 class LLMInterface(Protocol):
     """
-    Define an interface for LLM models with methods for structured output and prompt
-    display.
+    Define an interface for LLM models with methods for structured output, multimodal processing, and prompt display.
 
     Methods:
-    - acreate_structured_output(text_input: str, system_prompt: str, response_model:
-    Type[BaseModel])
-    - show_prompt(text_input: str, system_prompt: str)
+    - acreate_structured_output(text_input: str, system_prompt: str, response_model: Type[BaseModel])
+    - create_transcript(input): Transcribe audio files to text
+    - transcribe_image(input): Analyze image files and return text description
     """
 
     @abstractmethod
@@ -34,5 +33,41 @@ class LLMInterface(Protocol):
             - system_prompt (str): The system prompt that guides the model's response.
             - response_model (Type[BaseModel]): The model type that will structure the response
               output.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def create_transcript(self, input) -> Optional[BaseModel]:
+        """
+        Transcribe audio content to text.
+
+        This method should be implemented by subclasses that support audio transcription.
+        If not implemented, returns None and should be handled gracefully by callers.
+
+        Parameters:
+        -----------
+            - input: The path to the audio file that needs to be transcribed.
+
+        Returns:
+        --------
+            - BaseModel: A structured output containing the transcription, or None if not supported.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def transcribe_image(self, input) -> Optional[BaseModel]:
+        """
+        Analyze image content and return text description.
+
+        This method should be implemented by subclasses that support image analysis.
+        If not implemented, returns None and should be handled gracefully by callers.
+
+        Parameters:
+        -----------
+            - input: The path to the image file that needs to be analyzed.
+
+        Returns:
+        --------
+            - BaseModel: A structured output containing the image description, or None if not supported.
         """
         raise NotImplementedError
