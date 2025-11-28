@@ -90,6 +90,7 @@ def get_memify_router() -> APIRouter:
                 dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
                 node_name=payload.node_name,
                 user=user,
+                run_in_background=payload.run_in_background,
             )
 
             if isinstance(memify_run, PipelineRunErrored):
