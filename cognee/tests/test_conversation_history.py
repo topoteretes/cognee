@@ -221,7 +221,6 @@ async def main():
     ]
     assert len(our_qa_temporal) == 1, "Should find Temporal question in history"
 
-
     session_id_triplet = "test_session_triplet"
 
     result_triplet = await cognee.search(
@@ -234,9 +233,7 @@ async def main():
         f"TRIPLET_COMPLETION should return non-empty list, got: {result_triplet!r}"
     )
 
-    history_triplet = await cache_engine.get_latest_qa(
-        str(user.id), session_id_triplet, last_n=10
-    )
+    history_triplet = await cache_engine.get_latest_qa(str(user.id), session_id_triplet, last_n=10)
     our_qa_triplet = [
         h for h in history_triplet if h["question"] == "What companies are mentioned?"
     ]
