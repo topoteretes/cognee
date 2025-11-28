@@ -73,7 +73,6 @@ async def get_triplet_datapoints(
         logger.error(error_msg)
         raise NotImplementedError(error_msg)
 
-    # Build mapping of DataPoint type names to their index_fields
     logger.debug("Building DataPoint type to index_fields mapping")
     subclasses = get_all_subclasses(DataPoint)
     datapoint_type_index_property = {}
