@@ -194,7 +194,6 @@ async def cognify(
 
     Prerequisites:
         - **LLM_API_KEY**: Must be configured (required for entity extraction and graph generation)
-        - **Data Added**: Must have data previously added via `cognee.add()`
         - **Vector Database**: Must be accessible for embeddings storage
         - **Graph Database**: Must be accessible for relationship storage
 
