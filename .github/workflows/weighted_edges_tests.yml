@@ -94,6 +94,7 @@ jobs:
 
       - name: Run Weighted Edges Tests
         env:
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
           GRAPH_DATABASE_PROVIDER: ${{ matrix.graph_db_provider }}
           GRAPH_DATABASE_URL: ${{ matrix.graph_db_provider == 'neo4j' && steps.neo4j.outputs.neo4j-url || '' }}
           GRAPH_DATABASE_USERNAME: ${{ matrix.graph_db_provider == 'neo4j' && steps.neo4j.outputs.neo4j-username || '' }}
@@ -165,5 +166,3 @@ jobs:
         uses: astral-sh/ruff-action@v2
         with:
           args: "format --check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py examples/python/weighted_edges_example.py"
-
- 

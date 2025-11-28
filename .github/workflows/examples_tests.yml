@@ -72,6 +72,7 @@ jobs:
       - name: Run Descriptive Graph Metrics Example
         env:
           ENV: 'dev'
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
