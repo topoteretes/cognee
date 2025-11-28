@@ -62,7 +62,8 @@ async def main():
     )
 
     search_results = await cognee.search(
-        query_type=SearchType.TRIPLET_COMPLETION, query_text="What are the models produced by Volkswagen based on the context?"
+        query_type=SearchType.TRIPLET_COMPLETION,
+        query_text="What are the models produced by Volkswagen based on the context?",
     )
     print(search_results)
 
