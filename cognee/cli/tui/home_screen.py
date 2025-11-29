@@ -5,6 +5,7 @@ from textual.binding import Binding
 
 from cognee.cli.tui.base_screen import BaseTUIScreen
 from cognee.cli.tui.config_screen import ConfigTUIScreen
+from cognee.cli.tui.add_screen import AddTUIScreen
 
 
 def make_item(icon: str, command: str, description: str) -> ListItem:
@@ -167,7 +168,9 @@ class HomeScreen(BaseTUIScreen):
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         selected_index = event.index
-        if selected_index == 4:
+        if selected_index == 0:  # add
+            self.app.push_screen(AddTUIScreen())
+        elif selected_index == 4:  # config
             self.app.push_screen(ConfigTUIScreen())
         else:
             self.app.exit()
