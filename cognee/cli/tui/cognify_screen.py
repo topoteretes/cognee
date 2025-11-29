@@ -1,11 +1,24 @@
 import asyncio
+
+import cognee
+from cognee.modules.chunking.TextChunker import TextChunker
 from textual.app import ComposeResult
-from textual.widgets import Input, Label, Button, Static, Checkbox, RadioSet, RadioButton
+from textual.widgets import Input, Label, Static, Checkbox, RadioSet, RadioButton
 from textual.containers import Container, Vertical
 from textual.binding import Binding
 
 from cognee.cli.tui.base_screen import BaseTUIScreen
 from cognee.cli.config import CHUNKER_CHOICES
+
+try:
+    from cognee.modules.chunking.LangchainChunker import LangchainChunker
+except ImportError:
+    LangchainChunker = None
+
+try:
+    from cognee.modules.chunking.CsvChunker import CsvChunker
+except ImportError:
+    CsvChunker = None
 
 
 class CognifyTUIScreen(BaseTUIScreen):
@@ -83,11 +96,6 @@ class CognifyTUIScreen(BaseTUIScreen):
         if not self.is_processing:
             self._submit_cognify()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button press."""
-        if event.button.id == "submit-btn" and not self.is_processing:
-            self._submit_cognify()
-
     def _submit_cognify(self) -> None:
         """Process and submit the cognify request."""
         dataset_input = self.query_one("#dataset-input", Input)
@@ -106,7 +114,6 @@ class CognifyTUIScreen(BaseTUIScreen):
         dataset_input.disabled = True
         chunker_radio.disabled = True
         background_checkbox.disabled = True
-        self.query_one("#submit-btn", Button).disabled = True
 
         # Run async cognify operation
         asyncio.create_task(self._cognify_async(dataset_name, chunker_type, run_background))
@@ -116,22 +123,17 @@ class CognifyTUIScreen(BaseTUIScreen):
         status = self.query_one(".tui-status", Static)
         
         try:
-            import cognee
-            from cognee.modules.chunking.TextChunker import TextChunker
-            
             # Get chunker class
             chunker_class = TextChunker
             if chunker_type == "LangchainChunker":
-                try:
-                    from cognee.modules.chunking.LangchainChunker import LangchainChunker
+                if LangchainChunker is not None:
                     chunker_class = LangchainChunker
-                except ImportError:
+                else:
                     status.update("[yellow]⚠ LangchainChunker not available, using TextChunker[/yellow]")
             elif chunker_type == "CsvChunker":
-                try:
-                    from cognee.modules.chunking.CsvChunker import CsvChunker
+                if CsvChunker is not None:
                     chunker_class = CsvChunker
-                except ImportError:
+                else:
                     status.update("[yellow]⚠ CsvChunker not available, using TextChunker[/yellow]")
             
             # Prepare datasets parameter
@@ -160,5 +162,4 @@ class CognifyTUIScreen(BaseTUIScreen):
             dataset_input.disabled = False
             chunker_radio.disabled = False
             background_checkbox.disabled = False
-            self.query_one("#submit-btn", Button).disabled = False
             dataset_input.focus()

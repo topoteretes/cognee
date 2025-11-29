@@ -1,7 +1,8 @@
 import asyncio
+import cognee
 from textual.app import ComposeResult
-from textual.widgets import Input, Label, Button, Static, TextArea
-from textual.containers import Container, Vertical, Horizontal
+from textual.widgets import Input, Label, Static, TextArea
+from textual.containers import Container, Vertical
 from textual.binding import Binding
 
 from cognee.cli.tui.base_screen import BaseTUIScreen
@@ -76,11 +77,6 @@ class AddTUIScreen(BaseTUIScreen):
         if not self.is_processing:
             self._submit_data()
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button press."""
-        if event.button.id == "submit-btn" and not self.is_processing:
-            self._submit_data()
-
     def _submit_data(self) -> None:
         """Process and submit the data."""
         data_input = self.query_one("#data-input", TextArea)
@@ -100,7 +96,6 @@ class AddTUIScreen(BaseTUIScreen):
         # Disable inputs during processing
         data_input.disabled = True
         dataset_input.disabled = True
-        self.query_one("#submit-btn", Button).disabled = True
 
         # Run async add operation
         asyncio.create_task(self._add_data_async(data, dataset_name))
@@ -110,8 +105,6 @@ class AddTUIScreen(BaseTUIScreen):
         status = self.query_one(".tui-status", Static)
         
         try:
-            import cognee
-            
             await cognee.add(data=data, dataset_name=dataset_name)
             
             status.update(f"[green]✓ Successfully added data to dataset '{dataset_name}'[/green]")
@@ -130,5 +123,4 @@ class AddTUIScreen(BaseTUIScreen):
             dataset_input = self.query_one("#dataset-input", Input)
             data_input.disabled = False
             dataset_input.disabled = False
-            self.query_one("#submit-btn", Button).disabled = False
             data_input.focus()

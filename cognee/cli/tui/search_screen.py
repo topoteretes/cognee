@@ -1,4 +1,7 @@
 import asyncio
+
+import cognee
+from cognee.modules.search.types import SearchType
 from textual.app import ComposeResult
 from textual.widgets import Input, Label, Static, Select
 from textual.containers import Container, Vertical, ScrollableContainer
@@ -136,9 +139,6 @@ class SearchTUIScreen(BaseTUIScreen):
     async def _async_search(self, query_text: str, query_type: str) -> None:
         """Async search operation."""
         try:
-            import cognee
-            from cognee.modules.search.types import SearchType
-
             # Convert string to SearchType enum
             search_type = SearchType[query_type]
 
