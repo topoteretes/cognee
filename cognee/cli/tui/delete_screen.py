@@ -1,9 +1,9 @@
 import asyncio
+import cognee
 from textual.app import ComposeResult
 from textual.widgets import Input, Button, Static, Label
 from textual.containers import Container, Vertical, Horizontal
 from textual.binding import Binding
-
 from cognee.cli.tui.base_screen import BaseTUIScreen
 from cognee.modules.data.methods.get_deletion_counts import get_deletion_counts
 
@@ -15,14 +15,10 @@ class DeleteTUIScreen(BaseTUIScreen):
         Binding("q", "quit_app", "Quit"),
         Binding("escape", "back", "Back"),
         Binding("ctrl+s", "delete", "Delete"),
-        Binding("ctrl+d", "delete_all", "Delete All"),
+        Binding("ctrl+a", "delete_all", "Delete All"),
     ]
 
     CSS = BaseTUIScreen.CSS + """
-    #delete-form {
-        width: 80;
-    }
-
     #button-group {
         height: auto;
         align: center middle;
@@ -61,7 +57,7 @@ class DeleteTUIScreen(BaseTUIScreen):
 
     def compose_footer(self) -> ComposeResult:
         yield Static(
-            "Ctrl+s: Delete  •  Ctrl+d: Delete All  •  Esc: Back  •  q: Quit",
+            "Ctrl+s: Delete  •  Ctrl+a: Delete All  •  Esc: Back  •  q: Quit",
             classes="tui-footer"
         )
 
@@ -81,24 +77,26 @@ class DeleteTUIScreen(BaseTUIScreen):
 
     def action_delete(self) -> None:
         """Delete the dataset."""
-        self._handle_delete()
+        if not self.is_processing:
+            self._handle_delete()
 
     def action_delete_all(self) -> None:
-        self._handle_delete_all()
+        """Delete all data."""
+        if not self.is_processing:
+            self._handle_delete_all()
 
-    async def on_button_pressed(self, event: Button.Pressed) -> None:
+    def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         if self.is_processing:
             return
-
         if event.button.id == "delete-btn":
-            await self._handle_delete()
+            self._handle_delete()
         elif event.button.id == "delete-all-btn":
             self._handle_delete_all()
         elif event.button.id == "cancel-btn":
             self.app.pop_screen()
 
-    async def _handle_delete(self) -> None:
+    def _handle_delete(self) -> None:
         """Handle delete operation for dataset or user."""
         if self.is_processing:
             return
@@ -116,6 +114,13 @@ class DeleteTUIScreen(BaseTUIScreen):
 
         self.is_processing = True
         status.update("🔍 Checking data to delete...")
+
+        # Run async delete operation
+        asyncio.create_task(self._delete_async(dataset_name, user_id))
+
+    async def _delete_async(self, dataset_name: str | None, user_id: str | None) -> None:
+        """Async function to delete data."""
+        status = self.query_one(".tui-status", Static)
 
         try:
             # Get preview of what will be deleted
@@ -140,15 +145,10 @@ class DeleteTUIScreen(BaseTUIScreen):
             status.update(preview_msg)
 
             # Perform deletion
-            import cognee
             await cognee.delete(dataset_name=dataset_name, user_id=user_id)
 
             operation = f"dataset '{dataset_name}'" if dataset_name else f"data for user '{user_id}'"
             status.update(f"✓ Successfully deleted {operation}")
-
-            # Clear inputs
-            dataset_input.value = ""
-            user_input.value = ""
 
         except Exception as e:
             status.update(f"✗ Error: {str(e)}")
@@ -162,7 +162,7 @@ class DeleteTUIScreen(BaseTUIScreen):
 
         def handle_confirm(confirmed: bool) -> None:
             if confirmed:
-                self.run_worker(self._perform_delete_all())
+                asyncio.create_task(self._perform_delete_all())
 
         self.app.push_screen(DeleteAllConfirmModal(), handle_confirm)
 
