@@ -60,7 +60,7 @@ class TuiCommand(SupportsCliCommand):
 
                 #main-container {
                     height: 100%;
-                    border: thick $primary;
+                    border: solid $primary;
                     background: $surface;
                     padding: 1;
                 }
@@ -79,6 +79,12 @@ class TuiCommand(SupportsCliCommand):
                     border: solid $accent;
                     margin-bottom: 2;
                 }
+                
+                ListView > ListItem {
+                    width: 100%;
+                    padding: 0;
+                    margin: 0;
+                }
 
                 ListView {
                     height: auto;
@@ -92,19 +98,16 @@ class TuiCommand(SupportsCliCommand):
                     color: $text;
                     padding: 0 1;
                     height: auto;
+                    width: 100%;
                 }
-
-                ListItem:hover {
-                    background: $surface;
+                
+                ListItem.highlighted {
+                    background: $primary-darken-2;
                 }
-
-                ListItem.--highlight {
-                    background: $primary;
-                    color: $text;
-                }
-
+                
                 CommandItem {
                     width: 100%;
+                    background: transparent;
                 }
 
                 #footer-info {
@@ -121,7 +124,14 @@ class TuiCommand(SupportsCliCommand):
                     Binding("q", "quit", "Quit", priority=True),
                     Binding("escape", "quit", "Quit", priority=True),
                     Binding("enter", "select", "Select", priority=True),
+                    Binding("up", "nav_up", "Up", priority=True),
+                    Binding("down", "nav_down", "Down", priority=True),
                 ]
+
+                def __init__(self):
+                    super().__init__()
+                    self.lv = None
+                    self.current_index = 0
 
                 def compose(self) -> ComposeResult:
                     version = get_cognee_version()
@@ -145,10 +155,30 @@ class TuiCommand(SupportsCliCommand):
 
                 def on_mount(self) -> None:
                     """Focus the list view on mount."""
-                    self.query_one(ListView).index = 0
+                    self.lv = self.query_one(ListView)
+                    self.current_index = 0
+                    self.set_focus(self.lv)
+                    self._apply_highlight()
+
+                def _apply_highlight(self) -> None:
+                    lv = self.lv
+                    children = list(lv.children)
+                    for idx, item in enumerate(children):
+                        if idx == self.current_index:
+                            item.add_class("highlighted")
+                        else:
+                            item.remove_class("highlighted")
+
+                def action_nav_up(self) -> None:
+                    self.current_index = max(0, self.current_index - 1)
+                    self._apply_highlight()
+
+                def action_nav_down(self) -> None:
+                    children = list(self.lv.children)
+                    self.current_index = min(len(children) - 1, self.current_index + 1)
+                    self._apply_highlight()
 
                 def on_list_view_selected(self, event: ListView.Selected) -> None:
-                    """Handle command selection."""
                     command_item = event.item.query_one(CommandItem)
                     command = command_item.command
                     fmt.echo(f"Selected command: {command}")
