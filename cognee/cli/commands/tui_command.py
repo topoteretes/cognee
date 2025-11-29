@@ -61,11 +61,12 @@ class TuiCommand(SupportsCliCommand):
 
                 #header {
                     dock: top;
-                    height: 3;
                     background: $boost;
                     color: $text;
                     content-align: center middle;
                     border: solid $primary;
+                    text-style: bold;
+                    padding: 1;
                 }
 
                 #main-container {
