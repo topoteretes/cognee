@@ -1,12 +1,14 @@
 import argparse
 import asyncio
-from typing import Optional
-
+from uuid import UUID
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.modules.data.methods.get_deletion_counts import get_deletion_counts
+from cognee.modules.data.methods.delete_datasets_by_name import delete_datasets_by_name
+from cognee.modules.data.methods.delete_data_by_user import delete_data_by_user
+from cognee.modules.users.methods import get_default_user
 
 
 class DeleteCommand(SupportsCliCommand):
@@ -93,18 +95,27 @@ Be careful with deletion operations as they are irreversible.
             # Run the async delete function
             async def run_delete():
                 try:
-                    # NOTE: The underlying cognee.delete() function is currently not working as expected.
-                    # This is a separate bug that this preview feature helps to expose.
-                    if args.all:
-                        await cognee.delete(dataset_name=None, user_id=args.user_id)
+                    if args.dataset_name:
+                        # Use delete_datasets_by_name for dataset deletion
+                        user = await get_default_user()
+                        result = await delete_datasets_by_name(args.dataset_name, user.id)
+                        
+                        if result["not_found"]:
+                            fmt.warning(f"Dataset '{args.dataset_name}' not found")
+                            return False
+                        
+                        fmt.success(f"Successfully deleted {result['deleted_count']} dataset(s)")
+                        return True
                     else:
-                        await cognee.delete(dataset_name=args.dataset_name, user_id=args.user_id)
+                        # For user_id deletion, use the original cognee.delete
+                        result = await delete_data_by_user(UUID(args.user_id))
                 except Exception as e:
                     raise CliCommandInnerException(f"Failed to delete: {str(e)}") from e
+                return True
 
-            asyncio.run(run_delete())
-            # This success message may be inaccurate due to the underlying bug, but we leave it for now.
-            fmt.success(f"Successfully deleted {operation}")
+            success = asyncio.run(run_delete())
+            if success and not args.dataset_name:
+                fmt.success(f"Successfully deleted {operation}")
 
         except Exception as e:
             if isinstance(e, CliCommandInnerException):

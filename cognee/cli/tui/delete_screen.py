@@ -1,11 +1,14 @@
 import asyncio
-import cognee
+from uuid import UUID
 from textual.app import ComposeResult
 from textual.widgets import Input, Button, Static, Label
 from textual.containers import Container, Vertical, Horizontal
 from textual.binding import Binding
 from cognee.cli.tui.base_screen import BaseTUIScreen
 from cognee.modules.data.methods.get_deletion_counts import get_deletion_counts
+from cognee.modules.data.methods.delete_datasets_by_name import delete_datasets_by_name
+from cognee.modules.data.methods.delete_data_by_user import delete_data_by_user
+from cognee.modules.users.methods import get_default_user
 
 
 class DeleteTUIScreen(BaseTUIScreen):
@@ -145,10 +148,21 @@ class DeleteTUIScreen(BaseTUIScreen):
             status.update(preview_msg)
 
             # Perform deletion
-            await cognee.delete(dataset_name=dataset_name, user_id=user_id)
-
-            operation = f"dataset '{dataset_name}'" if dataset_name else f"data for user '{user_id}'"
-            status.update(f"✓ Successfully deleted {operation}")
+            if dataset_name:
+                # Use delete_datasets_by_name for dataset deletion
+                user = await get_default_user()
+                result = await delete_datasets_by_name(dataset_name, user.id)
+                
+                if result["not_found"]:
+                    status.update(f"⚠️ Dataset '{dataset_name}' not found")
+                    self.is_processing = False
+                    return
+                
+                status.update(f"✓ Successfully deleted {result['deleted_count']} dataset(s)")
+            else:
+                # For user_id deletion, use the new delete_data_by_user method
+                result = await delete_data_by_user(UUID(user_id))
+                status.update(f"✓ Successfully deleted {result['datasets_deleted']} datasets and {result['data_entries_deleted']} data entries for user '{user_id}'")
 
         except Exception as e:
             status.update(f"✗ Error: {str(e)}")
@@ -194,7 +208,7 @@ class DeleteTUIScreen(BaseTUIScreen):
             )
             status.update(preview_msg)
 
-            # Perform deletion
+            # Perform deletion - delete all uses the original cognee.delete
             import cognee
             await cognee.delete(dataset_name=None, user_id=None)
 
