@@ -3,6 +3,7 @@ from cognee.cli import SupportsCliCommand
 from cognee.cli.config import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException
+from cognee.cli.tui.config_tui import ConfigTUIScreen
 from cognee.version import get_cognee_version
 from textual.app import App, ComposeResult
 from textual.widgets import ListView, ListItem, Static
@@ -215,10 +216,11 @@ class TuiCommand(SupportsCliCommand):
                     self._apply_highlight()
 
                 def on_list_view_selected(self, event: ListView.Selected) -> None:
-                    command_item = event.item.query_one(CommandItem)
-                    command = command_item.command
-                    fmt.echo(f"Selected command: {command}")
-                    self.exit()
+                    selected_index = event.index
+                    if selected_index == 4:
+                        self.app.push_screen(ConfigTUIScreen())
+                    else:
+                        self.exit()
 
                 def action_select(self) -> None:
                     """Select the current item."""
