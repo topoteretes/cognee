@@ -8,6 +8,7 @@ from cognee.cli.tui.config_screen import ConfigTUIScreen
 from cognee.cli.tui.add_screen import AddTUIScreen
 from cognee.cli.tui.cognify_screen import CognifyTUIScreen
 from cognee.cli.tui.search_screen import SearchTUIScreen
+from cognee.cli.tui.delete_screen import DeleteTUIScreen
 
 
 def make_item(icon: str, command: str, description: str) -> ListItem:
@@ -176,6 +177,8 @@ class HomeScreen(BaseTUIScreen):
             self.app.push_screen(SearchTUIScreen())
         elif selected_index == 2:  # cognify
             self.app.push_screen(CognifyTUIScreen())
+        elif selected_index == 3:  # delete
+            self.app.push_screen(DeleteTUIScreen())
         elif selected_index == 4:  # config
             self.app.push_screen(ConfigTUIScreen())
         else:
