@@ -1,7 +1,7 @@
 import asyncio
 from textual.app import ComposeResult
 from textual.widgets import Input, Label, Button, Static, TextArea
-from textual.containers import Container, Vertical
+from textual.containers import Container, Vertical, Horizontal
 from textual.binding import Binding
 
 from cognee.cli.tui.base_screen import BaseTUIScreen
@@ -25,6 +25,7 @@ class AddTUIScreen(BaseTUIScreen):
     #add-container {
         height: auto;
         padding: 1;
+        content-align: center middle;
     }
 
     #add-form {
@@ -57,11 +58,6 @@ class AddTUIScreen(BaseTUIScreen):
     #data-input {
         height: 8;
         min-height: 8;
-    }
-
-    #submit-btn {
-        width: 20;
-        margin-top: 2;
     }
 
     #status-message {
@@ -100,13 +96,11 @@ class AddTUIScreen(BaseTUIScreen):
                     value="main_dataset",
                     id="dataset-input"
                 )
-
-                yield Button("Add Data [Ctrl+S]", variant="primary", id="submit-btn")
-                yield Static("", id="status-message")
+            yield Static("", id="status-message")
 
     def compose_footer(self) -> ComposeResult:
         yield Static(
-            "Ctrl+S: Submit  •  Esc: Back  •  q: Quit",
+            "Ctrl+S: Add  •  Esc: Back  •  q: Quit",
             id="add-footer"
         )
 
