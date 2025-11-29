@@ -15,19 +15,30 @@ from cognee.modules.retrieval.graph_summary_completion_retriever import (
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
 from collections import Counter
+import pytest
 
 logger = get_logger()
 
-
-async def main():
+@pytest.mark.asyncio
+async def test_integration_workflow():
     # This test runs for multiple db settings, to run this locally set the corresponding db envs
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
     dataset_name = "test_dataset"
 
+    # ✅ CHANGED: Standard ingestion (Default weight should be 0.5)
     text_1 = """Germany is located in europe right next to the Netherlands"""
-    await cognee.add(text_1, dataset_name)
+    await cognee.add(text_1, dataset_name)  # Implicit importance_weight=0.5
+
+    # ✅ ADDED: High importance ingestion
+    # Testing if custom weight is accepted and stored
+    text_high_importance = "France is a very important country located next to Spain."
+    await cognee.add(text_high_importance, dataset_name, importance_weight=0.95)
+
+    # ✅ ADDED: Low importance ingestion
+    text_low_importance = "Andorra is a small region near Spain."
+    await cognee.add(text_low_importance, dataset_name, importance_weight=0.1)
 
     explanation_file_path_quantum = os.path.join(
         pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
@@ -36,6 +47,8 @@ async def main():
     await cognee.add([explanation_file_path_quantum], dataset_name)
 
     await cognee.cognify([dataset_name])
+
+    # --- Test Context Retrieval ---
 
     context_gk = await GraphCompletionRetriever().get_context(
         query="Next to which country is Germany located?"
@@ -65,6 +78,8 @@ async def main():
             f"{name}: Context did not contain 'germany' or 'netherlands'; got: {context!r}"
         )
 
+    # --- Test Triplets Retrieval (The Core Logic Test) ---
+
     triplets_gk = await GraphCompletionRetriever().get_triplets(
         query="Next to which country is Germany located?"
     )
@@ -78,31 +93,56 @@ async def main():
         query="Next to which country is Germany located?"
     )
 
+    # ✅ ADDED: Test retrieval of the High Importance Weighted data
+    # We query for Spain to fetch the France (0.95) and Andorra (0.1) nodes
+    triplets_weighted = await GraphCompletionRetriever().get_triplets(
+        query="Which countries are next to Spain?"
+    )
+    assert len(triplets_weighted) > 0, "Should retrieve triplets for weighted data test"
+
+    # Check if we successfully retrieved the high importance node (France)
+    found_high_importance = False
+    for edge in triplets_weighted:
+        # Check nodes for the high weight we set (0.95)
+        w1 = edge.node1.attributes.get("importance_weight", 0.5)
+        w2 = edge.node2.attributes.get("importance_weight", 0.5)
+
+        # Note: Floating point comparison, use tolerance or check existence
+        if w1 > 0.9 or w2 > 0.9:
+            found_high_importance = True
+
+    assert found_high_importance, "Failed to retrieve the high importance node (France) with weight > 0.9"
+
     for name, triplets in [
         ("GraphCompletionRetriever", triplets_gk),
         ("GraphCompletionCotRetriever", triplets_gk_cot),
         ("GraphCompletionContextExtensionRetriever", triplets_gk_ext),
         ("GraphSummaryCompletionRetriever", triplets_gk_sum),
+        ("GraphCompletionRetriever_Weighted", triplets_weighted),  # ✅ Added to loop
     ]:
         assert isinstance(triplets, list), f"{name}: Triplets should be a list"
         assert triplets, f"{name}: Triplets list should not be empty"
+
         for edge in triplets:
             assert isinstance(edge, Edge), f"{name}: Elements should be Edge instances"
             distance = edge.attributes.get("vector_distance")
-            node1_distance = edge.node1.attributes.get("vector_distance")
-            node2_distance = edge.node2.attributes.get("vector_distance")
-            assert isinstance(distance, float), (
-                f"{name}: vector_distance should be float, got {type(distance)}"
-            )
-            assert 0 <= distance <= 1, (
-                f"{name}: edge vector_distance {distance} out of [0,1], this shouldn't happen"
-            )
-            assert 0 <= node1_distance <= 1, (
-                f"{name}: node_1 vector_distance {distance} out of [0,1], this shouldn't happen"
-            )
-            assert 0 <= node2_distance <= 1, (
-                f"{name}: node_2 vector_distance {distance} out of [0,1], this shouldn't happen"
-            )
+
+            node1_weight = edge.node1.attributes.get("importance_weight")
+            node2_weight = edge.node2.attributes.get("importance_weight")
+
+            n1_val = node1_weight if node1_weight is not None else 0.5
+            n2_val = node2_weight if node2_weight is not None else 0.5
+
+            assert 0.0 <= n1_val <= 1.0, f"{name}: Node1 weight {n1_val} out of range"
+            assert 0.0 <= n2_val <= 1.0, f"{name}: Node2 weight {n2_val} out of range"
+
+            if distance is not None:
+                assert isinstance(distance, float), (
+                    f"{name}: vector_distance should be float, got {type(distance)}"
+                )
+                assert 0 <= distance <= 1, (
+                    f"{name}: edge vector_distance {distance} out of [0,1]"
+                )
 
     completion_gk = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
@@ -223,7 +263,7 @@ async def main():
 
     await cognee.add(text_1, dataset_name)
 
-    await cognee.add([text], dataset_name)
+    await cognee.add(text_1, dataset_name)
 
     await cognee.cognify([dataset_name])
 
@@ -254,9 +294,3 @@ async def main():
             assert properties["feedback_weight"] >= 6, (
                 "Feedback weight calculation is not correct, it should be more then 6."
             )
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())

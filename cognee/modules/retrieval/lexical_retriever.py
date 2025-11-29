@@ -13,7 +13,7 @@ logger = get_logger("LexicalRetriever")
 
 class LexicalRetriever(BaseRetriever):
     def __init__(
-        self, tokenizer: Callable, scorer: Callable, top_k: int = 10, with_scores: bool = False
+        self, tokenizer: Callable, scorer: Callable, top_k: int = 10, with_scores: bool = False, default_importance_weight: float = 0.5
     ):
         if not callable(tokenizer) or not callable(scorer):
             raise TypeError("tokenizer and scorer must be callables")
@@ -24,12 +24,17 @@ class LexicalRetriever(BaseRetriever):
         self.scorer = scorer
         self.top_k = top_k
         self.with_scores = bool(with_scores)
+        self.default_importance_weight = default_importance_weight
+        
 
         # Cache keyed by dataset context
         self.chunks: dict[str, Any] = {}  # {chunk_id: tokens}
         self.payloads: dict[str, Any] = {}  # {chunk_id: original_document}
         self._initialized = False
         self._init_lock = asyncio.Lock()
+
+    def add(self, item_id: str, payload: dict):
+        self.payloads[item_id] = payload
 
     async def initialize(self):
         """Initialize retriever by reading all DocumentChunks from graph_engine."""
@@ -98,10 +103,16 @@ class LexicalRetriever(BaseRetriever):
                 if not isinstance(score, (int, float)):
                     logger.warning("Non-numeric score for chunk %s → treated as 0.0", chunk_id)
                     score = 0.0
+                payload = self.payloads.get(chunk_id, {})
+                weight = payload.get("importance_weight", self.default_importance_weight)
+
+                if not isinstance(weight, (int, float)):
+                    weight = self.default_importance_weight
+                final_score = score * weight
             except Exception as e:
                 logger.error("Scorer failed for chunk %s: %s", chunk_id, str(e))
-                score = 0.0
-            results.append((chunk_id, score))
+                final_score = 0.0
+            results.append((chunk_id, final_score))
 
         top_results = nlargest(self.top_k, results, key=lambda x: x[1])
         logger.info(

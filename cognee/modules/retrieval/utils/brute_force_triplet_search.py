@@ -61,7 +61,7 @@ async def get_memory_fragment(
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     if properties_to_project is None:
-        properties_to_project = ["id", "description", "name", "type", "text"]
+        properties_to_project = ["id", "description", "name", "type", "text","importance_weight"]
 
     memory_fragment = CogneeGraph()
 
@@ -115,6 +115,11 @@ async def brute_force_triplet_search(
         raise ValueError("The query must be a non-empty string.")
     if top_k <= 0:
         raise ValueError("top_k must be a positive integer.")
+
+    if properties_to_project is None:
+        properties_to_project = ["id", "description", "name", "type", "text", "importance_weight"]
+    elif "importance_weight" not in properties_to_project:
+        properties_to_project.append("importance_weight")
 
     if memory_fragment is None:
         memory_fragment = await get_memory_fragment(
@@ -170,12 +175,36 @@ async def brute_force_triplet_search(
             vector_engine=vector_engine, query_vector=query_vector, edge_distances=edge_distances
         )
 
-        results = await memory_fragment.calculate_top_triplet_importances(k=top_k)
+        expansion_factor = 3
+        candidate_k = top_k * expansion_factor
 
-        return results
+        initial_results = await memory_fragment.calculate_top_triplet_importances(k=candidate_k)
+
+        if not initial_results:
+            return []
+
+        scored_candidates = []
+
+        for index, edge in enumerate(initial_results):
+            similarity_score = 1.0 / (index + 1)
+
+            node1_weight = edge.node1.attributes.get("importance_weight", 0.5)
+            node2_weight = edge.node2.attributes.get("importance_weight", 0.5)
+
+            importance_score = (node1_weight + node2_weight) / 2
+
+            final_score = similarity_score * importance_score
+
+            scored_candidates.append((final_score, edge))
+        scored_candidates.sort(key=lambda x: x[0], reverse=True)
+
+        final_triplets = [item[1] for item in scored_candidates[:top_k]]
+
+        return final_triplets
 
     except CollectionNotFoundError:
         return []
+
     except Exception as error:
         logger.error(
             "Error during brute force search for query: %s. Error: %s",

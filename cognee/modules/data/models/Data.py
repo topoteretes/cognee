@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import UUID, Column, DateTime, String, JSON, Integer
+from sqlalchemy import UUID, Column, DateTime, String, JSON, Integer,Float
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm import relationship
 
@@ -34,8 +34,10 @@ class Data(Base):
     pipeline_status = Column(MutableDict.as_mutable(JSON))
     token_count = Column(Integer)
     data_size = Column(Integer, nullable=True)  # File size in bytes
+    importance_weight = Column(Float, nullable=False, default=0.5)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+
 
     datasets = relationship(
         "Dataset",
@@ -55,5 +57,6 @@ class Data(Base):
             "createdAt": self.created_at.isoformat(),
             "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
             "nodeSet": self.node_set,
+            "importanceWeight": self.importance_weight,
             # "datasets": [dataset.to_json() for dataset in self.datasets]
         }

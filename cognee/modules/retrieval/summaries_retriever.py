@@ -22,9 +22,11 @@ class SummariesRetriever(BaseRetriever):
     - top_k: int - Number of top summaries to retrieve.
     """
 
-    def __init__(self, top_k: int = 5):
+    def __init__(self, top_k: int = 5,default_importance_weight: float = 0.5):
         """Initialize retriever with search parameters."""
         self.top_k = top_k
+        self.candidate = top_k * 10
+        self.default_importance_weight = default_importance_weight
 
     async def get_context(self, query: str) -> Any:
         """
@@ -48,19 +50,35 @@ class SummariesRetriever(BaseRetriever):
         )
 
         vector_engine = get_vector_engine()
+        
 
         try:
             summaries_results = await vector_engine.search(
-                "TextSummary_text", query, limit=self.top_k
+                "TextSummary_text", query, limit=self.candidate
             )
             logger.info(f"Found {len(summaries_results)} summaries from vector search")
         except CollectionNotFoundError as error:
             logger.error("TextSummary_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error
 
-        summary_payloads = [summary.payload for summary in summaries_results]
-        logger.info(f"Returning {len(summary_payloads)} summary payloads")
-        return summary_payloads
+        rescored = []
+        for item in summaries_results:
+            payload = item.payload or {}
+            importance_weight = payload.get("importance_weight", self.default_importance_weight)
+
+            vector_score = item.score if hasattr(item, "score") else 1.0
+            final_score = vector_score * importance_weight
+
+            rescored.append((final_score, payload))
+
+        # sort descending
+        rescored.sort(key=lambda x: x[0], reverse=True)
+
+        top_payloads = [p for (_, p) in rescored[: self.top_k]]
+
+        logger.info(f"Returning {len(top_payloads)} re-ranked summary payloads")
+        return top_payloads
+
 
     async def get_completion(
         self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None, **kwargs

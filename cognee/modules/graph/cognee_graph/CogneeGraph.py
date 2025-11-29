@@ -143,11 +143,24 @@ class CogneeGraph(CogneeAbstractGraph):
         for category, scored_results in node_distances.items():
             for scored_result in scored_results:
                 node_id = str(scored_result.id)
-                score = scored_result.score
                 node = self.get_node(node_id)
-                if node:
-                    node.add_attribute("vector_distance", score)
-                    mapped_nodes += 1
+                if not node:
+                    continue
+
+                # vector_distance → similarity
+                vector_distance = scored_result.score
+                vector_score = 1 - vector_distance
+
+                # if importance_weight is missing, fallback to 1.0
+                importance_weight = node.attributes.get("importance_weight", 0.5)
+
+                final_score = vector_score * importance_weight
+
+                node.add_attribute("vector_distance", vector_distance)
+                node.add_attribute("importance_weight", importance_weight)
+                node.add_attribute("importance_score", final_score)
+
+                mapped_nodes += 1
 
     async def map_vector_distances_to_graph_edges(
         self, vector_engine, query_vector, edge_distances
@@ -174,17 +187,32 @@ class CogneeGraph(CogneeAbstractGraph):
                 relationship_type = edge.attributes.get("relationship_type")
                 distance = embedding_map.get(relationship_type, None)
                 if distance is not None:
-                    edge.attributes["vector_distance"] = distance
+                    vector_score = 1 - distance
+                else:
+                    vector_score = 0
+
+                # fallback weight
+                importance_weight = edge.attributes.get("importance_weight", 1.0)
+
+                final_score = vector_score * importance_weight
+
+                edge.add_attribute("vector_distance", distance)
+                edge.add_attribute("importance_weight", importance_weight)
+                edge.add_attribute("importance_score", final_score)
 
         except Exception as ex:
             logger.error(f"Error mapping vector distances to edges: {str(ex)}")
             raise ex
 
     async def calculate_top_triplet_importances(self, k: int) -> List[Edge]:
-        def score(edge):
-            n1 = edge.node1.attributes.get("vector_distance", 1)
-            n2 = edge.node2.attributes.get("vector_distance", 1)
-            e = edge.attributes.get("vector_distance", 1)
+        """
+        Rank triplets using merged importance_score:
+        importance_score = vector_similarity * importance_weight
+        """
+        def final_score(edge: Edge):
+            n1 = edge.node1.attributes.get("importance_score", 0)
+            n2 = edge.node2.attributes.get("importance_score", 0)
+            e  = edge.attributes.get("importance_score", 0)
             return n1 + n2 + e
 
-        return heapq.nsmallest(k, self.edges, key=score)
+        return heapq.nlargest(k, self.edges, key=final_score)

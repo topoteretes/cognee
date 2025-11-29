@@ -46,6 +46,7 @@ def _process_ontology_nodes(
                     name=ont_node_name,
                     description=ont_node_name,
                     ontology_valid=True,
+                    importance_weight=data_chunk.importance_weight,
                 )
 
         elif ontology_node.category == "individuals":
@@ -57,11 +58,12 @@ def _process_ontology_nodes(
                     description=ont_node_name,
                     ontology_valid=True,
                     belongs_to_set=data_chunk.belongs_to_set,
+                    importance_weight=data_chunk.importance_weight,
                 )
 
 
 def _process_ontology_edges(
-    ontology_edges: list, existing_edges_map: dict, ontology_relationships: list
+    ontology_edges: list, existing_edges_map: dict, ontology_relationships: list,data_chunk: DocumentChunk,
 ) -> None:
     """Process ontology edges and add them if new"""
     for source, relation, target in ontology_edges:
@@ -81,6 +83,7 @@ def _process_ontology_edges(
                         "source_node_id": source_node_id,
                         "target_node_id": target_node_id,
                         "ontology_valid": True,
+                        "importance_weight": data_chunk.importance_weight,
                     },
                 )
             )
@@ -131,13 +134,14 @@ def _create_type_node(
         type=node_name,
         description=node_name,
         ontology_valid=ontology_validated,
+        importance_weight=data_chunk.importance_weight,
     )
 
     added_nodes_map[type_node_key] = type_node
 
     # Process ontology nodes and edges
     _process_ontology_nodes(ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map)
-    _process_ontology_edges(ontology_edges, existing_edges_map, ontology_relationships)
+    _process_ontology_edges(ontology_edges, existing_edges_map, ontology_relationships,data_chunk)
 
     return type_node
 
@@ -190,13 +194,14 @@ def _create_entity_node(
         description=node_description,
         ontology_valid=ontology_validated,
         belongs_to_set=data_chunk.belongs_to_set,
+        importance_weight=data_chunk.importance_weight,
     )
 
     added_nodes_map[entity_node_key] = entity_node
 
     # Process ontology nodes and edges
     _process_ontology_nodes(ontology_nodes, data_chunk, added_nodes_map, added_ontology_nodes_map)
-    _process_ontology_edges(ontology_edges, existing_edges_map, ontology_relationships)
+    _process_ontology_edges(ontology_edges, existing_edges_map, ontology_relationships,data_chunk)
 
     return entity_node
 
@@ -250,8 +255,8 @@ def _process_graph_nodes(
 
 
 def _process_graph_edges(
-    graph: KnowledgeGraph, name_mapping: dict, existing_edges_map: dict, relationships: list
-) -> None:
+    graph: KnowledgeGraph, name_mapping: dict, existing_edges_map: dict, relationships: list,
+    data_chunk: DocumentChunk) -> None:
     """Process edges in a knowledge graph"""
     for edge in graph.edges:
         # Apply name mapping if exists
@@ -274,6 +279,7 @@ def _process_graph_edges(
                         "source_node_id": source_node_id,
                         "target_node_id": target_node_id,
                         "ontology_valid": False,
+                        "importance_weight": data_chunk.importance_weight,
                     },
                 )
             )
@@ -362,7 +368,7 @@ def expand_with_nodes_and_edges(
         )
 
         # Then process edges
-        _process_graph_edges(graph, name_mapping, existing_edges_map, relationships)
+        _process_graph_edges(graph, name_mapping, existing_edges_map, relationships,data_chunk)
 
     # Return combined results
     graph_nodes = data_chunks + list(added_ontology_nodes_map.values())
