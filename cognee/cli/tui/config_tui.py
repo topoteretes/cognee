@@ -242,6 +242,16 @@ class ConfigTUIScreen(Screen):
 
         table.focus()
 
+    def action_cursor_up(self) -> None:
+        """Move cursor up in the table."""
+        table = self.query_one(DataTable)
+        table.action_cursor_up()
+
+    def action_cursor_down(self) -> None:
+        """Move cursor down in the table."""
+        table = self.query_one(DataTable)
+        table.action_cursor_down()
+
     def action_go_back(self) -> None:
         """Go back to main menu."""
         self.app.pop_screen()
