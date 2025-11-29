@@ -4,6 +4,23 @@ from cognee.cli.config import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException
 from cognee.version import get_cognee_version
+from textual.app import App, ComposeResult
+from textual.widgets import ListView, ListItem, Static
+from textual.containers import Container, Horizontal
+from textual.binding import Binding
+
+
+def make_item(icon, command, description):
+    # Compose a ListItem that contains a Horizontal container with 3 children
+    return ListItem(
+        Horizontal(
+            Static(icon, classes="cmd-icon"),
+            Static(command, classes="cmd-name"),
+            Static(description, classes="cmd-desc"),
+            classes="cmd-row",
+        )
+    )
+
 
 class TuiCommand(SupportsCliCommand):
     @property
@@ -24,11 +41,6 @@ class TuiCommand(SupportsCliCommand):
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
-            from textual.app import App, ComposeResult
-            from textual.widgets import Header, Footer, ListView, ListItem, Static
-            from textual.containers import Container, Vertical
-            from textual.binding import Binding
-
             class CommandItem(Static):
                 """A custom widget for command items with icon and description."""
 
@@ -42,8 +54,6 @@ class TuiCommand(SupportsCliCommand):
                     return f"{self.icon}  {self.command:<12} {self.description}"
 
             class CogneeTUI(App):
-                """A k9s-style TUI for cognee commands."""
-
                 CSS = """
                 Screen {
                     background: $surface;
@@ -75,7 +85,7 @@ class TuiCommand(SupportsCliCommand):
                     width: auto;
                     color: $accent;
                     text-style: bold;
-                    padding: 0 3;
+                    padding: 0 10;
                     border: solid $accent;
                     margin-bottom: 2;
                 }
@@ -90,7 +100,7 @@ class TuiCommand(SupportsCliCommand):
                     height: auto;
                     background: $surface;
                     border: none;
-                    padding: 0 2;
+                    padding: 0 0;
                 }
 
                 ListItem {
@@ -118,6 +128,30 @@ class TuiCommand(SupportsCliCommand):
                     content-align: center middle;
                     border: solid $primary;
                 }
+                
+                .cmd-row {
+                    width: 100%;
+                    height: auto;
+                    align-horizontal: left;
+                    padding: 0 1;
+                }
+                
+                .cmd-icon {
+                    width: 4;
+                    text-align: center;
+                }
+                
+                .cmd-name {
+                    width: 14;
+                    padding-left: 1;
+                }
+                
+                .cmd-desc {
+                    width: 1fr;
+                    overflow: auto;
+                    padding-left: 1;
+                }
+                
                 """
 
                 BINDINGS = [
@@ -141,11 +175,11 @@ class TuiCommand(SupportsCliCommand):
                         with Container(id="title-wrapper"):
                             yield Static("Select Command", id="title")
                         yield ListView(
-                            ListItem(CommandItem("📥", "add", "Add data to cognee")),
-                            ListItem(CommandItem("🔍", "search", "Search data in cognee")),
-                            ListItem(CommandItem("⚡", "cognify", "Process data in cognee")),
-                            ListItem(CommandItem("🗑️", "delete", "Delete data from cognee")),
-                            ListItem(CommandItem("⚙️", "config", "Configure cognee settings")),
+                            make_item("📥", "add", "Add data to cognee"),
+                            make_item("🔍", "search", "Search data in cognee"),
+                            make_item("⚡", "cognify", "Process data in cognee"),
+                            make_item("🗑️", "delete", "Delete data from cognee"),
+                            make_item("⚙️", "config", "Configure cognee settings"),
                         )
 
                     yield Static(
@@ -163,6 +197,7 @@ class TuiCommand(SupportsCliCommand):
                 def _apply_highlight(self) -> None:
                     lv = self.lv
                     children = list(lv.children)
+                    self.lv.index = self.current_index
                     for idx, item in enumerate(children):
                         if idx == self.current_index:
                             item.add_class("highlighted")
