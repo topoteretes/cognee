@@ -78,11 +78,6 @@ class ConfigTUIScreen(BaseTUIScreen):
     ]
 
     CSS = BaseTUIScreen.CSS + """
-    #config-container {
-        height: 100%;
-        border: solid $primary;
-    }
-
     DataTable {
         height: 1fr;
         text-align: center;
@@ -128,15 +123,17 @@ class ConfigTUIScreen(BaseTUIScreen):
         self.editing_key = None  # Track which key is being edited
 
     def compose_content(self) -> ComposeResult:
-        with Container(id="config-container"):
-            yield Static("⚙️ Change Config", classes="tui-title")
-            table = DataTable()
-            table.cursor_type = "row"
-            table.zebra_stripes = True
-            yield table
-            with Container(id="inline-edit-container"):
-                yield Label("", id="edit-label")
-                yield Input(placeholder="Enter new value", id="inline-input")
+        with Container(classes="tui-main-container"):
+            with Container(classes="tui-title-wrapper"):
+                yield Static("⚙️  Change Config", classes="tui-title-bordered")
+            with Container(classes="tui-bordered-wrapper"):
+                table = DataTable()
+                table.cursor_type = "row"
+                table.zebra_stripes = True
+                yield table
+                with Container(id="inline-edit-container"):
+                    yield Label("", id="edit-label")
+                    yield Input(placeholder="Enter new value", id="inline-input")
 
     def compose_footer(self) -> ComposeResult:
         yield Static(

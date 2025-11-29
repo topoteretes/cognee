@@ -39,8 +39,9 @@ class CognifyTUIScreen(BaseTUIScreen):
         self.is_processing = False
 
     def compose_content(self) -> ComposeResult:
-        with Container(classes="tui-content-container"):
-            yield Label("⚡ Cognify Data", classes="tui-title")
+        with Container(classes="tui-main-container"):
+            with Container(classes="tui-title-wrapper"):
+                yield Static("⚡ Cognify Data", classes="tui-title-bordered")
             with Vertical(classes="tui-form"):
                 yield Label("Dataset Name (optional, leave empty for all):", classes="tui-label-spaced")
                 yield Input(

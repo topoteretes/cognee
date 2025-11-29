@@ -12,10 +12,38 @@ Screen {
     padding: 1;
 }
 
+.tui-bordered-wrapper {
+    border: solid $primary;
+}
+
 .tui-content-container {
     height: auto;
     padding: 1;
     content-align: center middle;
+}
+
+/* Main container wrapper - used across all screens */
+.tui-main-container {
+    height: 100%;
+    background: $surface;
+}
+
+/* Title wrapper - centers title elements */
+.tui-title-wrapper {
+    width: 100%;
+    height: auto;
+    align: center middle;
+    content-align: center middle;
+}
+
+/* Styled title with border */
+.tui-title-bordered {
+    text-align: center;
+    width: auto;
+    color: $accent;
+    text-style: bold;
+    padding: 0 10;
+    border: solid $accent;
 }
 
 .tui-form {
@@ -23,12 +51,6 @@ Screen {
     height: auto;
     border: solid $primary;
     padding: 2;
-    background: $surface;
-}
-
-.tui-form-compact {
-    border: solid $primary;
-    padding: 1;
     background: $surface;
 }
 

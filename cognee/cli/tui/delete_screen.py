@@ -19,12 +19,6 @@ class DeleteTUIScreen(BaseTUIScreen):
     ]
 
     CSS = BaseTUIScreen.CSS + """
-    #delete-container {
-        height: auto;
-        padding: 2;
-        align: center top;
-    }
-
     #delete-form {
         width: 80;
     }
@@ -41,10 +35,10 @@ class DeleteTUIScreen(BaseTUIScreen):
         self.is_processing = False
 
     def compose_content(self) -> ComposeResult:
-        with Container(id="delete-container"):
+        with Container(classes="tui-main-container"):
+            with Container(classes="tui-title-wrapper"):
+                yield Static("🗑  Delete Data", classes="tui-title-bordered")
             with Vertical(id="delete-form", classes="tui-form"):
-                yield Label("🗑️  Delete Data", classes="tui-title")
-                
                 with Vertical(classes="tui-input-group"):
                     yield Label("Dataset Name (optional):", classes="tui-label")
                     yield Input(

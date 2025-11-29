@@ -29,8 +29,9 @@ class AddTUIScreen(BaseTUIScreen):
         self.is_processing = False
 
     def compose_content(self) -> ComposeResult:
-        with Container(classes="tui-content-container"):
-            yield Label("Add Data to Cognee", classes="tui-title")
+        with Container(classes="tui-main-container"):
+            with Container(classes="tui-title-wrapper"):
+                yield Static("📥 Add Data to Cognee", classes="tui-title-bordered")
             with Vertical(classes="tui-form"):
                 yield Label("Data (text, file path, URL, or S3 path):", classes="tui-label-spaced")
                 yield TextArea(

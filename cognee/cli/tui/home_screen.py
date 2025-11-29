@@ -35,32 +35,6 @@ class HomeScreen(BaseTUIScreen):
     ]
 
     CSS = BaseTUIScreen.CSS + """
-    #main-container {
-        height: 100%;
-        border: solid $primary;
-        background: $surface;
-        padding: 1;
-    }
-
-    #title-wrapper {
-        width: 100%;
-        height: auto;
-        align: center middle;
-        content-align: center middle;
-        padding-bottom: 1;
-    }
-
-    #title {
-        text-align: center;
-        width: auto;
-        color: $accent;
-        text-style: bold;
-        padding: 0 10;
-        border: solid $accent;
-        margin-bottom: 2;
-    }
-    
-
     ListView > ListItem {
         width: 100%;
         padding: 0;
@@ -141,18 +115,19 @@ class HomeScreen(BaseTUIScreen):
         self.current_index = 0
 
     def compose_content(self) -> ComposeResult:
-        with Container(id="main-container"):
-            with Container(id="title-wrapper"):
-                yield Static("Select Command", id="title")
-            yield ListView(
-                make_item("📥", "add", "Add data to cognee"),
-                make_item("🔍", "search", "Search data in cognee"),
-                make_item("⚡", "cognify", "Process data in cognee"),
-                make_item("🗑️", "delete", "Delete data from cognee"),
-                make_item("⚙️", "config", "Configure cognee settings"),
-                id="menu-list",
-                classes="menu-list",
-            )
+        with Container(classes="tui-main-container"):
+            with Container(classes="tui-title-wrapper"):
+                yield Static("Select Command", classes="tui-title-bordered")
+            with Container(classes="tui-bordered-wrapper"):
+                yield ListView(
+                    make_item("📥", "add", "Add data to cognee"),
+                    make_item("🔍", "search", "Search data in cognee"),
+                    make_item("⚡", "cognify", "Process data in cognee"),
+                    make_item("🗑️", "delete", "Delete data from cognee"),
+                    make_item("⚙️", "config", "Configure cognee settings"),
+                    id="menu-list",
+                    classes="menu-list",
+                )
 
     def compose_footer(self) -> ComposeResult:
         yield Static(

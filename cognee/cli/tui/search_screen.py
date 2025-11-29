@@ -17,19 +17,6 @@ class SearchTUIScreen(BaseTUIScreen):
     ]
 
     CSS = BaseTUIScreen.CSS + """
-    #search-container {
-        height: 100%;
-        padding: 1;
-    }
-
-    #form-title {
-        text-align: center;
-        text-style: bold;
-        color: $accent;
-        margin-bottom: 2;
-        width: 100%;
-    }
-
     #search-form {
         height: auto;
         border: solid $primary;
@@ -69,8 +56,9 @@ class SearchTUIScreen(BaseTUIScreen):
         self.is_searching = False
 
     def compose_content(self) -> ComposeResult:
-        with Container(id="search-container"):
-            yield Label("🔍 Search Data", id="form-title")
+        with Container(classes="tui-main-container"):
+            with Container(classes="tui-title-wrapper"):
+                yield Static("🔍 Search Data", classes="tui-title-bordered")
             with Vertical(id="search-form"):
                 yield Label("Query:", classes="tui-label-spaced")
                 yield Input(placeholder="Enter your search query...", id="query-input")
