@@ -7,7 +7,7 @@ from cognee.cli.exceptions import CliCommandException
 
 from textual.app import App, ComposeResult
 from textual.screen import Screen
-from textual.widgets import DataTable, Input, Label, Button
+from textual.widgets import DataTable, Input, Label, Button, Static
 from textual.containers import Container, Horizontal
 from textual.binding import Binding
 
@@ -131,6 +131,7 @@ class ConfigTUIScreen(BaseTUIScreen):
         dock: bottom;
         height: 3;
         background: $boost;
+        color: $text-muted;
         content-align: center middle;
         border: solid $primary;
     }
@@ -165,8 +166,8 @@ class ConfigTUIScreen(BaseTUIScreen):
                 yield Input(placeholder="Enter new value", id="inline-input")
 
     def compose_footer(self) -> ComposeResult:
-        yield Label(
-            "[↑↓] Navigate  [e] Edit  [Enter] Save  [r] Reset  [Esc] Back  [q] Quit",
+        yield Static(
+            "↑↓: Navigate  •  e: Edit  •  Enter: Save  •  r: Reset  •  Esc: Back  •  q: Quit",
             id="config-footer"
         )
 
