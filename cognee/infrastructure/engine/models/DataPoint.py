@@ -1,6 +1,6 @@
 import pickle
 from uuid import UUID, uuid4
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from datetime import datetime, timezone
 from typing_extensions import TypedDict
 from typing import Optional, Any, Dict, List
@@ -49,6 +49,14 @@ class DataPoint(BaseModel):
     metadata: Optional[MetaData] = {"index_fields": []}
     type: str = Field(default_factory=lambda: DataPoint.__name__)
     belongs_to_set: Optional[List["DataPoint"]] = None
+    importance_weight: Optional[float] = Field(default=0.5, ge=0.0, le=1.0)
+
+    @field_validator('importance_weight', mode='before')
+    @classmethod
+    def set_default_weight_on_none(cls, v):
+        if v is None:
+            return 0.5
+        return v
 
     def __init__(self, **data):
         super().__init__(**data)
