@@ -15,7 +15,7 @@ class DeleteTUIScreen(BaseTUIScreen):
         Binding("q", "quit_app", "Quit"),
         Binding("escape", "back", "Back"),
         Binding("ctrl+s", "delete", "Delete"),
-        Binding("ctrl+a", "delete_all", "Delete All"),
+        Binding("ctrl+a", "delete_all", "Delete All", priority=True),
     ]
 
     CSS = BaseTUIScreen.CSS + """
