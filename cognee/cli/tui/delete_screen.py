@@ -14,6 +14,7 @@ class DeleteTUIScreen(BaseTUIScreen):
     BINDINGS = [
         Binding("q", "quit_app", "Quit"),
         Binding("escape", "back", "Back"),
+        Binding("ctrl+s", "delete", "Delete"),
         Binding("ctrl+d", "delete_all", "Delete All"),
     ]
 
@@ -110,13 +111,12 @@ class DeleteTUIScreen(BaseTUIScreen):
                 with Horizontal(id="button-group"):
                     yield Button("Delete", variant="error", id="delete-btn")
                     yield Button("Delete All", variant="error", id="delete-all-btn")
-                    yield Button("Cancel", variant="default", id="cancel-btn")
                 
                 yield Static("", id="status-message")
 
     def compose_footer(self) -> ComposeResult:
         yield Static(
-            "Enter dataset/user  •  Click Delete  •  Ctrl+D: Delete All  •  Esc: Back  •  q: Quit",
+            "Ctrl+s: Delete  •  Ctrl+d: Delete All  •  Esc: Back  •  q: Quit",
             id="delete-footer"
         )
 
@@ -134,10 +134,12 @@ class DeleteTUIScreen(BaseTUIScreen):
         """Quit the entire application."""
         self.app.exit()
 
+    def action_delete(self) -> None:
+        """Delete the dataset."""
+        self._handle_delete()
+
     def action_delete_all(self) -> None:
-        """Trigger delete all action."""
-        if not self.is_processing:
-            self._handle_delete_all()
+        self._handle_delete_all()
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
