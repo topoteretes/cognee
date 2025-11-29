@@ -3,13 +3,14 @@ from textual.app import ComposeResult
 from textual.widgets import Static
 
 from cognee.version import get_cognee_version
+from cognee.cli.tui.common_styles import COMMON_STYLES
 
 
 class BaseTUIScreen(Screen):
     """Base screen class with constant header for all TUI screens."""
 
     # Subclasses should override this CSS and add their own styles
-    CSS = """
+    CSS = COMMON_STYLES + """
     #header {
         dock: top;
         background: $boost;

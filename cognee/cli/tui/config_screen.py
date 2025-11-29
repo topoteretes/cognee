@@ -34,25 +34,9 @@ class ConfirmModal(Screen):
         padding: 1 2;
     }
 
-    #confirm-title {
-        text-align: center;
-        text-style: bold;
-        color: $warning;
-        margin-bottom: 1;
-    }
-
     #confirm-message {
         text-align: center;
         margin-bottom: 2;
-    }
-
-    #confirm-buttons {
-        align: center middle;
-        height: 3;
-    }
-
-    Button {
-        margin: 0 1;
     }
     """
 
@@ -63,10 +47,10 @@ class ConfirmModal(Screen):
 
     def compose(self) -> ComposeResult:
         with Container(id="confirm-dialog"):
-            yield Label("⚠ Reset Configuration", id="confirm-title")
+            yield Label("⚠ Reset Configuration", classes="tui-dialog-title")
             yield Label(f"Reset '{self.key}' to default?", id="confirm-message")
             yield Label(f"Default value: {self.default_value}", id="confirm-message")
-            with Horizontal(id="confirm-buttons"):
+            with Horizontal(classes="tui-dialog-buttons"):
                 yield Button("Reset", variant="error", id="confirm-btn")
                 yield Button("Cancel", variant="default", id="cancel-btn")
 
@@ -94,10 +78,6 @@ class ConfigTUIScreen(BaseTUIScreen):
     ]
 
     CSS = BaseTUIScreen.CSS + """
-    ConfigTUIScreen {
-        background: $surface;
-    }
-
     #config-container {
         height: 100%;
         border: solid $primary;
@@ -127,15 +107,6 @@ class ConfigTUIScreen(BaseTUIScreen):
     #inline-input {
         width: 100%;
     }
-
-    #config-footer {
-        dock: bottom;
-        padding: 1 0;
-        background: $boost;
-        color: $text-muted;
-        content-align: center middle;
-        border: solid $primary;
-    }
     """
 
     # Config key mappings with defaults (from existing config.py)
@@ -158,6 +129,7 @@ class ConfigTUIScreen(BaseTUIScreen):
 
     def compose_content(self) -> ComposeResult:
         with Container(id="config-container"):
+            yield Static("⚙️ Change Config", classes="tui-title")
             table = DataTable()
             table.cursor_type = "row"
             table.zebra_stripes = True
@@ -169,7 +141,7 @@ class ConfigTUIScreen(BaseTUIScreen):
     def compose_footer(self) -> ComposeResult:
         yield Static(
             "↑↓: Navigate  •  e: Edit  •  Enter: Save  •  r: Reset  •  Esc: Back  •  q: Quit",
-            id="config-footer"
+            classes="tui-footer"
         )
 
     def on_mount(self) -> None:

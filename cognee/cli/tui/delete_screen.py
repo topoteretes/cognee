@@ -19,10 +19,6 @@ class DeleteTUIScreen(BaseTUIScreen):
     ]
 
     CSS = BaseTUIScreen.CSS + """
-    DeleteTUIScreen {
-        background: $surface;
-    }
-
     #delete-container {
         height: auto;
         padding: 2;
@@ -31,58 +27,12 @@ class DeleteTUIScreen(BaseTUIScreen):
 
     #delete-form {
         width: 80;
-        height: auto;
-        border: solid $primary;
-        background: $surface;
-        padding: 2;
-    }
-
-    #form-title {
-        text-align: center;
-        text-style: bold;
-        color: $accent;
-        margin-bottom: 2;
-        width: 100%;
-    }
-
-    .input-group {
-        height: auto;
-        margin-bottom: 2;
-    }
-
-    .input-label {
-        color: $text-muted;
-        margin-bottom: 1;
-    }
-
-    Input {
-        width: 100%;
-        margin-bottom: 1;
     }
 
     #button-group {
         height: auto;
         align: center middle;
         margin-top: 2;
-    }
-
-    Button {
-        margin: 0 1;
-    }
-
-    #status-message {
-        text-align: center;
-        margin-top: 2;
-        height: auto;
-    }
-
-    #delete-footer {
-        dock: bottom;
-        padding: 1 0;
-        background: $boost;
-        color: $text-muted;
-        content-align: center middle;
-        border: solid $primary;
     }
     """
 
@@ -92,18 +42,18 @@ class DeleteTUIScreen(BaseTUIScreen):
 
     def compose_content(self) -> ComposeResult:
         with Container(id="delete-container"):
-            with Vertical(id="delete-form"):
-                yield Label("🗑️  Delete Data", id="form-title")
+            with Vertical(id="delete-form", classes="tui-form"):
+                yield Label("🗑️  Delete Data", classes="tui-title")
                 
-                with Vertical(classes="input-group"):
-                    yield Label("Dataset Name (optional):", classes="input-label")
+                with Vertical(classes="tui-input-group"):
+                    yield Label("Dataset Name (optional):", classes="tui-label")
                     yield Input(
                         placeholder="Enter dataset name to delete specific dataset",
                         id="dataset-input"
                     )
                 
-                with Vertical(classes="input-group"):
-                    yield Label("User ID (optional):", classes="input-label")
+                with Vertical(classes="tui-input-group"):
+                    yield Label("User ID (optional):", classes="tui-label")
                     yield Input(
                         placeholder="Enter user ID to delete user's data",
                         id="user-input"
@@ -113,12 +63,12 @@ class DeleteTUIScreen(BaseTUIScreen):
                     yield Button("Delete", variant="error", id="delete-btn")
                     yield Button("Delete All", variant="error", id="delete-all-btn")
                 
-                yield Static("", id="status-message")
+                yield Static("", classes="tui-status")
 
     def compose_footer(self) -> ComposeResult:
         yield Static(
             "Ctrl+s: Delete  •  Ctrl+d: Delete All  •  Esc: Back  •  q: Quit",
-            id="delete-footer"
+            classes="tui-footer"
         )
 
     def on_mount(self) -> None:
@@ -161,7 +111,7 @@ class DeleteTUIScreen(BaseTUIScreen):
 
         dataset_input = self.query_one("#dataset-input", Input)
         user_input = self.query_one("#user-input", Input)
-        status = self.query_one("#status-message", Static)
+        status = self.query_one(".tui-status", Static)
 
         dataset_name = dataset_input.value.strip() or None
         user_id = user_input.value.strip() or None
@@ -224,7 +174,7 @@ class DeleteTUIScreen(BaseTUIScreen):
 
     async def _perform_delete_all(self) -> None:
         """Perform the actual delete all operation."""
-        status = self.query_one("#status-message", Static)
+        status = self.query_one(".tui-status", Static)
         self.is_processing = True
 
         try:
@@ -295,34 +245,20 @@ class DeleteAllConfirmModal(BaseTUIScreen):
         margin-bottom: 1;
     }
 
-    #confirm-message {
-        text-align: center;
-        margin-bottom: 1;
-    }
-
     #confirm-warning {
         text-align: center;
         color: $warning;
         text-style: bold;
         margin-bottom: 2;
     }
-
-    #confirm-buttons {
-        align: center middle;
-        height: 3;
-    }
-
-    Button {
-        margin: 0 1;
-    }
     """
 
     def compose_content(self) -> ComposeResult:
         with Container(id="confirm-dialog"):
             yield Label("⚠️  DELETE ALL DATA", id="confirm-title")
-            yield Label("This will delete ALL data from cognee", id="confirm-message")
+            yield Label("This will delete ALL data from cognee", classes="tui-dialog-message")
             yield Label("This operation is IRREVERSIBLE!", id="confirm-warning")
-            with Horizontal(id="confirm-buttons"):
+            with Horizontal(classes="tui-dialog-buttons"):
                 yield Button("Delete All", variant="error", id="confirm-btn")
                 yield Button("Cancel", variant="default", id="cancel-btn")
 

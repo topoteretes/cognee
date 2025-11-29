@@ -17,22 +17,17 @@ class SearchTUIScreen(BaseTUIScreen):
     ]
 
     CSS = BaseTUIScreen.CSS + """
-    SearchTUIScreen {
-        background: $surface;
+    #search-container {
+        height: 100%;
+        padding: 1;
     }
-    
+
     #form-title {
         text-align: center;
         text-style: bold;
         color: $accent;
         margin-bottom: 2;
         width: 100%;
-    }
-
-
-    #search-container {
-        height: 100%;
-        padding: 1;
     }
 
     #search-form {
@@ -67,21 +62,6 @@ class SearchTUIScreen(BaseTUIScreen):
         height: 1fr;
         overflow-y: auto;
     }
-    
-    .field-label {
-        color: $text-muted;
-        margin-top: 1;
-        margin-bottom: 1;
-    }
-
-    #search-footer {
-        dock: bottom;
-        padding: 1 0;
-        background: $boost;
-        color: $text-muted;
-        content-align: center middle;
-        border: solid $primary;
-    }
     """
 
     def __init__(self):
@@ -92,9 +72,9 @@ class SearchTUIScreen(BaseTUIScreen):
         with Container(id="search-container"):
             yield Label("🔍 Search Data", id="form-title")
             with Vertical(id="search-form"):
-                yield Label("Query:", classes="field-label")
+                yield Label("Query:", classes="tui-label-spaced")
                 yield Input(placeholder="Enter your search query...", id="query-input")
-                yield Label("Search Type:", classes="field-label")
+                yield Label("Search Type:", classes="tui-label-spaced")
                 yield Select(
                     [
                         ("Graph Completion (Recommended)", "GRAPH_COMPLETION"),
@@ -114,7 +94,7 @@ class SearchTUIScreen(BaseTUIScreen):
     def compose_footer(self) -> ComposeResult:
         yield Static(
             "Ctrl+S: Search  •  Esc: Back  •  q: Quit",
-            id="search-footer"
+            classes="tui-footer"
         )
 
     def on_mount(self) -> None:

@@ -18,43 +18,6 @@ class CognifyTUIScreen(BaseTUIScreen):
     ]
 
     CSS = BaseTUIScreen.CSS + """
-    CognifyTUIScreen {
-        background: $surface;
-    }
-
-    #cognify-container {
-        height: auto;
-        padding: 1;
-        content-align: center middle;
-    }
-
-    #cognify-form {
-        width: 100%;
-        height: auto;
-        border: solid $primary;
-        padding: 2;
-        background: $surface;
-    }
-
-    #form-title {
-        text-align: center;
-        width: 100%;
-        text-style: bold;
-        color: $accent;
-        margin-bottom: 2;
-    }
-
-    .field-label {
-        color: $text-muted;
-        margin-top: 1;
-        margin-bottom: 1;
-    }
-
-    Input {
-        width: 100%;
-        margin-bottom: 1;
-    }
-
     Checkbox {
         margin-top: 1;
         margin-bottom: 1;
@@ -69,21 +32,6 @@ class CognifyTUIScreen(BaseTUIScreen):
     RadioButton {
         height: 1;
     }
-
-    #status-message {
-        margin-top: 2;
-        text-align: center;
-        height: auto;
-    }
-
-    #cognify-footer {
-        dock: bottom;
-        padding: 1 0;
-        background: $boost;
-        color: $text-muted;
-        content-align: center middle;
-        border: solid $primary;
-    }
     """
 
     def __init__(self):
@@ -91,28 +39,28 @@ class CognifyTUIScreen(BaseTUIScreen):
         self.is_processing = False
 
     def compose_content(self) -> ComposeResult:
-        with Container(id="cognify-container"):
-            yield Label("⚡ Cognify Data", id="form-title")
-            with Vertical(id="cognify-form"):
-                yield Label("Dataset Name (optional, leave empty for all):", classes="field-label")
+        with Container(classes="tui-content-container"):
+            yield Label("⚡ Cognify Data", classes="tui-title")
+            with Vertical(classes="tui-form"):
+                yield Label("Dataset Name (optional, leave empty for all):", classes="tui-label-spaced")
                 yield Input(
                     placeholder="Leave empty to process all datasets",
                     value="",
                     id="dataset-input"
                 )
                 
-                yield Label("Chunker Type:", classes="field-label")
+                yield Label("Chunker Type:", classes="tui-label-spaced")
                 with RadioSet(id="chunker-radio"):
                     for chunker in CHUNKER_CHOICES:
                         yield RadioButton(chunker, value=(chunker == "TextChunker"))
                 
                 yield Checkbox("Run in background", id="background-checkbox")
-            yield Static("", id="status-message")
+            yield Static("", classes="tui-status")
 
     def compose_footer(self) -> ComposeResult:
         yield Static(
             "Ctrl+S: Start  •  Esc: Back  •  q: Quit",
-            id="cognify-footer"
+            classes="tui-footer"
         )
 
     def on_mount(self) -> None:
@@ -144,7 +92,7 @@ class CognifyTUIScreen(BaseTUIScreen):
         dataset_input = self.query_one("#dataset-input", Input)
         chunker_radio = self.query_one("#chunker-radio", RadioSet)
         background_checkbox = self.query_one("#background-checkbox", Checkbox)
-        status = self.query_one("#status-message", Static)
+        status = self.query_one(".tui-status", Static)
 
         dataset_name = dataset_input.value.strip() or None
         chunker_type = str(chunker_radio.pressed_button.label) if chunker_radio.pressed_button else "TextChunker"
@@ -164,7 +112,7 @@ class CognifyTUIScreen(BaseTUIScreen):
 
     async def _cognify_async(self, dataset_name: str | None, chunker_type: str, run_background: bool) -> None:
         """Async function to cognify data."""
-        status = self.query_one("#status-message", Static)
+        status = self.query_one(".tui-status", Static)
         
         try:
             import cognee

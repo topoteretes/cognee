@@ -18,61 +18,9 @@ class AddTUIScreen(BaseTUIScreen):
     ]
 
     CSS = BaseTUIScreen.CSS + """
-    AddTUIScreen {
-        background: $surface;
-    }
-
-    #add-container {
-        height: auto;
-        padding: 1;
-        content-align: center middle;
-    }
-
-    #add-form {
-        width: 100%;
-        height: auto;
-        border: solid $primary;
-        padding: 2;
-        background: $surface;
-    }
-
-    #form-title {
-        text-align: center;
-        width: 100%;
-        text-style: bold;
-        color: $accent;
-        margin-bottom: 2;
-    }
-
-    .field-label {
-        color: $text-muted;
-        margin-top: 1;
-        margin-bottom: 1;
-    }
-
-    Input {
-        width: 100%;
-        margin-bottom: 1;
-    }
-
     #data-input {
         height: 8;
         min-height: 8;
-    }
-
-    #status-message {
-        margin-top: 2;
-        text-align: center;
-        height: auto;
-    }
-
-    #add-footer {
-        dock: bottom;
-        padding: 1 0;
-        background: $boost;
-        color: $text-muted;
-        content-align: center middle;
-        border: solid $primary;
     }
     """
 
@@ -81,27 +29,27 @@ class AddTUIScreen(BaseTUIScreen):
         self.is_processing = False
 
     def compose_content(self) -> ComposeResult:
-        with Container(id="add-container"):
-            yield Label("Add Data to Cognee", id="form-title")
-            with Vertical(id="add-form"):
-                yield Label("Data (text, file path, URL, or S3 path):", classes="field-label")
+        with Container(classes="tui-content-container"):
+            yield Label("Add Data to Cognee", classes="tui-title")
+            with Vertical(classes="tui-form"):
+                yield Label("Data (text, file path, URL, or S3 path):", classes="tui-label-spaced")
                 yield TextArea(
                     "",
                     id="data-input",
                 )
                 
-                yield Label("Dataset Name:", classes="field-label")
+                yield Label("Dataset Name:", classes="tui-label-spaced")
                 yield Input(
                     placeholder="main_dataset",
                     value="main_dataset",
                     id="dataset-input"
                 )
-            yield Static("", id="status-message")
+            yield Static("", classes="tui-status")
 
     def compose_footer(self) -> ComposeResult:
         yield Static(
             "Ctrl+S: Add  •  Esc: Back  •  q: Quit",
-            id="add-footer"
+            classes="tui-footer"
         )
 
     def on_mount(self) -> None:
@@ -136,7 +84,7 @@ class AddTUIScreen(BaseTUIScreen):
         """Process and submit the data."""
         data_input = self.query_one("#data-input", TextArea)
         dataset_input = self.query_one("#dataset-input", Input)
-        status = self.query_one("#status-message", Static)
+        status = self.query_one(".tui-status", Static)
 
         data = data_input.text.strip()
         dataset_name = dataset_input.value.strip() or "main_dataset"
@@ -158,7 +106,7 @@ class AddTUIScreen(BaseTUIScreen):
 
     async def _add_data_async(self, data: str, dataset_name: str) -> None:
         """Async function to add data to cognee."""
-        status = self.query_one("#status-message", Static)
+        status = self.query_one(".tui-status", Static)
         
         try:
             import cognee

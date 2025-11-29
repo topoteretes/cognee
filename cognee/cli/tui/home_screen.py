@@ -35,10 +35,6 @@ class HomeScreen(BaseTUIScreen):
     ]
 
     CSS = BaseTUIScreen.CSS + """
-    HomeScreen {
-        background: $surface;
-    }
-
     #main-container {
         height: 100%;
         border: solid $primary;
@@ -64,13 +60,6 @@ class HomeScreen(BaseTUIScreen):
         margin-bottom: 2;
     }
     
-    #title-sub {
-        text-align: center;
-        width: auto;
-        color: $text-muted;
-        padding-bottom: 1;
-        margin-bottom: 1;
-    }
 
     ListView > ListItem {
         width: 100%;
@@ -144,15 +133,6 @@ class HomeScreen(BaseTUIScreen):
         padding-left: 1;
         color: $text-muted;
     }
-
-    #home-footer {
-        dock: bottom;
-        padding: 1 0;
-        background: $boost;
-        color: $text-muted;
-        content-align: center middle;
-        border: solid $primary;
-    }
     """
 
     def __init__(self):
@@ -177,7 +157,7 @@ class HomeScreen(BaseTUIScreen):
     def compose_footer(self) -> ComposeResult:
         yield Static(
             "↑↓: Navigate  •  Enter: Select  •  q/Esc: Quit",
-            id="home-footer"
+            classes="tui-footer"
         )
 
     def on_mount(self) -> None:
