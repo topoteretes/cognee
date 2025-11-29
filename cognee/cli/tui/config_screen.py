@@ -100,11 +100,12 @@ class ConfigTUIScreen(BaseTUIScreen):
 
     #config-container {
         height: 100%;
-        padding: 1;
+        border: solid $primary;
     }
 
     DataTable {
         height: 1fr;
+        text-align: center;
     }
 
     #inline-edit-container {
@@ -173,8 +174,7 @@ class ConfigTUIScreen(BaseTUIScreen):
 
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
-        table.add_columns("KEY", "VALUE")
-
+        key_col, value_col = table.add_columns("KEY", "VALUE")
         # Add all config keys
         for key, (method, default) in self.CONFIG_KEYS.items():
             display_default = "(empty)" if default == "" else str(default)
