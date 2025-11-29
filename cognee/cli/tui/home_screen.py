@@ -50,6 +50,8 @@ class HomeScreen(BaseTUIScreen):
         width: 100%;
         height: auto;
         align: center middle;
+        content-align: center middle;
+        padding-bottom: 1;
     }
 
     #title {
@@ -61,11 +63,32 @@ class HomeScreen(BaseTUIScreen):
         border: solid $accent;
         margin-bottom: 2;
     }
+    
+    #title-sub {
+        text-align: center;
+        width: auto;
+        color: $text-muted;
+        padding-bottom: 1;
+        margin-bottom: 1;
+    }
 
     ListView > ListItem {
         width: 100%;
         padding: 0;
         margin: 0;
+    }
+    
+    .menu-list > ListItem {
+        width: 100%;
+        padding: 0;
+        margin: 0;
+    }
+
+    .menu-list {
+        height: auto;
+        background: $surface;
+        border: none;
+        padding: 0 0;
     }
 
     ListView {
@@ -78,36 +101,48 @@ class HomeScreen(BaseTUIScreen):
     ListItem {
         background: $surface;
         color: $text;
-        padding: 0 1;
-        height: auto;
         width: 100%;
+        min-height: 2;
+        align-vertical: middle;
+    }
+    
+    ListItem:focus {
+        outline: none;
     }
 
     ListItem.highlighted {
-        background: $primary-darken-2;
+        background: $primary-darken-3;
+        color: $text;
+    }
+    ListItem.highlighted .cmd-name {
+        text-style: bold;
+        color: $accent;
     }
 
     .cmd-row {
         width: 100%;
         height: auto;
         align-horizontal: left;
-        padding: 0 1;
+        align-vertical: middle;
     }
 
     .cmd-icon {
         width: 4;
         text-align: center;
+        color: $text-muted;
     }
 
     .cmd-name {
         width: 14;
         padding-left: 1;
+        text-style: bold;
     }
 
     .cmd-desc {
         width: 1fr;
         overflow: auto;
         padding-left: 1;
+        color: $text-muted;
     }
 
     #home-footer {
@@ -135,6 +170,8 @@ class HomeScreen(BaseTUIScreen):
                 make_item("⚡", "cognify", "Process data in cognee"),
                 make_item("🗑️", "delete", "Delete data from cognee"),
                 make_item("⚙️", "config", "Configure cognee settings"),
+                id="menu-list",
+                classes="menu-list",
             )
 
     def compose_footer(self) -> ComposeResult:
