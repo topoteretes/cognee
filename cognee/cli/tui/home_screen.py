@@ -102,8 +102,7 @@ class HomeScreen(BaseTUIScreen):
         background: $surface;
         color: $text;
         width: 100%;
-        min-height: 2;
-        align-vertical: middle;
+        height: 3;
     }
     
     ListItem:focus {
@@ -124,6 +123,7 @@ class HomeScreen(BaseTUIScreen):
         height: auto;
         align-horizontal: left;
         align-vertical: middle;
+        height: 1fr;
     }
 
     .cmd-icon {
