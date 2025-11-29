@@ -1,10 +1,8 @@
 import argparse
 import json
-from typing import Optional
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
-import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException
 
 from textual.app import App, ComposeResult
@@ -14,83 +12,6 @@ from textual.containers import Container, Horizontal
 from textual.binding import Binding
 
 from cognee.cli.tui.base_screen import BaseTUIScreen
-
-
-class EditModal(Screen):
-    """Modal screen for editing a config value."""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-    ]
-
-    CSS = """
-    EditModal {
-        align: center middle;
-    }
-
-    #edit-dialog {
-        width: 60;
-        height: 13;
-        border: thick $primary;
-        background: $surface;
-        padding: 1 2;
-    }
-
-    #edit-title {
-        text-align: center;
-        text-style: bold;
-        color: $accent;
-        margin-bottom: 1;
-    }
-
-    #edit-key {
-        color: $text-muted;
-        margin-bottom: 1;
-    }
-
-    #edit-input {
-        margin-bottom: 1;
-    }
-
-    #edit-buttons {
-        align: center middle;
-        height: 3;
-    }
-
-    Button {
-        margin: 0 1;
-    }
-    """
-
-    def __init__(self, key: str, default_value: str):
-        super().__init__()
-        self.key = key
-        self.default_value = default_value
-        self.result = None
-
-    def compose(self) -> ComposeResult:
-        with Container(id="edit-dialog"):
-            yield Label("Edit Configuration", id="edit-title")
-            yield Label(f"Key: {self.key}", id="edit-key")
-            yield Label(f"Default: {self.default_value}", id="edit-key")
-            yield Input(placeholder="Enter new value", id="edit-input")
-            with Horizontal(id="edit-buttons"):
-                yield Button("Save", variant="primary", id="save-btn")
-                yield Button("Cancel", variant="default", id="cancel-btn")
-
-    def on_mount(self) -> None:
-        self.query_one(Input).focus()
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "save-btn":
-            input_widget = self.query_one(Input)
-            self.result = input_widget.value
-            self.dismiss(self.result)
-        else:
-            self.dismiss(None)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
 
 
 class ConfirmModal(Screen):
@@ -160,12 +81,13 @@ class ConfirmModal(Screen):
 
 
 class ConfigTUIScreen(BaseTUIScreen):
-    """Main config TUI screen."""
+    """Main config TUI screen with inline editing."""
 
     BINDINGS = [
         Binding("q", "quit_app", "Quit"),
-        Binding("escape", "go_back", "Back"),
+        Binding("escape", "cancel_or_back", "Back/Cancel"),
         Binding("e", "edit", "Edit"),
+        Binding("enter", "confirm_edit", "Confirm", show=False),
         Binding("r", "reset", "Reset"),
         Binding("up", "cursor_up", "Up", show=False),
         Binding("down", "cursor_down", "Down", show=False),
@@ -183,6 +105,26 @@ class ConfigTUIScreen(BaseTUIScreen):
 
     DataTable {
         height: 1fr;
+    }
+
+    #inline-edit-container {
+        display: none;
+        height: auto;
+        padding: 0 1;
+        margin-top: 1;
+    }
+
+    #inline-edit-container.visible {
+        display: block;
+    }
+
+    #edit-label {
+        color: $text-muted;
+        margin-bottom: 0;
+    }
+
+    #inline-input {
+        width: 100%;
     }
 
     #config-footer {
@@ -208,22 +150,29 @@ class ConfigTUIScreen(BaseTUIScreen):
         "chunk_overlap": ("set_chunk_overlap", "10"),
     }
 
+    def __init__(self):
+        super().__init__()
+        self.editing_key = None  # Track which key is being edited
+
     def compose_content(self) -> ComposeResult:
         with Container(id="config-container"):
             table = DataTable()
             table.cursor_type = "row"
             table.zebra_stripes = True
             yield table
+            with Container(id="inline-edit-container"):
+                yield Label("", id="edit-label")
+                yield Input(placeholder="Enter new value", id="inline-input")
 
     def compose_footer(self) -> ComposeResult:
         yield Label(
-            "[↑↓] Navigate  [e] Edit  [r] Reset  [Esc] Back  [q] Quit",
+            "[↑↓] Navigate  [e] Edit  [Enter] Save  [r] Reset  [Esc] Back  [q] Quit",
             id="config-footer"
         )
 
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
-        table.add_columns("KEY", "DEFAULT VALUE")
+        table.add_columns("KEY", "VALUE")
 
         # Add all config keys
         for key, (method, default) in self.CONFIG_KEYS.items():
@@ -234,38 +183,90 @@ class ConfigTUIScreen(BaseTUIScreen):
 
     def action_cursor_up(self) -> None:
         """Move cursor up in the table."""
+        if self.editing_key:
+            return  # Don't navigate while editing
         table = self.query_one(DataTable)
         table.action_cursor_up()
 
     def action_cursor_down(self) -> None:
         """Move cursor down in the table."""
+        if self.editing_key:
+            return  # Don't navigate while editing
         table = self.query_one(DataTable)
         table.action_cursor_down()
 
-    def action_go_back(self) -> None:
-        """Go back to main menu."""
-        self.app.pop_screen()
+    def action_cancel_or_back(self) -> None:
+        """Cancel editing or go back to main menu."""
+        if self.editing_key:
+            self._cancel_edit()
+        else:
+            self.app.pop_screen()
 
     def action_quit_app(self) -> None:
         """Quit the entire application."""
         self.app.exit()
 
     def action_edit(self) -> None:
-        """Edit the selected config value."""
-        table = self.query_one(DataTable)
+        """Start inline editing for the selected config value."""
+        if self.editing_key:
+            return  # Already editing
 
+        table = self.query_one(DataTable)
         if table.cursor_coordinate.row < 0:
             return
 
-        row_key = table.get_row_at(table.cursor_coordinate.row)
-        key = str(row_key[0])
-        default_value = str(row_key[1])
+        row_data = table.get_row_at(table.cursor_coordinate.row)
+        key = str(row_data[0])
+        default_value = str(row_data[1])
 
-        def handle_edit_result(value: Optional[str]) -> None:
-            if value is not None and value.strip():
-                self._save_config(key, value)
+        self.editing_key = key
 
-        self.app.push_screen(EditModal(key, default_value), handle_edit_result)
+        # Show the inline edit container
+        edit_container = self.query_one("#inline-edit-container")
+        edit_container.add_class("visible")
+
+        # Update label and input
+        label = self.query_one("#edit-label", Label)
+        label.update(f"Editing: {key} (default: {default_value})")
+
+        input_widget = self.query_one("#inline-input", Input)
+        input_widget.value = ""
+        input_widget.placeholder = f"Enter new value for {key}"
+        input_widget.focus()
+
+    def action_confirm_edit(self) -> None:
+        """Confirm the inline edit and save the value."""
+        if not self.editing_key:
+            return
+
+        input_widget = self.query_one("#inline-input", Input)
+        value = input_widget.value.strip()
+
+        if value:
+            self._save_config(self.editing_key, value)
+
+        self._cancel_edit()
+
+    def _cancel_edit(self) -> None:
+        """Cancel the current edit and hide the input."""
+        self.editing_key = None
+
+        # Hide the inline edit container
+        edit_container = self.query_one("#inline-edit-container")
+        edit_container.remove_class("visible")
+
+        # Clear input
+        input_widget = self.query_one("#inline-input", Input)
+        input_widget.value = ""
+
+        # Return focus to table
+        table = self.query_one(DataTable)
+        table.focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle Enter key in the input field."""
+        if event.input.id == "inline-input" and self.editing_key:
+            self.action_confirm_edit()
 
     def action_reset(self) -> None:
         """Reset the selected config to default."""
