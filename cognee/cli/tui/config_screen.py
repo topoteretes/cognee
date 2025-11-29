@@ -1,6 +1,6 @@
 import argparse
 import json
-from typing import Optional, Tuple
+from typing import Optional
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
@@ -9,10 +9,11 @@ from cognee.cli.exceptions import CliCommandException
 
 from textual.app import App, ComposeResult
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Input, Label, Button
-from textual.containers import Container, Vertical, Horizontal
+from textual.widgets import DataTable, Input, Label, Button
+from textual.containers import Container, Horizontal
 from textual.binding import Binding
-from textual.coordinate import Coordinate
+
+from cognee.cli.tui.base_screen import BaseTUIScreen
 
 
 class EditModal(Screen):
@@ -158,7 +159,7 @@ class ConfirmModal(Screen):
         self.dismiss(False)
 
 
-class ConfigTUIScreen(Screen):
+class ConfigTUIScreen(BaseTUIScreen):
     """Main config TUI screen."""
 
     BINDINGS = [
@@ -170,19 +171,9 @@ class ConfigTUIScreen(Screen):
         Binding("down", "cursor_down", "Down", show=False),
     ]
 
-    CSS = """
+    CSS = BaseTUIScreen.CSS + """
     ConfigTUIScreen {
         background: $surface;
-    }
-
-    #config-header {
-        dock: top;
-        background: $boost;
-        color: $text;
-        content-align: center middle;
-        text-style: bold;
-        padding: 1;
-        border: solid $primary;
     }
 
     #config-container {
@@ -217,15 +208,14 @@ class ConfigTUIScreen(Screen):
         "chunk_overlap": ("set_chunk_overlap", "10"),
     }
 
-    def compose(self) -> ComposeResult:
-        yield Label("🧠 cognee Config Manager", id="config-header")
-
+    def compose_content(self) -> ComposeResult:
         with Container(id="config-container"):
             table = DataTable()
             table.cursor_type = "row"
             table.zebra_stripes = True
             yield table
 
+    def compose_footer(self) -> ComposeResult:
         yield Label(
             "[↑↓] Navigate  [e] Edit  [r] Reset  [Esc] Back  [q] Quit",
             id="config-footer"
