@@ -1,11 +1,9 @@
 import argparse
-from typing import List
-
 from cognee.cli import SupportsCliCommand
 from cognee.cli.config import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException
-
+from cognee.version import get_cognee_version
 
 class TuiCommand(SupportsCliCommand):
     @property
@@ -66,12 +64,20 @@ class TuiCommand(SupportsCliCommand):
                     background: $surface;
                     padding: 1;
                 }
+                #title-wrapper {
+                    width: 100%;
+                    height: auto;
+                    align: center middle; 
+                }
 
                 #title {
                     text-align: center;
+                    width: auto;
                     color: $accent;
                     text-style: bold;
-                    padding: 1;
+                    padding: 0 3;
+                    border: solid $accent;
+                    margin-bottom: 2;
                 }
 
                 ListView {
@@ -118,10 +124,12 @@ class TuiCommand(SupportsCliCommand):
                 ]
 
                 def compose(self) -> ComposeResult:
-                    yield Static("🧠 cognee v1.0.0", id="header")
+                    version = get_cognee_version()
+                    yield Static(f"🧠 cognee v{version}", id="header")
 
                     with Container(id="main-container"):
-                        yield Static("Select Command", id="title")
+                        with Container(id="title-wrapper"):
+                            yield Static("Select Command", id="title")
                         yield ListView(
                             ListItem(CommandItem("📥", "add", "Add data to cognee")),
                             ListItem(CommandItem("🔍", "search", "Search data in cognee")),
