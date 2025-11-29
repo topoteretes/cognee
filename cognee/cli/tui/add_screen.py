@@ -47,7 +47,7 @@ class AddTUIScreen(BaseTUIScreen):
     .field-label {
         color: $text-muted;
         margin-top: 1;
-        margin-bottom: 0;
+        margin-bottom: 1;
     }
 
     Input {
@@ -68,7 +68,7 @@ class AddTUIScreen(BaseTUIScreen):
 
     #add-footer {
         dock: bottom;
-        height: 3;
+        padding: 1 0;
         background: $boost;
         color: $text-muted;
         content-align: center middle;

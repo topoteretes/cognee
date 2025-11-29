@@ -147,7 +147,7 @@ class HomeScreen(BaseTUIScreen):
 
     #home-footer {
         dock: bottom;
-        height: 3;
+        padding: 1 0;
         background: $boost;
         color: $text-muted;
         content-align: center middle;

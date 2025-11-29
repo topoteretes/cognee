@@ -47,7 +47,7 @@ class CognifyTUIScreen(BaseTUIScreen):
     .field-label {
         color: $text-muted;
         margin-top: 1;
-        margin-bottom: 0;
+        margin-bottom: 1;
     }
 
     Input {
@@ -78,7 +78,7 @@ class CognifyTUIScreen(BaseTUIScreen):
 
     #cognify-footer {
         dock: bottom;
-        height: 3;
+        padding: 1 0;
         background: $boost;
         color: $text-muted;
         content-align: center middle;
@@ -92,7 +92,7 @@ class CognifyTUIScreen(BaseTUIScreen):
 
     def compose_content(self) -> ComposeResult:
         with Container(id="cognify-container"):
-            yield Label("Cognify Data", id="form-title")
+            yield Label("⚡ Cognify Data", id="form-title")
             with Vertical(id="cognify-form"):
                 yield Label("Dataset Name (optional, leave empty for all):", classes="field-label")
                 yield Input(

@@ -42,6 +42,7 @@ class DeleteTUIScreen(BaseTUIScreen):
         text-style: bold;
         color: $accent;
         margin-bottom: 2;
+        width: 100%;
     }
 
     .input-group {
@@ -77,7 +78,7 @@ class DeleteTUIScreen(BaseTUIScreen):
 
     #delete-footer {
         dock: bottom;
-        height: 3;
+        padding: 1 0;
         background: $boost;
         color: $text-muted;
         content-align: center middle;
