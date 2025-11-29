@@ -24,8 +24,12 @@ class ChunksRetriever(BaseRetriever):
     def __init__(
         self,
         top_k: Optional[int] = 5,
+        default_importance_weight: float = 0.5,
     ):
         self.top_k = top_k
+        self.default_importance_weight = default_importance_weight
+        self.candidate = top_k * 10
+        self.vector_engine = get_vector_engine()
 
     async def get_context(self, query: str) -> Any:
         """
@@ -48,18 +52,36 @@ class ChunksRetriever(BaseRetriever):
             f"Starting chunk retrieval for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
         )
 
-        vector_engine = get_vector_engine()
+        vector_engine = self.vector_engine
 
         try:
-            found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
+            found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.candidate)
             logger.info(f"Found {len(found_chunks)} chunks from vector search")
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error
 
-        chunk_payloads = [result.payload for result in found_chunks]
-        logger.info(f"Returning {len(chunk_payloads)} chunk payloads")
-        return chunk_payloads
+        rescored = []
+        for item in found_chunks:
+            payload = item.payload or {}
+            importance_weight = payload.get("importance_weight", self.default_importance_weight)
+
+            distance_score = item.score if hasattr(item, "score") and item.score is not None else 0.0
+            similarity_score = 1 / (1 + distance_score)
+            final_score = similarity_score * importance_weight
+            text_preview = payload.get('text', '')[:20]
+            print(
+                f"Chunk: {text_preview:<20} | VecScore: {distance_score:.4f} | Weight: {importance_weight} | Final: {final_score:.4f}")
+            rescored.append((final_score, payload))
+
+        # sort descending by final_score
+        rescored.sort(key=lambda x: x[0], reverse=True)
+
+        # take top_k after re-ranking
+        top_payloads = [p for (_, p) in rescored[: self.top_k]]
+
+        logger.info(f"Returning {len(top_payloads)} re-ranked chunk payloads")
+        return top_payloads
 
     async def get_completion(
         self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None

@@ -26,6 +26,7 @@ async def add(
     preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
     incremental_loading: bool = True,
     data_per_batch: Optional[int] = 20,
+    importance_weight: float = 0.5,
 ):
     """
     Add data to Cognee for knowledge graph processing.
@@ -85,6 +86,9 @@ async def add(
         extraction_rules: Optional dictionary of rules (e.g., CSS selectors, XPath) for extracting specific content from web pages using BeautifulSoup
         tavily_config: Optional configuration for Tavily API, including API key and extraction settings
         soup_crawler_config: Optional configuration for BeautifulSoup crawler, specifying concurrency, crawl delay, and extraction rules.
+        importance_weight: A float between 0.0 and 1.0 representing the importance of the
+                           ingested data. This weight will influence search result ranking.
+                           Defaults to 0.5.
 
     Returns:
         PipelineRunInfo: Information about the ingestion pipeline execution including:
@@ -164,6 +168,9 @@ async def add(
         - TAVILY_API_KEY: YOUR_TAVILY_API_KEY
 
     """
+    if not 0.0 <= importance_weight <= 1.0:
+        raise ValueError("importance_weight must be a float between 0.0 and 1.0")
+
     if preferred_loaders is not None:
         transformed = {}
         for item in preferred_loaders:
@@ -182,6 +189,7 @@ async def add(
             node_set,
             dataset_id,
             preferred_loaders,
+            importance_weight,
         ),
     ]
 

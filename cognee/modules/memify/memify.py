@@ -21,6 +21,7 @@ from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
 from cognee.tasks.codingagents.coding_rule_associations import (
     add_rule_associations,
 )
+from cognee.tasks.memify.propagate_importance_weights import propagate_importance_weights
 
 logger = get_logger("memify")
 
@@ -69,13 +70,15 @@ async def memify(
     if not extraction_tasks:
         extraction_tasks = [Task(extract_subgraph_chunks)]
     if not enrichment_tasks:
-        enrichment_tasks = [
+        default_enrichment_tasks = [
+            Task(propagate_importance_weights),
             Task(
                 add_rule_associations,
                 rules_nodeset_name="coding_agent_rules",
                 task_config={"batch_size": 1},
-            )
+            ),
         ]
+        enrichment_tasks = default_enrichment_tasks
 
     await setup()
 

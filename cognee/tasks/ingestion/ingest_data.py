@@ -20,6 +20,7 @@ from cognee.modules.data.methods import (
 
 from .save_data_item_to_storage import save_data_item_to_storage
 from .data_item_to_text_file import data_item_to_text_file
+from ...shared.data_models import Document
 
 
 async def ingest_data(
@@ -29,6 +30,7 @@ async def ingest_data(
     node_set: Optional[List[str]] = None,
     dataset_id: UUID = None,
     preferred_loaders: dict[str, dict[str, Any]] = None,
+    importance_weight: float = 0.5,
 ):
     if not user:
         user = await get_default_user()
@@ -46,6 +48,7 @@ async def ingest_data(
         node_set: Optional[List[str]] = None,
         dataset_id: UUID = None,
         preferred_loaders: dict[str, dict[str, Any]] = None,
+        importance_weight: float = 0.5,
     ):
         new_datapoints = []
         existing_data_points = []
@@ -139,6 +142,7 @@ async def ingest_data(
                 data_point.external_metadata = ext_metadata
                 data_point.node_set = json.dumps(node_set) if node_set else None
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None
+                data_point.importance_weight = importance_weight
 
                 # Check if data is already in dataset
                 if str(data_point.id) in dataset_data_map:
@@ -169,6 +173,7 @@ async def ingest_data(
                     tenant_id=user.tenant_id if user.tenant_id else None,
                     pipeline_status={},
                     token_count=-1,
+                    importance_weight = importance_weight
                 )
 
                 new_datapoints.append(data_point)
@@ -195,5 +200,5 @@ async def ingest_data(
         return existing_data_points + dataset_new_data_points + new_datapoints
 
     return await store_data_to_dataset(
-        data, dataset_name, user, node_set, dataset_id, preferred_loaders
+        data, dataset_name, user, node_set, dataset_id, preferred_loaders,importance_weight
     )

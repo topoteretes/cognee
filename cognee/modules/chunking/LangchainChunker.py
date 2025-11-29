@@ -48,6 +48,7 @@ class LangchainChunker(Chunker):
                         chunk_index=self.chunk_index,
                         cut_type="missing",
                         contains=[],
+                        importance_weight=self.document.importance_weight,
                         metadata={
                             "index_fields": ["text"],
                         },
