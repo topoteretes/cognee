@@ -1,17 +1,21 @@
 import argparse
 import json
+from typing import Any, Optional
 
 from cognee.cli.reference import SupportsCliCommand
 from cognee.cli import DEFAULT_DOCS_URL
 from cognee.cli.exceptions import CliCommandException
 
-from textual.app import App, ComposeResult
-from textual.screen import Screen
-from textual.widgets import DataTable, Input, Label, Button, Static
-from textual.containers import Container, Horizontal
-from textual.binding import Binding
-
-from cognee.cli.tui.base_screen import BaseTUIScreen
+try:
+    from textual.app import App, ComposeResult
+    from textual.screen import Screen
+    from textual.widgets import DataTable, Input, Label, Button, Static
+    from textual.containers import Container, Horizontal
+    from textual.binding import Binding
+    from cognee.cli.tui.base_screen import BaseTUIScreen
+except ImportError:
+    # Handle case where textual is not installed to prevent import errors at module level
+    BaseTUIScreen = object
 
 
 class ConfirmModal(Screen):
@@ -27,16 +31,31 @@ class ConfirmModal(Screen):
     }
 
     #confirm-dialog {
-        width: 50;
-        height: 11;
+        width: 60;
+        height: auto;
         border: thick $warning;
         background: $surface;
         padding: 1 2;
     }
 
+    #confirm-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
     #confirm-message {
         text-align: center;
         margin-bottom: 2;
+    }
+
+    .tui-dialog-buttons {
+        align: center middle;
+        height: auto;
+    }
+
+    Button {
+        margin: 0 1;
     }
     """
 
@@ -47,9 +66,10 @@ class ConfirmModal(Screen):
 
     def compose(self) -> ComposeResult:
         with Container(id="confirm-dialog"):
-            yield Label("⚠ Reset Configuration", classes="tui-dialog-title")
-            yield Label(f"Reset '{self.key}' to default?", id="confirm-message")
-            yield Label(f"Default value: {self.default_value}", id="confirm-message")
+            yield Label("⚠ Reset Configuration", id="confirm-title")
+            yield Label(f"Are you sure you want to reset '{self.key}'?", id="confirm-message")
+            yield Label(f"It will revert to: {self.default_value}", classes="dim-text")
+
             with Horizontal(classes="tui-dialog-buttons"):
                 yield Button("Reset", variant="error", id="confirm-btn")
                 yield Button("Cancel", variant="default", id="cancel-btn")
@@ -65,7 +85,7 @@ class ConfirmModal(Screen):
 
 
 class ConfigTUIScreen(BaseTUIScreen):
-    """Main config TUI screen with inline editing."""
+    """Main config TUI screen with inline editing and live data fetching."""
 
     BINDINGS = [
         Binding("q", "quit_app", "Quit"),
@@ -96,16 +116,22 @@ class ConfigTUIScreen(BaseTUIScreen):
 
     #edit-label {
         color: $text-muted;
-        margin-bottom: 0;
+        margin-bottom: 1;
     }
 
     #inline-input {
         width: 100%;
     }
+
+    .dim-text {
+        color: $text-muted;
+        text-align: center;
+        margin-bottom: 1;
+    }
     """
 
-    # Config key mappings with defaults (from existing config.py)
-    CONFIG_KEYS = {
+    # Config key mappings: Key -> (Reset Method Name, Default Value)
+    CONFIG_MAP = {
         "llm_provider": ("set_llm_provider", "openai"),
         "llm_model": ("set_llm_model", "gpt-5-mini"),
         "llm_api_key": ("set_llm_api_key", ""),
@@ -114,8 +140,8 @@ class ConfigTUIScreen(BaseTUIScreen):
         "vector_db_provider": ("set_vector_db_provider", "lancedb"),
         "vector_db_url": ("set_vector_db_url", ""),
         "vector_db_key": ("set_vector_db_key", ""),
-        "chunk_size": ("set_chunk_size", "1500"),
-        "chunk_overlap": ("set_chunk_overlap", "10"),
+        "chunk_size": ("set_chunk_size", 1500),
+        "chunk_overlap": ("set_chunk_overlap", 10),
     }
 
     def __init__(self):
@@ -125,12 +151,14 @@ class ConfigTUIScreen(BaseTUIScreen):
     def compose_content(self) -> ComposeResult:
         with Container(classes="tui-main-container"):
             with Container(classes="tui-title-wrapper"):
-                yield Static("⚙️  Change Config", classes="tui-title-bordered")
+                yield Static("⚙️  Configuration Manager", classes="tui-title-bordered")
+
             with Container(classes="tui-bordered-wrapper"):
-                table = DataTable()
+                table = DataTable(id="config-table")
                 table.cursor_type = "row"
                 table.zebra_stripes = True
                 yield table
+
                 with Container(id="inline-edit-container"):
                     yield Label("", id="edit-label")
                     yield Input(placeholder="Enter new value", id="inline-input")
@@ -142,121 +170,127 @@ class ConfigTUIScreen(BaseTUIScreen):
         )
 
     def on_mount(self) -> None:
+        """Initialize the table with columns and current data."""
         table = self.query_one(DataTable)
-        key_col, value_col = table.add_columns("KEY", "VALUE")
-        # Add all config keys
-        for key, (method, default) in self.CONFIG_KEYS.items():
-            display_default = "(empty)" if default == "" else str(default)
-            table.add_row(key, display_default)
+        table.add_columns("Configuration Key", "Current Value")
 
+        self._load_table_data()
         table.focus()
 
-    def action_cursor_up(self) -> None:
-        """Move cursor up in the table."""
-        if self.editing_key:
-            return  # Don't navigate while editing
+    def _load_table_data(self) -> None:
+        """Fetch real config values and populate the table."""
         table = self.query_one(DataTable)
-        table.action_cursor_up()
+        table.clear()
+
+        try:
+            import cognee
+            # Check if get method exists, otherwise warn
+            has_get = hasattr(cognee.config, "get")
+        except ImportError:
+            has_get = False
+            self.notify("Could not import cognee config", severity="error")
+
+        for key, (_, default_val) in self.CONFIG_MAP.items():
+            value_display = "N/A"
+
+            if has_get:
+                try:
+                    raw_val = cognee.config.get(key)
+                    if raw_val is None:
+                        raw_val = default_val
+                    value_display = str(raw_val) if raw_val is not None else "(empty)"
+                except Exception:
+                    value_display = "Error fetching value"
+
+            table.add_row(key, value_display, key=key)
+
+    def action_cursor_up(self) -> None:
+        if self.editing_key: return
+        self.query_one(DataTable).action_cursor_up()
 
     def action_cursor_down(self) -> None:
-        """Move cursor down in the table."""
-        if self.editing_key:
-            return  # Don't navigate while editing
-        table = self.query_one(DataTable)
-        table.action_cursor_down()
+        if self.editing_key: return
+        self.query_one(DataTable).action_cursor_down()
 
     def action_cancel_or_back(self) -> None:
-        """Cancel editing or go back to main menu."""
         if self.editing_key:
             self._cancel_edit()
         else:
             self.app.pop_screen()
 
     def action_quit_app(self) -> None:
-        """Quit the entire application."""
         self.app.exit()
 
     def action_edit(self) -> None:
         """Start inline editing for the selected config value."""
-        if self.editing_key:
-            return  # Already editing
+        if self.editing_key: return
 
         table = self.query_one(DataTable)
-        if table.cursor_coordinate.row < 0:
-            return
+        if table.cursor_row < 0: return
 
-        row_data = table.get_row_at(table.cursor_coordinate.row)
-        key = str(row_data[0])
-        default_value = str(row_data[1])
+        # Get row data using the cursor
+        row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
+        current_val = table.get_cell(row_key, list(table.columns.keys())[1])  # Get value column
 
-        self.editing_key = key
+        self.editing_key = str(row_key.value)
 
-        # Show the inline edit container
+        # Show edit container
         edit_container = self.query_one("#inline-edit-container")
         edit_container.add_class("visible")
 
-        # Update label and input
+        # Update UI
         label = self.query_one("#edit-label", Label)
-        label.update(f"Editing: {key} (default: {default_value})")
+        label.update(f"Editing: [bold]{self.editing_key}[/bold]")
 
         input_widget = self.query_one("#inline-input", Input)
         input_widget.value = ""
-        input_widget.placeholder = f"Enter new value for {key}"
+        # Don't put "empty" or "N/A" into the input box to save user deleting it
+        if current_val not in ["(empty)", "N/A", "Error fetching value"]:
+            input_widget.value = str(current_val)
+
+        input_widget.placeholder = f"Enter new value for {self.editing_key}"
         input_widget.focus()
 
     def action_confirm_edit(self) -> None:
         """Confirm the inline edit and save the value."""
-        if not self.editing_key:
-            return
+        if not self.editing_key: return
 
         input_widget = self.query_one("#inline-input", Input)
         value = input_widget.value.strip()
 
-        if value:
-            self._save_config(self.editing_key, value)
-
+        # Allow saving even if empty (might mean unset/empty string)
+        self._save_config(self.editing_key, value)
         self._cancel_edit()
 
     def _cancel_edit(self) -> None:
-        """Cancel the current edit and hide the input."""
         self.editing_key = None
-
-        # Hide the inline edit container
         edit_container = self.query_one("#inline-edit-container")
         edit_container.remove_class("visible")
-
-        # Clear input
-        input_widget = self.query_one("#inline-input", Input)
-        input_widget.value = ""
-
-        # Return focus to table
-        table = self.query_one(DataTable)
-        table.focus()
+        self.query_one("#inline-input", Input).value = ""
+        self.query_one(DataTable).focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle Enter key in the input field."""
         if event.input.id == "inline-input" and self.editing_key:
             self.action_confirm_edit()
 
     def action_reset(self) -> None:
         """Reset the selected config to default."""
         table = self.query_one(DataTable)
+        if table.cursor_row < 0: return
 
-        if table.cursor_coordinate.row < 0:
+        row_key_obj = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
+        key = str(row_key_obj.value)
+
+        if key not in self.CONFIG_MAP:
+            self.notify(f"Cannot reset '{key}'", severity="warning")
             return
 
-        row_key = table.get_row_at(table.cursor_coordinate.row)
-        key = str(row_key[0])
-
-        if key not in self.CONFIG_KEYS:
-            return
-
-        method_name, default_value = self.CONFIG_KEYS[key]
+        _, default_value = self.CONFIG_MAP[key]
         display_default = "(empty)" if default_value == "" else str(default_value)
 
         def handle_confirm_result(confirmed: bool) -> None:
             if confirmed:
-                self._reset_config(key, method_name, default_value)
+                self._reset_config(key)
 
         self.app.push_screen(
             ConfirmModal(key, display_default),
@@ -264,38 +298,62 @@ class ConfigTUIScreen(BaseTUIScreen):
         )
 
     def _save_config(self, key: str, value: str) -> None:
-        """Save config value using cognee.config.set()."""
+        """Save config value and update UI."""
         try:
             import cognee
 
-            # Try to parse as JSON (numbers, booleans, etc)
+            # Parse value types (restore JSON behavior)
             try:
                 parsed_value = json.loads(value)
-            except json.JSONDecodeError:
-                parsed_value = value
+            except (json.JSONDecodeError, TypeError):
+                # If it looks like a boolean but json didn't catch it
+                if value.lower() == "true":
+                    parsed_value = True
+                elif value.lower() == "false":
+                    parsed_value = False
+                else:
+                    parsed_value = value
 
             cognee.config.set(key, parsed_value)
-            self.notify(f"✓ Set {key} = {parsed_value}", severity="information")
+            self._update_table_row(key, parsed_value)
+            self.notify(f"✓ Set {key}", severity="information")
 
         except Exception as e:
-            self.notify(f"✗ Failed to set {key}: {str(e)}", severity="error")
+            self.notify(f"✗ Error setting {key}: {str(e)}", severity="error")
 
-    def _reset_config(self, key: str, method_name: str, default_value: any) -> None:
-        """Reset config to default using the mapped method."""
+    def _reset_config(self, key: str) -> None:
+        """Reset config to default using mapped method and update UI."""
         try:
             import cognee
 
-            method = getattr(cognee.config, method_name)
-            method(default_value)
+            method_name, default_value = self.CONFIG_MAP[key]
 
-            display_default = "(empty)" if default_value == "" else str(default_value)
-            self.notify(
-                f"✓ Reset {key} to default: {display_default}",
-                severity="information"
-            )
+            if hasattr(cognee.config, method_name):
+                method = getattr(cognee.config, method_name)
+                method(default_value)
+
+                # IMPROVEMENT: Update table immediately
+                self._update_table_row(key, default_value)
+                self.notify(f"✓ Reset {key}", severity="information")
+            else:
+                self.notify(f"✗ Reset method '{method_name}' not found", severity="error")
 
         except Exception as e:
             self.notify(f"✗ Failed to reset {key}: {str(e)}", severity="error")
+
+    def _update_table_row(self, key: str, value: Any) -> None:
+        """Helper to update a specific row's value column visually."""
+        table = self.query_one(DataTable)
+        display_val = str(value) if value != "" else "(empty)"
+
+        # 'key' was used as the row_key in add_row, so we can address it directly
+        # The value column is at index 1 (0 is key, 1 is value)
+        try:
+            col_key = list(table.columns.keys())[1]
+            table.update_cell(key, col_key, display_val)
+        except Exception:
+            # Fallback if key update fails, reload all
+            self._load_table_data()
 
 
 class ConfigTUICommand(SupportsCliCommand):
@@ -310,8 +368,14 @@ class ConfigTUICommand(SupportsCliCommand):
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
+            # Import here to check if Textual is actually installed
+            from textual.app import App
+
             class ConfigTUIApp(App):
                 """Simple app wrapper for config TUI."""
+                CSS = """
+                Screen { background: $surface; }
+                """
 
                 def on_mount(self) -> None:
                     self.push_screen(ConfigTUIScreen())
