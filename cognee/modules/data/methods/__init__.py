@@ -16,7 +16,7 @@ from .get_dataset_ids import get_dataset_ids
 
 # Delete
 from .delete_dataset import delete_dataset
-from .delete_dataset_by_name import delete_datasets_by_name
+from .delete_dataset_by_name import delete_dataset_by_name
 from .delete_data_by_user import delete_data_by_user
 from .delete_data import delete_data
 

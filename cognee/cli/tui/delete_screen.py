@@ -6,7 +6,7 @@ from textual.containers import Container, Vertical, Horizontal
 from textual.binding import Binding
 from cognee.cli.tui.base_screen import BaseTUIScreen
 from cognee.modules.data.methods.get_deletion_counts import get_deletion_counts
-from cognee.modules.data.methods.delete_dataset_by_name import delete_datasets_by_name
+from cognee.modules.data.methods.delete_dataset_by_name import delete_dataset_by_name
 from cognee.modules.data.methods.delete_data_by_user import delete_data_by_user
 from cognee.modules.users.methods import get_default_user
 
@@ -151,7 +151,7 @@ class DeleteTUIScreen(BaseTUIScreen):
             if dataset_name:
                 # Use delete_datasets_by_name for dataset deletion
                 user = await get_default_user()
-                result = await delete_datasets_by_name(dataset_name, user.id)
+                result = await delete_dataset_by_name(dataset_name, user.id)
                 
                 if result["not_found"]:
                     status.update(f"⚠️ Dataset '{dataset_name}' not found")
