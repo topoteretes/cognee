@@ -1,11 +1,9 @@
 import asyncio
-from cognee.modules.search.types import SearchType
 from textual.app import ComposeResult
 from textual.widgets import Input, Label, Static, Select
 from textual.containers import Container, Vertical, ScrollableContainer
 from textual.binding import Binding
 from cognee.cli.tui.base_screen import BaseTUIScreen
-
 
 class SearchTUIScreen(BaseTUIScreen):
     """Simple search screen with query input and results display."""
@@ -136,9 +134,11 @@ class SearchTUIScreen(BaseTUIScreen):
     async def _async_search(self, query_text: str, query_type: str) -> None:
         """Async search operation."""
         try:
+            import cognee
+            from cognee.modules.search.types import SearchType
+
             # Convert string to SearchType enum
             search_type = SearchType[query_type]
-            import cognee
             # Perform search
             results = await cognee.search(
                 query_text=query_text,
@@ -157,7 +157,7 @@ class SearchTUIScreen(BaseTUIScreen):
                 if query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
                     formatted = "\n\n".join([f"📝 {result}" for result in results])
                 elif query_type == "CHUNKS":
-                    formatted = "\n\n".join([f"📄 Chunk {i+1}:\n{result}" for i, result in enumerate(results)])
+                    formatted = "\n\n".join([f"📄 Chunk {i + 1}:\n{result}" for i, result in enumerate(results)])
                 else:
                     formatted = "\n\n".join([f"• {result}" for result in results])
 
