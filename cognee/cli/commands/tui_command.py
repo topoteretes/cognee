@@ -5,7 +5,7 @@ import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException
 from cognee.cli.tui.home_screen import HomeScreen
 from textual.app import App
-
+from cognee.shared.logging_utils import setup_logging
 
 
 class TuiCommand(SupportsCliCommand):
@@ -40,9 +40,9 @@ class TuiCommand(SupportsCliCommand):
                     """Push the home screen on mount."""
                     self.push_screen(HomeScreen())
 
+            setup_logging(enable_console_logging=False)
             app = CogneeTUI()
             app.run()
-            fmt.success("TUI exited successfully!")
         except ImportError:
             raise CliCommandException(
                 "Textual is not installed. Install with: pip install textual",
