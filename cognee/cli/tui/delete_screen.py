@@ -240,7 +240,7 @@ class DeleteAllConfirmModal(BaseTUIScreen):
 
     #confirm-dialog {
         width: 60;
-        height: 13;
+        height: 20;
         border: thick $error;
         background: $surface;
         padding: 2;
