@@ -3,8 +3,7 @@ import asyncio
 from os import path
 import tempfile
 from uuid import UUID
-from typing import Optional
-from typing import AsyncGenerator, List
+from typing import Optional, AsyncGenerator, List, Union
 from contextlib import asynccontextmanager
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import NoResultFound
@@ -235,35 +234,45 @@ class SQLAlchemyAdapter:
                 return [schema[0] for schema in result.fetchall()]
         return []
 
-    async def delete_entity_by_id(
-        self, table_name: str, data_id: UUID, schema_name: Optional[str] = "public"
+    async def delete_entities_by_id(
+            self,
+            table_name: str,
+            data_id: Union[UUID, List[UUID]],  # Supports a single UUID or a List of UUIDs
+            schema_name: Optional[str] = "public"
     ):
         """
-        Delete an entity from the specified table based on its unique ID.
+        Delete one or more entities from the specified table based on their ID(s).
 
         Parameters:
         -----------
-
-            - table_name (str): The name of the table from which to delete the entity.
-            - data_id (UUID): The unique identifier of the entity to be deleted.
-            - schema_name (Optional[str]): The name of the schema where the table resides,
-              defaults to 'public'. (default 'public')
+            - table_name (str): The name of the table from which to delete the entities.
+            - data_id (Union[UUID, List[UUID]]): The unique identifier(s) to be deleted.
+            - schema_name (Optional[str]): The name of the schema where the table resides.
         """
-        if self.engine.dialect.name == "sqlite":
-            async with self.get_async_session() as session:
-                TableModel = await self.get_table(table_name, schema_name)
 
-                # Foreign key constraints are disabled by default in SQLite (for backwards compatibility),
-                # so must be enabled for each database connection/session separately.
+        # Ensure data_ids is a list for the WHERE clause logic
+        if isinstance(data_id, list):
+            data_ids_to_delete = data_id
+        else:
+            data_ids_to_delete = [data_id]
+
+        if not data_ids_to_delete:
+            return
+
+        async with self.get_async_session() as session:
+            TableModel = await self.get_table(table_name, schema_name)
+
+            # Handle SQLite's foreign key requirement
+            if self.engine.dialect.name == "sqlite":
+                from sqlalchemy import text
                 await session.execute(text("PRAGMA foreign_keys = ON;"))
 
-                await session.execute(TableModel.delete().where(TableModel.c.id == data_id))
-                await session.commit()
-        else:
-            async with self.get_async_session() as session:
-                TableModel = await self.get_table(table_name, schema_name)
-                await session.execute(TableModel.delete().where(TableModel.c.id == data_id))
-                await session.commit()
+            # Construct the DELETE statement using the 'in_()' operator
+            stmt = TableModel.delete().where(TableModel.c.id.in_(data_ids_to_delete))
+
+            # Execute and commit
+            await session.execute(stmt)
+            await session.commit()
 
     async def delete_data_entity(self, data_id: UUID):
         """

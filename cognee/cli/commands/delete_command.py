@@ -6,7 +6,7 @@ from cognee.cli import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException, CliCommandInnerException
 from cognee.modules.data.methods.get_deletion_counts import get_deletion_counts
-from cognee.modules.data.methods.delete_datasets_by_name import delete_datasets_by_name
+from cognee.modules.data.methods.delete_dataset_by_name import delete_datasets_by_name
 from cognee.modules.data.methods.delete_data_by_user import delete_data_by_user
 from cognee.modules.users.methods import get_default_user
 
