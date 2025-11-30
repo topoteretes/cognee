@@ -1,6 +1,4 @@
 import asyncio
-
-import cognee
 from cognee.modules.chunking.TextChunker import TextChunker
 from textual.app import ComposeResult
 from textual.widgets import Input, Label, Static, Checkbox, RadioSet, RadioButton
@@ -138,7 +136,7 @@ class CognifyTUIScreen(BaseTUIScreen):
             
             # Prepare datasets parameter
             datasets = [dataset_name] if dataset_name else None
-            
+            import cognee
             await cognee.cognify(
                 datasets=datasets,
                 chunker=chunker_class,

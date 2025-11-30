@@ -1,12 +1,9 @@
 import asyncio
-
-import cognee
 from cognee.modules.search.types import SearchType
 from textual.app import ComposeResult
 from textual.widgets import Input, Label, Static, Select
 from textual.containers import Container, Vertical, ScrollableContainer
 from textual.binding import Binding
-
 from cognee.cli.tui.base_screen import BaseTUIScreen
 
 
@@ -141,7 +138,7 @@ class SearchTUIScreen(BaseTUIScreen):
         try:
             # Convert string to SearchType enum
             search_type = SearchType[query_type]
-
+            import cognee
             # Perform search
             results = await cognee.search(
                 query_text=query_text,
