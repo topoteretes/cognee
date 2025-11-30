@@ -126,32 +126,13 @@ class DeleteTUIScreen(BaseTUIScreen):
         status = self.query_one(".tui-status", Static)
 
         try:
-            # Get preview of what will be deleted
-            preview_data = await get_deletion_counts(
-                dataset_name=dataset_name,
-                user_id=user_id,
-                all_data=False,
-            )
-
-            if not preview_data:
-                status.update("✓ No data found to delete")
-                self.is_processing = False
-                return
-
-            # Show preview and confirm
-            preview_msg = (
-                f"About to delete:\n"
-                f"Datasets: {preview_data.datasets}\n"
-                f"Entries: {preview_data.entries}\n"
-                f"Users: {preview_data.users}"
-            )
-            status.update(preview_msg)
-
             # Perform deletion
             if dataset_name:
                 # Use delete_datasets_by_name for dataset deletion
-                user = await get_default_user()
-                result = await delete_dataset_by_name(dataset_name, user.id)
+                if user_id is None:
+                    user = await get_default_user()
+                    user_id = user.id
+                result = await delete_dataset_by_name(dataset_name, user_id)
                 
                 if result["not_found"]:
                     status.update(f"⚠️ Dataset '{dataset_name}' not found")
