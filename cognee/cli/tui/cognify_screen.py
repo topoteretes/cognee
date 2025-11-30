@@ -1,22 +1,10 @@
 import asyncio
-from cognee.modules.chunking.TextChunker import TextChunker
 from textual.app import ComposeResult
 from textual.widgets import Input, Label, Static, Checkbox, RadioSet, RadioButton
 from textual.containers import Container, Vertical
 from textual.binding import Binding
-
 from cognee.cli.tui.base_screen import BaseTUIScreen
 from cognee.cli.config import CHUNKER_CHOICES
-
-try:
-    from cognee.modules.chunking.LangchainChunker import LangchainChunker
-except ImportError:
-    LangchainChunker = None
-
-try:
-    from cognee.modules.chunking.CsvChunker import CsvChunker
-except ImportError:
-    CsvChunker = None
 
 
 class CognifyTUIScreen(BaseTUIScreen):
@@ -119,16 +107,24 @@ class CognifyTUIScreen(BaseTUIScreen):
     async def _cognify_async(self, dataset_name: str | None, chunker_type: str, run_background: bool) -> None:
         """Async function to cognify data."""
         status = self.query_one(".tui-status", Static)
-        
+        from cognee.modules.chunking.TextChunker import TextChunker
         try:
             # Get chunker class
             chunker_class = TextChunker
             if chunker_type == "LangchainChunker":
+                try:
+                    from cognee.modules.chunking.LangchainChunker import LangchainChunker
+                except ImportError:
+                    LangchainChunker = None
                 if LangchainChunker is not None:
                     chunker_class = LangchainChunker
                 else:
                     status.update("[yellow]⚠ LangchainChunker not available, using TextChunker[/yellow]")
             elif chunker_type == "CsvChunker":
+                try:
+                    from cognee.modules.chunking.CsvChunker import CsvChunker
+                except ImportError:
+                    CsvChunker = None
                 if CsvChunker is not None:
                     chunker_class = CsvChunker
                 else:
