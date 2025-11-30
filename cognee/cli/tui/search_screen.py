@@ -5,6 +5,7 @@ from textual.containers import Container, Vertical, ScrollableContainer
 from textual.binding import Binding
 from cognee.cli.tui.base_screen import BaseTUIScreen
 
+
 class SearchTUIScreen(BaseTUIScreen):
     """Simple search screen with query input and results display."""
 
@@ -14,7 +15,9 @@ class SearchTUIScreen(BaseTUIScreen):
         Binding("ctrl+s", "search", "Search"),
     ]
 
-    CSS = BaseTUIScreen.CSS + """
+    CSS = (
+        BaseTUIScreen.CSS
+        + """
     #search-form {
         height: auto;
         border: solid $primary;
@@ -48,6 +51,7 @@ class SearchTUIScreen(BaseTUIScreen):
         overflow-y: auto;
     }
     """
+    )
 
     def __init__(self):
         super().__init__()
@@ -75,13 +79,12 @@ class SearchTUIScreen(BaseTUIScreen):
             with Container(id="results-container"):
                 yield Static("Results", id="results-title")
                 with ScrollableContainer(id="results-content"):
-                    yield Static("Enter a query and click Search to see results.", id="results-text")
+                    yield Static(
+                        "Enter a query and click Search to see results.", id="results-text"
+                    )
 
     def compose_footer(self) -> ComposeResult:
-        yield Static(
-            "Ctrl+S: Search  •  Esc: Back  •  q: Quit",
-            classes="tui-footer"
-        )
+        yield Static("Ctrl+S: Search  •  Esc: Back  •  q: Quit", classes="tui-footer")
 
     def on_mount(self) -> None:
         """Focus the query input on mount."""
@@ -157,7 +160,9 @@ class SearchTUIScreen(BaseTUIScreen):
                 if query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
                     formatted = "\n\n".join([f"📝 {result}" for result in results])
                 elif query_type == "CHUNKS":
-                    formatted = "\n\n".join([f"📄 Chunk {i + 1}:\n{result}" for i, result in enumerate(results)])
+                    formatted = "\n\n".join(
+                        [f"📄 Chunk {i + 1}:\n{result}" for i, result in enumerate(results)]
+                    )
                 else:
                     formatted = "\n\n".join([f"• {result}" for result in results])
 

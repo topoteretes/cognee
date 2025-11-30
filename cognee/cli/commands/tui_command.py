@@ -27,6 +27,7 @@ class TuiCommand(SupportsCliCommand):
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
+
             class CogneeTUI(App):
                 """Main TUI application for cognee."""
 

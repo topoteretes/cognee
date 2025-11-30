@@ -97,7 +97,9 @@ class ConfigTUIScreen(BaseTUIScreen):
         Binding("down", "cursor_down", "Down", show=False),
     ]
 
-    CSS = BaseTUIScreen.CSS + """
+    CSS = (
+        BaseTUIScreen.CSS
+        + """
     DataTable {
         height: 1fr;
         text-align: center;
@@ -129,6 +131,7 @@ class ConfigTUIScreen(BaseTUIScreen):
         margin-bottom: 1;
     }
     """
+    )
 
     # Config key mappings: Key -> (Reset Method Name, Default Value)
     CONFIG_MAP = {
@@ -166,7 +169,7 @@ class ConfigTUIScreen(BaseTUIScreen):
     def compose_footer(self) -> ComposeResult:
         yield Static(
             "↑↓: Navigate  •  e: Edit  •  Enter: Save  •  r: Reset  •  Esc: Back  •  q: Quit",
-            classes="tui-footer"
+            classes="tui-footer",
         )
 
     def on_mount(self) -> None:
@@ -184,6 +187,7 @@ class ConfigTUIScreen(BaseTUIScreen):
 
         try:
             import cognee
+
             # Check if get method exists, otherwise warn
             has_get = hasattr(cognee.config, "get")
         except ImportError:
@@ -205,11 +209,13 @@ class ConfigTUIScreen(BaseTUIScreen):
             table.add_row(key, value_display, key=key)
 
     def action_cursor_up(self) -> None:
-        if self.editing_key: return
+        if self.editing_key:
+            return
         self.query_one(DataTable).action_cursor_up()
 
     def action_cursor_down(self) -> None:
-        if self.editing_key: return
+        if self.editing_key:
+            return
         self.query_one(DataTable).action_cursor_down()
 
     def action_cancel_or_back(self) -> None:
@@ -223,10 +229,12 @@ class ConfigTUIScreen(BaseTUIScreen):
 
     def action_edit(self) -> None:
         """Start inline editing for the selected config value."""
-        if self.editing_key: return
+        if self.editing_key:
+            return
 
         table = self.query_one(DataTable)
-        if table.cursor_row < 0: return
+        if table.cursor_row < 0:
+            return
 
         # Get row data using the cursor
         row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
@@ -253,7 +261,8 @@ class ConfigTUIScreen(BaseTUIScreen):
 
     def action_confirm_edit(self) -> None:
         """Confirm the inline edit and save the value."""
-        if not self.editing_key: return
+        if not self.editing_key:
+            return
 
         input_widget = self.query_one("#inline-input", Input)
         value = input_widget.value.strip()
@@ -276,7 +285,8 @@ class ConfigTUIScreen(BaseTUIScreen):
     def action_reset(self) -> None:
         """Reset the selected config to default."""
         table = self.query_one(DataTable)
-        if table.cursor_row < 0: return
+        if table.cursor_row < 0:
+            return
 
         row_key_obj = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
         key = str(row_key_obj.value)
@@ -292,10 +302,7 @@ class ConfigTUIScreen(BaseTUIScreen):
             if confirmed:
                 self._reset_config(key)
 
-        self.app.push_screen(
-            ConfirmModal(key, display_default),
-            handle_confirm_result
-        )
+        self.app.push_screen(ConfirmModal(key, display_default), handle_confirm_result)
 
     def _save_config(self, key: str, value: str) -> None:
         """Save config value and update UI."""
@@ -373,6 +380,7 @@ class ConfigTUICommand(SupportsCliCommand):
 
             class ConfigTUIApp(App):
                 """Simple app wrapper for config TUI."""
+
                 CSS = """
                 Screen { background: $surface; }
                 """

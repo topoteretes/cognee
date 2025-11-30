@@ -16,7 +16,9 @@ class CognifyTUIScreen(BaseTUIScreen):
         Binding("ctrl+s", "submit", "Submit"),
     ]
 
-    CSS = BaseTUIScreen.CSS + """
+    CSS = (
+        BaseTUIScreen.CSS
+        + """
     Checkbox {
         margin-top: 1;
         margin-bottom: 1;
@@ -32,6 +34,7 @@ class CognifyTUIScreen(BaseTUIScreen):
         height: 1;
     }
     """
+    )
 
     def __init__(self):
         super().__init__()
@@ -42,26 +45,23 @@ class CognifyTUIScreen(BaseTUIScreen):
             with Container(classes="tui-title-wrapper"):
                 yield Static("⚡ Cognify Data", classes="tui-title-bordered")
             with Vertical(classes="tui-form"):
-                yield Label("Dataset Name (optional, leave empty for all):", classes="tui-label-spaced")
-                yield Input(
-                    placeholder="Leave empty to process all datasets",
-                    value="",
-                    id="dataset-input"
+                yield Label(
+                    "Dataset Name (optional, leave empty for all):", classes="tui-label-spaced"
                 )
-                
+                yield Input(
+                    placeholder="Leave empty to process all datasets", value="", id="dataset-input"
+                )
+
                 yield Label("Chunker Type:", classes="tui-label-spaced")
                 with RadioSet(id="chunker-radio"):
                     for chunker in CHUNKER_CHOICES:
                         yield RadioButton(chunker, value=(chunker == "TextChunker"))
-                
+
                 yield Checkbox("Run in background", id="background-checkbox")
             yield Static("", classes="tui-status")
 
     def compose_footer(self) -> ComposeResult:
-        yield Static(
-            "Ctrl+S: Start  •  Esc: Back  •  q: Quit",
-            classes="tui-footer"
-        )
+        yield Static("Ctrl+S: Start  •  Esc: Back  •  q: Quit", classes="tui-footer")
 
     def on_mount(self) -> None:
         """Focus the dataset input on mount."""
@@ -90,12 +90,16 @@ class CognifyTUIScreen(BaseTUIScreen):
         status = self.query_one(".tui-status", Static)
 
         dataset_name = dataset_input.value.strip() or None
-        chunker_type = str(chunker_radio.pressed_button.label) if chunker_radio.pressed_button else "TextChunker"
+        chunker_type = (
+            str(chunker_radio.pressed_button.label)
+            if chunker_radio.pressed_button
+            else "TextChunker"
+        )
         run_background = background_checkbox.value
 
         self.is_processing = True
         status.update("[yellow]⏳ Starting cognification...[/yellow]")
-        
+
         # Disable inputs during processing
         dataset_input.disabled = True
         chunker_radio.disabled = True
@@ -104,10 +108,13 @@ class CognifyTUIScreen(BaseTUIScreen):
         # Run async cognify operation
         asyncio.create_task(self._cognify_async(dataset_name, chunker_type, run_background))
 
-    async def _cognify_async(self, dataset_name: str | None, chunker_type: str, run_background: bool) -> None:
+    async def _cognify_async(
+        self, dataset_name: str | None, chunker_type: str, run_background: bool
+    ) -> None:
         """Async function to cognify data."""
         status = self.query_one(".tui-status", Static)
         from cognee.modules.chunking.TextChunker import TextChunker
+
         try:
             # Get chunker class
             chunker_class = TextChunker
@@ -119,7 +126,9 @@ class CognifyTUIScreen(BaseTUIScreen):
                 if LangchainChunker is not None:
                     chunker_class = LangchainChunker
                 else:
-                    status.update("[yellow]⚠ LangchainChunker not available, using TextChunker[/yellow]")
+                    status.update(
+                        "[yellow]⚠ LangchainChunker not available, using TextChunker[/yellow]"
+                    )
             elif chunker_type == "CsvChunker":
                 try:
                     from cognee.modules.chunking.CsvChunker import CsvChunker
@@ -129,24 +138,25 @@ class CognifyTUIScreen(BaseTUIScreen):
                     chunker_class = CsvChunker
                 else:
                     status.update("[yellow]⚠ CsvChunker not available, using TextChunker[/yellow]")
-            
+
             # Prepare datasets parameter
             datasets = [dataset_name] if dataset_name else None
             import cognee
+
             await cognee.cognify(
                 datasets=datasets,
                 chunker=chunker_class,
                 run_in_background=run_background,
             )
-            
+
             if run_background:
                 status.update("[green]✓ Cognification started in background![/green]")
             else:
                 status.update("[green]✓ Cognification completed successfully![/green]")
-            
+
         except Exception as e:
             status.update(f"[red]✗ Failed to cognify: {str(e)}[/red]")
-        
+
         finally:
             # Re-enable inputs
             self.is_processing = False

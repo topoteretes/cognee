@@ -21,13 +21,16 @@ class DeleteTUIScreen(BaseTUIScreen):
         Binding("ctrl+a", "delete_all", "Delete All", priority=True),
     ]
 
-    CSS = BaseTUIScreen.CSS + """
+    CSS = (
+        BaseTUIScreen.CSS
+        + """
     #button-group {
         height: auto;
         align: center middle;
         margin-top: 2;
     }
     """
+    )
 
     def __init__(self):
         super().__init__()
@@ -42,26 +45,22 @@ class DeleteTUIScreen(BaseTUIScreen):
                     yield Label("Dataset Name (optional):", classes="tui-label")
                     yield Input(
                         placeholder="Enter dataset name to delete specific dataset",
-                        id="dataset-input"
+                        id="dataset-input",
                     )
-                
+
                 with Vertical(classes="tui-input-group"):
                     yield Label("User ID (optional):", classes="tui-label")
-                    yield Input(
-                        placeholder="Enter user ID to delete user's data",
-                        id="user-input"
-                    )
-                
+                    yield Input(placeholder="Enter user ID to delete user's data", id="user-input")
+
                 with Horizontal(id="button-group"):
                     yield Button("Delete", variant="error", id="delete-btn")
                     yield Button("Delete All", variant="error", id="delete-all-btn")
-                
+
                 yield Static("", classes="tui-status")
 
     def compose_footer(self) -> ComposeResult:
         yield Static(
-            "Ctrl+s: Delete  •  Ctrl+a: Delete All  •  Esc: Back  •  q: Quit",
-            classes="tui-footer"
+            "Ctrl+s: Delete  •  Ctrl+a: Delete All  •  Esc: Back  •  q: Quit", classes="tui-footer"
         )
 
     def on_mount(self) -> None:
@@ -133,17 +132,19 @@ class DeleteTUIScreen(BaseTUIScreen):
                     user = await get_default_user()
                     user_id = user.id
                 result = await delete_dataset_by_name(dataset_name, user_id)
-                
+
                 if result["not_found"]:
                     status.update(f"⚠️ Dataset '{dataset_name}' not found")
                     self.is_processing = False
                     return
-                
+
                 status.update(f"✓ Successfully deleted {result['deleted_count']} dataset(s)")
             else:
                 # For user_id deletion, use the new delete_data_by_user method
                 result = await delete_data_by_user(UUID(user_id))
-                status.update(f"✓ Successfully deleted {result['datasets_deleted']} datasets and {result['data_entries_deleted']} data entries for user '{user_id}'")
+                status.update(
+                    f"✓ Successfully deleted {result['datasets_deleted']} datasets and {result['data_entries_deleted']} data entries for user '{user_id}'"
+                )
 
         except Exception as e:
             status.update(f"✗ Error: {str(e)}")
@@ -191,6 +192,7 @@ class DeleteTUIScreen(BaseTUIScreen):
 
             # Perform deletion - delete all uses the original cognee.delete
             import cognee
+
             await cognee.delete(dataset_name=None, user_id=None)
 
             status.update("✓ Successfully deleted all data")
@@ -214,7 +216,9 @@ class DeleteAllConfirmModal(BaseTUIScreen):
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    CSS = BaseTUIScreen.CSS + """
+    CSS = (
+        BaseTUIScreen.CSS
+        + """
     DeleteAllConfirmModal {
         align: center middle;
     }
@@ -241,6 +245,7 @@ class DeleteAllConfirmModal(BaseTUIScreen):
         margin-bottom: 2;
     }
     """
+    )
 
     def compose_content(self) -> ComposeResult:
         with Container(id="confirm-dialog"):

@@ -17,12 +17,15 @@ class AddTUIScreen(BaseTUIScreen):
         Binding("ctrl+v", "paste", "Paste", show=False),
     ]
 
-    CSS = BaseTUIScreen.CSS + """
+    CSS = (
+        BaseTUIScreen.CSS
+        + """
     #data-input {
         height: 8;
         min-height: 8;
     }
     """
+    )
 
     def __init__(self):
         super().__init__()
@@ -33,25 +36,21 @@ class AddTUIScreen(BaseTUIScreen):
             with Container(classes="tui-title-wrapper"):
                 yield Static("📥 Add Data to Cognee", classes="tui-title-bordered")
             with Vertical(classes="tui-form"):
-                yield Label("Data (text, file path (/path/to/doc), URL, or S3 path (s3://bucket)):", classes="tui-label-spaced")
+                yield Label(
+                    "Data (text, file path (/path/to/doc), URL, or S3 path (s3://bucket)):",
+                    classes="tui-label-spaced",
+                )
                 yield TextArea(
                     "",
                     id="data-input",
                 )
-                
+
                 yield Label("Dataset Name:", classes="tui-label-spaced")
-                yield Input(
-                    placeholder="main_dataset",
-                    value="main_dataset",
-                    id="dataset-input"
-                )
+                yield Input(placeholder="main_dataset", value="main_dataset", id="dataset-input")
             yield Static("", classes="tui-status")
 
     def compose_footer(self) -> ComposeResult:
-        yield Static(
-            "Ctrl+S: Add  •  Esc: Back  •  q: Quit",
-            classes="tui-footer"
-        )
+        yield Static("Ctrl+S: Add  •  Esc: Back  •  q: Quit", classes="tui-footer")
 
     def on_mount(self) -> None:
         """Focus the data input on mount."""
@@ -91,7 +90,7 @@ class AddTUIScreen(BaseTUIScreen):
 
         self.is_processing = True
         status.update("[yellow]⏳ Processing...[/yellow]")
-        
+
         # Disable inputs during processing
         data_input.disabled = True
         dataset_input.disabled = True
@@ -102,21 +101,21 @@ class AddTUIScreen(BaseTUIScreen):
     async def _add_data_async(self, data: str, dataset_name: str) -> None:
         """Async function to add data to cognee."""
         status = self.query_one(".tui-status", Static)
-        
+
         try:
             import cognee
 
             await cognee.add(data=data, dataset_name=dataset_name)
-            
+
             status.update(f"[green]✓ Successfully added data to dataset '{dataset_name}'[/green]")
-            
+
             # Clear the data input after successful add
             data_input = self.query_one("#data-input", TextArea)
             data_input.clear()
-            
+
         except Exception as e:
             status.update(f"[red]✗ Failed to add data: {str(e)}[/red]")
-        
+
         finally:
             # Re-enable inputs
             self.is_processing = False

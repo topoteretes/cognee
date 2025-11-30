@@ -10,7 +10,9 @@ class BaseTUIScreen(Screen):
     """Base screen class with constant header for all TUI screens."""
 
     # Subclasses should override this CSS and add their own styles
-    CSS = COMMON_STYLES + """
+    CSS = (
+        COMMON_STYLES
+        + """
     #header {
         dock: top;
         background: $boost;
@@ -21,6 +23,7 @@ class BaseTUIScreen(Screen):
         padding: 1;
     }
     """
+    )
 
     def compose_header(self) -> ComposeResult:
         """Compose the constant header widget."""

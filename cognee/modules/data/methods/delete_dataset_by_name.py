@@ -4,9 +4,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from ..models import Dataset
 
 
-async def delete_dataset_by_name(
-        dataset_name: str, user_id: UUID
-):
+async def delete_dataset_by_name(dataset_name: str, user_id: UUID):
     """
     Delete a single dataset by name for a specific user.
 
@@ -25,6 +23,6 @@ async def delete_dataset_by_name(
                 .filter(Dataset.name == dataset_name)
             )
         ).first()
-    #Keeping this out of the first session, since delete_entities_by_id creates another session.
+    # Keeping this out of the first session, since delete_entities_by_id creates another session.
     if dataset_id:
         await db_engine.delete_entities_by_id(Dataset.__table__.name, dataset_id)

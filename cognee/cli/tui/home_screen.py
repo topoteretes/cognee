@@ -34,7 +34,9 @@ class HomeScreen(BaseTUIScreen):
         Binding("down", "nav_down", "Down", priority=True),
     ]
 
-    CSS = BaseTUIScreen.CSS + """
+    CSS = (
+        BaseTUIScreen.CSS
+        + """
     ListView > ListItem {
         width: 100%;
         padding: 0;
@@ -108,6 +110,7 @@ class HomeScreen(BaseTUIScreen):
         color: $text-muted;
     }
     """
+    )
 
     def __init__(self):
         super().__init__()
@@ -130,10 +133,7 @@ class HomeScreen(BaseTUIScreen):
                 )
 
     def compose_footer(self) -> ComposeResult:
-        yield Static(
-            "↑↓: Navigate  •  Enter: Select  •  q/Esc: Quit",
-            classes="tui-footer"
-        )
+        yield Static("↑↓: Navigate  •  Enter: Select  •  q/Esc: Quit", classes="tui-footer")
 
     def on_mount(self) -> None:
         """Focus the list view on mount."""

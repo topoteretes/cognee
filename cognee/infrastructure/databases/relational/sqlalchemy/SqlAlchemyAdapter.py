@@ -235,10 +235,10 @@ class SQLAlchemyAdapter:
         return []
 
     async def delete_entities_by_id(
-            self,
-            table_name: str,
-            data_id: Union[UUID, List[UUID]],  # Supports a single UUID or a List of UUIDs
-            schema_name: Optional[str] = "public"
+        self,
+        table_name: str,
+        data_id: Union[UUID, List[UUID]],  # Supports a single UUID or a List of UUIDs
+        schema_name: Optional[str] = "public",
     ):
         """
         Delete one or more entities from the specified table based on their ID(s).
@@ -265,6 +265,7 @@ class SQLAlchemyAdapter:
             # Handle SQLite's foreign key requirement
             if self.engine.dialect.name == "sqlite":
                 from sqlalchemy import text
+
                 await session.execute(text("PRAGMA foreign_keys = ON;"))
 
             # Construct the DELETE statement using the 'in_()' operator
