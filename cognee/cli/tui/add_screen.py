@@ -1,5 +1,4 @@
 import asyncio
-import cognee
 from textual.app import ComposeResult
 from textual.widgets import Input, Label, Static, TextArea
 from textual.containers import Container, Vertical
@@ -34,7 +33,7 @@ class AddTUIScreen(BaseTUIScreen):
             with Container(classes="tui-title-wrapper"):
                 yield Static("📥 Add Data to Cognee", classes="tui-title-bordered")
             with Vertical(classes="tui-form"):
-                yield Label("Data (text, file path, URL, or S3 path):", classes="tui-label-spaced")
+                yield Label("Data (text, file path (/path/to/doc), URL, or S3 path (s3://bucket)):", classes="tui-label-spaced")
                 yield TextArea(
                     "",
                     id="data-input",
@@ -105,6 +104,8 @@ class AddTUIScreen(BaseTUIScreen):
         status = self.query_one(".tui-status", Static)
         
         try:
+            import cognee
+
             await cognee.add(data=data, dataset_name=dataset_name)
             
             status.update(f"[green]✓ Successfully added data to dataset '{dataset_name}'[/green]")
