@@ -150,6 +150,7 @@ redis = ["redis>=5.0.3,<6.0.0"]
 monitoring = ["sentry-sdk[fastapi]>=2.9.0,<3", "langfuse>=2.32.0,<3"]
 
 docling = ["docling>=2.54", "transformers>=4.55"]
+textual = ["textual>=6.6.0"]
 
 [project.urls]
 Homepage = "https://www.cognee.ai"
