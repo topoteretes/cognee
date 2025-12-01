@@ -295,7 +295,11 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             summarize_text,
             task_config={"batch_size": chunks_per_batch},
         ),
-        Task(add_data_points, embed_triplets=embed_triplets, task_config={"batch_size": chunks_per_batch}),
+        Task(
+            add_data_points,
+            embed_triplets=embed_triplets,
+            task_config={"batch_size": chunks_per_batch},
+        ),
     ]
 
     return default_tasks

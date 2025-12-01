@@ -27,6 +27,7 @@ from cognee.tasks.graph.exceptions import (
 )
 from cognee.modules.cognify.config import get_cognify_config
 
+
 async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,

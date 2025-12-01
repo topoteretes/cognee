@@ -98,22 +98,22 @@ def _extract_embeddable_text_from_datapoint(data_point: DataPoint) -> str:
     """
     Extract embeddable text from a DataPoint using its index_fields metadata.
     Uses the same approach as index_data_points.
-    
+
     Parameters:
     -----------
         - data_point (DataPoint): The data point to extract text from.
-    
+
     Returns:
     --------
         - str: Concatenated string of all embeddable property values, or empty string if none found.
     """
     if not data_point or not hasattr(data_point, "metadata"):
         return ""
-    
+
     index_fields = data_point.metadata.get("index_fields", [])
     if not index_fields:
         return ""
-    
+
     embeddable_values = []
     for field_name in index_fields:
         field_value = getattr(data_point, field_name, None)
@@ -122,31 +122,28 @@ def _extract_embeddable_text_from_datapoint(data_point: DataPoint) -> str:
                 field_value = field_value.strip()
             else:
                 field_value = str(field_value).strip()
-            
+
             if field_value:
                 embeddable_values.append(field_value)
-    
+
     return " ".join(embeddable_values) if embeddable_values else ""
 
 
-def _create_triplets_from_graph(
-    nodes: List[DataPoint], 
-    edges: List[tuple]
-) -> List[Triplet]:
+def _create_triplets_from_graph(nodes: List[DataPoint], edges: List[tuple]) -> List[Triplet]:
     """
     Create Triplet objects from graph nodes and edges.
-    
+
     This function processes graph edges and their corresponding nodes to create
     triplet datapoints with embeddable text, similar to the triplet embeddings pipeline.
-    
+
     Parameters:
     -----------
         - nodes (List[DataPoint]): List of graph nodes extracted from data points
-        - edges (List[tuple]): List of edge tuples in format 
+        - edges (List[tuple]): List of edge tuples in format
           (source_node_id, target_node_id, relationship_name, properties_dict)
           Note: All edges including those from DocumentChunk.contains are already extracted
           by get_graph_from_model and included in this list.
-    
+
     Returns:
     --------
         - List[Triplet]: List of Triplet objects ready for indexing
@@ -157,55 +154,56 @@ def _create_triplets_from_graph(
             node_id = str(node.id)
             if node_id not in node_map:
                 node_map[node_id] = node
-    
+
     triplets = []
     skipped_count = 0
 
     for edge_tuple in edges:
         if len(edge_tuple) < 4:
             continue
-        
+
         source_node_id, target_node_id, relationship_name, edge_properties = (
-            edge_tuple[0], edge_tuple[1], edge_tuple[2], edge_tuple[3]
+            edge_tuple[0],
+            edge_tuple[1],
+            edge_tuple[2],
+            edge_tuple[3],
         )
-        
+
         source_node = node_map.get(str(source_node_id))
         target_node = node_map.get(str(target_node_id))
-        
+
         if not source_node or not target_node:
             skipped_count += 1
             continue
-        
+
         source_node_text = _extract_embeddable_text_from_datapoint(source_node)
         target_node_text = _extract_embeddable_text_from_datapoint(target_node)
-        
+
         relationship_text = ""
         if isinstance(edge_properties, dict):
             edge_text = edge_properties.get("edge_text")
             if edge_text and isinstance(edge_text, str) and edge_text.strip():
                 relationship_text = edge_text.strip()
-        
+
         if not relationship_text and relationship_name:
             relationship_text = relationship_name
-        
-        embeddable_text = (
-            f"{source_node_text} -› {relationship_text}-›{target_node_text}".strip()
-        )
-        
+
+        embeddable_text = f"{source_node_text} -› {relationship_text}-›{target_node_text}".strip()
+
         if not embeddable_text:
             skipped_count += 1
             continue
-        
+
         triplet = Triplet(
-            id=generate_node_id(str(source_node_id)+relationship_name+str(target_node_id)),
+            id=generate_node_id(str(source_node_id) + relationship_name + str(target_node_id)),
             from_node_id=str(source_node_id),
             to_node_id=str(target_node_id),
-            text=embeddable_text
+            text=embeddable_text,
         )
         triplets.append(triplet)
-    
+
     if skipped_count > 0:
         logger.info(f"Skipped {skipped_count} edges when creating triplets")
-    
+
     logger.info(f"Created {len(triplets)} triplets from {len(edges)} graph edges")
     return triplets
