@@ -2076,7 +2076,6 @@ class KuzuAdapter(GraphDBInterface):
 
                 triplet = row[0]
 
-                # Validate and parse start_node
                 if "start_node" not in triplet:
                     logger.warning(f"Skipping triplet at index {idx}: missing 'start_node' key")
                     continue
@@ -2087,7 +2086,6 @@ class KuzuAdapter(GraphDBInterface):
 
                 triplet["start_node"] = self._parse_node_properties(triplet["start_node"].copy())
 
-                # Validate and parse relationship_properties
                 if "relationship_properties" not in triplet:
                     logger.warning(
                         f"Skipping triplet at index {idx}: missing 'relationship_properties' key"
@@ -2103,7 +2101,6 @@ class KuzuAdapter(GraphDBInterface):
                 rel_props = triplet["relationship_properties"].copy()
                 relationship_name = rel_props.get("relationship_name") or ""
 
-                # Parse JSON properties if present
                 if rel_props.get("properties"):
                     try:
                         parsed_props = json.loads(rel_props["properties"])
@@ -2119,11 +2116,9 @@ class KuzuAdapter(GraphDBInterface):
                             f"Failed to parse relationship properties JSON for triplet at index {idx}: {e}"
                         )
 
-                # Ensure relationship_name is present
                 rel_props["relationship_name"] = relationship_name
                 triplet["relationship_properties"] = rel_props
 
-                # Validate and parse end_node
                 if "end_node" not in triplet:
                     logger.warning(f"Skipping triplet at index {idx}: missing 'end_node' key")
                     continue
@@ -2138,7 +2133,6 @@ class KuzuAdapter(GraphDBInterface):
 
             except Exception as e:
                 logger.error(f"Error processing triplet at index {idx}: {e}", exc_info=True)
-                # Continue processing other triplets instead of failing completely
                 continue
 
         return triplets
