@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.4.0"
+version = "0.4.1"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -37,7 +37,8 @@ dependencies = [
     "rdflib>=7.1.4,<7.2.0",
     "pypdf>=4.1.0,<7.0.0",
     "jinja2>=3.1.3,<4",
-    "lancedb>=0.24.0,<1.0.0",
+    "lancedb>=0.24.0,<=0.25.3", # Quick fix for lancedb lance-namespace 0.2.0 issue
+    "lance-namespace<=0.0.21", # Quick fix for lancedb lance-namespace 0.2.0 issue
     "nbformat>=5.7.0,<6.0.0",
     "alembic>=1.13.3,<2",
     "limits>=4.4.1,<5",

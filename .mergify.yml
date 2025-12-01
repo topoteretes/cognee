@@ -1,0 +1,9 @@
+pull_request_rules:
+  - name: Backport to main when backport_main label is set
+    conditions:
+      - label=backport_main
+      - base=dev
+    actions:
+      backport:
+        branches:
+          - main
