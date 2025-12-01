@@ -10,6 +10,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -26,7 +27,34 @@ def upgrade() -> None:
     connection = op.get_bind()
     inspector = sa.inspect(connection)
 
+    if op.get_context().dialect.name == "postgresql":
+        syncstatus_enum = postgresql.ENUM(
+            "STARTED", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED", name="syncstatus"
+        )
+        syncstatus_enum.create(op.get_bind(), checkfirst=True)
+
     if "sync_operations" not in inspector.get_table_names():
+        if op.get_context().dialect.name == "postgresql":
+            syncstatus = postgresql.ENUM(
+                "STARTED",
+                "IN_PROGRESS",
+                "COMPLETED",
+                "FAILED",
+                "CANCELLED",
+                name="syncstatus",
+                create_type=False,
+            )
+        else:
+            syncstatus = sa.Enum(
+                "STARTED",
+                "IN_PROGRESS",
+                "COMPLETED",
+                "FAILED",
+                "CANCELLED",
+                name="syncstatus",
+                create_type=False,
+            )
+
         # Table doesn't exist, create it normally
         op.create_table(
             "sync_operations",
@@ -34,15 +62,7 @@ def upgrade() -> None:
             sa.Column("run_id", sa.Text(), nullable=True),
             sa.Column(
                 "status",
-                sa.Enum(
-                    "STARTED",
-                    "IN_PROGRESS",
-                    "COMPLETED",
-                    "FAILED",
-                    "CANCELLED",
-                    name="syncstatus",
-                    create_type=False,
-                ),
+                syncstatus,
                 nullable=True,
             ),
             sa.Column("progress_percentage", sa.Integer(), nullable=True),
