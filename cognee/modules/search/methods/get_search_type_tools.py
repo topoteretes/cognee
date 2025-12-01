@@ -36,6 +36,8 @@ async def get_search_type_tools(
     node_name: Optional[List[str]] = None,
     save_interaction: bool = False,
     last_k: Optional[int] = None,
+    wide_search_top_k: Optional[int] = 100,
+    triplet_distance_penalty: Optional[float] = 3.5,
 ) -> list:
     search_tasks: dict[SearchType, List[Callable]] = {
         SearchType.SUMMARIES: [
@@ -66,6 +68,8 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
             ).get_completion,
             GraphCompletionRetriever(
                 system_prompt_path=system_prompt_path,
@@ -74,6 +78,8 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
             ).get_context,
         ],
         SearchType.GRAPH_COMPLETION_COT: [
@@ -84,6 +90,8 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
             ).get_completion,
             GraphCompletionCotRetriever(
                 system_prompt_path=system_prompt_path,
@@ -92,6 +100,8 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
             ).get_context,
         ],
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: [
@@ -102,6 +112,8 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
             ).get_completion,
             GraphCompletionContextExtensionRetriever(
                 system_prompt_path=system_prompt_path,
@@ -110,6 +122,8 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
             ).get_context,
         ],
         SearchType.GRAPH_SUMMARY_COMPLETION: [
@@ -120,6 +134,8 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
             ).get_completion,
             GraphSummaryCompletionRetriever(
                 system_prompt_path=system_prompt_path,
@@ -128,6 +144,8 @@ async def get_search_type_tools(
                 node_name=node_name,
                 save_interaction=save_interaction,
                 system_prompt=system_prompt,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
             ).get_context,
         ],
         SearchType.CYPHER: [
@@ -140,8 +158,16 @@ async def get_search_type_tools(
         ],
         SearchType.FEEDBACK: [UserQAFeedback(last_k=last_k).add_feedback],
         SearchType.TEMPORAL: [
-            TemporalRetriever(top_k=top_k).get_completion,
-            TemporalRetriever(top_k=top_k).get_context,
+            TemporalRetriever(
+                top_k=top_k,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
+            ).get_completion,
+            TemporalRetriever(
+                top_k=top_k,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
+            ).get_context,
         ],
         SearchType.CHUNKS_LEXICAL: (
             lambda _r=JaccardChunksRetriever(top_k=top_k): [
