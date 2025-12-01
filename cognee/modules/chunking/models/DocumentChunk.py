@@ -1,6 +1,7 @@
 from typing import List, Union
 
 from cognee.infrastructure.engine import DataPoint
+from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.data.processing.document_types import Document
 from cognee.modules.engine.models import Entity
 from cognee.tasks.temporal_graph.models import Event
@@ -31,6 +32,6 @@ class DocumentChunk(DataPoint):
     chunk_index: int
     cut_type: str
     is_part_of: Document
-    contains: List[Union[Entity, Event]] = None
+    contains: List[Union[Entity, Event, tuple[Edge, Entity]]] = None
 
     metadata: dict = {"index_fields": ["text"]}

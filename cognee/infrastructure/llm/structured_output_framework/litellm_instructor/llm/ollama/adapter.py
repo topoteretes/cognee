@@ -42,8 +42,16 @@ class OllamaAPIAdapter(LLMInterface):
     - aclient
     """
 
+    default_instructor_mode = "json_mode"
+
     def __init__(
-        self, endpoint: str, api_key: str, model: str, name: str, max_completion_tokens: int
+        self,
+        endpoint: str,
+        api_key: str,
+        model: str,
+        name: str,
+        max_completion_tokens: int,
+        instructor_mode: str = None,
     ):
         self.name = name
         self.model = model
@@ -51,8 +59,11 @@ class OllamaAPIAdapter(LLMInterface):
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
 
+        self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
+
         self.aclient = instructor.from_openai(
-            OpenAI(base_url=self.endpoint, api_key=self.api_key), mode=instructor.Mode.JSON
+            OpenAI(base_url=self.endpoint, api_key=self.api_key),
+            mode=instructor.Mode(self.instructor_mode),
         )
 
     @retry(

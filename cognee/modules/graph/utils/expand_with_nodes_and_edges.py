@@ -1,5 +1,6 @@
 from typing import Optional
 
+from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.engine.utils import (
@@ -243,10 +244,26 @@ def _process_graph_nodes(
             ontology_relationships,
         )
 
-        # Add entity to data chunk
         if data_chunk.contains is None:
             data_chunk.contains = []
-        data_chunk.contains.append(entity_node)
+
+        edge_text = "; ".join(
+            [
+                "relationship_name: contains",
+                f"entity_name: {entity_node.name}",
+                f"entity_description: {entity_node.description}",
+            ]
+        )
+
+        data_chunk.contains.append(
+            (
+                Edge(
+                    relationship_type="contains",
+                    edge_text=edge_text,
+                ),
+                entity_node,
+            )
+        )
 
 
 def _process_graph_edges(

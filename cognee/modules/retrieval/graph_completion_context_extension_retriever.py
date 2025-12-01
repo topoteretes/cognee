@@ -1,5 +1,5 @@
 import asyncio
-from typing import Optional, List, Type
+from typing import Optional, List, Type, Any
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -39,6 +39,8 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
         save_interaction: bool = False,
+        wide_search_top_k: Optional[int] = 100,
+        triplet_distance_penalty: Optional[float] = 3.5,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -48,6 +50,8 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             node_name=node_name,
             save_interaction=save_interaction,
             system_prompt=system_prompt,
+            wide_search_top_k=wide_search_top_k,
+            triplet_distance_penalty=triplet_distance_penalty,
         )
 
     async def get_completion(
@@ -56,7 +60,8 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         context: Optional[List[Edge]] = None,
         session_id: Optional[str] = None,
         context_extension_rounds=4,
-    ) -> List[str]:
+        response_model: Type = str,
+    ) -> List[Any]:
         """
         Extends the context for a given query by retrieving related triplets and generating new
         completions based on them.
@@ -76,6 +81,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
               defaults to 'default_session'. (default None)
             - context_extension_rounds: The maximum number of rounds to extend the context with
               new triplets before halting. (default 4)
+            - response_model (Type): The Pydantic model type for structured output. (default str)
 
         Returns:
         --------
@@ -143,6 +149,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                     system_prompt_path=self.system_prompt_path,
                     system_prompt=self.system_prompt,
                     conversation_history=conversation_history,
+                    response_model=response_model,
                 ),
             )
         else:
@@ -152,6 +159,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
+                response_model=response_model,
             )
 
         if self.save_interaction and context_text and triplets and completion:
