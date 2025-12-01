@@ -131,6 +131,7 @@ dev = [
     "pytest>=7.4.0,<8",
     "pytest-cov>=6.1.1,<7.0.0",
     "pytest-asyncio>=0.21.1,<0.22",
+    "pytest-timeout>=2.4.0",
     "coverage>=7.3.2,<8",
     "mypy>=1.7.1,<2",
     "pre-commit>=4.0.1,<5",
@@ -199,8 +200,3 @@ exclude = [
 
 [tool.ruff.lint]
 ignore = ["F401"]
-
-[dependency-groups]
-dev = [
-    "pytest-timeout>=2.4.0",
-]
