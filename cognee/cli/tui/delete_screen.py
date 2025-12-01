@@ -1,4 +1,5 @@
 import asyncio
+import time
 from uuid import UUID
 from textual.app import ComposeResult
 from textual.widgets import Input, Button, Static, Label
@@ -99,13 +100,14 @@ class DeleteTUIScreen(BaseTUIScreen):
             self.app.pop_screen()
 
     def _handle_delete(self) -> None:
+        status = self.query_one(".tui-status", Static)
+        status.update("🔍 Starting the deletion process...")
         """Handle delete operation for dataset or user."""
         if self.is_processing:
             return
 
         dataset_input = self.query_one("#dataset-input", Input)
         user_input = self.query_one("#user-input", Input)
-        status = self.query_one(".tui-status", Static)
 
         dataset_name = dataset_input.value.strip() or None
         user_id = user_input.value.strip() or None
@@ -116,39 +118,24 @@ class DeleteTUIScreen(BaseTUIScreen):
 
         self.is_processing = True
         status.update("🔍 Checking data to delete...")
-
         # Run async delete operation
         asyncio.create_task(self._delete_async(dataset_name, user_id))
 
     async def _delete_async(self, dataset_name: str | None, user_id: str | None) -> None:
         """Async function to delete data."""
         status = self.query_one(".tui-status", Static)
-
         try:
-            # Perform deletion
             if dataset_name:
-                # Use delete_datasets_by_name for dataset deletion
                 if user_id is None:
                     user = await get_default_user()
                     user_id = user.id
-                result = await delete_dataset_by_name(dataset_name, user_id)
-
-                if result["not_found"]:
-                    status.update(f"⚠️ Dataset '{dataset_name}' not found")
-                    self.is_processing = False
-                    return
-
-                status.update(f"✓ Successfully deleted {result['deleted_count']} dataset(s)")
+                await delete_dataset_by_name(dataset_name, user_id)
             else:
-                # For user_id deletion, use the new delete_data_by_user method
-                result = await delete_data_by_user(UUID(user_id))
-                status.update(
-                    f"✓ Successfully deleted {result['datasets_deleted']} datasets and {result['data_entries_deleted']} data entries for user '{user_id}'"
-                )
-
+                await delete_data_by_user(UUID(user_id))
         except Exception as e:
             status.update(f"✗ Error: {str(e)}")
         finally:
+            status.update("✓ Successfully deleted dataset.")
             self.is_processing = False
 
     def _handle_delete_all(self) -> None:
