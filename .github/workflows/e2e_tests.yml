@@ -226,7 +226,7 @@ jobs:
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
 
-      - name: Run parallel databases test
+      - name: Run permissions test
         env:
           ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -238,6 +238,31 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_permissions.py
+
+  test-multi-tenancy:
+    name: Test multi tenancy with different situations in Cognee
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run multi tenancy test
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_multi_tenancy.py
 
   test-graph-edges:
     name: Test graph edge ingestion
@@ -308,7 +333,7 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "postgres redis"
 
-      - name: Run Concurrent subprocess access test (Kuzu/Lancedb/Postgres)
+      - name: Run Concurrent subprocess access test (Kuzu/Lancedb/Postgres/Redis)
         env:
           ENV: dev
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -321,6 +346,7 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           CACHING: true
+          CACHE_BACKEND: 'redis'
           SHARED_KUZU_LOCK: true
           DB_PROVIDER: 'postgres'
           DB_NAME: 'cognee_db'
@@ -386,8 +412,8 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_feedback_enrichment.py
 
-  run_conversation_sessions_test:
-    name: Conversation sessions test
+  run_conversation_sessions_test_redis:
+    name: Conversation sessions test (Redis)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -427,7 +453,60 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "postgres redis"
 
-      - name: Run Conversation session tests
+      - name: Run Conversation session tests (Redis)
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          GRAPH_DATABASE_PROVIDER: 'kuzu'
+          CACHING: true
+          CACHE_BACKEND: 'redis'
+          DB_PROVIDER: 'postgres'
+          DB_NAME: 'cognee_db'
+          DB_HOST: '127.0.0.1'
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+        run: uv run python ./cognee/tests/test_conversation_history.py
+
+  run_conversation_sessions_test_fs:
+    name: Conversation sessions test (FS)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "postgres"
+
+      - name: Run Conversation session tests (FS)
         env:
           ENV: dev
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
@@ -440,6 +519,7 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           CACHING: true
+          CACHE_BACKEND: 'fs'
           DB_PROVIDER: 'postgres'
           DB_NAME: 'cognee_db'
           DB_HOST: '127.0.0.1'
@@ -447,44 +527,3 @@ jobs:
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
         run: uv run python ./cognee/tests/test_conversation_history.py
-
-  test-load:
-    name: Test Load
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-          extra-dependencies: "aws"
-
-      - name: Set File Descriptor Limit
-        run: sudo prlimit --pid $$ --nofile=4096:4096
-
-      - name: Verify File Descriptor Limit
-        run: ulimit -n
-
-      - name: Dependencies already installed
-        run: echo "Dependencies already installed in setup"
-
-      - name: Run Load Test
-        env:
-          ENV: 'dev'
-          ENABLE_BACKEND_ACCESS_CONTROL: True
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          STORAGE_BACKEND: s3
-          AWS_REGION: eu-west-1
-          AWS_ENDPOINT_URL: https://s3-eu-west-1.amazonaws.com
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
-        run: uv run python ./cognee/tests/test_load.py

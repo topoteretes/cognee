@@ -38,6 +38,7 @@ class LLMConfig(BaseSettings):
     """
 
     structured_output_framework: str = "instructor"
+    llm_instructor_mode: str = ""
     llm_provider: str = "openai"
     llm_model: str = "openai/gpt-5-mini"
     llm_endpoint: str = ""
@@ -216,6 +217,7 @@ class LLMConfig(BaseSettings):
               instance.
         """
         return {
+            "llm_instructor_mode": self.llm_instructor_mode.lower(),
             "provider": self.llm_provider,
             "model": self.llm_model,
             "endpoint": self.llm_endpoint,

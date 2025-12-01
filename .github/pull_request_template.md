@@ -6,6 +6,14 @@ Please provide a clear, human-generated description of the changes in this PR.
 DO NOT use AI-generated descriptions. We want to understand your thought process and reasoning.
 -->
 
+## Acceptance Criteria
+<!--
+* Key requirements to the new feature or modification;
+* Proof that the changes work and meet the requirements;
+* Include instructions on how to verify the changes. Describe how to test it locally;
+* Proof that it's sufficiently tested.
+-->
+
 ## Type of Change
 <!-- Please check the relevant option -->
 - [ ] Bug fix (non-breaking change that fixes an issue)
