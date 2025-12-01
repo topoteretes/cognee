@@ -196,9 +196,10 @@ async def get_search_type_tools(
 
     if query_type in registered_community_retrievers:
         retriever = registered_community_retrievers[query_type]
+        retriever_instance = retriever(top_k=top_k)
         search_type_tools = [
-            retriever(top_k=top_k).get_completion,
-            retriever(top_k=top_k).get_context,
+            retriever_instance.get_completion,
+            retriever_instance.get_context,
         ]
     else:
         search_type_tools = search_tasks.get(query_type)
