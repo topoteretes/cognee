@@ -25,7 +25,7 @@ from cognee.tasks.graph.exceptions import (
     InvalidChunkGraphInputError,
     InvalidOntologyAdapterError,
 )
-
+from cognee.modules.cognify.config import get_cognify_config
 
 async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
@@ -84,8 +84,11 @@ async def integrate_chunk_graphs(
         data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
     )
 
+    cognify_config = get_cognify_config()
+    embed_triplets = cognify_config.triplet_embedding
+
     if len(graph_nodes) > 0:
-        await add_data_points(graph_nodes)
+        await add_data_points(graph_nodes, embed_triplets=embed_triplets)
 
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
