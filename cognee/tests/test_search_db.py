@@ -39,7 +39,6 @@ async def main():
 
     await cognee.cognify([dataset_name])
 
-    # Create triplet embeddings for TRIPLET_COMPLETION search type
     user = await get_default_user()
     from cognee.memify_pipelines.create_triplet_embeddings import create_triplet_embeddings
 
@@ -76,7 +75,6 @@ async def main():
             f"{name}: Context did not contain 'germany' or 'netherlands'; got: {context!r}"
         )
 
-    # Test TripletRetriever separately as it returns a string, not a list of edges
     assert isinstance(context_triplet, str), "TripletRetriever: Context should be a string"
     assert len(context_triplet) > 0, "TripletRetriever: Context should not be empty"
     lower_triplet = context_triplet.lower()
