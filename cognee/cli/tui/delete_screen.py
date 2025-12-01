@@ -6,7 +6,6 @@ from textual.widgets import Input, Button, Static, Label
 from textual.containers import Container, Vertical, Horizontal
 from textual.binding import Binding
 from cognee.cli.tui.base_screen import BaseTUIScreen
-from cognee.modules.data.methods.get_deletion_counts import get_deletion_counts
 from cognee.modules.data.methods.delete_dataset_by_name import delete_dataset_by_name
 from cognee.modules.data.methods.delete_data_by_user import delete_data_by_user
 from cognee.modules.users.methods import get_default_user
@@ -51,7 +50,7 @@ class DeleteTUIScreen(BaseTUIScreen):
 
                 with Vertical(classes="tui-input-group"):
                     yield Label("User ID (optional):", classes="tui-label")
-                    yield Input(placeholder="Enter user ID to delete user's data", id="user-input")
+                    yield Input(placeholder="Enter user ID to delete user's data or leave empty for default user.", id="user-input")
 
                 with Horizontal(id="button-group"):
                     yield Button("Delete", variant="error", id="delete-btn")
@@ -135,54 +134,34 @@ class DeleteTUIScreen(BaseTUIScreen):
         except Exception as e:
             status.update(f"✗ Error: {str(e)}")
         finally:
-            status.update("✓ Successfully deleted dataset.")
+            status.update(f"✓ Successfully deleted dataset '{dataset_name}'.")
             self.is_processing = False
+            self.clear_input()
 
     def _handle_delete_all(self) -> None:
         """Handle delete all operation with confirmation."""
         if self.is_processing:
             return
-
+        user_input = self.query_one("#user-input", Input)
+        user_id = user_input.value.strip() or None
         def handle_confirm(confirmed: bool) -> None:
             if confirmed:
-                asyncio.create_task(self._perform_delete_all())
+                asyncio.create_task(self._perform_delete_all(user_id))
 
         self.app.push_screen(DeleteAllConfirmModal(), handle_confirm)
 
-    async def _perform_delete_all(self) -> None:
+    async def _perform_delete_all(self, user_id: str | None) -> None:
         """Perform the actual delete all operation."""
         status = self.query_one(".tui-status", Static)
         self.is_processing = True
 
         try:
-            status.update("🔍 Checking all data...")
-
-            # Get preview
-            preview_data = await get_deletion_counts(
-                dataset_name=None,
-                user_id=None,
-                all_data=True,
-            )
-
-            if not preview_data:
-                status.update("✓ No data found to delete")
-                self.is_processing = False
-                return
-
-            preview_msg = (
-                f"Deleting ALL data:\n"
-                f"Datasets: {preview_data.datasets}\n"
-                f"Entries: {preview_data.entries}\n"
-                f"Users: {preview_data.users}"
-            )
-            status.update(preview_msg)
-
-            # Perform deletion - delete all uses the original cognee.delete
-            import cognee
-
-            await cognee.delete(dataset_name=None, user_id=None)
-
-            status.update("✓ Successfully deleted all data")
+            status.update("🔍 Deleting all data...")
+            if user_id is None:
+                user = await get_default_user()
+                user_id = user.id
+            await delete_data_by_user(user_id)
+            status.update(f"✓ Successfully deleted all data by user ")
 
             # Clear inputs
             dataset_input = self.query_one("#dataset-input", Input)
@@ -194,6 +173,12 @@ class DeleteTUIScreen(BaseTUIScreen):
             status.update(f"✗ Error: {str(e)}")
         finally:
             self.is_processing = False
+
+    def clear_input(self) -> None:
+        dataset_input = self.query_one("#dataset-input", Input)
+        user_input = self.query_one("#user-input", Input)
+        dataset_input.value = ""
+        user_input.value = ""
 
 
 class DeleteAllConfirmModal(BaseTUIScreen):
