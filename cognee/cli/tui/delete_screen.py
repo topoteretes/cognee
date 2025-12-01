@@ -1,5 +1,4 @@
 import asyncio
-import time
 from uuid import UUID
 from textual.app import ComposeResult
 from textual.widgets import Input, Button, Static, Label
@@ -50,7 +49,10 @@ class DeleteTUIScreen(BaseTUIScreen):
 
                 with Vertical(classes="tui-input-group"):
                     yield Label("User ID (optional):", classes="tui-label")
-                    yield Input(placeholder="Enter user ID to delete user's data or leave empty for default user.", id="user-input")
+                    yield Input(
+                        placeholder="Enter user ID to delete user's data or leave empty for default user.",
+                        id="user-input",
+                    )
 
                 with Horizontal(id="button-group"):
                     yield Button("Delete", variant="error", id="delete-btn")
@@ -144,6 +146,7 @@ class DeleteTUIScreen(BaseTUIScreen):
             return
         user_input = self.query_one("#user-input", Input)
         user_id = user_input.value.strip() or None
+
         def handle_confirm(confirmed: bool) -> None:
             if confirmed:
                 asyncio.create_task(self._perform_delete_all(user_id))
