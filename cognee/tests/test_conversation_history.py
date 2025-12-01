@@ -63,7 +63,6 @@ async def main():
 
     user = await get_default_user()
 
-    # Create triplet embeddings for TRIPLET_COMPLETION search type
     from cognee.memify_pipelines.create_triplet_embeddings import create_triplet_embeddings
 
     await create_triplet_embeddings(user=user, dataset=dataset_name)
