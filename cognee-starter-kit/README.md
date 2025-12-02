@@ -1,3 +1,15 @@
+# ⚠️ DEPRECATED - Go to `new-examples/` Instead
+
+This starter kit is deprecated. Its examples have been integrated into the `/new-examples/` folder.
+
+| Old Location | New Location |
+|--------------|--------------|
+| `src/pipelines/default.py` | none |
+| `src/pipelines/low_level.py` | `new-examples/custom_pipelines/organizational_hierarchy/` |
+| `src/pipelines/custom-model.py` | `new-examples/demos/custom_graph_model_entity_schema_definition.py` |
+| `src/data/` | Included in `new-examples/custom_pipelines/organizational_hierarchy/data/` |
+
+----------
 
 # Cognee Starter Kit
 Welcome to the <a href="https://github.com/topoteretes/cognee">cognee</a> Starter Repo! This repository is designed to help you get started quickly by providing a structured dataset and pre-built data pipelines using cognee to build powerful knowledge graphs.
