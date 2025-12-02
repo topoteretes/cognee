@@ -163,7 +163,6 @@ async def get_triplet_datapoints(
                     start_node_text = _extract_embeddable_text(start_node, start_index_fields)
                     end_node_text = _extract_embeddable_text(end_node, end_index_fields)
 
-
                     embeddable_text = (
                         f"{start_node_text}-›{relationship_text}-›{end_node_text}".strip()
                     )
