@@ -11,6 +11,24 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
+def get_nvm_dir() -> Path:
+    """
+    Get the nvm directory path following standard nvm installation logic.
+    Uses XDG_CONFIG_HOME if set, otherwise falls back to ~/.nvm.
+    """
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        return Path(xdg_config_home) / "nvm"
+    return Path.home() / ".nvm"
+
+
+def get_nvm_sh_path() -> Path:
+    """
+    Get the path to nvm.sh following standard nvm installation logic.
+    """
+    return get_nvm_dir() / "nvm.sh"
+
+
 def check_nvm_installed() -> bool:
     """
     Check if nvm (Node Version Manager) is installed.
@@ -29,14 +47,29 @@ def check_nvm_installed() -> bool:
             )
         else:
             # On Unix-like systems, nvm is a shell function, so we need to source it
+            # First check if nvm.sh exists
+            nvm_path = get_nvm_sh_path()
+            if not nvm_path.exists():
+                logger.debug(f"nvm.sh not found at {nvm_path}")
+                return False
+
+            # Try to source nvm and check version, capturing errors
             result = subprocess.run(
-                ["bash", "-c", "source ~/.nvm/nvm.sh 2>/dev/null && nvm --version"],
+                ["bash", "-c", f"source {nvm_path} && nvm --version"],
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
+
+            if result.returncode != 0:
+                # Log the error to help diagnose configuration issues
+                if result.stderr:
+                    logger.debug(f"nvm check failed: {result.stderr.strip()}")
+                return False
+
         return result.returncode == 0
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Exception checking nvm: {str(e)}")
         return False
 
 
@@ -79,11 +112,13 @@ def install_nvm() -> bool:
             if result.returncode == 0:
                 logger.info("✓ nvm installed successfully")
                 # Source nvm in current shell session
-                nvm_dir = Path.home() / ".nvm"
+                nvm_dir = get_nvm_dir()
                 if nvm_dir.exists():
                     return True
                 else:
-                    logger.warning("nvm installation completed but .nvm directory not found")
+                    logger.warning(
+                        f"nvm installation completed but nvm directory not found at {nvm_dir}"
+                    )
                     return False
             else:
                 logger.error(f"nvm installation failed: {result.stderr}")
@@ -117,7 +152,12 @@ def install_node_with_nvm() -> bool:
 
     try:
         # Source nvm and install latest Node.js
-        nvm_source_cmd = "source ~/.nvm/nvm.sh"
+        nvm_path = get_nvm_sh_path()
+        if not nvm_path.exists():
+            logger.error(f"nvm.sh not found at {nvm_path}. nvm may not be properly installed.")
+            return False
+
+        nvm_source_cmd = f"source {nvm_path}"
         install_cmd = f"{nvm_source_cmd} && nvm install node"
 
         result = subprocess.run(
@@ -141,7 +181,7 @@ def install_node_with_nvm() -> bool:
 
             # Add nvm to PATH for current session
             # This ensures node/npm are available in subsequent commands
-            nvm_dir = Path.home() / ".nvm"
+            nvm_dir = get_nvm_dir()
             if nvm_dir.exists():
                 # Update PATH for current process
                 nvm_bin = nvm_dir / "versions" / "node"
@@ -178,14 +218,16 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
         result = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
             # If direct command fails, try with nvm sourced (in case nvm is installed but not in PATH)
-            nvm_path = Path.home() / ".nvm" / "nvm.sh"
+            nvm_path = get_nvm_sh_path()
             if nvm_path.exists():
                 result = subprocess.run(
-                    ["bash", "-c", "source ~/.nvm/nvm.sh 2>/dev/null && node --version"],
+                    ["bash", "-c", f"source {nvm_path} && node --version"],
                     capture_output=True,
                     text=True,
                     timeout=10,
                 )
+                if result.returncode != 0 and result.stderr:
+                    logger.debug(f"Failed to source nvm or run node: {result.stderr.strip()}")
         if result.returncode != 0:
             # Node.js is not installed, try to install it
             logger.info("Node.js is not installed. Attempting to install automatically...")
@@ -208,22 +250,27 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
 
             # Verify installation after automatic setup
             # Try with nvm sourced first
-            nvm_path = Path.home() / ".nvm" / "nvm.sh"
+            nvm_path = get_nvm_sh_path()
             if nvm_path.exists():
                 result = subprocess.run(
-                    ["bash", "-c", "source ~/.nvm/nvm.sh 2>/dev/null && node --version"],
+                    ["bash", "-c", f"source {nvm_path} && node --version"],
                     capture_output=True,
                     text=True,
                     timeout=10,
                 )
+                if result.returncode != 0 and result.stderr:
+                    logger.debug(
+                        f"Failed to verify node after installation: {result.stderr.strip()}"
+                    )
             else:
                 result = subprocess.run(
                     ["node", "--version"], capture_output=True, text=True, timeout=10
                 )
             if result.returncode != 0:
+                nvm_path = get_nvm_sh_path()
                 return (
                     False,
-                    "Node.js installation completed but node command is not available. Please restart your terminal or source ~/.nvm/nvm.sh",
+                    f"Node.js installation completed but node command is not available. Please restart your terminal or source {nvm_path}",
                 )
 
         node_version = result.stdout.strip()
@@ -243,12 +290,16 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
             )
             if result.returncode != 0:
                 # Try with nvm sourced
-                result = subprocess.run(
-                    ["bash", "-c", "source ~/.nvm/nvm.sh 2>/dev/null && npm --version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
+                nvm_path = get_nvm_sh_path()
+                if nvm_path.exists():
+                    result = subprocess.run(
+                        ["bash", "-c", f"source {nvm_path} && npm --version"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if result.returncode != 0 and result.stderr:
+                        logger.debug(f"Failed to source nvm or run npm: {result.stderr.strip()}")
 
         if result.returncode != 0:
             return False, "npm is not installed or not in PATH"
@@ -288,17 +339,21 @@ def check_node_npm() -> tuple[bool, str]:  # (is_available, error_message)
             if result.returncode == 0:
                 node_version = result.stdout.strip()
                 # Check npm
-                result = subprocess.run(
-                    ["bash", "-c", "source ~/.nvm/nvm.sh 2>/dev/null && npm --version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                if result.returncode == 0:
-                    npm_version = result.stdout.strip()
-                    return True, f"Node.js {node_version}, npm {npm_version}"
-        except Exception:
-            pass
+                nvm_path = get_nvm_sh_path()
+                if nvm_path.exists():
+                    result = subprocess.run(
+                        ["bash", "-c", f"source {nvm_path} && npm --version"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if result.returncode == 0:
+                        npm_version = result.stdout.strip()
+                        return True, f"Node.js {node_version}, npm {npm_version}"
+                    elif result.stderr:
+                        logger.debug(f"Failed to source nvm or run npm: {result.stderr.strip()}")
+        except Exception as e:
+            logger.debug(f"Exception retrying node/npm check: {str(e)}")
 
         return False, "Node.js/npm not found. Please install Node.js from https://nodejs.org/"
     except Exception as e:

@@ -15,7 +15,7 @@ import shutil
 
 from cognee.shared.logging_utils import get_logger
 from cognee.version import get_cognee_version
-from .node_setup import check_node_npm
+from .node_setup import check_node_npm, get_nvm_dir, get_nvm_sh_path
 from .npm_utils import run_npm_command
 
 logger = get_logger()
@@ -586,10 +586,10 @@ def start_ui(
     env["PORT"] = str(port)
 
     # If nvm is installed, ensure it's available in the environment
-    nvm_path = Path.home() / ".nvm" / "nvm.sh"
+    nvm_path = get_nvm_sh_path()
     if platform.system() != "Windows" and nvm_path.exists():
         # Add nvm to PATH for the subprocess
-        nvm_dir = Path.home() / ".nvm"
+        nvm_dir = get_nvm_dir()
         # Find the latest Node.js version installed via nvm
         nvm_versions = nvm_dir / "versions" / "node"
         if nvm_versions.exists():
@@ -621,7 +621,7 @@ def start_ui(
             if nvm_path.exists():
                 # Use bash to source nvm and run npm
                 process = subprocess.Popen(
-                    ["bash", "-c", "source ~/.nvm/nvm.sh 2>/dev/null && npm run dev"],
+                    ["bash", "-c", f"source {nvm_path} && npm run dev"],
                     cwd=frontend_path,
                     env=env,
                     stdout=subprocess.PIPE,
