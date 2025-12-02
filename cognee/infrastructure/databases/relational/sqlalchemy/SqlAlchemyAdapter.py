@@ -30,7 +30,7 @@ class SQLAlchemyAdapter:
     functions.
     """
 
-    def __init__(self, connection_string: str):
+    def __init__(self, connection_string: str, connect_args: dict = None):
         """
         Initialize the SQLAlchemy adapter with connection settings.
 
@@ -38,6 +38,8 @@ class SQLAlchemyAdapter:
         -----------
             connection_string (str): The database connection string (e.g., 'sqlite:///path/to/db'
                 or 'postgresql://user:pass@host:port/db').
+            connect_args (dict, optional): Database driver arguments. These take precedence over
+                DATABASE_CONNECT_ARGS environment variable.
 
         Environment Variables:
         ----------------------
@@ -59,17 +61,20 @@ class SQLAlchemyAdapter:
         self.db_uri: str = connection_string
 
         # Parse optional connection arguments from environment variable
-        connect_args = None
+        env_connect_args_dict = {}
         env_connect_args = os.getenv("DATABASE_CONNECT_ARGS")
         if env_connect_args:
             try:
-                connect_args = json.loads(env_connect_args)
-                if not isinstance(connect_args, dict):
+                parsed_args = json.loads(env_connect_args)
+                if isinstance(parsed_args, dict):
+                    env_connect_args_dict = parsed_args
+                else:
                     logger.warning("DATABASE_CONNECT_ARGS is not a valid JSON dictionary, ignoring")
-                    connect_args = None
             except json.JSONDecodeError:
                 logger.warning("Failed to parse DATABASE_CONNECT_ARGS as JSON, ignoring")
-                connect_args = None
+
+        # Merge environment args with explicit args (explicit args take precedence)
+        final_connect_args = {**env_connect_args_dict, **(connect_args or {})}
 
         if "sqlite" in connection_string:
             [prefix, db_path] = connection_string.split("///")
@@ -91,7 +96,7 @@ class SQLAlchemyAdapter:
             self.engine = create_async_engine(
                 connection_string,
                 poolclass=NullPool,
-                connect_args={**{"timeout": 30}, **(connect_args or {})},
+                connect_args={**{"timeout": 30}, **final_connect_args},
             )
         else:
             self.engine = create_async_engine(
@@ -101,7 +106,7 @@ class SQLAlchemyAdapter:
                 pool_recycle=280,
                 pool_pre_ping=True,
                 pool_timeout=280,
-                connect_args=connect_args or {},
+                connect_args=final_connect_args,
             )
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
