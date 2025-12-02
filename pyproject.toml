@@ -199,8 +199,3 @@ exclude = [
 
 [tool.ruff.lint]
 ignore = ["F401"]
-
-[dependency-groups]
-dev = [
-    "pytest-timeout>=2.4.0",
-]
