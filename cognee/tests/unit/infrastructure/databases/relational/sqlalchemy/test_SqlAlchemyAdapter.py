@@ -47,11 +47,17 @@ class TestSqlAlchemyAdapter:
     @patch(
         "cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter.create_async_engine"
     )
+    @patch("cognee.infrastructure.databases.relational.sqlalchemy.SqlAlchemyAdapter.logger")
     @patch("os.getenv")
-    def test_sqlite_with_invalid_json_env_var(self, mock_getenv, mock_create_engine):
+    def test_sqlite_with_invalid_json_env_var(self, mock_getenv, mock_logger, mock_create_engine):
         """Test that SQLite connection uses default timeout when env var has invalid JSON."""
         mock_getenv.return_value = '{"timeout": 60'  # Invalid JSON
         SQLAlchemyAdapter("sqlite:///test.db")
+
+        mock_logger.warning.assert_called_with(
+            "Failed to parse DATABASE_CONNECT_ARGS as JSON, ignoring"
+        )
+
         mock_create_engine.assert_called_once()
         _, kwargs = mock_create_engine.call_args
         assert "connect_args" in kwargs
