@@ -1,16 +1,14 @@
-from typing import Optional, List, Any
+from typing import Any
 
 from cognee import memify
 from cognee.context_global_variables import (
     set_database_global_context_variables,
-    set_session_user_context_variable,
 )
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.users.models import User
-from cognee.tasks.memify import extract_user_sessions, cognify_session
 from cognee.tasks.memify.get_triplet_datapoints import get_triplet_datapoints
 from cognee.tasks.storage import index_data_points
 

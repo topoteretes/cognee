@@ -1,7 +1,6 @@
 import os
 from typing import Callable, List, Optional, Type
 
-from cognee.modules.engine.models import Triplet
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.types import SearchType
