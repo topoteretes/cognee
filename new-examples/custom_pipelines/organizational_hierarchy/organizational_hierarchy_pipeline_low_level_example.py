@@ -49,7 +49,7 @@ class Company(DataPoint):
 
 
 ROOT = Path(__file__).resolve().parent
-DATA_DIR = ROOT.parent / "data"
+DATA_DIR = ROOT / "data"
 COGNEE_DIR = ROOT / ".cognee_system"
 ARTIFACTS_DIR = ROOT / ".artifacts"
 GRAPH_HTML = ARTIFACTS_DIR / "graph_visualization.html"
