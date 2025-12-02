@@ -12,7 +12,7 @@ logger = get_logger("get_triplet_datapoints")
 def _build_datapoint_type_index_mapping() -> Dict[str, List[str]]:
     """
     Build a mapping of DataPoint type names to their index_fields.
-    
+
     Returns:
     --------
         - Dict[str, List[str]]: Mapping of type name to list of index field names
@@ -69,28 +69,27 @@ def _extract_embeddable_text(node_or_edge: Dict[str, Any], index_fields: List[st
 
 
 def _extract_relationship_text(
-    relationship: Dict[str, Any], 
-    datapoint_type_index_property: Dict[str, List[str]]
+    relationship: Dict[str, Any], datapoint_type_index_property: Dict[str, List[str]]
 ) -> str:
     """
     Extract relationship text from edge properties.
-    
+
     Parameters:
     -----------
         - relationship (Dict[str, Any]): Dictionary containing relationship properties
         - datapoint_type_index_property (Dict[str, List[str]]): Mapping of type to index fields
-    
+
     Returns:
     --------
         - str: Extracted relationship text or empty string
     """
     if not relationship:
         return ""
-    
+
     edge_text = relationship.get("edge_text")
     if edge_text and isinstance(edge_text, str) and edge_text.strip():
         return edge_text.strip()
-    
+
     # Fallback to extracting from EdgeType index_fields
     edge_type_index_fields = datapoint_type_index_property.get("EdgeType", [])
     return _extract_embeddable_text(relationship, edge_type_index_fields)
@@ -104,14 +103,14 @@ def _process_single_triplet(
 ) -> tuple[Optional[Triplet], Optional[str]]:
     """
     Process a single triplet and create a Triplet object.
-    
+
     Parameters:
     -----------
         - triplet_datapoint (Dict[str, Any]): Raw triplet data from graph engine
         - datapoint_type_index_property (Dict[str, List[str]]): Type to index fields mapping
         - offset (int): Current batch offset
         - idx (int): Index within current batch
-    
+
     Returns:
     --------
         - tuple[Optional[Triplet], Optional[str]]: (Triplet object, error message if skipped)
@@ -156,11 +155,7 @@ def _process_single_triplet(
 
     embeddable_text = f"{start_node_text}-›{relationship_text}-›{end_node_text}".strip()
 
-    triplet_obj = Triplet(
-        from_node_id=start_node_id, 
-        to_node_id=end_node_id, 
-        text=embeddable_text
-    )
+    triplet_obj = Triplet(from_node_id=start_node_id, to_node_id=end_node_id, text=embeddable_text)
 
     return triplet_obj, None
 
@@ -227,17 +222,14 @@ async def get_triplet_datapoints(
             for idx, triplet_datapoint in enumerate(triplets_batch):
                 try:
                     triplet_obj, error_msg = _process_single_triplet(
-                        triplet_datapoint, 
-                        datapoint_type_index_property, 
-                        offset, 
-                        idx
+                        triplet_datapoint, datapoint_type_index_property, offset, idx
                     )
-                    
+
                     if error_msg:
                         logger.warning(error_msg)
                         skipped_count += 1
                         continue
-                    
+
                     if triplet_obj:
                         triplet_datapoints.append(triplet_obj)
                         yield triplet_obj
