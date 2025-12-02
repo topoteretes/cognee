@@ -8043,7 +8043,7 @@ description = "Fast, correct Python JSON library supporting dataclasses, datetim
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "(platform_python_implementation != \"PyPy\" or sys_platform != \"emscripten\" or extra == \"chromadb\") and (platform_python_implementation != \"PyPy\" or extra == \"chromadb\" or extra == \"dlt\") and (sys_platform != \"emscripten\" or extra == \"chromadb\" or extra == \"neptune\" or extra == \"langchain\") and (extra == \"neptune\" or extra == \"langchain\" or extra == \"chromadb\" or extra == \"dlt\")"
+markers = "(sys_platform != \"emscripten\" or platform_python_implementation != \"PyPy\" or extra == \"chromadb\") and (sys_platform != \"emscripten\" or extra == \"neptune\" or extra == \"langchain\" or extra == \"chromadb\") and (platform_python_implementation != \"PyPy\" or extra == \"chromadb\" or extra == \"dlt\") and (extra == \"neptune\" or extra == \"langchain\" or extra == \"chromadb\" or extra == \"dlt\")"
 files = [
     {file = "orjson-3.11.4-cp310-cp310-macosx_10_15_x86_64.macosx_11_0_arm64.macosx_10_15_universal2.whl", hash = "sha256:e3aa2118a3ece0d25489cbe48498de8a5d580e42e8d9979f65bf47900a15aba1"},
     {file = "orjson-3.11.4-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a69ab657a4e6733133a3dca82768f2f8b884043714e8d2b9ba9f52b6efef5c44"},
@@ -10303,22 +10303,6 @@ files = [
 [package.dependencies]
 packaging = ">=17.1"
 pytest = ">=6.2"
-
-[[package]]
-name = "pytest-timeout"
-version = "2.4.0"
-description = "pytest plugin to abort hanging tests"
-optional = true
-python-versions = ">=3.7"
-groups = ["main"]
-markers = "extra == \"dev\""
-files = [
-    {file = "pytest_timeout-2.4.0-py3-none-any.whl", hash = "sha256:c42667e5cdadb151aeb5b26d114aff6bdf5a907f176a007a30b940d3d865b5c2"},
-    {file = "pytest_timeout-2.4.0.tar.gz", hash = "sha256:7e68e90b01f9eff71332b25001f85c75495fc4e3a836701876183c4bcfd0540a"},
-]
-
-[package.dependencies]
-pytest = ">=7.0.0"
 
 [[package]]
 name = "pytest-xdist"
@@ -13464,7 +13448,7 @@ description = "Fast implementation of asyncio event loop on top of libuv"
 optional = true
 python-versions = ">=3.8.1"
 groups = ["main"]
-markers = "sys_platform != \"win32\" and sys_platform != \"cygwin\" and extra == \"chromadb\" and platform_python_implementation != \"PyPy\""
+markers = "platform_python_implementation != \"PyPy\" and extra == \"chromadb\" and sys_platform != \"win32\" and sys_platform != \"cygwin\""
 files = [
     {file = "uvloop-0.22.1-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:ef6f0d4cc8a9fa1f6a910230cd53545d9a14479311e87e3cb225495952eb672c"},
     {file = "uvloop-0.22.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:7cd375a12b71d33d46af85a3343b35d98e8116134ba404bd657b3b1d15988792"},
@@ -14312,7 +14296,7 @@ chromadb = ["chromadb", "pypika"]
 codegraph = ["fastembed", "transformers", "tree-sitter", "tree-sitter-python"]
 debug = ["debugpy"]
 deepeval = ["deepeval"]
-dev = ["coverage", "deptry", "gitpython", "mkdocs-material", "mkdocs-minify-plugin", "mkdocstrings", "mypy", "notebook", "pre-commit", "pylint", "pytest", "pytest-asyncio", "pytest-cov", "pytest-timeout", "ruff", "tweepy"]
+dev = ["coverage", "deptry", "gitpython", "mkdocs-material", "mkdocs-minify-plugin", "mkdocstrings", "mypy", "notebook", "pre-commit", "pylint", "pytest", "pytest-asyncio", "pytest-cov", "ruff", "tweepy"]
 distributed = ["modal"]
 dlt = ["dlt"]
 docling = ["docling", "transformers"]
@@ -14338,4 +14322,4 @@ scraping = ["APScheduler", "beautifulsoup4", "lxml", "playwright", "protego", "t
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.14"
-content-hash = "a73c52c18a3b5830bd047913abfd1b5d961117f3db79a8299fa0135b03e03770"
+content-hash = "4e044eddd2d2995cf28a413df341c62333fa4206df7088049fbc5e0ccc85f454"
