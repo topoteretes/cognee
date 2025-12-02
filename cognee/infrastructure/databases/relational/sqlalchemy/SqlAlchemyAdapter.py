@@ -30,7 +30,7 @@ class SQLAlchemyAdapter:
     functions.
     """
 
-    def __init__(self, connection_string: str, connect_args: Optional[dict] = None):
+    def __init__(self, connection_string: str):
         """
         Initialize the SQLAlchemy adapter with connection settings.
 
@@ -38,32 +38,38 @@ class SQLAlchemyAdapter:
         -----------
             connection_string (str): The database connection string (e.g., 'sqlite:///path/to/db'
                 or 'postgresql://user:pass@host:port/db').
-            connect_args (Optional[dict]): Optional dictionary of connection arguments to pass to
-                the database engine. These are driver-specific parameters such as SSL settings,
-                timeouts, or connection pool options. If DATABASE_CONNECT_ARGS environment variable
-                is set, those values will be merged with this parameter (programmatic values take
-                precedence over environment variables). Defaults to None.
 
         Environment Variables:
         ----------------------
             DATABASE_CONNECT_ARGS: Optional JSON string containing connection arguments.
-                Example: '{"sslmode": "require", "connect_timeout": 10}'
+                Allows configuration of driver-specific parameters such as SSL settings,
+                timeouts, or connection pool options without code changes.
+
+                Examples:
+                    PostgreSQL with SSL:
+                        DATABASE_CONNECT_ARGS='{"sslmode": "require", "connect_timeout": 10}'
+
+                    SQLite with custom timeout:
+                        DATABASE_CONNECT_ARGS='{"timeout": 60}'
+
+                Note: This follows cognee's environment-based configuration pattern and is
+                the recommended approach for production deployments.
         """
         self.db_path: str = None
         self.db_uri: str = connection_string
 
+        # Parse optional connection arguments from environment variable
+        connect_args = None
         env_connect_args = os.getenv("DATABASE_CONNECT_ARGS")
         if env_connect_args:
             try:
-                parsed_env_args = json.loads(env_connect_args)
-                if isinstance(parsed_env_args, dict):
-                    # Merge: env vars as base, programmatic args override
-                    merged_args = {**parsed_env_args, **(connect_args or {})}
-                    connect_args = merged_args
-                else:
+                connect_args = json.loads(env_connect_args)
+                if not isinstance(connect_args, dict):
                     logger.warning("DATABASE_CONNECT_ARGS is not a valid JSON dictionary, ignoring")
+                    connect_args = None
             except json.JSONDecodeError:
                 logger.warning("Failed to parse DATABASE_CONNECT_ARGS as JSON, ignoring")
+                connect_args = None
 
         if "sqlite" in connection_string:
             [prefix, db_path] = connection_string.split("///")
