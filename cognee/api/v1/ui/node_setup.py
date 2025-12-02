@@ -88,7 +88,7 @@ def install_nvm() -> bool:
 
     try:
         # Download and install nvm
-        nvm_install_script = "https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh"
+        nvm_install_script = "https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh"
         logger.info(f"Downloading nvm installer from {nvm_install_script}...")
 
         response = requests.get(nvm_install_script, timeout=60)
