@@ -1,4 +1,4 @@
-from typing import AsyncGenerator, Dict, Any, List
+from typing import AsyncGenerator, Dict, Any, List, Optional
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
@@ -7,6 +7,37 @@ from cognee.modules.engine.models import Triplet
 from cognee.tasks.storage import index_data_points
 
 logger = get_logger("get_triplet_datapoints")
+
+
+def _build_datapoint_type_index_mapping() -> Dict[str, List[str]]:
+    """
+    Build a mapping of DataPoint type names to their index_fields.
+    
+    Returns:
+    --------
+        - Dict[str, List[str]]: Mapping of type name to list of index field names
+    """
+    logger.debug("Building DataPoint type to index_fields mapping")
+    subclasses = get_all_subclasses(DataPoint)
+    datapoint_type_index_property = {}
+
+    for subclass in subclasses:
+        if "metadata" in subclass.model_fields:
+            metadata_field = subclass.model_fields["metadata"]
+            default = getattr(metadata_field, "default", None)
+            if isinstance(default, dict):
+                index_fields = default.get("index_fields", [])
+                if index_fields:
+                    datapoint_type_index_property[subclass.__name__] = index_fields
+                    logger.debug(
+                        f"Registered {subclass.__name__} with index_fields: {index_fields}"
+                    )
+
+    logger.info(
+        f"Found {len(datapoint_type_index_property)} DataPoint types with index_fields: "
+        f"{list(datapoint_type_index_property.keys())}"
+    )
+    return datapoint_type_index_property
 
 
 def _extract_embeddable_text(node_or_edge: Dict[str, Any], index_fields: List[str]) -> str:
@@ -35,6 +66,103 @@ def _extract_embeddable_text(node_or_edge: Dict[str, Any], index_fields: List[st
                 embeddable_values.append(field_value)
 
     return " ".join(embeddable_values) if embeddable_values else ""
+
+
+def _extract_relationship_text(
+    relationship: Dict[str, Any], 
+    datapoint_type_index_property: Dict[str, List[str]]
+) -> str:
+    """
+    Extract relationship text from edge properties.
+    
+    Parameters:
+    -----------
+        - relationship (Dict[str, Any]): Dictionary containing relationship properties
+        - datapoint_type_index_property (Dict[str, List[str]]): Mapping of type to index fields
+    
+    Returns:
+    --------
+        - str: Extracted relationship text or empty string
+    """
+    if not relationship:
+        return ""
+    
+    edge_text = relationship.get("edge_text")
+    if edge_text and isinstance(edge_text, str) and edge_text.strip():
+        return edge_text.strip()
+    
+    # Fallback to extracting from EdgeType index_fields
+    edge_type_index_fields = datapoint_type_index_property.get("EdgeType", [])
+    return _extract_embeddable_text(relationship, edge_type_index_fields)
+
+
+def _process_single_triplet(
+    triplet_datapoint: Dict[str, Any],
+    datapoint_type_index_property: Dict[str, List[str]],
+    offset: int,
+    idx: int,
+) -> tuple[Optional[Triplet], Optional[str]]:
+    """
+    Process a single triplet and create a Triplet object.
+    
+    Parameters:
+    -----------
+        - triplet_datapoint (Dict[str, Any]): Raw triplet data from graph engine
+        - datapoint_type_index_property (Dict[str, List[str]]): Type to index fields mapping
+        - offset (int): Current batch offset
+        - idx (int): Index within current batch
+    
+    Returns:
+    --------
+        - tuple[Optional[Triplet], Optional[str]]: (Triplet object, error message if skipped)
+    """
+    start_node = triplet_datapoint.get("start_node", {})
+    end_node = triplet_datapoint.get("end_node", {})
+    relationship = triplet_datapoint.get("relationship_properties", {})
+
+    start_node_type = start_node.get("type")
+    end_node_type = end_node.get("type")
+
+    start_index_fields = datapoint_type_index_property.get(start_node_type, [])
+    end_index_fields = datapoint_type_index_property.get(end_node_type, [])
+
+    if not start_index_fields:
+        logger.debug(
+            f"No index_fields found for start_node type '{start_node_type}' in triplet {offset + idx}"
+        )
+    if not end_index_fields:
+        logger.debug(
+            f"No index_fields found for end_node type '{end_node_type}' in triplet {offset + idx}"
+        )
+
+    start_node_id = start_node.get("id", "")
+    end_node_id = end_node.get("id", "")
+
+    if not start_node_id or not end_node_id:
+        return None, (
+            f"Skipping triplet at offset {offset + idx}: missing node IDs "
+            f"(start: {start_node_id}, end: {end_node_id})"
+        )
+
+    relationship_text = _extract_relationship_text(relationship, datapoint_type_index_property)
+    start_node_text = _extract_embeddable_text(start_node, start_index_fields)
+    end_node_text = _extract_embeddable_text(end_node, end_index_fields)
+
+    if not start_node_text and not end_node_text and not relationship_text:
+        return None, (
+            f"Skipping triplet at offset {offset + idx}: empty embeddable text "
+            f"(start_node_id: {start_node_id}, end_node_id: {end_node_id})"
+        )
+
+    embeddable_text = f"{start_node_text}-›{relationship_text}-›{end_node_text}".strip()
+
+    triplet_obj = Triplet(
+        from_node_id=start_node_id, 
+        to_node_id=end_node_id, 
+        text=embeddable_text
+    )
+
+    return triplet_obj, None
 
 
 async def get_triplet_datapoints(
@@ -70,26 +198,7 @@ async def get_triplet_datapoints(
         logger.error(error_msg)
         raise NotImplementedError(error_msg)
 
-    logger.debug("Building DataPoint type to index_fields mapping")
-    subclasses = get_all_subclasses(DataPoint)
-    datapoint_type_index_property = {}
-
-    for subclass in subclasses:
-        if "metadata" in subclass.model_fields:
-            metadata_field = subclass.model_fields["metadata"]
-            default = getattr(metadata_field, "default", None)
-            if isinstance(default, dict):
-                index_fields = default.get("index_fields", [])
-                if index_fields:
-                    datapoint_type_index_property[subclass.__name__] = index_fields
-                    logger.debug(
-                        f"Registered {subclass.__name__} with index_fields: {index_fields}"
-                    )
-
-    logger.info(
-        f"Found {len(datapoint_type_index_property)} DataPoint types with index_fields: "
-        f"{list(datapoint_type_index_property.keys())}"
-    )
+    datapoint_type_index_property = _build_datapoint_type_index_mapping()
 
     offset = 0
     total_triplets_processed = 0
@@ -117,71 +226,21 @@ async def get_triplet_datapoints(
 
             for idx, triplet_datapoint in enumerate(triplets_batch):
                 try:
-                    start_node = triplet_datapoint.get("start_node", {})
-                    end_node = triplet_datapoint.get("end_node", {})
-                    relationship = triplet_datapoint.get("relationship_properties", {})
-
-                    start_node_type = start_node.get("type")
-                    end_node_type = end_node.get("type")
-
-                    start_index_fields = datapoint_type_index_property.get(start_node_type, [])
-                    end_index_fields = datapoint_type_index_property.get(end_node_type, [])
-
-                    if not start_index_fields:
-                        logger.debug(
-                            f"No index_fields found for start_node type '{start_node_type}' in triplet {offset + idx}"
-                        )
-                    if not end_index_fields:
-                        logger.debug(
-                            f"No index_fields found for end_node type '{end_node_type}' in triplet {offset + idx}"
-                        )
-
-                    start_node_id = start_node.get("id", "")
-                    end_node_id = end_node.get("id", "")
-
-                    if not start_node_id or not end_node_id:
-                        logger.warning(
-                            f"Skipping triplet at offset {offset + idx}: missing node IDs "
-                            f"(start: {start_node_id}, end: {end_node_id})"
-                        )
+                    triplet_obj, error_msg = _process_single_triplet(
+                        triplet_datapoint, 
+                        datapoint_type_index_property, 
+                        offset, 
+                        idx
+                    )
+                    
+                    if error_msg:
+                        logger.warning(error_msg)
                         skipped_count += 1
                         continue
-
-                    relationship_text = ""
-                    if relationship:
-                        edge_text = relationship.get("edge_text")
-                        if edge_text and isinstance(edge_text, str) and edge_text.strip():
-                            relationship_text = edge_text.strip()
-                        else:
-                            edge_type_index_fields = datapoint_type_index_property.get(
-                                "EdgeType", []
-                            )
-                            relationship_text = _extract_embeddable_text(
-                                relationship, edge_type_index_fields
-                            )
-
-                    start_node_text = _extract_embeddable_text(start_node, start_index_fields)
-                    end_node_text = _extract_embeddable_text(end_node, end_index_fields)
-
-                    if not start_node_text and not end_node_text and not relationship_text:
-                        logger.warning(
-                            f"Skipping triplet at offset {offset + idx}: empty embeddable text "
-                            f"(start_node_id: {start_node_id}, end_node_id: {end_node_id})"
-                        )
-                        skipped_count += 1
-                        continue
-
-                    embeddable_text = (
-                        f"{start_node_text}-›{relationship_text}-›{end_node_text}".strip()
-                    )
-
-                    triplet_obj = Triplet(
-                        from_node_id=start_node_id, to_node_id=end_node_id, text=embeddable_text
-                    )
-
-                    triplet_datapoints.append(triplet_obj)
-
-                    yield triplet_obj
+                    
+                    if triplet_obj:
+                        triplet_datapoints.append(triplet_obj)
+                        yield triplet_obj
 
                 except Exception as e:
                     logger.warning(
