@@ -136,6 +136,17 @@ async def get_triplet_datapoints(
                             f"No index_fields found for end_node type '{end_node_type}' in triplet {offset + idx}"
                         )
 
+                    start_node_id = start_node.get("id", "")
+                    end_node_id = end_node.get("id", "")
+
+                    if not start_node_id or not end_node_id:
+                        logger.warning(
+                            f"Skipping triplet at offset {offset + idx}: missing node IDs "
+                            f"(start: {start_node_id}, end: {end_node_id})"
+                        )
+                        skipped_count += 1
+                        continue
+
                     relationship_text = ""
                     if relationship:
                         edge_text = relationship.get("edge_text")
@@ -152,16 +163,6 @@ async def get_triplet_datapoints(
                     start_node_text = _extract_embeddable_text(start_node, start_index_fields)
                     end_node_text = _extract_embeddable_text(end_node, end_index_fields)
 
-                    start_node_id = start_node.get("id", "")
-                    end_node_id = end_node.get("id", "")
-
-                    if not start_node_id or not end_node_id:
-                        logger.warning(
-                            f"Skipping triplet at offset {offset + idx}: missing node IDs "
-                            f"(start: {start_node_id}, end: {end_node_id})"
-                        )
-                        skipped_count += 1
-                        continue
 
                     embeddable_text = (
                         f"{start_node_text}-›{relationship_text}-›{end_node_text}".strip()
