@@ -4,6 +4,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.models import Triplet
+from cognee.tasks.storage import index_data_points
 
 logger = get_logger("get_triplet_datapoints")
 
