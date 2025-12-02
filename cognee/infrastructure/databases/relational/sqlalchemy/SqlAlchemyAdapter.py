@@ -3,6 +3,7 @@ import asyncio
 from os import path
 import tempfile
 from uuid import UUID
+import json
 from typing import Optional
 from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
@@ -29,9 +30,24 @@ class SQLAlchemyAdapter:
     functions.
     """
 
-    def __init__(self, connection_string: str):
+    def __init__(self, connection_string: str, connect_args: Optional[dict] = None):
         self.db_path: str = None
         self.db_uri: str = connection_string
+
+        env_connect_args = os.getenv("DATABASE_CONNECT_ARGS")
+        if env_connect_args:
+            try:
+                env_connect_args = json.loads(env_connect_args)
+                if isinstance(env_connect_args, dict):
+                    if connect_args is None:
+                        connect_args = {}
+                    connect_args.update(env_connect_args)
+                else:
+                    logger.warning(
+                        f"DATABASE_CONNECT_ARGS is not a valid JSON dictionary: {env_connect_args}"
+                    )
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse DATABASE_CONNECT_ARGS as JSON: {e}")
 
         if "sqlite" in connection_string:
             [prefix, db_path] = connection_string.split("///")
@@ -53,7 +69,7 @@ class SQLAlchemyAdapter:
             self.engine = create_async_engine(
                 connection_string,
                 poolclass=NullPool,
-                connect_args={"timeout": 30},
+                connect_args={**(connect_args or {}), **{"timeout": 30}},
             )
         else:
             self.engine = create_async_engine(
@@ -63,6 +79,7 @@ class SQLAlchemyAdapter:
                 pool_recycle=280,
                 pool_pre_ping=True,
                 pool_timeout=280,
+                connect_args=connect_args or {},
             )
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
