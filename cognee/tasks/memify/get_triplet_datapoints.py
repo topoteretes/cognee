@@ -29,10 +29,7 @@ def _extract_embeddable_text(node_or_edge: Dict[str, Any], index_fields: List[st
     for field_name in index_fields:
         field_value = node_or_edge.get(field_name)
         if field_value is not None:
-            if isinstance(field_value, str):
-                field_value = field_value.strip()
-            else:
-                field_value = str(field_value).strip()
+            field_value = str(field_value).strip()
 
             if field_value:
                 embeddable_values.append(field_value)
