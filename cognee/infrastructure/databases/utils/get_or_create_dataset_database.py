@@ -98,7 +98,6 @@ async def get_or_create_dataset_database(
 
     async with db_engine.get_async_session() as session:
         # If there are no existing rows build a new row
-        # TODO: Update Dataset Database migrations, also make sure database_name is not unique anymore
         record = DatasetDatabase(
             owner_id=user.id,
             dataset_id=dataset_id,

@@ -33,7 +33,6 @@ class KuzuDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
                 "KuzuDatasetDatabaseHandler can only be used with Kuzu graph database provider."
             )
 
-        # TODO: Add graph file path info for kuzu (also in DatasetDatabase model)
         graph_db_name = f"{dataset_id}.pkl"
         graph_db_url = graph_config.graph_database_url
         graph_db_key = graph_config.graph_database_key
