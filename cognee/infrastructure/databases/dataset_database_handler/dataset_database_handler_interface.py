@@ -68,7 +68,7 @@ class DatasetDatabaseHandlerInterface(ABC):
 
     @classmethod
     @abstractmethod
-    async def delete_dataset(cls, dataset_id: UUID, user: User) -> None:
+    async def delete_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> None:
         """
         Delete the graph or vector database for the given dataset.
         Function should auto handle deleting of the actual database or send a request to the proper service to delete/mark the database as not needed for the given dataset.

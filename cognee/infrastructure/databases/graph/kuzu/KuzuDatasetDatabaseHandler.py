@@ -1,6 +1,3 @@
-import os
-import asyncio
-import requests
 from uuid import UUID
 from typing import Optional
 
