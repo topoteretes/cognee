@@ -1,7 +1,8 @@
 import os
+from typing import List
 
 
-async def get_non_py_files(repo_path):
+async def get_non_py_files(repo_data: List):
     """
     Get files that are not .py files and their contents.
 
@@ -13,13 +14,15 @@ async def get_non_py_files(repo_path):
     Parameters:
     -----------
 
-        - repo_path: The file system path to the repository to scan for non-Python files.
+        - repo_data: The data object containing file system path to the repository to scan for non-Python files.
 
     Returns:
     --------
 
         A list of file paths that are not Python files and meet the specified criteria.
     """
+    repo_path = repo_data[0].repo_path
+
     if not os.path.exists(repo_path):
         return {}
 
