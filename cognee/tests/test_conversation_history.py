@@ -8,10 +8,10 @@ Tests all retrievers that save conversation history to Redis cache:
 4. GRAPH_COMPLETION_CONTEXT_EXTENSION
 5. GRAPH_SUMMARY_COMPLETION
 6. TEMPORAL
+7. TRIPLET_COMPLETION
 """
 
 import os
-import shutil
 import cognee
 import pathlib
 
@@ -62,6 +62,10 @@ async def main():
     await cognee.cognify(datasets=[dataset_name])
 
     user = await get_default_user()
+
+    from cognee.memify_pipelines.create_triplet_embeddings import create_triplet_embeddings
+
+    await create_triplet_embeddings(user=user, dataset=dataset_name)
 
     cache_engine = get_cache_engine()
     assert cache_engine is not None, "Cache engine should be available for testing"
@@ -215,6 +219,24 @@ async def main():
         h for h in history_temporal if h["question"] == "Tell me about the companies"
     ]
     assert len(our_qa_temporal) == 1, "Should find Temporal question in history"
+
+    session_id_triplet = "test_session_triplet"
+
+    result_triplet = await cognee.search(
+        query_type=SearchType.TRIPLET_COMPLETION,
+        query_text="What companies are mentioned?",
+        session_id=session_id_triplet,
+    )
+
+    assert isinstance(result_triplet, list) and len(result_triplet) > 0, (
+        f"TRIPLET_COMPLETION should return non-empty list, got: {result_triplet!r}"
+    )
+
+    history_triplet = await cache_engine.get_latest_qa(str(user.id), session_id_triplet, last_n=10)
+    our_qa_triplet = [
+        h for h in history_triplet if h["question"] == "What companies are mentioned?"
+    ]
+    assert len(our_qa_triplet) == 1, "Should find Triplet question in history"
 
     from cognee.modules.retrieval.utils.session_cache import (
         get_conversation_history,

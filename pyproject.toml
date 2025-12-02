@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "openai>=1.80.1",
     "python-dotenv>=1.0.1,<2.0.0",
-    "pydantic>=2.10.5,<3.0.0",
+    "pydantic>=2.10.5,<2.12.0",
     "pydantic-settings>=2.2.1,<3",
     "typing_extensions>=4.12.2,<5.0.0",
     "numpy>=1.26.4, <=4.0.0",
@@ -33,7 +33,7 @@ dependencies = [
     "instructor>=1.9.1,<2.0.0",
     "filetype>=1.2.0,<2.0.0",
     "aiohttp>=3.11.14,<4.0.0",
-    "aiofiles>=23.2.1,<24.0.0",
+    "aiofiles>=23.2.1",
     "rdflib>=7.1.4,<7.2.0",
     "pypdf>=4.1.0,<7.0.0",
     "jinja2>=3.1.3,<4",
@@ -199,8 +199,3 @@ exclude = [
 
 [tool.ruff.lint]
 ignore = ["F401"]
-
-[dependency-groups]
-dev = [
-    "pytest-timeout>=2.4.0",
-]
