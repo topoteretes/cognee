@@ -163,17 +163,17 @@ async def get_triplet_datapoints(
                     start_node_text = _extract_embeddable_text(start_node, start_index_fields)
                     end_node_text = _extract_embeddable_text(end_node, end_index_fields)
 
-                    embeddable_text = (
-                        f"{start_node_text}-›{relationship_text}-›{end_node_text}".strip()
-                    )
-
-                    if not embeddable_text:
+                    if not start_node_text and not end_node_text and not relationship_text:
                         logger.warning(
                             f"Skipping triplet at offset {offset + idx}: empty embeddable text "
                             f"(start_node_id: {start_node_id}, end_node_id: {end_node_id})"
                         )
                         skipped_count += 1
                         continue
+
+                    embeddable_text = (
+                        f"{start_node_text}-›{relationship_text}-›{end_node_text}".strip()
+                    )
 
                     triplet_obj = Triplet(
                         from_node_id=start_node_id, to_node_id=end_node_id, text=embeddable_text
