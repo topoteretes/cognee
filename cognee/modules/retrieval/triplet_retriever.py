@@ -116,36 +116,67 @@ class TripletRetriever(BaseRetriever):
         session_save = user_id and cache_config.caching
 
         if session_save:
-            conversation_history = await get_conversation_history(session_id=session_id)
-
-            context_summary, completion = await asyncio.gather(
-                summarize_text(context),
-                generate_completion(
-                    query=query,
-                    context=context,
-                    user_prompt_path=self.user_prompt_path,
-                    system_prompt_path=self.system_prompt_path,
-                    system_prompt=self.system_prompt,
-                    conversation_history=conversation_history,
-                    response_model=response_model,
-                ),
+            completion = await self._get_completion_with_session(
+                query=query,
+                context=context,
+                session_id=session_id,
+                response_model=response_model,
             )
         else:
-            completion = await generate_completion(
+            completion = await self._get_completion_without_session(
+                query=query,
+                context=context,
+                response_model=response_model,
+            )
+
+        return [completion]
+
+    async def _get_completion_with_session(
+        self,
+        query: str,
+        context: str,
+        session_id: Optional[str],
+        response_model: Type,
+    ) -> Any:
+        """Generate completion with session history and caching."""
+        conversation_history = await get_conversation_history(session_id=session_id)
+
+        context_summary, completion = await asyncio.gather(
+            summarize_text(context),
+            generate_completion(
                 query=query,
                 context=context,
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
+                conversation_history=conversation_history,
                 response_model=response_model,
-            )
+            ),
+        )
 
-        if session_save:
-            await save_conversation_history(
-                query=query,
-                context_summary=context_summary,
-                answer=completion,
-                session_id=session_id,
-            )
+        await save_conversation_history(
+            query=query,
+            context_summary=context_summary,
+            answer=completion,
+            session_id=session_id,
+        )
 
-        return [completion]
+        return completion
+
+    async def _get_completion_without_session(
+        self,
+        query: str,
+        context: str,
+        response_model: Type,
+    ) -> Any:
+        """Generate completion without session history."""
+        completion = await generate_completion(
+            query=query,
+            context=context,
+            user_prompt_path=self.user_prompt_path,
+            system_prompt_path=self.system_prompt_path,
+            system_prompt=self.system_prompt,
+            response_model=response_model,
+        )
+
+        return completion
