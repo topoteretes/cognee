@@ -36,16 +36,22 @@ async def update_node_access_timestamps(items: List[Any]):
         return  
           
     try:  
-        # Update nodes using graph projection ( database-agnostic approach  
+        # Try to update nodes in graph database (may fail for unsupported DBs)  
         await _update_nodes_via_projection(graph_engine, node_ids, timestamp_ms)  
+    except Exception as e:  
+        logger.warning(  
+            f"Failed to update node timestamps in graph database: {e}. "  
+            "Will update document-level timestamps in SQL instead."  
+        )  
               
-        # Find origin documents and update SQL  
+    # Always try to find origin documents and update SQL  
+    # This ensures document-level tracking works even if graph updates fail  
+    try:  
         doc_ids = await _find_origin_documents_via_projection(graph_engine, node_ids)  
         if doc_ids:  
             await _update_sql_records(doc_ids, timestamp_dt)  
-                  
     except Exception as e:  
-        logger.error(f"Failed to update timestamps: {e}")  
+        logger.error(f"Failed to update SQL timestamps: {e}")  
         raise  
   
 async def _update_nodes_via_projection(graph_engine, node_ids, timestamp_ms):  
@@ -59,37 +65,42 @@ async def _update_nodes_via_projection(graph_engine, node_ids, timestamp_ms):
     )  
       
     # Update each node's last_accessed_at property  
+    provider = os.getenv("GRAPH_DATABASE_PROVIDER", "kuzu").lower()  
+      
     for node_id in node_ids:  
         node = memory_fragment.get_node(node_id)  
         if node:  
-            # Update the node in the database  
-            provider = os.getenv("GRAPH_DATABASE_PROVIDER", "kuzu").lower()  
-              
-            if provider == "kuzu":  
-                # Kuzu stores properties as JSON  
-                result = await graph_engine.query(  
-                    "MATCH (n:Node {id: $id}) RETURN n.properties",  
-                    {"id": node_id}  
-                )  
-                  
-                if result and result[0]:  
-                    props = json.loads(result[0][0]) if result[0][0] else {}  
-                    props["last_accessed_at"] = timestamp_ms  
-                      
-                    await graph_engine.query(  
-                        "MATCH (n:Node {id: $id}) SET n.properties = $props",  
-                        {"id": node_id, "props": json.dumps(props)}  
+            try:  
+                # Update the node in the database  
+                if provider == "kuzu":  
+                    # Kuzu stores properties as JSON  
+                    result = await graph_engine.query(  
+                        "MATCH (n:Node {id: $id}) RETURN n.properties",  
+                        {"id": node_id}  
                     )  
-            elif provider == "neo4j":  
-                await graph_engine.query(  
-                    "MATCH (n:__Node__ {id: $id}) SET n.last_accessed_at = $timestamp",  
-                    {"id": node_id, "timestamp": timestamp_ms}  
-                )  
-            elif provider == "neptune":  
-                await graph_engine.query(  
-                    "MATCH (n:Node {id: $id}) SET n.last_accessed_at = $timestamp",  
-                    {"id": node_id, "timestamp": timestamp_ms}  
-                )  
+                      
+                    if result and result[0]:  
+                        props = json.loads(result[0][0]) if result[0][0] else {}  
+                        props["last_accessed_at"] = timestamp_ms  
+                          
+                        await graph_engine.query(  
+                            "MATCH (n:Node {id: $id}) SET n.properties = $props",  
+                            {"id": node_id, "props": json.dumps(props)}  
+                        )  
+                elif provider == "neo4j":  
+                    await graph_engine.query(  
+                        "MATCH (n:__Node__ {id: $id}) SET n.last_accessed_at = $timestamp",  
+                        {"id": node_id, "timestamp": timestamp_ms}  
+                    )  
+                elif provider == "neptune":  
+                    await graph_engine.query(  
+                        "MATCH (n:Node {id: $id}) SET n.last_accessed_at = $timestamp",  
+                        {"id": node_id, "timestamp": timestamp_ms}  
+                    )  
+            except Exception as e:  
+                # Log but continue with other nodes  
+                logger.debug(f"Failed to update node {node_id}: {e}")  
+                continue  
   
 async def _find_origin_documents_via_projection(graph_engine, node_ids):  
     """Find origin documents using graph projection instead of DB queries"""  
