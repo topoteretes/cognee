@@ -2,6 +2,7 @@ import pathlib
 import os
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -42,7 +43,19 @@ async def main():
     user = await get_default_user()
     from cognee.memify_pipelines.create_triplet_embeddings import create_triplet_embeddings
 
-    await create_triplet_embeddings(user=user, dataset=dataset_name)
+    await create_triplet_embeddings(user=user, dataset=dataset_name, triplets_batch_size=5)
+
+    graph_engine = await get_graph_engine()
+    nodes, edges = await graph_engine.get_graph_data()
+
+    vector_engine = get_vector_engine()
+    collection = await vector_engine.search(
+        query_text="Test", limit=None, collection_name="Triplet_text"
+    )
+
+    assert len(edges) == len(collection), (
+        f"Expected {len(edges)} edges but got {len(collection)} in Triplet_text collection"
+    )
 
     context_gk = await GraphCompletionRetriever().get_context(
         query="Next to which country is Germany located?"
