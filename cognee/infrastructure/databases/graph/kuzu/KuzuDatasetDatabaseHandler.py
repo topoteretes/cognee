@@ -1,8 +1,12 @@
+import os
 from uuid import UUID
 from typing import Optional
 
+from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
+from cognee.base_config import get_base_config
 from cognee.modules.users.models import User
-
+from cognee.modules.users.models import DatasetDatabase
+from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
 
 
@@ -51,5 +55,27 @@ class KuzuDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         }
 
     @classmethod
-    async def delete_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]):
-        pass
+    async def delete_dataset(cls, dataset_database: DatasetDatabase):
+        graph_config = get_graph_config()
+        base_config = get_base_config()
+        databases_directory_path = os.path.join(
+            base_config.system_root_directory, "databases", str(dataset_database.owner_id)
+        )
+        graph_file_path = os.path.join(
+            databases_directory_path, dataset_database.graph_database_name
+        )
+        graph_engine = create_graph_engine(
+            graph_database_provider=dataset_database.graph_database_provider,
+            graph_file_path=graph_file_path,
+            graph_database_url=dataset_database.graph_database_url,
+            graph_database_name=dataset_database.graph_database_name,
+            graph_database_username=dataset_database.graph_database_connection_info.get(
+                "graph_database_username", ""
+            ),
+            graph_database_password=dataset_database.graph_database_connection_info.get(
+                "graph_database_password", ""
+            ),
+            graph_database_port=graph_config.graph_database_port,
+            graph_database_key=dataset_database.graph_database_key,
+        )
+        await graph_engine.delete_graph()

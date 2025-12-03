@@ -153,5 +153,5 @@ class Neo4jAuraDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         return dataset_database
 
     @classmethod
-    async def delete_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]):
+    async def delete_dataset(cls, dataset_database: DatasetDatabase):
         pass
