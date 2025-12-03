@@ -2,7 +2,7 @@ name: Weighted Edges Tests
 
 on:
   push:
-    branches: [ main, weighted_edges ]
+    branches: [ main, dev, weighted_edges ]
     paths:
       - 'cognee/modules/graph/utils/get_graph_from_model.py'
       - 'cognee/infrastructure/engine/models/Edge.py'
@@ -10,7 +10,7 @@ on:
       - 'examples/python/weighted_edges_example.py'
       - '.github/workflows/weighted_edges_tests.yml'
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev ]
     paths:
       - 'cognee/modules/graph/utils/get_graph_from_model.py'
       - 'cognee/infrastructure/engine/models/Edge.py'
@@ -32,7 +32,7 @@ jobs:
     env:
       LLM_PROVIDER: openai
       LLM_MODEL: gpt-5-mini
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
     steps:
       - name: Check out repository
@@ -67,14 +67,13 @@ jobs:
     env:
       LLM_PROVIDER: openai
       LLM_MODEL: gpt-5-mini
-      LLM_ENDPOINT: https://api.openai.com/v1/
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_ENDPOINT: https://api.openai.com/v1
+      LLM_API_KEY: ${{ secrets.OPENAI_API_KEY  }}
       LLM_API_VERSION: "2024-02-01"
-      EMBEDDING_PROVIDER: openai
-      EMBEDDING_MODEL: text-embedding-3-small
-      EMBEDDING_ENDPOINT: https://api.openai.com/v1/
-      EMBEDDING_API_KEY: ${{ secrets.LLM_API_KEY }}
-      EMBEDDING_API_VERSION: "2024-02-01"
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -108,14 +107,14 @@ jobs:
     env:
       LLM_PROVIDER: openai
       LLM_MODEL: gpt-5-mini
-      LLM_ENDPOINT: https://api.openai.com/v1/
-      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_ENDPOINT: https://api.openai.com/v1
+      LLM_API_KEY: ${{ secrets.OPENAI_API_KEY  }}
       LLM_API_VERSION: "2024-02-01"
-      EMBEDDING_PROVIDER: openai
-      EMBEDDING_MODEL: text-embedding-3-small
-      EMBEDDING_ENDPOINT: https://api.openai.com/v1/
-      EMBEDDING_API_KEY: ${{ secrets.LLM_API_KEY }}
-      EMBEDDING_API_VERSION: "2024-02-01"
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

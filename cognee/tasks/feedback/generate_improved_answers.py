@@ -61,7 +61,7 @@ async def _generate_improved_answer_for_single_interaction(
         )
 
         retrieved_context = await retriever.get_context(query_text)
-        completion = await retriever.get_structured_completion(
+        completion = await retriever.get_completion(
             query=query_text,
             context=retrieved_context,
             response_model=ImprovedAnswerResponse,
@@ -70,9 +70,9 @@ async def _generate_improved_answer_for_single_interaction(
         new_context_text = await retriever.resolve_edges_to_text(retrieved_context)
 
         if completion:
-            enrichment.improved_answer = completion.answer
+            enrichment.improved_answer = completion[0].answer
             enrichment.new_context = new_context_text
-            enrichment.explanation = completion.explanation
+            enrichment.explanation = completion[0].explanation
             return enrichment
         else:
             logger.warning(
