@@ -2,6 +2,7 @@ import os
 from typing import Callable, List, Optional, Type
 
 from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.types import SearchType
 from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
@@ -56,6 +57,18 @@ async def get_search_type_tools(
                 system_prompt=system_prompt,
             ).get_completion,
             CompletionRetriever(
+                system_prompt_path=system_prompt_path,
+                top_k=top_k,
+                system_prompt=system_prompt,
+            ).get_context,
+        ],
+        SearchType.TRIPLET_COMPLETION: [
+            TripletRetriever(
+                system_prompt_path=system_prompt_path,
+                top_k=top_k,
+                system_prompt=system_prompt,
+            ).get_completion,
+            TripletRetriever(
                 system_prompt_path=system_prompt_path,
                 top_k=top_k,
                 system_prompt=system_prompt,
