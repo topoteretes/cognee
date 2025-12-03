@@ -20,13 +20,17 @@ class Node:
     status: np.ndarray
 
     def __init__(
-        self, node_id: str, attributes: Optional[Dict[str, Any]] = None, dimension: int = 1
+        self,
+        node_id: str,
+        attributes: Optional[Dict[str, Any]] = None,
+        dimension: int = 1,
+        node_penalty: float = 3.5,
     ):
         if dimension <= 0:
             raise InvalidDimensionsError()
         self.id = node_id
         self.attributes = attributes if attributes is not None else {}
-        self.attributes["vector_distance"] = float("inf")
+        self.attributes["vector_distance"] = node_penalty
         self.skeleton_neighbours = []
         self.skeleton_edges = []
         self.status = np.ones(dimension, dtype=int)
@@ -105,13 +109,14 @@ class Edge:
         attributes: Optional[Dict[str, Any]] = None,
         directed: bool = True,
         dimension: int = 1,
+        edge_penalty: float = 3.5,
     ):
         if dimension <= 0:
             raise InvalidDimensionsError()
         self.node1 = node1
         self.node2 = node2
         self.attributes = attributes if attributes is not None else {}
-        self.attributes["vector_distance"] = float("inf")
+        self.attributes["vector_distance"] = edge_penalty
         self.directed = directed
         self.status = np.ones(dimension, dtype=int)
 
