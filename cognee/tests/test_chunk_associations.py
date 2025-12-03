@@ -1,6 +1,3 @@
-import os
-import pathlib
-
 import pytest
 
 import cognee
@@ -9,6 +6,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger()
 
 
+@pytest.mark.asyncio
 async def test_chunk_associations():
     """
     Integration test for chunk associations.

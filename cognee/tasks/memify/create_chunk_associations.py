@@ -61,7 +61,7 @@ async def create_chunk_associations(data, similarity_threshold: float = 0.7):
 
     if not chunks:
         logger.info("No chunks provided for association")
-        return
+        return data
 
     logger.info(f"Processing chunks: {chunks}")
 
