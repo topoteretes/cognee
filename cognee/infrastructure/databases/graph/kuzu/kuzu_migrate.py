@@ -107,11 +107,15 @@ def run_migration_step(python_exe: str, db_path: str, cypher: str):
     Uses the given python_exe to execute a short snippet that
     connects to the Kùzu database and runs a Cypher command.
     """
+    import json
+    # Use json.dumps to safely escape the strings
+    db_path_escaped = json.dumps(db_path)
+    cypher_escaped = json.dumps(cypher)
     snippet = f"""
 import kuzu
-db = kuzu.Database(r"{db_path}")
+db = kuzu.Database({db_path_escaped})
 conn = kuzu.Connection(db)
-conn.execute(r\"\"\"{cypher}\"\"\")
+conn.execute({cypher_escaped})
 """
     proc = subprocess.run([python_exe, "-c", snippet], capture_output=True, text=True)
     if proc.returncode != 0:
