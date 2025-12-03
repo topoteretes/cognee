@@ -9,11 +9,13 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 
 
 class MockEdge:
-    def __init__(self, node1, node2, relationship):
+    def __init__(self, node1, node2, relationship,score = None):
         self.node1 = node1
         self.node2 = node2
         self.relationship = relationship
         self.attributes = {}
+        if score is not None:
+            self.score = score
 
 
 class MockNode:

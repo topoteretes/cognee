@@ -70,7 +70,7 @@ class ChunksRetriever(BaseRetriever):
             similarity_score = 1 / (1 + distance_score)
             final_score = similarity_score * importance_weight
             text_preview = payload.get('text', '')[:20]
-            print(
+            logger.debug(
                 f"Chunk: {text_preview:<20} | VecScore: {distance_score:.4f} | Weight: {importance_weight} | Final: {final_score:.4f}")
             rescored.append((final_score, payload))
 
