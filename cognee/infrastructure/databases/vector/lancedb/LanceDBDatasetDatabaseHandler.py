@@ -32,21 +32,18 @@ class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         vector_db_name = f"{dataset_id}.lance.db"
 
         return {
-            "vector_database_name": vector_db_name,
-            "vector_database_url": os.path.join(databases_directory_path, vector_db_name),
             "vector_database_provider": vector_config.vector_db_provider,
+            "vector_database_url": os.path.join(databases_directory_path, vector_db_name),
             "vector_database_key": vector_config.vector_db_key,
+            "vector_database_name": vector_db_name,
         }
 
     @classmethod
     async def delete_dataset(cls, dataset_database: DatasetDatabase):
-        vector_config = get_vectordb_config()
         vector_engine = create_vector_engine(
             vector_db_provider=dataset_database.vector_database_provider,
             vector_db_url=dataset_database.vector_database_url,
-            vector_db_name=dataset_database.vector_database_name,
-            vector_db_port=vector_config.vector_db_port,
             vector_db_key=dataset_database.vector_database_key,
-            vector_dataset_database_handler=vector_config.vector_dataset_database_handler,
+            vector_db_name=dataset_database.vector_database_name,
         )
         await vector_engine.prune()
