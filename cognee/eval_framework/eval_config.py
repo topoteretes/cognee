@@ -14,7 +14,7 @@ class EvalConfig(BaseSettings):
 
     # Question answering params
     answering_questions: bool = True
-    qa_engine: str = "cognee_completion"  # Options: 'cognee_completion' or 'cognee_graph_completion' or 'cognee_graph_completion_cot' or 'cognee_graph_completion_context_extension'
+    qa_engine: str = "cognee_graph_completion"  # Options: 'cognee_completion' or 'cognee_graph_completion' or 'cognee_graph_completion_cot' or 'cognee_graph_completion_context_extension'
 
     # Evaluation params
     evaluating_answers: bool = True
@@ -25,7 +25,7 @@ class EvalConfig(BaseSettings):
         "EM",
         "f1",
     ]  # Use only 'correctness' for DirectLLM
-    deepeval_model: str = "gpt-5-mini"
+    deepeval_model: str = "gpt-4o-mini"
 
     # Metrics params
     calculate_metrics: bool = True

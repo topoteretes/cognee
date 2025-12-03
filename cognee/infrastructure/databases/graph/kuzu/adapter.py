@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, Union, Optional, Tuple, Type
 
+from cognee.exceptions import CogneeValidationError
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.infrastructure.files.storage import get_file_storage
@@ -1186,6 +1187,11 @@ class KuzuAdapter(GraphDBInterface):
               A tuple with two elements: a list of tuples of (node_id, properties) and a list of
               tuples of (source_id, target_id, relationship_name, properties).
         """
+
+        import time
+
+        start_time = time.time()
+
         try:
             nodes_query = """
             MATCH (n:Node)
@@ -1249,6 +1255,11 @@ class KuzuAdapter(GraphDBInterface):
                             },
                         )
                     )
+
+            retrieval_time = time.time() - start_time
+            logger.info(
+                f"Retrieved {len(nodes)} nodes and {len(edges)} edges in {retrieval_time:.2f} seconds"
+            )
             return formatted_nodes, formatted_edges
         except Exception as e:
             logger.error(f"Failed to get graph data: {e}")
@@ -1416,6 +1427,92 @@ class KuzuAdapter(GraphDBInterface):
                         )
                 formatted_edges.append((source_id, target_id, rel_type, props))
         return formatted_nodes, formatted_edges
+
+    async def get_id_filtered_graph_data(self, target_ids: list[str]):
+        """
+        Retrieve graph data filtered by specific node IDs, including their direct neighbors
+        and only edges where one endpoint matches those IDs.
+
+        Returns:
+            nodes: List[dict]   -> Each dict includes "id" and all node properties
+            edges: List[dict]   -> Each dict includes "source", "target", "type", "properties"
+        """
+        import time
+
+        start_time = time.time()
+
+        try:
+            if not target_ids:
+                logger.warning("No target IDs provided for ID-filtered graph retrieval.")
+                return [], []
+
+            if not all(isinstance(x, str) for x in target_ids):
+                raise CogneeValidationError("target_ids must be a list of strings")
+
+            query = """
+            MATCH (n:Node)-[r]->(m:Node)
+            WHERE n.id IN $target_ids OR m.id IN $target_ids
+            RETURN n.id, {
+                name: n.name,
+                type: n.type,
+                properties: n.properties
+            }, m.id, {
+                name: m.name,
+                type: m.type,
+                properties: m.properties
+            }, r.relationship_name, r.properties
+            """
+
+            result = await self.query(query, {"target_ids": target_ids})
+
+            if not result:
+                logger.info("No data returned for the supplied IDs")
+                return [], []
+
+            nodes_dict = {}
+            edges = []
+
+            for n_id, n_props, m_id, m_props, r_type, r_props_raw in result:
+                if n_props.get("properties"):
+                    try:
+                        additional_props = json.loads(n_props["properties"])
+                        n_props.update(additional_props)
+                        del n_props["properties"]
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse properties JSON for node {n_id}")
+
+                if m_props.get("properties"):
+                    try:
+                        additional_props = json.loads(m_props["properties"])
+                        m_props.update(additional_props)
+                        del m_props["properties"]
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse properties JSON for node {m_id}")
+
+                nodes_dict[n_id] = (n_id, n_props)
+                nodes_dict[m_id] = (m_id, m_props)
+
+                edge_props = {}
+                if r_props_raw:
+                    try:
+                        edge_props = json.loads(r_props_raw)
+                    except (json.JSONDecodeError, TypeError):
+                        logger.warning(f"Failed to parse edge properties for {n_id}->{m_id}")
+
+                source_id = edge_props.get("source_node_id", n_id)
+                target_id = edge_props.get("target_node_id", m_id)
+                edges.append((source_id, target_id, r_type, edge_props))
+
+            retrieval_time = time.time() - start_time
+            logger.info(
+                f"ID-filtered retrieval: {len(nodes_dict)} nodes and {len(edges)} edges in {retrieval_time:.2f}s"
+            )
+
+            return list(nodes_dict.values()), edges
+
+        except Exception as e:
+            logger.error(f"Error during ID-filtered graph data retrieval: {str(e)}")
+            raise
 
     async def get_graph_metrics(self, include_optional=False) -> Dict[str, Any]:
         """
@@ -1908,3 +2005,134 @@ class KuzuAdapter(GraphDBInterface):
         time_ids_list = [item[0] for item in time_nodes]
 
         return ", ".join(f"'{uid}'" for uid in time_ids_list)
+
+    async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
+        """
+        Retrieve a batch of triplets (start_node, relationship, end_node) from the graph.
+
+        Parameters:
+        -----------
+            - offset (int): Number of triplets to skip before returning results.
+            - limit (int): Maximum number of triplets to return.
+
+        Returns:
+        --------
+            - list[dict[str, Any]]: A list of triplets, where each triplet is a dictionary
+              with keys: 'start_node', 'relationship_properties', 'end_node'.
+
+        Raises:
+        -------
+            - ValueError: If offset or limit are negative.
+            - Exception: Re-raises any exceptions from query execution.
+        """
+        if offset < 0:
+            raise ValueError(f"Offset must be non-negative, got {offset}")
+        if limit < 0:
+            raise ValueError(f"Limit must be non-negative, got {limit}")
+
+        query = """
+        MATCH (start_node:Node)-[relationship:EDGE]->(end_node:Node)
+        RETURN {
+            start_node: {
+                id: start_node.id,
+                name: start_node.name,
+                type: start_node.type,
+                properties: start_node.properties
+            },
+            relationship_properties: {
+                relationship_name: relationship.relationship_name,
+                properties: relationship.properties
+            },
+            end_node: {
+                id: end_node.id,
+                name: end_node.name,
+                type: end_node.type,
+                properties: end_node.properties
+            }
+        } AS triplet
+        SKIP $offset LIMIT $limit
+        """
+
+        try:
+            results = await self.query(query, {"offset": offset, "limit": limit})
+        except Exception as e:
+            logger.error(f"Failed to execute triplet query: {str(e)}")
+            logger.error(f"Query: {query}")
+            logger.error(f"Parameters: offset={offset}, limit={limit}")
+            raise
+
+        triplets = []
+        for idx, row in enumerate(results):
+            try:
+                if not row or len(row) == 0:
+                    logger.warning(f"Skipping empty row at index {idx} in triplet batch")
+                    continue
+
+                if not isinstance(row[0], dict):
+                    logger.warning(
+                        f"Skipping invalid row at index {idx}: expected dict, got {type(row[0])}"
+                    )
+                    continue
+
+                triplet = row[0]
+
+                if "start_node" not in triplet:
+                    logger.warning(f"Skipping triplet at index {idx}: missing 'start_node' key")
+                    continue
+
+                if not isinstance(triplet["start_node"], dict):
+                    logger.warning(f"Skipping triplet at index {idx}: 'start_node' is not a dict")
+                    continue
+
+                triplet["start_node"] = self._parse_node_properties(triplet["start_node"].copy())
+
+                if "relationship_properties" not in triplet:
+                    logger.warning(
+                        f"Skipping triplet at index {idx}: missing 'relationship_properties' key"
+                    )
+                    continue
+
+                if not isinstance(triplet["relationship_properties"], dict):
+                    logger.warning(
+                        f"Skipping triplet at index {idx}: 'relationship_properties' is not a dict"
+                    )
+                    continue
+
+                rel_props = triplet["relationship_properties"].copy()
+                relationship_name = rel_props.get("relationship_name") or ""
+
+                if rel_props.get("properties"):
+                    try:
+                        parsed_props = json.loads(rel_props["properties"])
+                        if isinstance(parsed_props, dict):
+                            rel_props.update(parsed_props)
+                            del rel_props["properties"]
+                        else:
+                            logger.warning(
+                                f"Parsed relationship properties is not a dict for triplet at index {idx}"
+                            )
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.warning(
+                            f"Failed to parse relationship properties JSON for triplet at index {idx}: {e}"
+                        )
+
+                rel_props["relationship_name"] = relationship_name
+                triplet["relationship_properties"] = rel_props
+
+                if "end_node" not in triplet:
+                    logger.warning(f"Skipping triplet at index {idx}: missing 'end_node' key")
+                    continue
+
+                if not isinstance(triplet["end_node"], dict):
+                    logger.warning(f"Skipping triplet at index {idx}: 'end_node' is not a dict")
+                    continue
+
+                triplet["end_node"] = self._parse_node_properties(triplet["end_node"].copy())
+
+                triplets.append(triplet)
+
+            except Exception as e:
+                logger.error(f"Error processing triplet at index {idx}: {e}", exc_info=True)
+                continue
+
+        return triplets
