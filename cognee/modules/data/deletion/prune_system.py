@@ -1,5 +1,6 @@
 from sqlalchemy.exc import OperationalError
 
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
@@ -25,14 +26,13 @@ async def prune_graph_databases():
 
     db_engine = get_relational_engine()
     try:
-        if "dataset_database" in await db_engine.get_table_names():
-            data = await db_engine.get_all_data_from_table("dataset_database")
-            # Go through each dataset database and delete the graph database
-            for data_item in data:
-                await _prune_graph_db(data_item)
-    except OperationalError as e:
+        data = await db_engine.get_all_data_from_table("dataset_database")
+        # Go through each dataset database and delete the graph database
+        for data_item in data:
+            await _prune_graph_db(data_item)
+    except (OperationalError, EntityNotFoundError) as e:
         logger.debug(
-            "Skipping pruning of graph DB. OperationalError when accessing dataset_database table: %s",
+            "Skipping pruning of graph DB. Error when accessing dataset_database table: %s",
             e,
         )
         return
@@ -51,14 +51,13 @@ async def prune_vector_databases():
 
     db_engine = get_relational_engine()
     try:
-        if "dataset_database" in await db_engine.get_table_names():
-            data = await db_engine.get_all_data_from_table("dataset_database")
-            # Go through each dataset database and delete the vector database
-            for data_item in data:
-                await _prune_vector_db(data_item)
-    except OperationalError as e:
+        data = await db_engine.get_all_data_from_table("dataset_database")
+        # Go through each dataset database and delete the vector database
+        for data_item in data:
+            await _prune_vector_db(data_item)
+    except (OperationalError, EntityNotFoundError) as e:
         logger.debug(
-            "Skipping pruning of vector DB. OperationalError when accessing dataset_database table: %s",
+            "Skipping pruning of vector DB. Error when accessing dataset_database table: %s",
             e,
         )
         return
@@ -67,7 +66,6 @@ async def prune_vector_databases():
 async def prune_system(graph=True, vector=True, metadata=True, cache=True):
     # Note: prune system should not be available through the API, it has no permission checks and will
     #       delete all graph and vector databases if called. It should only be used in development or testing environments.
-    # TODO: prune_system should work with multi-user access control mode enabled
     if graph and not backend_access_control_enabled():
         graph_engine = await get_graph_engine()
         await graph_engine.delete_graph()
