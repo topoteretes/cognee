@@ -70,12 +70,6 @@ async def main():
     )
     cognee.config.system_root_directory(cognee_directory_path)
 
-    # Create a clean slate for cognee -- reset data and system state
-    print("Resetting cognee data...")
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-    print("Data reset complete.\n")
-
     # Add custom dataset database handler
     from cognee.infrastructure.databases.dataset_database_handler.use_dataset_database_handler import (
         use_dataset_database_handler,
@@ -85,6 +79,12 @@ async def main():
         "custom_lancedb_handler", LanceDBTestDatasetDatabaseHandler, "lancedb"
     )
     use_dataset_database_handler("custom_kuzu_handler", KuzuTestDatasetDatabaseHandler, "kuzu")
+
+    # Create a clean slate for cognee -- reset data and system state
+    print("Resetting cognee data...")
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    print("Data reset complete.\n")
 
     # cognee knowledge graph will be created based on this text
     text = """
