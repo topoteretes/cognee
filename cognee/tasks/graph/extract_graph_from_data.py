@@ -90,12 +90,7 @@ async def integrate_chunk_graphs(
         await add_data_points(
             data_points=graph_nodes, custom_edges=graph_edges, embed_triplets=embed_triplets
         )
-
-    graph_engine = await get_graph_engine()
-    if len(graph_edges) > 0:
-        await graph_engine.add_edges(graph_edges)
-        await index_graph_edges(graph_edges)
-
+        
     return data_chunks
 
 
