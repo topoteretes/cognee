@@ -86,7 +86,7 @@ async def add_data_points(
     await graph_engine.add_edges(edges)
     await index_graph_edges(edges)
 
-    if custom_edges:
+    if isinstance(custom_edges, list) and custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
         await graph_engine.add_edges(custom_edges)
         await index_graph_edges(custom_edges)
