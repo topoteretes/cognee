@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Dict
+from typing import List, Dict, Optional
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.utils import deduplicate_nodes_and_edges, get_graph_from_model
@@ -16,7 +16,7 @@ logger = get_logger("add_data_points")
 
 
 async def add_data_points(
-    data_points: List[DataPoint], custom_edges: List[tuple] = None, embed_triplets: bool = False
+    data_points: List[DataPoint], custom_edges: Optional[List] = None, embed_triplets: bool = False
 ) -> List[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
@@ -86,7 +86,12 @@ async def add_data_points(
     await graph_engine.add_edges(edges)
     await index_graph_edges(edges)
 
+    if len(custom_edges) > 0:
+        await graph_engine.add_edges(custom_edges)
+        await index_graph_edges(custom_edges)
+
     if embed_triplets:
+        edges.extend(custom_edges)
         triplets = _create_triplets_from_graph(nodes, edges)
         if triplets:
             await index_data_points(triplets)
