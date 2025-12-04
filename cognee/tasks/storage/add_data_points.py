@@ -78,6 +78,9 @@ async def add_data_points(
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
+    if custom_edges:
+        edges.extend(custom_edges)
+
     graph_engine = await get_graph_engine()
 
     await graph_engine.add_nodes(nodes)
