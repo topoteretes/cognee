@@ -78,25 +78,13 @@ async def add_data_points(
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
-    logger.info("Adding graph nodes and edges")
     graph_engine = await get_graph_engine()
 
     await graph_engine.add_nodes(nodes)
     await index_data_points(nodes)
-    logger.info("Nodes done")
 
     await graph_engine.add_edges(edges)
     await index_graph_edges(edges)
-
-    if custom_edges:
-        logger.info(f"Custom edges: {custom_edges}")
-        logger.info(f"Edges: {edges}")
-        logger.info("extension start")
-        await graph_engine.add_edges(custom_edges)
-        await index_data_points(custom_edges)
-        logger.info("extension end")
-
-    logger.info("Edges done")
 
     if embed_triplets:
         triplets = _create_triplets_from_graph(nodes, edges)
