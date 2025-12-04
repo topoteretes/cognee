@@ -34,7 +34,7 @@ class TestCogneeServerStart(unittest.TestCase):
 
         # Check if server started with errors
         if cls.server_process.poll() is not None:
-            stderr = cls.server_process.stderr.read().decode("utf-8")
+            stderr = cls.server_process.stderr.read()
             print(f"Server failed to start: {stderr}", file=sys.stderr)
             raise RuntimeError(f"Server failed to start: {stderr}")
 
