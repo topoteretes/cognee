@@ -6,6 +6,8 @@ on:
         type: string
         default: '3.11.x'
 
+permissions:
+  contents: read
 jobs:
   check-uv-lock:
     name: Validate uv lockfile and project metadata
