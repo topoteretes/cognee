@@ -86,7 +86,7 @@ async def add_data_points(
     await graph_engine.add_edges(edges)
     await index_graph_edges(edges)
 
-    if len(custom_edges) > 0:
+    if custom_edges:
         await graph_engine.add_edges(custom_edges)
         await index_graph_edges(custom_edges)
 
