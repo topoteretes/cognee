@@ -176,7 +176,7 @@ def _create_triplets_from_graph(nodes: List[DataPoint], edges: List[tuple]) -> L
         source_node = node_map.get(str(source_node_id))
         target_node = node_map.get(str(target_node_id))
 
-        if not source_node or not target_node:
+        if not source_node or not target_node or relationship_name is None:
             skipped_count += 1
             continue
 
