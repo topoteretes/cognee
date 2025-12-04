@@ -203,8 +203,4 @@ def _create_triplets_from_graph(nodes: List[DataPoint], edges: List[tuple]) -> L
         )
         triplets.append(triplet)
 
-    if skipped_count > 0:
-        logger.info(f"Skipped {skipped_count} edges when creating triplets")
-
-    logger.info(f"Created {len(triplets)} triplets from {len(edges)} graph edges")
     return triplets
