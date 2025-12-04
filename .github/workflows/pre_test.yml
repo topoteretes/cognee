@@ -1,10 +1,5 @@
 on:
   workflow_call:
-    inputs:
-      python-version:
-        required: false
-        type: string
-        default: '3.11.x'
 
 permissions:
   contents: read
