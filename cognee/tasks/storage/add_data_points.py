@@ -78,13 +78,6 @@ async def add_data_points(
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
-    if custom_edges:
-        logger.info(f"Custom edges: {custom_edges}")
-        logger.info(f"Edges: {edges}")
-        logger.info("extension start")
-        edges.extend(custom_edges)
-        logger.info("extension end")
-
     logger.info("Adding graph nodes and edges")
     graph_engine = await get_graph_engine()
 
@@ -94,6 +87,14 @@ async def add_data_points(
 
     await graph_engine.add_edges(edges)
     await index_graph_edges(edges)
+
+    if custom_edges:
+        logger.info(f"Custom edges: {custom_edges}")
+        logger.info(f"Edges: {edges}")
+        logger.info("extension start")
+        await graph_engine.add_edges(custom_edges)
+        await index_data_points(custom_edges)
+        logger.info("extension end")
 
     logger.info("Edges done")
 
