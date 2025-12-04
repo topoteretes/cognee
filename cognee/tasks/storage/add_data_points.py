@@ -16,7 +16,7 @@ logger = get_logger("add_data_points")
 
 
 async def add_data_points(
-    data_points: List[DataPoint], embed_triplets: bool = False
+    data_points: List[DataPoint], custom_edges: List[tuple]=None, embed_triplets: bool = False
 ) -> List[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
@@ -30,6 +30,7 @@ async def add_data_points(
     Args:
         data_points (List[DataPoint]):
             A list of data points to process and insert into the graph.
+        custom_edges (List[tuple]): Custom edges between datapoints.
         embed_triplets (bool):
             If True, creates and indexes triplet embeddings from the graph structure.
             Defaults to False.
@@ -77,6 +78,9 @@ async def add_data_points(
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
+    if custom_edges:
+        edges.extend(custom_edges)
+
     graph_engine = await get_graph_engine()
 
     await graph_engine.add_nodes(nodes)
@@ -118,10 +122,7 @@ def _extract_embeddable_text_from_datapoint(data_point: DataPoint) -> str:
     for field_name in index_fields:
         field_value = getattr(data_point, field_name, None)
         if field_value is not None:
-            if isinstance(field_value, str):
-                field_value = field_value.strip()
-            else:
-                field_value = str(field_value).strip()
+            field_value = str(field_value).strip()
 
             if field_value:
                 embeddable_values.append(field_value)
@@ -188,11 +189,11 @@ def _create_triplets_from_graph(nodes: List[DataPoint], edges: List[tuple]) -> L
         if not relationship_text and relationship_name:
             relationship_text = relationship_name
 
-        embeddable_text = f"{source_node_text} -› {relationship_text}-›{target_node_text}".strip()
-
-        if not embeddable_text:
+        if not source_node_text and not relationship_text and not relationship_name:
             skipped_count += 1
             continue
+
+        embeddable_text = f"{source_node_text} -› {relationship_text}-›{target_node_text}".strip()
 
         triplet = Triplet(
             id=generate_node_id(str(source_node_id) + relationship_name + str(target_node_id)),

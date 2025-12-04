@@ -68,8 +68,6 @@ async def integrate_chunk_graphs(
             type(ontology_resolver).__name__ if ontology_resolver else "None"
         )
 
-    graph_engine = await get_graph_engine()
-
     if graph_model is not KnowledgeGraph:
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
             data_chunks[chunk_index].contains = chunk_graph
@@ -89,11 +87,7 @@ async def integrate_chunk_graphs(
     embed_triplets = cognify_config.triplet_embedding
 
     if len(graph_nodes) > 0:
-        await add_data_points(graph_nodes, embed_triplets=embed_triplets)
-
-    if len(graph_edges) > 0:
-        await graph_engine.add_edges(graph_edges)
-        await index_graph_edges(graph_edges)
+        await add_data_points(data_points=graph_nodes, custom_edges=graph_edges, embed_triplets=embed_triplets)
 
     return data_chunks
 
