@@ -87,11 +87,12 @@ async def add_data_points(
     await index_graph_edges(edges)
 
     if custom_edges:
+        # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
         await graph_engine.add_edges(custom_edges)
         await index_graph_edges(custom_edges)
+        edges.extend(custom_edges)
 
     if embed_triplets:
-        edges.extend(custom_edges)
         triplets = _create_triplets_from_graph(nodes, edges)
         if triplets:
             await index_data_points(triplets)
