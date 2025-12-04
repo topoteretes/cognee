@@ -18,15 +18,21 @@ env:
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
 
-jobs:
+jobs: 
+  pre-test:
+    name: basic checks
+    uses: ./.github/workflows/pre_test.yml
+    
   basic-tests:
     name: Basic Tests
     uses: ./.github/workflows/basic_tests.yml
+    needs: [ pre-test ]
     secrets: inherit
 
   e2e-tests:
     name: End-to-End Tests
     uses: ./.github/workflows/e2e_tests.yml
+    needs: [ pre-test ]
     secrets: inherit
 
   distributed-tests:
