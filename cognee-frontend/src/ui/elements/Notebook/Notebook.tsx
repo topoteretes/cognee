@@ -2,16 +2,15 @@
 
 import { v4 as uuid4 } from "uuid";
 import classNames from "classnames";
-import { Fragment, MouseEvent, MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, MouseEvent, useCallback, useEffect, useState } from "react";
 
 import { useModal } from "@/ui/elements/Modal";
 import { CaretIcon, CloseIcon, PlusIcon } from "@/ui/Icons";
 import { IconButton, PopupMenu, TextArea, Modal, GhostButton, CTAButton } from "@/ui/elements";
-import { GraphControlsAPI } from "@/app/(graph)/GraphControls";
-import GraphVisualization, { GraphVisualizationAPI } from "@/app/(graph)/GraphVisualization";
 
 import NotebookCellHeader from "./NotebookCellHeader";
 import { Cell, Notebook as NotebookType } from "./types";
+import GraphVisualization from "../GraphVisualization";
 
 interface NotebookProps {
   notebook: NotebookType;
@@ -282,25 +281,23 @@ export default function Notebook({ notebook, updateNotebook, runCell }: Notebook
 function CellResult({ content }: { content: [] }) {
   const parsedContent = [];
 
-  const graphRef = useRef<GraphVisualizationAPI>();
-  const graphControls = useRef<GraphControlsAPI>({
-    setSelectedNode: () => {},
-    getSelectedNode: () => null,
-  });
-
   for (const line of content) {
     try {
       if (Array.isArray(line)) {
         // Insights search returns uncommon graph data structure
         if (Array.from(line).length > 0 && Array.isArray(line[0]) && line[0][1]["relationship_name"]) {
+          const data = transformInsightsGraphData(line);
+          
           parsedContent.push(
-            <div key={line[0][1]["relationship_name"]} className="w-full h-full bg-white">
+            <div key={line[0][1]["relationship_name"]} className="flex flex-col w-full h-full min-h-80 bg-white">
               <span className="text-sm pl-2 mb-4">reasoning graph</span>
               <GraphVisualization
-                data={transformInsightsGraphData(line)}
-                ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
-                graphControls={graphControls}
-                className="min-h-80"
+                nodes={data.nodes}
+                edges={data.edges}
+                className="flex-1"
+                config={{
+                  fontSize: 24,
+                }}
               />
             </div>
           );
@@ -342,13 +339,15 @@ function CellResult({ content }: { content: [] }) {
           if (typeof item === "object" && item["graphs"] && typeof item["graphs"] === "object") {
             Object.entries<{ nodes: []; edges: []; }>(item["graphs"]).forEach(([datasetName, graph]) => {
               parsedContent.push(
-                <div key={datasetName} className="w-full h-full bg-white">
+                <div key={datasetName} className="flex flex-col w-full h-full min-h-80 bg-white">
                   <span className="text-sm pl-2 mb-4">reasoning graph (datasets: {datasetName})</span>
                   <GraphVisualization
-                    data={transformToVisualizationData(graph)}
-                    ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
-                    graphControls={graphControls}
-                    className="min-h-80"
+                    nodes={graph.nodes}
+                    edges={graph.edges}
+                    className="flex-1"
+                    config={{
+                      fontSize: 24,
+                    }}
                   />
                 </div>
               );
@@ -373,13 +372,15 @@ function CellResult({ content }: { content: [] }) {
       if (typeof(line) === "object" && line["graphs"]) {
         Object.entries<{ nodes: []; edges: []; }>(line["graphs"]).forEach(([datasetName, graph]) => {
           parsedContent.push(
-            <div key={datasetName} className="w-full h-full bg-white">
+            <div key={datasetName} className="flex flex-col w-full h-full min-h-80 bg-white">
               <span className="text-sm pl-2 mb-4">reasoning graph (datasets: {datasetName})</span>
               <GraphVisualization
-                data={transformToVisualizationData(graph)}
-                ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
-                graphControls={graphControls}
-                className="min-h-80"
+                nodes={graph.nodes}
+                edges={graph.edges}
+                className="flex-1"
+                config={{
+                  fontSize: 24,
+                }}
               />
             </div>
           );
@@ -418,13 +419,6 @@ function CellResult({ content }: { content: [] }) {
 
 };
 
-function transformToVisualizationData(graph: { nodes: [], edges: [] }) {
-  return {
-    nodes: graph.nodes,
-    links: graph.edges,
-  };
-}
-
 type Triplet = [{
   id: string,
   name: string,
@@ -445,8 +439,9 @@ function transformInsightsGraphData(triplets: Triplet[]) {
       type: string,
     }
   } = {};
-  const links: {
+  const edges: {
     [key: string]: {
+      id: string,
       source: string,
       target: string,
       label: string,
@@ -465,7 +460,8 @@ function transformInsightsGraphData(triplets: Triplet[]) {
       type: triplet[2].type,
     };
     const linkKey = `${triplet[0]["id"]}_${triplet[1]["relationship_name"]}_${triplet[2]["id"]}`;
-    links[linkKey] = {
+    edges[linkKey] = {
+      id: linkKey,
       source: triplet[0].id,
       target: triplet[2].id,
       label: triplet[1]["relationship_name"],
@@ -474,6 +470,6 @@ function transformInsightsGraphData(triplets: Triplet[]) {
   
   return {
     nodes: Object.values(nodes),
-    links: Object.values(links),
+    edges: Object.values(edges),
   };
 }
