@@ -161,6 +161,7 @@ def _create_triplets_from_graph(nodes: List[DataPoint], edges: List[tuple]) -> L
 
     triplets = []
     skipped_count = 0
+    seen_ids = set()
 
     for edge_tuple in edges:
         if len(edge_tuple) < 4:
@@ -198,12 +199,19 @@ def _create_triplets_from_graph(nodes: List[DataPoint], edges: List[tuple]) -> L
 
         embeddable_text = f"{source_node_text} -› {relationship_text}-›{target_node_text}".strip()
 
-        triplet = Triplet(
-            id=generate_node_id(str(source_node_id) + relationship_name + str(target_node_id)),
-            from_node_id=str(source_node_id),
-            to_node_id=str(target_node_id),
-            text=embeddable_text,
+        triplet_id = generate_node_id(str(source_node_id) + relationship_name + str(target_node_id))
+
+        if triplet_id in seen_ids:
+            continue
+        seen_ids.add(triplet_id)
+
+        triplets.append(
+            Triplet(
+                id=triplet_id,
+                from_node_id=str(source_node_id),
+                to_node_id=str(target_node_id),
+                text=embeddable_text,
+            )
         )
-        triplets.append(triplet)
 
     return triplets
