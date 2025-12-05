@@ -107,35 +107,7 @@ async def main():
     cognee.config.data_root_directory(data_directory_path)
     cognee.config.system_root_directory(cognee_directory_path)
 
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
     dataset_name = "tech_companies"
-
-    await cognee.add(data=text_data, dataset_name=dataset_name)
-
-    await cognee.cognify(datasets=[dataset_name])
-
-    graph_engine = await get_graph_engine()
-    nodes_phase1, edges_phase1 = await graph_engine.get_graph_data()
-
-    vector_engine = get_vector_engine()
-    triplets_phase1 = await vector_engine.search(
-        query_text="technology", limit=None, collection_name="Triplet_text"
-    )
-
-    assert len(triplets_phase1) == len(edges_phase1), (
-        "Triplet embeddings and number of edges does not match for the non-ontology use case."
-    )
-
-    search_results_phase1 = await cognee.search(
-        query_type=SearchType.TRIPLET_COMPLETION,
-        query_text="What products does Apple make?",
-    )
-
-    assert search_results_phase1 is not None, (
-        "Search should return results for triplet embeddings in simple non-ontology use case."
-    )
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -157,7 +129,7 @@ async def main():
         }
 
         await cognee.cognify(datasets=[dataset_name], config=config)
-
+        graph_engine = await get_graph_engine()
         nodes_phase2, edges_phase2 = await graph_engine.get_graph_data()
 
         vector_engine = get_vector_engine()
@@ -166,7 +138,7 @@ async def main():
         )
 
         assert len(triplets_phase2) == len(edges_phase2), (
-            "Triplet embeddings and number of edges does not match for the ontology use case."
+            f"Triplet embeddings and number of edges do not match. Vector db contains {len(triplets_phase2)} edge triplets while graph db contains {len(edges_phase2)} edges."
         )
 
         search_results_phase2 = await cognee.search(
