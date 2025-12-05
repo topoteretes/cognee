@@ -4,10 +4,7 @@ from typing import List
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import (
     LiteLLMEmbeddingEngine,
 )
-from cognee.infrastructure.databases.vector.embeddings.embedding_rate_limiter import (
-    embedding_rate_limit_async,
-    embedding_sleep_and_retry_async,
-)
+from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 
 class MockEmbeddingEngine(LiteLLMEmbeddingEngine):
@@ -34,8 +31,6 @@ class MockEmbeddingEngine(LiteLLMEmbeddingEngine):
         self.fail_every_n_requests = fail_every_n_requests
         self.add_delay = add_delay
 
-    @embedding_sleep_and_retry_async()
-    @embedding_rate_limit_async
     async def embed_text(self, text: List[str]) -> List[List[float]]:
         """
         Mock implementation that returns fixed embeddings and can
@@ -52,4 +47,5 @@ class MockEmbeddingEngine(LiteLLMEmbeddingEngine):
             raise Exception(f"Mock failure on request #{self.request_count}")
 
         # Return mock embeddings of the correct dimension
-        return [[0.1] * self.dimensions for _ in text]
+        async with embedding_rate_limiter_context_manager():
+            return [[0.1] * self.dimensions for _ in text]
