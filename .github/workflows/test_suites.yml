@@ -1,4 +1,6 @@
 name: Test Suites
+permissions:
+  contents: read
 
 on:
   push:
@@ -16,15 +18,21 @@ env:
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
 
-jobs:
+jobs: 
+  pre-test:
+    name: basic checks
+    uses: ./.github/workflows/pre_test.yml
+    
   basic-tests:
     name: Basic Tests
     uses: ./.github/workflows/basic_tests.yml
+    needs: [ pre-test ]
     secrets: inherit
 
   e2e-tests:
     name: End-to-End Tests
     uses: ./.github/workflows/e2e_tests.yml
+    needs: [ pre-test ]
     secrets: inherit
 
   distributed-tests:
@@ -80,12 +88,22 @@ jobs:
     uses: ./.github/workflows/notebooks_tests.yml
     secrets: inherit
 
-  different-operating-systems-tests:
-    name: Operating System and Python Tests
+  different-os-tests-basic:
+    name: OS and Python Tests Ubuntu
     needs: [basic-tests, e2e-tests]
     uses: ./.github/workflows/test_different_operating_systems.yml
     with:
       python-versions: '["3.10.x", "3.11.x", "3.12.x", "3.13.x"]'
+      os: '["ubuntu-22.04"]'
+    secrets: inherit
+
+  different-os-tests-extended:
+    name: OS and Python Tests Extended
+    needs: [basic-tests, e2e-tests]
+    uses: ./.github/workflows/test_different_operating_systems.yml
+    with:
+      python-versions: '["3.13.x"]'
+      os: '["macos-15", "windows-latest"]'
     secrets: inherit
 
   # Matrix-based vector database tests
@@ -135,7 +153,8 @@ jobs:
       e2e-tests,
       graph-db-tests,
       notebook-tests,
-      different-operating-systems-tests,
+      different-os-tests-basic,
+      different-os-tests-extended,
       vector-db-tests,
       example-tests,
       llm-tests,
@@ -155,7 +174,8 @@ jobs:
       cli-tests,
       graph-db-tests,
       notebook-tests,
-      different-operating-systems-tests,
+      different-os-tests-basic,
+      different-os-tests-extended,
       vector-db-tests,
       example-tests,
       db-examples-tests,
@@ -176,7 +196,8 @@ jobs:
                 "${{ needs.cli-tests.result }}" == "success" &&
                 "${{ needs.graph-db-tests.result }}" == "success" &&
                 "${{ needs.notebook-tests.result }}" == "success" &&
-                "${{ needs.different-operating-systems-tests.result }}" == "success" &&
+                "${{ needs.different-os-tests-basic.result }}" == "success" &&
+                "${{ needs.different-os-tests-extended.result }}" == "success" &&
                 "${{ needs.vector-db-tests.result }}" == "success" &&
                 "${{ needs.example-tests.result }}" == "success" &&
                 "${{ needs.db-examples-tests.result }}" == "success" &&

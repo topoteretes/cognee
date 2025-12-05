@@ -1,0 +1,70 @@
+name: Load tests
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      LLM_MODEL:
+        required: true
+      LLM_ENDPOINT:
+        required: true
+      LLM_API_KEY:
+        required: true
+      LLM_API_VERSION:
+        required: true
+      EMBEDDING_MODEL:
+        required: true
+      EMBEDDING_ENDPOINT:
+        required: true
+      EMBEDDING_API_KEY:
+        required: true
+      EMBEDDING_API_VERSION:
+        required: true
+      OPENAI_API_KEY:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+
+jobs:
+  test-load:
+    name: Test Load
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "aws"
+
+      - name: Verify File Descriptor Limit
+        run: ulimit -n
+
+      - name: Run Load Test
+        env:
+          ENV: 'dev'
+          ENABLE_BACKEND_ACCESS_CONTROL: True
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          STORAGE_BACKEND: s3
+          AWS_REGION: eu-west-1
+          AWS_ENDPOINT_URL: https://s3-eu-west-1.amazonaws.com
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+        run: uv run python ./cognee/tests/test_load.py
+  
+    

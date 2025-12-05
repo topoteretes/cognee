@@ -69,7 +69,7 @@ async def run_tasks_data_item_incremental(
         async with open_data_file(file_path) as file:
             classified_data = ingestion.classify(file)
             # data_id is the hash of file contents + owner id to avoid duplicate data
-            data_id = ingestion.identify(classified_data, user)
+            data_id = await ingestion.identify(classified_data, user)
     else:
         # If data was already processed by Cognee get data id
         data_id = data_item.id

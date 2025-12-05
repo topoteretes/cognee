@@ -2,6 +2,7 @@ import pathlib
 import os
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -12,8 +13,10 @@ from cognee.modules.retrieval.graph_completion_cot_retriever import GraphComplet
 from cognee.modules.retrieval.graph_summary_completion_retriever import (
     GraphSummaryCompletionRetriever,
 )
+from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
+from cognee.modules.users.methods import get_default_user
 from collections import Counter
 
 logger = get_logger()
@@ -37,6 +40,23 @@ async def main():
 
     await cognee.cognify([dataset_name])
 
+    user = await get_default_user()
+    from cognee.memify_pipelines.create_triplet_embeddings import create_triplet_embeddings
+
+    await create_triplet_embeddings(user=user, dataset=dataset_name, triplets_batch_size=5)
+
+    graph_engine = await get_graph_engine()
+    nodes, edges = await graph_engine.get_graph_data()
+
+    vector_engine = get_vector_engine()
+    collection = await vector_engine.search(
+        query_text="Test", limit=None, collection_name="Triplet_text"
+    )
+
+    assert len(edges) == len(collection), (
+        f"Expected {len(edges)} edges but got {len(collection)} in Triplet_text collection"
+    )
+
     context_gk = await GraphCompletionRetriever().get_context(
         query="Next to which country is Germany located?"
     )
@@ -47,6 +67,9 @@ async def main():
         query="Next to which country is Germany located?"
     )
     context_gk_sum = await GraphSummaryCompletionRetriever().get_context(
+        query="Next to which country is Germany located?"
+    )
+    context_triplet = await TripletRetriever().get_context(
         query="Next to which country is Germany located?"
     )
 
@@ -64,6 +87,13 @@ async def main():
         assert "germany" in lower or "netherlands" in lower, (
             f"{name}: Context did not contain 'germany' or 'netherlands'; got: {context!r}"
         )
+
+    assert isinstance(context_triplet, str), "TripletRetriever: Context should be a string"
+    assert len(context_triplet) > 0, "TripletRetriever: Context should not be empty"
+    lower_triplet = context_triplet.lower()
+    assert "germany" in lower_triplet or "netherlands" in lower_triplet, (
+        f"TripletRetriever: Context did not contain 'germany' or 'netherlands'; got: {context_triplet!r}"
+    )
 
     triplets_gk = await GraphCompletionRetriever().get_triplets(
         query="Next to which country is Germany located?"
@@ -129,6 +159,11 @@ async def main():
         query_text="Next to which country is Germany located?",
         save_interaction=True,
     )
+    completion_triplet = await cognee.search(
+        query_type=SearchType.TRIPLET_COMPLETION,
+        query_text="Next to which country is Germany located?",
+        save_interaction=True,
+    )
 
     await cognee.search(
         query_type=SearchType.FEEDBACK,
@@ -141,12 +176,19 @@ async def main():
         ("GRAPH_COMPLETION_COT", completion_cot),
         ("GRAPH_COMPLETION_CONTEXT_EXTENSION", completion_ext),
         ("GRAPH_SUMMARY_COMPLETION", completion_sum),
+        ("TRIPLET_COMPLETION", completion_triplet),
     ]:
         assert isinstance(search_results, list), f"{name}: should return a list"
         assert len(search_results) == 1, (
             f"{name}: expected single-element list, got {len(search_results)}"
         )
-        text = search_results[0]
+
+        from cognee.context_global_variables import backend_access_control_enabled
+
+        if backend_access_control_enabled():
+            text = search_results[0]["search_result"][0]
+        else:
+            text = search_results[0]
         assert isinstance(text, str), f"{name}: element should be a string"
         assert text.strip(), f"{name}: string should not be empty"
         assert "netherlands" in text.lower(), (
@@ -162,7 +204,7 @@ async def main():
 
     # Assert there are exactly 4 CogneeUserInteraction nodes.
     assert type_counts.get("CogneeUserInteraction", 0) == 4, (
-        f"Expected exactly four DCogneeUserInteraction nodes, but found {type_counts.get('CogneeUserInteraction', 0)}"
+        f"Expected exactly four CogneeUserInteraction nodes, but found {type_counts.get('CogneeUserInteraction', 0)}"
     )
 
     # Assert there is exactly two CogneeUserFeedback nodes.

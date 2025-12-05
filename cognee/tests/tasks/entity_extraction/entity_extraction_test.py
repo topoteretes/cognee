@@ -55,7 +55,7 @@ async def main():
         classified_data = ingestion.classify(file)
 
         # data_id is the hash of original file contents + owner id to avoid duplicate data
-        data_id = ingestion.identify(classified_data, await get_default_user())
+        data_id = await ingestion.identify(classified_data, await get_default_user())
 
     await cognee.add(file_path)
 
