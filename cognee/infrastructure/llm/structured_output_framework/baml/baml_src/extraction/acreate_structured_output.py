@@ -18,6 +18,7 @@ from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.type
     TypeBuilder,
 )
 from cognee.infrastructure.llm.structured_output_framework.baml.baml_client import b
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 import logging
 
 logger = get_logger()
@@ -58,11 +59,12 @@ async def acreate_structured_output(
     tb = TypeBuilder()
     type_builder = create_dynamic_baml_type(tb, tb.ResponseModel, response_model)
 
-    result = await b.AcreateStructuredOutput(
-        text_input=text_input,
-        system_prompt=system_prompt,
-        baml_options={"client_registry": config.baml_registry, "tb": type_builder},
-    )
+    async with llm_rate_limiter_context_manager():
+        result = await b.AcreateStructuredOutput(
+            text_input=text_input,
+            system_prompt=system_prompt,
+            baml_options={"client_registry": config.baml_registry, "tb": type_builder},
+        )
 
     # Transform BAML response to proper pydantic reponse model
     if response_model is str:

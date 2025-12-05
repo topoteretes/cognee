@@ -59,6 +59,7 @@ dependencies = [
     "tenacity>=9.0.0",
     "fakeredis[lua]>=2.32.0",
     "diskcache>=5.6.3",
+    "aiolimiter>=1.2.1",
 ]
 
 [project.optional-dependencies]
