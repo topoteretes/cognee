@@ -186,7 +186,7 @@ def get_datasets_router() -> APIRouter:
         Delete a dataset by its ID.
 
         This endpoint permanently deletes a dataset and all its associated data.
-        The user must have delete permissions on the dataset to perform this operation.
+        The user must have deleted permissions on the dataset to perform this operation.
 
         ## Path Parameters
         - **dataset_id** (UUID): The unique identifier of the dataset to delete
@@ -229,7 +229,7 @@ def get_datasets_router() -> APIRouter:
         Delete a specific data item from a dataset.
 
         This endpoint removes a specific data item from a dataset while keeping
-        the dataset itself intact. The user must have delete permissions on the
+        the dataset itself intact. The user must have deleted permissions on the
         dataset to perform this operation.
 
         ## Path Parameters

@@ -58,7 +58,7 @@ async def run_code_graph_pipeline(
     ]
 
     if include_docs:
-        # This tasks take a long time to complete
+        # These tasks take a long time to complete
         non_code_tasks = [
             Task(get_non_py_files, task_config={"batch_size": 50}),
             Task(ingest_data, dataset_name="repo_docs", user=user),

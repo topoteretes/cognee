@@ -51,7 +51,7 @@ async def acreate_structured_output(
         baml_options={"client_registry": config.baml_registry, "tb": type_builder},
     )
 
-    # Transform BAML response to proper pydantic reponse model
+    # Transform BAML response to proper pydantic response model
     if response_model is str:
         # Note: when a response model is set to string in python, result is stored in text property in the BAML response model
         return str(result.text)

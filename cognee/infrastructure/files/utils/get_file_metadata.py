@@ -60,7 +60,7 @@ async def get_file_metadata(file: BinaryIO, name: Optional[str] = None) -> FileM
     if isinstance(file_path, str):
         file_name = Path(file_path).stem if file_path else None
     else:
-        # In case file_path does not exist or is a integer return None
+        # In case file_path does not exist or is an integer return None
         file_name = None
 
     # Get file size

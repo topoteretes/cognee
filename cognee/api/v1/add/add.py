@@ -143,7 +143,7 @@ async def add(
         await cognee.add("https://example.com",extraction_rules=extraction_rules)
 
         # Add a single url and tavily extract ingestion method
-        Make sure to set TAVILY_API_KEY = YOUR_TAVILY_API_KEY as a environment variable
+        Make sure to set TAVILY_API_KEY = YOUR_TAVILY_API_KEY as an environment variable
         await cognee.add("https://example.com")
 
         # Add multiple urls

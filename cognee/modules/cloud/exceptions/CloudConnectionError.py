@@ -9,7 +9,7 @@ class CloudConnectionError(CogneeConfigurationError):
     def __init__(
         self,
         message: str = "Failed to connect to the cloud service. Please check your cloud API key in local instance.",
-        name: str = "CloudConnnectionError",
+        name: str = "CloudConnectionError",
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
     ):
         super().__init__(message, name, status_code)

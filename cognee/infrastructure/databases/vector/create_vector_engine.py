@@ -59,7 +59,7 @@ def create_vector_engine(
         db_name = relational_config.db_name
 
         if not (db_host and db_port and db_name and db_username and db_password):
-            raise EnvironmentError("Missing requred pgvector credentials!")
+            raise EnvironmentError("Missing required pgvector credentials!")
 
         connection_string: str = (
             f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"

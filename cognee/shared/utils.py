@@ -32,7 +32,7 @@ def create_secure_ssl_context() -> ssl.SSLContext:
 
 
 def get_anonymous_id():
-    """Creates or reads a anonymous user id"""
+    """Creates or reads an anonymous user id"""
     tracking_id = os.getenv("TRACKING_ID", None)
 
     if tracking_id:

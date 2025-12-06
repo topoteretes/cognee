@@ -45,12 +45,12 @@ async def delete(
     Raises:
         DocumentNotFoundError: If data is not found
         DatasetNotFoundError: If dataset is not found
-        PermissionDeniedError: If user doesn't have delete permission on dataset
+        PermissionDeniedError: If user doesn't have deleted permission on dataset
     """
     if user is None:
         user = await get_default_user()
 
-    # Verify user has delete permission on the dataset
+    # Verify user has deleted permission on the dataset
     dataset_list = await get_authorized_existing_datasets([dataset_id], "delete", user)
 
     if not dataset_list:
