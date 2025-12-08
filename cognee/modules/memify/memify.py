@@ -97,10 +97,6 @@ async def memify(
         *enrichment_tasks,
     ]
 
-    await reset_dataset_pipeline_run_status(
-        authorized_dataset.id, user, pipeline_names=["memify_pipeline"]
-    )
-
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
@@ -113,6 +109,7 @@ async def memify(
         datasets=authorized_dataset.id,
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
+        pipeline_cache=False,
         incremental_loading=False,
         pipeline_name="memify_pipeline",
     )
