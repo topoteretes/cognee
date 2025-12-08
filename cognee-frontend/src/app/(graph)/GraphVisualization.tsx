@@ -1,7 +1,7 @@
 "use client";
 
 import classNames from "classnames";
-import { MutableRefObject, useEffect, useImperativeHandle, useRef, useState, useCallback } from "react";
+import { RefObject, useEffect, useImperativeHandle, useRef, useState, useCallback } from "react";
 import { forceCollide, forceManyBody } from "d3-force-3d";
 import dynamic from "next/dynamic";
 import { GraphControlsAPI } from "./GraphControls";
@@ -16,9 +16,9 @@ const ForceGraph = dynamic(() => import("react-force-graph-2d"), {
 import type { ForceGraphMethods, GraphData, LinkObject, NodeObject } from "react-force-graph-2d";
 
 interface GraphVisuzaliationProps {
-  ref: MutableRefObject<GraphVisualizationAPI>;
+  ref: RefObject<GraphVisualizationAPI>;
   data?: GraphData<NodeObject, LinkObject>;
-  graphControls: MutableRefObject<GraphControlsAPI>;
+  graphControls: RefObject<GraphControlsAPI>;
   className?: string;
 }
 
@@ -205,7 +205,7 @@ export default function GraphVisualization({ ref, data, graphControls, className
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   function handleDagError(loopNodeIds: (string | number)[]) {}
 
-  const graphRef = useRef<ForceGraphMethods>();
+  const graphRef = useRef<ForceGraphMethods>(null);
 
   useEffect(() => {
     if (data && graphRef.current) {
@@ -224,6 +224,7 @@ export default function GraphVisualization({ ref, data, graphControls, className
   ) => {
     if (!graphRef.current) {
       console.warn("GraphVisualization: graphRef not ready yet");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return undefined as any;
     }
   
@@ -239,7 +240,7 @@ export default function GraphVisualization({ ref, data, graphControls, className
   return (
     <div ref={containerRef} className={classNames("w-full h-full", className)} id="graph-container">
       <ForceGraph
-        ref={graphRef}
+        ref={graphRef as RefObject<ForceGraphMethods>}
         width={dimensions.width}
         height={dimensions.height}
         dagMode={graphShape as unknown as undefined}

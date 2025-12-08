@@ -15,6 +15,8 @@ import shutil
 
 from cognee.shared.logging_utils import get_logger
 from cognee.version import get_cognee_version
+from .node_setup import check_node_npm, get_nvm_dir, get_nvm_sh_path
+from .npm_utils import run_npm_command
 
 logger = get_logger()
 
@@ -285,48 +287,6 @@ def find_frontend_path() -> Optional[Path]:
     return None
 
 
-def check_node_npm() -> tuple[bool, str]:
-    """
-    Check if Node.js and npm are available.
-    Returns (is_available, error_message)
-    """
-
-    try:
-        # Check Node.js
-        result = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=10)
-        if result.returncode != 0:
-            return False, "Node.js is not installed or not in PATH"
-
-        node_version = result.stdout.strip()
-        logger.debug(f"Found Node.js version: {node_version}")
-
-        # Check npm - handle Windows PowerShell scripts
-        if platform.system() == "Windows":
-            # On Windows, npm might be a PowerShell script, so we need to use shell=True
-            result = subprocess.run(
-                ["npm", "--version"], capture_output=True, text=True, timeout=10, shell=True
-            )
-        else:
-            result = subprocess.run(
-                ["npm", "--version"], capture_output=True, text=True, timeout=10
-            )
-
-        if result.returncode != 0:
-            return False, "npm is not installed or not in PATH"
-
-        npm_version = result.stdout.strip()
-        logger.debug(f"Found npm version: {npm_version}")
-
-        return True, f"Node.js {node_version}, npm {npm_version}"
-
-    except subprocess.TimeoutExpired:
-        return False, "Timeout checking Node.js/npm installation"
-    except FileNotFoundError:
-        return False, "Node.js/npm not found. Please install Node.js from https://nodejs.org/"
-    except Exception as e:
-        return False, f"Error checking Node.js/npm: {str(e)}"
-
-
 def install_frontend_dependencies(frontend_path: Path) -> bool:
     """
     Install frontend dependencies if node_modules doesn't exist.
@@ -341,24 +301,7 @@ def install_frontend_dependencies(frontend_path: Path) -> bool:
     logger.info("Installing frontend dependencies (this may take a few minutes)...")
 
     try:
-        # Use shell=True on Windows for npm commands
-        if platform.system() == "Windows":
-            result = subprocess.run(
-                ["npm", "install"],
-                cwd=frontend_path,
-                capture_output=True,
-                text=True,
-                timeout=300,  # 5 minutes timeout
-                shell=True,
-            )
-        else:
-            result = subprocess.run(
-                ["npm", "install"],
-                cwd=frontend_path,
-                capture_output=True,
-                text=True,
-                timeout=300,  # 5 minutes timeout
-            )
+        result = run_npm_command(["npm", "install"], frontend_path, timeout=300)
 
         if result.returncode == 0:
             logger.info("Frontend dependencies installed successfully")
@@ -642,6 +585,21 @@ def start_ui(
     env["HOST"] = "localhost"
     env["PORT"] = str(port)
 
+    # If nvm is installed, ensure it's available in the environment
+    nvm_path = get_nvm_sh_path()
+    if platform.system() != "Windows" and nvm_path.exists():
+        # Add nvm to PATH for the subprocess
+        nvm_dir = get_nvm_dir()
+        # Find the latest Node.js version installed via nvm
+        nvm_versions = nvm_dir / "versions" / "node"
+        if nvm_versions.exists():
+            versions = sorted(nvm_versions.iterdir(), reverse=True)
+            if versions:
+                latest_node_bin = versions[0] / "bin"
+                if latest_node_bin.exists():
+                    current_path = env.get("PATH", "")
+                    env["PATH"] = f"{latest_node_bin}:{current_path}"
+
     # Start the development server
     logger.info(f"Starting frontend server at http://localhost:{port}")
     logger.info("This may take a moment to compile and start...")
@@ -659,14 +617,26 @@ def start_ui(
                 shell=True,
             )
         else:
-            process = subprocess.Popen(
-                ["npm", "run", "dev"],
-                cwd=frontend_path,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                preexec_fn=os.setsid if hasattr(os, "setsid") else None,
-            )
+            # On Unix-like systems, use bash with nvm sourced if available
+            if nvm_path.exists():
+                # Use bash to source nvm and run npm
+                process = subprocess.Popen(
+                    ["bash", "-c", f"source {nvm_path} && npm run dev"],
+                    cwd=frontend_path,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+                )
+            else:
+                process = subprocess.Popen(
+                    ["npm", "run", "dev"],
+                    cwd=frontend_path,
+                    env=env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+                )
 
         # Start threads to stream frontend output with prefix
         _stream_process_output(process, "stdout", "[FRONTEND]", "\033[33m")  # Yellow
