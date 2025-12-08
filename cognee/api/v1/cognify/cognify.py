@@ -19,7 +19,6 @@ from cognee.modules.ontology.get_default_ontology_resolver import (
 from cognee.modules.users.models import User
 
 from cognee.tasks.documents import (
-    check_permissions_on_dataset,
     classify_documents,
     extract_chunks_from_documents,
 )
@@ -78,12 +77,11 @@ async def cognify(
 
     Processing Pipeline:
         1. **Document Classification**: Identifies document types and structures
-        2. **Permission Validation**: Ensures user has processing rights
-        3. **Text Chunking**: Breaks content into semantically meaningful segments
-        4. **Entity Extraction**: Identifies key concepts, people, places, organizations
-        5. **Relationship Detection**: Discovers connections between entities
-        6. **Graph Construction**: Builds semantic knowledge graph with embeddings
-        7. **Content Summarization**: Creates hierarchical summaries for navigation
+        2. **Text Chunking**: Breaks content into semantically meaningful segments
+        3. **Entity Extraction**: Identifies key concepts, people, places, organizations
+        4. **Relationship Detection**: Discovers connections between entities
+        5. **Graph Construction**: Builds semantic knowledge graph with embeddings
+        6. **Content Summarization**: Creates hierarchical summaries for navigation
 
     Graph Model Customization:
         The `graph_model` parameter allows custom knowledge structures:
@@ -274,7 +272,6 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
     default_tasks = [
         Task(classify_documents),
-        Task(check_permissions_on_dataset, user=user, permissions=["write"]),
         Task(
             extract_chunks_from_documents,
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
@@ -305,14 +302,13 @@ async def get_temporal_tasks(
 
     The pipeline includes:
     1. Document classification.
-    2. Dataset permission checks (requires "write" access).
-    3. Document chunking with a specified or default chunk size.
-    4. Event and timestamp extraction from chunks.
-    5. Knowledge graph extraction from events.
-    6. Batched insertion of data points.
+    2. Document chunking with a specified or default chunk size.
+    3. Event and timestamp extraction from chunks.
+    4. Knowledge graph extraction from events.
+    5. Batched insertion of data points.
 
     Args:
-        user (User, optional): The user requesting task execution, used for permission checks.
+        user (User, optional): The user requesting task execution.
         chunker (Callable, optional): A text chunking function/class to split documents. Defaults to TextChunker.
         chunk_size (int, optional): Maximum token size per chunk. If not provided, uses system default.
         chunks_per_batch (int, optional): Number of chunks to process in a single batch in Cognify
@@ -325,7 +321,6 @@ async def get_temporal_tasks(
 
     temporal_tasks = [
         Task(classify_documents),
-        Task(check_permissions_on_dataset, user=user, permissions=["write"]),
         Task(
             extract_chunks_from_documents,
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
