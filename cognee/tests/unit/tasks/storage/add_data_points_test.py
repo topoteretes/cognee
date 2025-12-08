@@ -169,3 +169,120 @@ def test_create_triplets_from_graph():
     assert triplets[0].to_node_id == str(dp2.id)
     assert "source node" in triplets[0].text
     assert "target node" in triplets[0].text
+
+
+def test_extract_embeddable_text_with_none_datapoint():
+    text = _extract_embeddable_text_from_datapoint(None)
+    assert text == ""
+
+
+def test_extract_embeddable_text_without_metadata():
+    class NoMetadata(DataPoint):
+        text: str
+
+    dp = NoMetadata(text="test")
+    delattr(dp, "metadata")
+    text = _extract_embeddable_text_from_datapoint(dp)
+    assert text == ""
+
+
+def test_extract_embeddable_text_with_whitespace_only():
+    class WhitespaceField(DataPoint):
+        text: str
+        metadata: dict = {"index_fields": ["text"]}
+
+    dp = WhitespaceField(text="   ")
+    text = _extract_embeddable_text_from_datapoint(dp)
+    assert text == ""
+
+
+def test_create_triplets_skips_short_edge_tuples():
+    dp = SimplePoint(text="node")
+    incomplete_edge = (str(dp.id), str(dp.id))
+
+    triplets = _create_triplets_from_graph([dp], [incomplete_edge])
+
+    assert len(triplets) == 0
+
+
+def test_create_triplets_skips_missing_source_node():
+    dp1 = SimplePoint(text="target")
+    edge = ("missing_id", str(dp1.id), "relates", {})
+
+    triplets = _create_triplets_from_graph([dp1], [edge])
+
+    assert len(triplets) == 0
+
+
+def test_create_triplets_skips_missing_target_node():
+    dp1 = SimplePoint(text="source")
+    edge = (str(dp1.id), "missing_id", "relates", {})
+
+    triplets = _create_triplets_from_graph([dp1], [edge])
+
+    assert len(triplets) == 0
+
+
+def test_create_triplets_skips_none_relationship():
+    dp1 = SimplePoint(text="source")
+    dp2 = SimplePoint(text="target")
+    edge = (str(dp1.id), str(dp2.id), None, {})
+
+    triplets = _create_triplets_from_graph([dp1, dp2], [edge])
+
+    assert len(triplets) == 0
+
+
+def test_create_triplets_uses_relationship_name_when_no_edge_text():
+    dp1 = SimplePoint(text="source")
+    dp2 = SimplePoint(text="target")
+    edge = (str(dp1.id), str(dp2.id), "connects_to", {})
+
+    triplets = _create_triplets_from_graph([dp1, dp2], [edge])
+
+    assert len(triplets) == 1
+    assert "connects_to" in triplets[0].text
+
+
+def test_create_triplets_prevents_duplicates():
+    dp1 = SimplePoint(text="source")
+    dp2 = SimplePoint(text="target")
+    edge = (str(dp1.id), str(dp2.id), "relates", {"edge_text": "links"})
+
+    triplets = _create_triplets_from_graph([dp1, dp2], [edge, edge])
+
+    assert len(triplets) == 1
+
+
+def test_create_triplets_skips_nodes_without_id():
+    class NodeNoId:
+        pass
+
+    dp = SimplePoint(text="valid")
+    node_no_id = NodeNoId()
+    edge = (str(dp.id), "some_id", "relates", {})
+
+    triplets = _create_triplets_from_graph([dp, node_no_id], [edge])
+
+    assert len(triplets) == 0
+
+
+@pytest.mark.asyncio
+@patch.object(adp_module, "index_graph_edges")
+@patch.object(adp_module, "index_data_points")
+@patch.object(adp_module, "get_graph_engine")
+@patch.object(adp_module, "deduplicate_nodes_and_edges")
+@patch.object(adp_module, "get_graph_from_model")
+async def test_add_data_points_with_empty_custom_edges(
+    mock_get_graph, mock_dedup, mock_get_engine, mock_index_nodes, mock_index_edges
+):
+    dp = SimplePoint(text="test")
+    mock_get_graph.side_effect = [([dp], [])]
+    mock_dedup.side_effect = lambda n, e: (n, e)
+    graph_engine = AsyncMock()
+    mock_get_engine.return_value = graph_engine
+
+    result = await add_data_points([dp], custom_edges=[])
+
+    assert result == [dp]
+    assert graph_engine.add_edges.await_count == 1
