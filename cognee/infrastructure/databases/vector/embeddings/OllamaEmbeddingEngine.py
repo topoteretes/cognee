@@ -18,10 +18,7 @@ from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import Em
 from cognee.infrastructure.llm.tokenizer.HuggingFace import (
     HuggingFaceTokenizer,
 )
-from cognee.infrastructure.databases.vector.embeddings.embedding_rate_limiter import (
-    embedding_rate_limit_async,
-    embedding_sleep_and_retry_async,
-)
+from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 from cognee.shared.utils import create_secure_ssl_context
 
 logger = get_logger("OllamaEmbeddingEngine")
@@ -101,7 +98,7 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
 
     @retry(
         stop=stop_after_delay(128),
-        wait=wait_exponential_jitter(2, 128),
+        wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
@@ -120,14 +117,15 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         ssl_context = create_secure_ssl_context()
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.post(
-                self.endpoint, json=payload, headers=headers, timeout=60.0
-            ) as response:
-                data = await response.json()
-                if "embeddings" in data:
-                    return data["embeddings"][0]
-                else:
-                    return data["data"][0]["embedding"]
+            async with embedding_rate_limiter_context_manager():
+                async with session.post(
+                    self.endpoint, json=payload, headers=headers, timeout=60.0
+                ) as response:
+                    data = await response.json()
+                    if "embeddings" in data:
+                        return data["embeddings"][0]
+                    else:
+                        return data["data"][0]["embedding"]
 
     def get_vector_size(self) -> int:
         """
