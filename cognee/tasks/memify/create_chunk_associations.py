@@ -1,3 +1,5 @@
+import asyncio
+
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -46,92 +48,97 @@ async def ask_llm_for_association(
     return decision.should_associate
 
 
-async def create_chunk_associations(data, similarity_threshold: float = 0.7):
+async def create_chunk_associations(data, similarity_threshold: float = 0.90, max_candidates_per_chunk: int = None):
     """
     Analyzes chunks for semantic similarity and creates weighted association edges.
 
     Args:
         data: Either a single chunk text (str) or list of chunk texts from previous task
         similarity_threshold: Minimum similarity score (0.0-1.0) to consider for association
+        max_candidates_per_chunk: Maximum candidates per chunk. None = no limit (processes all above threshold)
     """
-    logger.info(f"create_chunk_associations called with data type: {type(data)}, data: {data}")
-
-    # Handle data being passed from extract_subgraph_chunks
     chunks = data if isinstance(data, list) else [data]
-
     if not chunks:
-        logger.info("No chunks provided for association")
         return data
-
-    logger.info(f"Processing chunks: {chunks}")
 
     vector_engine = get_vector_engine()
     graph_engine = await get_graph_engine()
 
-    edges_to_save = []
-    processed_pairs = set()
-
-    logger.info(f"Processing {len(chunks)} chunks for associations")
+    # Step 1: Find all similar chunk pairs above threshold
+    seen_pairs = set()
+    candidates = []
 
     for chunk_text in chunks:
-        # Get this chunk's ID and find similar chunks in one search
-        similar_chunks = await vector_engine.search(
-            collection_name="DocumentChunk_text", query_text=chunk_text, limit=5
-        )
+        # Get ALL chunks if no limit, otherwise use default vector search limit
+        search_params = {"collection_name": "DocumentChunk_text", "query_text": chunk_text}
+        if max_candidates_per_chunk is None:
+            search_params["limit"] = None  # Get all chunks
 
+        similar_chunks = await vector_engine.search(**search_params)
         if not similar_chunks:
             continue
 
-        origin_chunk_id = similar_chunks[0].id  # First result is the chunk itself
+        origin_id = similar_chunks[0].id
+        valid_pairs = []
 
-        for similar_chunk in similar_chunks[1:]:  # Skip first (self)
-            # Skip duplicates
-            pair_key = tuple(sorted([str(origin_chunk_id), str(similar_chunk.id)]))
-            if pair_key in processed_pairs:
-                continue
-            processed_pairs.add(pair_key)
+        for similar in similar_chunks[1:]:  # Skip self
+            pair_key = tuple(sorted([str(origin_id), str(similar.id)]))
 
-            # Filter by threshold
-            if similar_chunk.score < similarity_threshold:
-                logger.debug(
-                    f"Skipping pair - score {similar_chunk.score} below threshold {similarity_threshold}"
-                )
+            if pair_key in seen_pairs or similar.score < similarity_threshold:
                 continue
 
-            logger.info(
-                f"Asking LLM for chunks with similarity {similar_chunk.score}: "
-                f"'{chunk_text[:50]}...' <-> '{similar_chunk.payload.get('text', '')[:50]}...'"
-            )
+            valid_pairs.append({
+                "origin_id": origin_id,
+                "similar_id": similar.id,
+                "text1": chunk_text,
+                "text2": similar.payload.get("text", ""),
+                "score": similar.score,
+            })
 
-            # Ask LLM
-            llm_decision = await ask_llm_for_association(
-                chunk_text, similar_chunk.payload.get("text", ""), similar_chunk.score
-            )
-            logger.info(f"LLM decision: {llm_decision}")
+        # Sort by similarity and apply limit if specified
+        valid_pairs.sort(key=lambda x: x["score"], reverse=True)
+        pairs_to_process = valid_pairs if max_candidates_per_chunk is None else valid_pairs[:max_candidates_per_chunk]
 
-            if llm_decision:
-                edges_to_save.append(
-                    (
-                        origin_chunk_id,
-                        similar_chunk.id,
-                        "associated_with",
-                        {
-                            "relationship_name": "associated_with",
-                            "source_node_id": origin_chunk_id,
-                            "target_node_id": similar_chunk.id,
-                            "weight": similar_chunk.score,
-                            "ontology_valid": False,
-                        },
-                    )
-                )
+        for pair in pairs_to_process:
+            pair_key = tuple(sorted([str(pair["origin_id"]), str(pair["similar_id"])]))
+            seen_pairs.add(pair_key)
+            candidates.append(pair)
 
-    # Store edges
-    if edges_to_save:
-        await graph_engine.add_edges(edges_to_save)
-        await index_graph_edges(edges_to_save)
-        logger.info(f"Created {len(edges_to_save)} chunk associations")
+    if not candidates:
+        logger.info("No candidate pairs found")
+        return data
+
+    # Step 2: Ask LLM for all pairs in parallel
+    logger.info(f"Evaluating {len(candidates)} pairs with LLM in parallel...")
+    llm_tasks = [
+        ask_llm_for_association(pair["text1"], pair["text2"], pair["score"])
+        for pair in candidates
+    ]
+    decisions = await asyncio.gather(*llm_tasks)
+
+    # Step 3: Create edges for approved pairs
+    edges = [
+        (
+            pair["origin_id"],
+            pair["similar_id"],
+            "associated_with",
+            {
+                "relationship_name": "associated_with",
+                "source_node_id": pair["origin_id"],
+                "target_node_id": pair["similar_id"],
+                "weight": pair["score"],
+                "ontology_valid": False,
+            },
+        )
+        for pair, approved in zip(candidates, decisions)
+        if approved
+    ]
+
+    if edges:
+        await graph_engine.add_edges(edges)
+        await index_graph_edges(edges)
+        logger.info(f"Created {len(edges)} chunk associations")
     else:
         logger.info("No chunk associations created")
 
-    # Return the data so it can flow to next task in pipeline
     return data
