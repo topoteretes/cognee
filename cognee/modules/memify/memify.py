@@ -1,27 +1,25 @@
-from typing import Union, Optional, List, Type, Any
+from typing import Any, List, Optional, Type, Union
 from uuid import UUID
 
-from cognee.shared.logging_utils import get_logger
-
-from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
 from cognee.context_global_variables import set_database_global_context_variables
 from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.engine.operations.setup import setup
 from cognee.modules.pipelines import run_pipeline
-from cognee.modules.pipelines.tasks.task import Task
-from cognee.modules.users.models import User
-from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
-    resolve_authorized_user_datasets,
-)
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
     reset_dataset_pipeline_run_status,
 )
-from cognee.modules.engine.operations.setup import setup
-from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
-from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
-from cognee.tasks.memify.create_chunk_associations import create_chunk_associations
+from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
+    resolve_authorized_user_datasets,
+)
+from cognee.modules.pipelines.tasks.task import Task
+from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
+from cognee.modules.users.models import User
+from cognee.shared.logging_utils import get_logger
 from cognee.tasks.codingagents.coding_rule_associations import (
     add_rule_associations,
 )
+from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
 
 logger = get_logger("memify")
 
@@ -75,12 +73,7 @@ async def memify(
                 add_rule_associations,
                 rules_nodeset_name="coding_agent_rules",
                 task_config={"batch_size": 1},
-            ),
-            Task(
-                create_chunk_associations,
-                similarity_threshold=0.7,
-                task_config={"batch_size": 1},
-            ),
+            )
         ]
 
     await setup()
