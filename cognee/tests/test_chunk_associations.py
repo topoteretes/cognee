@@ -12,6 +12,8 @@ async def test_chunk_associations():
     Integration test for chunk associations.
     Tests: add data → cognify → memify with chunk associations
     """
+    import time
+
     # Clean up at start
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -26,14 +28,29 @@ async def test_chunk_associations():
         "Deep learning is a subset of machine learning that uses neural networks with multiple layers to learn from data.",
     ]
 
+    start_add = time.time()
     for text in sample_texts:
         await cognee.add(text, dataset_name)
+    logger.info(f"Add data: {time.time() - start_add:.2f}s")
 
     # Run cognify to create the knowledge graph
+    start_cognify = time.time()
     await cognee.cognify([dataset_name])
+    logger.info(f"Cognify: {time.time() - start_cognify:.2f}s")
 
-    # Run memify - should automatically run chunk associations
-    await cognee.memify(dataset=dataset_name)
+    # Run chunk associations pipeline
+    from cognee.memify_pipelines.chunk_associations_pipeline import chunk_associations_pipeline
+    from cognee.modules.users.methods import get_default_user
+
+    start_memify = time.time()
+    default_user = await get_default_user()
+    await chunk_associations_pipeline(
+        user=default_user,
+        dataset=dataset_name,
+        similarity_threshold=0.90,
+        max_candidates_per_chunk=4,
+    )
+    logger.info(f"Chunk associations pipeline: {time.time() - start_memify:.2f}s")
 
     # Verify associations were created by checking the graph
     from cognee.infrastructure.databases.graph import get_graph_engine
