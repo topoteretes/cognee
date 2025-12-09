@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, List
 from dataclasses import dataclass
-
+from fastapi import UploadFile
 
 @dataclass
 class OntologyMetadata:
@@ -45,7 +45,7 @@ class OntologyService:
             json.dump(metadata, f, indent=2)
 
     async def upload_ontology(
-        self, ontology_key: str, file, user, description: Optional[str] = None
+        self, ontology_key: str, file: UploadFile, user, description: Optional[str] = None
     ) -> OntologyMetadata:
         if not file.filename.lower().endswith(".owl"):
             raise ValueError("File must be in .owl format")
@@ -57,8 +57,6 @@ class OntologyService:
             raise ValueError(f"Ontology key '{ontology_key}' already exists")
 
         content = await file.read()
-        if len(content) > 10 * 1024 * 1024:
-            raise ValueError("File size exceeds 10MB limit")
 
         file_path = user_dir / f"{ontology_key}.owl"
         with open(file_path, "wb") as f:
@@ -105,47 +103,15 @@ class OntologyService:
         if len(set(ontology_key)) != len(ontology_key):
             raise ValueError("Duplicate ontology keys not allowed")
 
-        if descriptions and len(descriptions) != len(files):
-            raise ValueError("Number of descriptions must match number of files")
-
         results = []
-        user_dir = self._get_user_dir(str(user.id))
-        metadata = self._load_metadata(user_dir)
 
         for i, (key, file) in enumerate(zip(ontology_key, files)):
-            if key in metadata:
-                raise ValueError(f"Ontology key '{key}' already exists")
-
-            if not file.filename.lower().endswith(".owl"):
-                raise ValueError(f"File '{file.filename}' must be in .owl format")
-
-            content = await file.read()
-            if len(content) > 10 * 1024 * 1024:
-                raise ValueError(f"File '{file.filename}' exceeds 10MB limit")
-
-            file_path = user_dir / f"{key}.owl"
-            with open(file_path, "wb") as f:
-                f.write(content)
-
-            ontology_metadata = {
-                "filename": file.filename,
-                "size_bytes": len(content),
-                "uploaded_at": datetime.now(timezone.utc).isoformat(),
-                "description": descriptions[i] if descriptions else None,
-            }
-            metadata[key] = ontology_metadata
-
-            results.append(
-                OntologyMetadata(
-                    ontology_key=key,
-                    filename=file.filename,
-                    size_bytes=len(content),
-                    uploaded_at=ontology_metadata["uploaded_at"],
-                    description=descriptions[i] if descriptions else None,
-                )
-            )
-
-        self._save_metadata(user_dir, metadata)
+            results.append(await self.upload_ontology(
+                ontology_key=key,
+                file=file,
+                user=user,
+                description=descriptions[i] if descriptions else None,
+            ))            
         return results
 
     def get_ontology_contents(self, ontology_key: List[str], user) -> List[str]:
