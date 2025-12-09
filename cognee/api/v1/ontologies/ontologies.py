@@ -80,7 +80,7 @@ class OntologyService:
         )
 
     async def upload_ontologies(
-        self, ontology_key: List[str], files: List, user, descriptions: Optional[List[str]] = None
+        self, ontology_key: List[str], files: List[UploadFile], user, descriptions: Optional[List[str]] = None
     ) -> List[OntologyMetadata]:
         """
         Upload ontology files with their respective keys.
