@@ -256,7 +256,7 @@ jobs:
         with:
           python-version: '3.11.x'
 
-      - name: Run Memify Tests
+      - name: Run Permissions Example
         env:
           ENV: 'dev'
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -269,6 +269,64 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./examples/python/permissions_example.py
+
+  test-s3-permissions-example: # Make sure permission and multi-user mode work with S3 file system
+    name: Run Permissions Example
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+    services:
+      postgres: # Using postgres to avoid storing and using SQLite from S3
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: cognee
+          POSTGRES_PASSWORD: cognee
+          POSTGRES_DB: cognee_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+          extra-dependencies: "aws"
+
+      - name: Run S3 Permissions Example
+        env:
+          ENV: 'dev'
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          STORAGE_BACKEND: 's3'
+          AWS_ENDPOINT_URL: https://s3-eu-west-1.amazonaws.com
+          AWS_REGION: eu-west-1
+          DATA_ROOT_DIRECTORY: "s3://cognee-temp/cognee/data"
+          SYSTEM_ROOT_DIRECTORY: "s3://cognee-temp/cognee/system"
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          DB_PROVIDER: 'postgres'
+          DB_NAME: 'cognee_db'
+          DB_HOST: '127.0.0.1'
+          DB_PORT: 5432
+          DB_USERNAME: cognee
+          DB_PASSWORD: cognee
+        run: uv run python ./examples/python/permissions_example.py
+
   test_docling_add:
     name: Run Add with Docling Test
     runs-on: macos-15
