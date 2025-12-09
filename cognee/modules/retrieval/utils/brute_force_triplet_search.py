@@ -137,6 +137,9 @@ async def brute_force_triplet_search(
             "DocumentChunk_text",
         ]
 
+    if "EdgeType_relationship_name" not in collections:
+        collections.append("EdgeType_relationship_name")
+
     try:
         vector_engine = get_vector_engine()
     except Exception as e:
@@ -197,9 +200,7 @@ async def brute_force_triplet_search(
             )
 
         await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)
-        await memory_fragment.map_vector_distances_to_graph_edges(
-            vector_engine=vector_engine, query_vector=query_vector, edge_distances=edge_distances
-        )
+        await memory_fragment.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
         results = await memory_fragment.calculate_top_triplet_importances(k=top_k)
 
