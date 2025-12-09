@@ -127,6 +127,7 @@ async def test_brute_force_triplet_search_default_collections():
             "TextSummary_text",
             "EntityType_name",
             "DocumentChunk_text",
+            "EdgeType_relationship_name",
         ]
 
         call_collections = [
@@ -154,7 +155,32 @@ async def test_brute_force_triplet_search_custom_collections():
         call_collections = [
             call[1]["collection_name"] for call in mock_vector_engine.search.call_args_list
         ]
-        assert call_collections == custom_collections
+        assert set(call_collections) == set(custom_collections) | {"EdgeType_relationship_name"}
+
+
+@pytest.mark.asyncio
+async def test_brute_force_triplet_search_always_includes_edge_collection():
+    """Test that EdgeType_relationship_name is always searched even when not in collections."""
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    mock_vector_engine.search = AsyncMock(return_value=[])
+
+    collections_without_edge = ["Entity_name", "TextSummary_text"]
+
+    with patch(
+        "cognee.modules.retrieval.utils.brute_force_triplet_search.get_vector_engine",
+        return_value=mock_vector_engine,
+    ):
+        await brute_force_triplet_search(query="test", collections=collections_without_edge)
+
+        call_collections = [
+            call[1]["collection_name"] for call in mock_vector_engine.search.call_args_list
+        ]
+        assert "EdgeType_relationship_name" in call_collections
+        assert set(call_collections) == set(collections_without_edge) | {
+            "EdgeType_relationship_name"
+        }
 
 
 @pytest.mark.asyncio

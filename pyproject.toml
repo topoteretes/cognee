@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "openai>=1.80.1",
     "python-dotenv>=1.0.1,<2.0.0",
-    "pydantic>=2.10.5,<3.0.0",
+    "pydantic>=2.10.5,<2.12.0",
     "pydantic-settings>=2.2.1,<3",
     "typing_extensions>=4.12.2,<5.0.0",
     "numpy>=1.26.4, <=4.0.0",
@@ -33,7 +33,7 @@ dependencies = [
     "instructor>=1.9.1,<2.0.0",
     "filetype>=1.2.0,<2.0.0",
     "aiohttp>=3.11.14,<4.0.0",
-    "aiofiles>=23.2.1,<24.0.0",
+    "aiofiles>=23.2.1",
     "rdflib>=7.1.4,<7.2.0",
     "pypdf>=4.1.0,<7.0.0",
     "jinja2>=3.1.3,<4",
@@ -59,6 +59,7 @@ dependencies = [
     "tenacity>=9.0.0",
     "fakeredis[lua]>=2.32.0",
     "diskcache>=5.6.3",
+    "aiolimiter>=1.2.1",
 ]
 
 [project.optional-dependencies]
@@ -72,7 +73,8 @@ scraping = [
     "tavily-python>=0.7.12",
     "beautifulsoup4>=4.13.1",
     "playwright>=1.9.0",
-    "lxml>=4.9.3",
+    "lxml>=4.9.3,<5 ; python_version < '3.13'",
+    "lxml>=5,<6 ; python_version >= '3.13'",
     "protego>=0.1",
     "APScheduler>=3.10.0,<=3.11.0"
 ]
@@ -106,7 +108,11 @@ chromadb = [
     "chromadb>=0.6,<0.7",
     "pypika==0.48.9",
 ]
-docs = ["lxml<6.0.0", "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19"]
+docs = [
+    "lxml>=4.9.3,<5 ; python_version < '3.13'",
+    "lxml>=5,<6 ; python_version >= '3.13'",
+    "unstructured[csv, doc, docx, epub, md, odt, org, ppt, pptx, rst, rtf, tsv, xlsx, pdf]>=0.18.1,<19",
+]
 codegraph = [
     "fastembed<=0.6.0 ; python_version < '3.13'",
     "transformers>=4.46.3,<5",
@@ -199,8 +205,3 @@ exclude = [
 
 [tool.ruff.lint]
 ignore = ["F401"]
-
-[dependency-groups]
-dev = [
-    "pytest-timeout>=2.4.0",
-]

@@ -25,6 +25,7 @@ from cognee.infrastructure.llm.tokenizer.Mistral import (
 from cognee.infrastructure.llm.tokenizer.TikToken import (
     TikTokenTokenizer,
 )
+from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
 logger = get_logger("LiteLLMEmbeddingEngine")
@@ -109,13 +110,14 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}
                 return [data["embedding"] for data in response["data"]]
             else:
-                response = await litellm.aembedding(
-                    model=self.model,
-                    input=text,
-                    api_key=self.api_key,
-                    api_base=self.endpoint,
-                    api_version=self.api_version,
-                )
+                async with embedding_rate_limiter_context_manager():
+                    response = await litellm.aembedding(
+                        model=self.model,
+                        input=text,
+                        api_key=self.api_key,
+                        api_base=self.endpoint,
+                        api_version=self.api_version,
+                    )
 
                 return [data["embedding"] for data in response.data]
 

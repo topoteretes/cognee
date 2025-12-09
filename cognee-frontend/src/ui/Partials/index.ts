@@ -3,4 +3,3 @@ export { default as Footer } from "./Footer/Footer";
 export { default as SearchView } from "./SearchView/SearchView";
 export { default as IFrameView } from "./IFrameView/IFrameView";
 // export { default as Explorer } from "./Explorer/Explorer";
-export { default as FeedbackForm } from "./FeedbackForm";
