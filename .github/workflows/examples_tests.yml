@@ -298,7 +298,7 @@ jobs:
         uses: ./.github/actions/cognee_setup
         with:
           python-version: '3.11.x'
-          extra-dependencies: "aws"
+          extra-dependencies: "postgres aws"
 
       - name: Run S3 Permissions Example
         env:
