@@ -7,6 +7,7 @@ from typing import Optional, List
 from dataclasses import dataclass
 from fastapi import UploadFile
 
+
 @dataclass
 class OntologyMetadata:
     ontology_key: str
@@ -80,7 +81,11 @@ class OntologyService:
         )
 
     async def upload_ontologies(
-        self, ontology_key: List[str], files: List[UploadFile], user, descriptions: Optional[List[str]] = None
+        self,
+        ontology_key: List[str],
+        files: List[UploadFile],
+        user,
+        descriptions: Optional[List[str]] = None,
     ) -> List[OntologyMetadata]:
         """
         Upload ontology files with their respective keys.
@@ -106,12 +111,14 @@ class OntologyService:
         results = []
 
         for i, (key, file) in enumerate(zip(ontology_key, files)):
-            results.append(await self.upload_ontology(
-                ontology_key=key,
-                file=file,
-                user=user,
-                description=descriptions[i] if descriptions else None,
-            ))            
+            results.append(
+                await self.upload_ontology(
+                    ontology_key=key,
+                    file=file,
+                    user=user,
+                    description=descriptions[i] if descriptions else None,
+                )
+            )
         return results
 
     def get_ontology_contents(self, ontology_key: List[str], user) -> List[str]:
