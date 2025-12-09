@@ -1,8 +1,8 @@
-"use server";
+"use client";
 
 import Dashboard from "./Dashboard";
 
-export default async function Page() {
+export default function Page() {
   const accessToken = "";
 
   return (

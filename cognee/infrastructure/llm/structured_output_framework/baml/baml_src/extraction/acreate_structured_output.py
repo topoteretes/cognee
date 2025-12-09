@@ -1,7 +1,15 @@
 import asyncio
 from typing import Type
-from cognee.shared.logging_utils import get_logger
+from pydantic import BaseModel
+from tenacity import (
+    retry,
+    stop_after_delay,
+    wait_exponential_jitter,
+    retry_if_not_exception_type,
+    before_sleep_log,
+)
 
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.structured_output_framework.baml.baml_src.extraction.create_dynamic_baml_type import (
     create_dynamic_baml_type,
@@ -10,12 +18,18 @@ from cognee.infrastructure.llm.structured_output_framework.baml.baml_client.type
     TypeBuilder,
 )
 from cognee.infrastructure.llm.structured_output_framework.baml.baml_client import b
-from pydantic import BaseModel
-
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
+import logging
 
 logger = get_logger()
 
 
+@retry(
+    stop=stop_after_delay(128),
+    wait=wait_exponential_jitter(8, 128),
+    before_sleep=before_sleep_log(logger, logging.DEBUG),
+    reraise=True,
+)
 async def acreate_structured_output(
     text_input: str, system_prompt: str, response_model: Type[BaseModel]
 ):
@@ -45,11 +59,12 @@ async def acreate_structured_output(
     tb = TypeBuilder()
     type_builder = create_dynamic_baml_type(tb, tb.ResponseModel, response_model)
 
-    result = await b.AcreateStructuredOutput(
-        text_input=text_input,
-        system_prompt=system_prompt,
-        baml_options={"client_registry": config.baml_registry, "tb": type_builder},
-    )
+    async with llm_rate_limiter_context_manager():
+        result = await b.AcreateStructuredOutput(
+            text_input=text_input,
+            system_prompt=system_prompt,
+            baml_options={"client_registry": config.baml_registry, "tb": type_builder},
+        )
 
     # Transform BAML response to proper pydantic reponse model
     if response_model is str:
