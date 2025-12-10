@@ -221,7 +221,9 @@ async def test_chunks_retriever_context_multiple_chunks(setup_test_environment_w
 
     assert isinstance(context, list), "Context should be a list"
     assert len(context) > 0, "Context should not be empty"
-    assert any(chunk["text"] == "Steve Rodger" for chunk in context), "Failed to get Steve Rodger chunk"
+    assert any(chunk["text"] == "Steve Rodger" for chunk in context), (
+        "Failed to get Steve Rodger chunk"
+    )
 
 
 @pytest.mark.asyncio
