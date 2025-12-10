@@ -69,7 +69,7 @@ class OllamaAPIAdapter(LLMInterface):
 
     @retry(
         stop=stop_after_delay(128),
-        wait=wait_exponential_jitter(2, 128),
+        wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
@@ -117,7 +117,7 @@ class OllamaAPIAdapter(LLMInterface):
 
     @retry(
         stop=stop_after_delay(128),
-        wait=wait_exponential_jitter(2, 128),
+        wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
