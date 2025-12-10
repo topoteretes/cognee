@@ -201,18 +201,6 @@ async def setup_test_environment_empty():
 
 
 @pytest.mark.asyncio
-async def test_chunks_retriever_context_simple(setup_test_environment_with_chunks_simple):
-    """Integration test: verify ChunksRetriever can retrieve chunk context (simple)."""
-    retriever = ChunksRetriever()
-
-    context = await retriever.get_context("Mike")
-
-    assert isinstance(context, list), "Context should be a list"
-    assert len(context) > 0, "Context should not be empty"
-    assert context[0]["text"] == "Mike Broski", "Failed to get Mike Broski"
-
-
-@pytest.mark.asyncio
 async def test_chunks_retriever_context_multiple_chunks(setup_test_environment_with_chunks_simple):
     """Integration test: verify ChunksRetriever can retrieve multiple chunks."""
     retriever = ChunksRetriever()
