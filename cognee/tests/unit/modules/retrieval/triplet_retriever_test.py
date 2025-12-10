@@ -92,15 +92,17 @@ async def test_get_completion_without_session(mock_vector_engine):
 
     retriever = TripletRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
-    ), patch(
-        "cognee.modules.retrieval.triplet_retriever.generate_completion",
-        return_value="Generated answer",
-    ), patch(
-        "cognee.modules.retrieval.triplet_retriever.CacheConfig"
-    ) as mock_cache_config:
+    with (
+        patch(
+            "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.triplet_retriever.generate_completion",
+            return_value="Generated answer",
+        ),
+        patch("cognee.modules.retrieval.triplet_retriever.CacheConfig") as mock_cache_config,
+    ):
         mock_config = MagicMock()
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
@@ -117,12 +119,13 @@ async def test_get_completion_with_provided_context(mock_vector_engine):
     """Test get_completion with provided context."""
     retriever = TripletRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.triplet_retriever.generate_completion",
-        return_value="Generated answer",
-    ), patch(
-        "cognee.modules.retrieval.triplet_retriever.CacheConfig"
-    ) as mock_cache_config:
+    with (
+        patch(
+            "cognee.modules.retrieval.triplet_retriever.generate_completion",
+            return_value="Generated answer",
+        ),
+        patch("cognee.modules.retrieval.triplet_retriever.CacheConfig") as mock_cache_config,
+    ):
         mock_config = MagicMock()
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
