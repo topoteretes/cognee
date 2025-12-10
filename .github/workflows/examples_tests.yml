@@ -313,7 +313,6 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           STORAGE_BACKEND: 's3'
-          AWS_ENDPOINT_URL: https://s3-eu-west-1.amazonaws.com
           AWS_REGION: eu-west-1
           DATA_ROOT_DIRECTORY: "s3://github-runner-cognee-tests/cognee/data"
           SYSTEM_ROOT_DIRECTORY: "s3://github-runner-cognee-tests/cognee/system"
