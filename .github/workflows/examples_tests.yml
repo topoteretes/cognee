@@ -315,8 +315,8 @@ jobs:
           STORAGE_BACKEND: 's3'
           AWS_ENDPOINT_URL: https://s3-eu-west-1.amazonaws.com
           AWS_REGION: eu-west-1
-          DATA_ROOT_DIRECTORY: "s3://cognee-temp/cognee/data"
-          SYSTEM_ROOT_DIRECTORY: "s3://cognee-temp/cognee/system"
+          DATA_ROOT_DIRECTORY: "s3://github-runner-cognee-tests/cognee/data"
+          SYSTEM_ROOT_DIRECTORY: "s3://github-runner-cognee-tests/cognee/system"
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           DB_PROVIDER: 'postgres'
