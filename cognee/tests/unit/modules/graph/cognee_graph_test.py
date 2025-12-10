@@ -305,7 +305,7 @@ async def test_map_vector_distances_multiple_categories(setup_graph):
 
 
 @pytest.mark.asyncio
-async def test_map_vector_distances_to_graph_edges_with_payload(setup_graph, mock_vector_engine):
+async def test_map_vector_distances_to_graph_edges_with_payload(setup_graph):
     """Test mapping vector distances to edges when edge_distances provided."""
     graph = setup_graph
 
@@ -325,48 +325,13 @@ async def test_map_vector_distances_to_graph_edges_with_payload(setup_graph, moc
         MockScoredResult("e1", 0.92, payload={"text": "CONNECTS_TO"}),
     ]
 
-    await graph.map_vector_distances_to_graph_edges(
-        vector_engine=mock_vector_engine,
-        query_vector=[0.1, 0.2, 0.3],
-        edge_distances=edge_distances,
-    )
+    await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
     assert graph.edges[0].attributes.get("vector_distance") == 0.92
 
 
 @pytest.mark.asyncio
-async def test_map_vector_distances_to_graph_edges_search(setup_graph, mock_vector_engine):
-    """Test mapping edge distances when searching for them."""
-    graph = setup_graph
-
-    node1 = Node("1")
-    node2 = Node("2")
-    graph.add_node(node1)
-    graph.add_node(node2)
-
-    edge = Edge(
-        node1,
-        node2,
-        attributes={"edge_text": "CONNECTS_TO", "relationship_type": "connects"},
-    )
-    graph.add_edge(edge)
-
-    mock_vector_engine.search.return_value = [
-        MockScoredResult("e1", 0.88, payload={"text": "CONNECTS_TO"}),
-    ]
-
-    await graph.map_vector_distances_to_graph_edges(
-        vector_engine=mock_vector_engine,
-        query_vector=[0.1, 0.2, 0.3],
-        edge_distances=None,
-    )
-
-    mock_vector_engine.search.assert_called_once()
-    assert graph.edges[0].attributes.get("vector_distance") == 0.88
-
-
-@pytest.mark.asyncio
-async def test_map_vector_distances_partial_edge_coverage(setup_graph, mock_vector_engine):
+async def test_map_vector_distances_partial_edge_coverage(setup_graph):
     """Test mapping edge distances when only some edges have results."""
     graph = setup_graph
 
@@ -386,20 +351,14 @@ async def test_map_vector_distances_partial_edge_coverage(setup_graph, mock_vect
         MockScoredResult("e1", 0.92, payload={"text": "CONNECTS_TO"}),
     ]
 
-    await graph.map_vector_distances_to_graph_edges(
-        vector_engine=mock_vector_engine,
-        query_vector=[0.1, 0.2, 0.3],
-        edge_distances=edge_distances,
-    )
+    await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
     assert graph.edges[0].attributes.get("vector_distance") == 0.92
     assert graph.edges[1].attributes.get("vector_distance") == 3.5
 
 
 @pytest.mark.asyncio
-async def test_map_vector_distances_edges_fallback_to_relationship_type(
-    setup_graph, mock_vector_engine
-):
+async def test_map_vector_distances_edges_fallback_to_relationship_type(setup_graph):
     """Test that edge mapping falls back to relationship_type when edge_text is missing."""
     graph = setup_graph
 
@@ -419,17 +378,13 @@ async def test_map_vector_distances_edges_fallback_to_relationship_type(
         MockScoredResult("e1", 0.85, payload={"text": "KNOWS"}),
     ]
 
-    await graph.map_vector_distances_to_graph_edges(
-        vector_engine=mock_vector_engine,
-        query_vector=[0.1, 0.2, 0.3],
-        edge_distances=edge_distances,
-    )
+    await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
     assert graph.edges[0].attributes.get("vector_distance") == 0.85
 
 
 @pytest.mark.asyncio
-async def test_map_vector_distances_no_edge_matches(setup_graph, mock_vector_engine):
+async def test_map_vector_distances_no_edge_matches(setup_graph):
     """Test edge mapping when no edges match the distance results."""
     graph = setup_graph
 
@@ -449,26 +404,22 @@ async def test_map_vector_distances_no_edge_matches(setup_graph, mock_vector_eng
         MockScoredResult("e1", 0.92, payload={"text": "SOME_OTHER_EDGE"}),
     ]
 
-    await graph.map_vector_distances_to_graph_edges(
-        vector_engine=mock_vector_engine,
-        query_vector=[0.1, 0.2, 0.3],
-        edge_distances=edge_distances,
-    )
+    await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
     assert graph.edges[0].attributes.get("vector_distance") == 3.5
 
 
 @pytest.mark.asyncio
-async def test_map_vector_distances_invalid_query_vector(setup_graph, mock_vector_engine):
-    """Test that invalid query vector raises error."""
+async def test_map_vector_distances_none_returns_early(setup_graph):
+    """Test that edge_distances=None returns early without error."""
     graph = setup_graph
+    graph.add_node(Node("1"))
+    graph.add_node(Node("2"))
+    graph.add_edge(Edge(graph.get_node("1"), graph.get_node("2")))
 
-    with pytest.raises(ValueError, match="Failed to generate query embedding"):
-        await graph.map_vector_distances_to_graph_edges(
-            vector_engine=mock_vector_engine,
-            query_vector=[],
-            edge_distances=None,
-        )
+    await graph.map_vector_distances_to_graph_edges(edge_distances=None)
+
+    assert graph.edges[0].attributes.get("vector_distance") == 3.5
 
 
 @pytest.mark.asyncio

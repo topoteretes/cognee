@@ -5,12 +5,13 @@ import instructor
 from typing import Type
 from openai import OpenAI
 from pydantic import BaseModel
+
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
+    LLMInterface,
+)
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.observability.get_observe import get_observe
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
-    GenericAPIAdapter,
-)
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 from tenacity import (
     retry,
     stop_after_delay,
@@ -20,10 +21,9 @@ from tenacity import (
 )
 
 logger = get_logger()
-observe = get_observe()
 
 
-class OllamaAPIAdapter(GenericAPIAdapter):
+class OllamaAPIAdapter(LLMInterface):
     """
     Adapter for a Generic API LLM provider using instructor with an OpenAI backend.
 
@@ -47,20 +47,18 @@ class OllamaAPIAdapter(GenericAPIAdapter):
 
     def __init__(
         self,
+        endpoint: str,
         api_key: str,
         model: str,
         name: str,
         max_completion_tokens: int,
-        endpoint: str,
         instructor_mode: str = None,
     ):
-        super().__init__(
-            api_key=api_key,
-            model=model,
-            max_completion_tokens=max_completion_tokens,
-            name="Ollama",
-            endpoint=endpoint,
-        )
+        self.name = name
+        self.model = model
+        self.api_key = api_key
+        self.endpoint = endpoint
+        self.max_completion_tokens = max_completion_tokens
 
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
@@ -69,7 +67,6 @@ class OllamaAPIAdapter(GenericAPIAdapter):
             mode=instructor.Mode(self.instructor_mode),
         )
 
-    @observe(as_type="generation")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
@@ -99,21 +96,113 @@ class OllamaAPIAdapter(GenericAPIAdapter):
 
             - BaseModel: A structured output that conforms to the specified response model.
         """
+        async with llm_rate_limiter_context_manager():
+            response = self.aclient.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"{text_input}",
+                    },
+                    {
+                        "role": "system",
+                        "content": system_prompt,
+                    },
+                ],
+                max_retries=2,
+                response_model=response_model,
+            )
+
+        return response
+
+    @retry(
+        stop=stop_after_delay(128),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        reraise=True,
+    )
+    async def create_transcript(self, input_file: str) -> str:
+        """
+        Generate an audio transcript from a user query.
+
+        This synchronous method takes an input audio file and returns its transcription. Raises
+        a FileNotFoundError if the input file does not exist, and raises a ValueError if
+        transcription fails or returns no text.
+
+        Parameters:
+        -----------
+
+            - input_file (str): The path to the audio file to be transcribed.
+
+        Returns:
+        --------
+
+            - str: The transcription of the audio as a string.
+        """
+
+        async with open_data_file(input_file, mode="rb") as audio_file:
+            transcription = self.aclient.audio.transcriptions.create(
+                model="whisper-1",  # Ensure the correct model for transcription
+                file=audio_file,
+                language="en",
+            )
+
+        # Ensure the response contains a valid transcript
+        if not hasattr(transcription, "text"):
+            raise ValueError("Transcription failed. No text returned.")
+
+        return transcription.text
+
+    @retry(
+        stop=stop_after_delay(128),
+        wait=wait_exponential_jitter(2, 128),
+        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        before_sleep=before_sleep_log(logger, logging.DEBUG),
+        reraise=True,
+    )
+    async def transcribe_image(self, input_file: str) -> str:
+        """
+        Transcribe content from an image using base64 encoding.
+
+        This synchronous method takes an input image file, encodes it as base64, and returns the
+        transcription of its content. Raises a FileNotFoundError if the input file does not
+        exist, and raises a ValueError if the transcription fails or no valid response is
+        received.
+
+        Parameters:
+        -----------
+
+            - input_file (str): The path to the image file to be transcribed.
+
+        Returns:
+        --------
+
+            - str: The transcription of the image's content as a string.
+        """
+
+        async with open_data_file(input_file, mode="rb") as image_file:
+            encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
         response = self.aclient.chat.completions.create(
             model=self.model,
             messages=[
                 {
                     "role": "user",
-                    "content": f"{text_input}",
-                },
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
+                    "content": [
+                        {"type": "text", "text": "What's in this image?"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"},
+                        },
+                    ],
+                }
             ],
-            max_retries=5,
-            response_model=response_model,
+            max_completion_tokens=300,
         )
 
-        return response
+        # Ensure response is valid before accessing .choices[0].message.content
+        if not hasattr(response, "choices") or not response.choices:
+            raise ValueError("Image transcription failed. No response received.")
+
+        return response.choices[0].message.content

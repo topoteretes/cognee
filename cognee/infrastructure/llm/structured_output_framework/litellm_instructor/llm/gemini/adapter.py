@@ -9,6 +9,9 @@ from litellm.exceptions import ContentPolicyViolationError
 from instructor.core import InstructorRetryException
 
 import logging
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
+from cognee.shared.logging_utils import get_logger
+
 from tenacity import (
     retry,
     stop_after_delay,
@@ -78,7 +81,7 @@ class GeminiAdapter(GenericAPIAdapter):
     @observe(as_type="generation")
     @retry(
         stop=stop_after_delay(128),
-        wait=wait_exponential_jitter(2, 128),
+        wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
@@ -110,24 +113,25 @@ class GeminiAdapter(GenericAPIAdapter):
         """
 
         try:
-            return await self.aclient.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"""{text_input}""",
-                    },
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                ],
-                api_key=self.api_key,
-                max_retries=self.MAX_RETRIES,
-                api_base=self.endpoint,
-                api_version=self.api_version,
-                response_model=response_model,
-            )
+            async with llm_rate_limiter_context_manager():
+                return await self.aclient.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": f"""{text_input}""",
+                        },
+                        {
+                            "role": "system",
+                            "content": system_prompt,
+                        },
+                    ],
+                    api_key=self.api_key,
+                    max_retries=2,
+                    api_base=self.endpoint,
+                    api_version=self.api_version,
+                    response_model=response_model,
+                )
         except (
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
@@ -145,23 +149,24 @@ class GeminiAdapter(GenericAPIAdapter):
                 )
 
             try:
-                return await self.aclient.chat.completions.create(
-                    model=self.fallback_model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": f"""{text_input}""",
-                        },
-                        {
-                            "role": "system",
-                            "content": system_prompt,
-                        },
-                    ],
-                    max_retries=self.MAX_RETRIES,
-                    api_key=self.fallback_api_key,
-                    api_base=self.fallback_endpoint,
-                    response_model=response_model,
-                )
+                async with llm_rate_limiter_context_manager():
+                    return await self.aclient.chat.completions.create(
+                        model=self.fallback_model,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": f"""{text_input}""",
+                            },
+                            {
+                                "role": "system",
+                                "content": system_prompt,
+                            },
+                        ],
+                        max_retries=2,
+                        api_key=self.fallback_api_key,
+                        api_base=self.fallback_endpoint,
+                        response_model=response_model,
+                    )
             except (
                 ContentFilterFinishReasonError,
                 ContentPolicyViolationError,

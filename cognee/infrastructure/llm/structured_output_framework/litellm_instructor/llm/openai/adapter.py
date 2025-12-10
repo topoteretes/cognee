@@ -21,6 +21,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
 from cognee.infrastructure.llm.exceptions import (
     ContentPolicyFilterError,
 )
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
@@ -101,7 +102,7 @@ class OpenAIAdapter(GenericAPIAdapter):
     @observe(as_type="generation")
     @retry(
         stop=stop_after_delay(128),
-        wait=wait_exponential_jitter(2, 128),
+        wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
@@ -131,34 +132,9 @@ class OpenAIAdapter(GenericAPIAdapter):
         """
 
         try:
-            return await self.aclient.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"""{text_input}""",
-                    },
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                ],
-                api_key=self.api_key,
-                api_base=self.endpoint,
-                api_version=self.api_version,
-                response_model=response_model,
-                max_retries=self.MAX_RETRIES,
-            )
-        except (
-            ContentFilterFinishReasonError,
-            ContentPolicyViolationError,
-            InstructorRetryException,
-        ) as e:
-            if not (self.fallback_model and self.fallback_api_key):
-                raise e
-            try:
+            async with llm_rate_limiter_context_manager():
                 return await self.aclient.chat.completions.create(
-                    model=self.fallback_model,
+                    model=self.model,
                     messages=[
                         {
                             "role": "user",
@@ -169,11 +145,38 @@ class OpenAIAdapter(GenericAPIAdapter):
                             "content": system_prompt,
                         },
                     ],
-                    api_key=self.fallback_api_key,
-                    api_base=self.fallback_endpoint,
+                    api_key=self.api_key,
+                    api_base=self.endpoint,
+                    api_version=self.api_version,
                     response_model=response_model,
                     max_retries=self.MAX_RETRIES,
                 )
+        except (
+            ContentFilterFinishReasonError,
+            ContentPolicyViolationError,
+            InstructorRetryException,
+        ) as e:
+            if not (self.fallback_model and self.fallback_api_key):
+                raise e
+            try:
+                async with llm_rate_limiter_context_manager():
+                    return await self.aclient.chat.completions.create(
+                        model=self.fallback_model,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": f"""{text_input}""",
+                            },
+                            {
+                                "role": "system",
+                                "content": system_prompt,
+                            },
+                        ],
+                        api_key=self.fallback_api_key,
+                        # api_base=self.fallback_endpoint,
+                        response_model=response_model,
+                        max_retries=self.MAX_RETRIES,
+                    )
             except (
                 ContentFilterFinishReasonError,
                 ContentPolicyViolationError,

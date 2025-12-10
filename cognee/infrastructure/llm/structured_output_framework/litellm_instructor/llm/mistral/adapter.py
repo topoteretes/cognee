@@ -10,6 +10,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     GenericAPIAdapter,
 )
 from cognee.infrastructure.llm.config import get_llm_config
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 
 import logging
 from tenacity import (
@@ -69,7 +70,7 @@ class MistralAdapter(GenericAPIAdapter):
     @observe(as_type="generation")
     @retry(
         stop=stop_after_delay(128),
-        wait=wait_exponential_jitter(2, 128),
+        wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
@@ -104,13 +105,14 @@ class MistralAdapter(GenericAPIAdapter):
                 },
             ]
             try:
-                response = await self.aclient.chat.completions.create(
-                    model=self.model,
-                    max_tokens=self.max_completion_tokens,
-                    max_retries=5,
-                    messages=messages,
-                    response_model=response_model,
-                )
+                async with llm_rate_limiter_context_manager():
+                    response = await self.aclient.chat.completions.create(
+                        model=self.model,
+                        max_tokens=self.max_completion_tokens,
+                        max_retries=2,
+                        messages=messages,
+                        response_model=response_model,
+                    )
                 if response.choices and response.choices[0].message.content:
                     content = response.choices[0].message.content
                     return response_model.model_validate_json(content)

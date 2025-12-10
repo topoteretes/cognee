@@ -2,6 +2,7 @@ import os
 from typing import Callable, List, Optional, Type
 
 from cognee.modules.engine.models.node_set import NodeSet
+from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.modules.search.types import SearchType
 from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
@@ -22,7 +23,6 @@ from cognee.modules.retrieval.graph_completion_cot_retriever import GraphComplet
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
 )
-from cognee.modules.retrieval.code_retriever import CodeRetriever
 from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriever
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 
@@ -56,6 +56,18 @@ async def get_search_type_tools(
                 system_prompt=system_prompt,
             ).get_completion,
             CompletionRetriever(
+                system_prompt_path=system_prompt_path,
+                top_k=top_k,
+                system_prompt=system_prompt,
+            ).get_context,
+        ],
+        SearchType.TRIPLET_COMPLETION: [
+            TripletRetriever(
+                system_prompt_path=system_prompt_path,
+                top_k=top_k,
+                system_prompt=system_prompt,
+            ).get_completion,
+            TripletRetriever(
                 system_prompt_path=system_prompt_path,
                 top_k=top_k,
                 system_prompt=system_prompt,
@@ -149,10 +161,6 @@ async def get_search_type_tools(
                 triplet_distance_penalty=triplet_distance_penalty,
             ).get_context,
         ],
-        SearchType.CODE: [
-            CodeRetriever(top_k=top_k).get_completion,
-            CodeRetriever(top_k=top_k).get_context,
-        ],
         SearchType.CYPHER: [
             CypherSearchRetriever().get_completion,
             CypherSearchRetriever().get_context,
@@ -195,7 +203,19 @@ async def get_search_type_tools(
     ):
         raise UnsupportedSearchTypeError("Cypher query search types are disabled.")
 
-    search_type_tools = search_tasks.get(query_type)
+    from cognee.modules.retrieval.registered_community_retrievers import (
+        registered_community_retrievers,
+    )
+
+    if query_type in registered_community_retrievers:
+        retriever = registered_community_retrievers[query_type]
+        retriever_instance = retriever(top_k=top_k)
+        search_type_tools = [
+            retriever_instance.get_completion,
+            retriever_instance.get_context,
+        ]
+    else:
+        search_type_tools = search_tasks.get(query_type)
 
     if not search_type_tools:
         raise UnsupportedSearchTypeError(str(query_type))
