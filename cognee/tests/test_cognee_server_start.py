@@ -25,8 +25,6 @@ class TestCogneeServerStart(unittest.TestCase):
                 "--port",
                 "8000",
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
             preexec_fn=os.setsid,
         )
         # Give the server some time to start
