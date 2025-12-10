@@ -207,7 +207,32 @@ async def test_chunks_retriever_context_simple(setup_test_environment_with_chunk
 
     context = await retriever.get_context("Mike")
 
+    assert isinstance(context, list), "Context should be a list"
+    assert len(context) > 0, "Context should not be empty"
     assert context[0]["text"] == "Mike Broski", "Failed to get Mike Broski"
+
+
+@pytest.mark.asyncio
+async def test_chunks_retriever_context_multiple_chunks(setup_test_environment_with_chunks_simple):
+    """Integration test: verify ChunksRetriever can retrieve multiple chunks."""
+    retriever = ChunksRetriever()
+
+    context = await retriever.get_context("Steve")
+
+    assert isinstance(context, list), "Context should be a list"
+    assert len(context) > 0, "Context should not be empty"
+    assert any(chunk["text"] == "Steve Rodger" for chunk in context), "Failed to get Steve Rodger chunk"
+
+
+@pytest.mark.asyncio
+async def test_chunks_retriever_top_k_limit(setup_test_environment_with_chunks_complex):
+    """Integration test: verify ChunksRetriever respects top_k parameter."""
+    retriever = ChunksRetriever(top_k=2)
+
+    context = await retriever.get_context("Employee")
+
+    assert isinstance(context, list), "Context should be a list"
+    assert len(context) <= 2, "Should respect top_k limit"
 
 
 @pytest.mark.asyncio
