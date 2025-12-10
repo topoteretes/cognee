@@ -205,3 +205,14 @@ async def test_get_graph_completion_cot_context_on_empty_graph(setup_test_enviro
     assert all(isinstance(item, str) and item.strip() for item in answer), (
         "Answer must contain only non-empty strings"
     )
+
+
+@pytest.mark.asyncio
+async def test_graph_completion_cot_get_triplets_empty(setup_test_environment_empty):
+    """Integration test: verify GraphCompletionCotRetriever get_triplets handles empty graph."""
+    retriever = GraphCompletionCotRetriever()
+
+    triplets = await retriever.get_triplets("Who works at Figma?")
+
+    assert isinstance(triplets, list), "Triplets should be a list"
+    assert len(triplets) == 0, "Should return empty list on empty graph"
