@@ -48,6 +48,8 @@ class OntologyService:
     async def upload_ontology(
         self, ontology_key: str, file: UploadFile, user, description: Optional[str] = None
     ) -> OntologyMetadata:
+        if not file.filename:
+            raise ValueError("File must have a filename")
         if not file.filename.lower().endswith(".owl"):
             raise ValueError("File must be in .owl format")
 
