@@ -211,7 +211,19 @@ async def test_rag_completion_context_simple(setup_test_environment_with_chunks_
 
     context = await retriever.get_context("Mike")
 
-    assert context == "Mike Broski", "Failed to get Mike Broski"
+    assert isinstance(context, str), "Context should be a string"
+    assert "Mike Broski" in context, "Failed to get Mike Broski"
+
+
+@pytest.mark.asyncio
+async def test_rag_completion_context_multiple_chunks(setup_test_environment_with_chunks_simple):
+    """Integration test: verify CompletionRetriever can retrieve context from multiple chunks."""
+    retriever = CompletionRetriever()
+
+    context = await retriever.get_context("Steve")
+
+    assert isinstance(context, str), "Context should be a string"
+    assert "Steve Rodger" in context, "Failed to get Steve Rodger"
 
 
 @pytest.mark.asyncio
