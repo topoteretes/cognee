@@ -263,14 +263,18 @@ async def test_get_context_with_time_range(mock_graph_engine, mock_vector_engine
     mock_result2 = SimpleNamespace(payload={"id": "e1"}, score=0.10)
     mock_vector_engine.search.return_value = [mock_result1, mock_result2]
 
-    with patch.object(
-        retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
-    ), patch(
-        "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-        return_value=mock_graph_engine,
-    ), patch(
-        "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+    with (
+        patch.object(
+            retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
+            return_value=mock_vector_engine,
+        ),
     ):
         context = await retriever.get_context("What happened in 2024?")
 
@@ -284,14 +288,19 @@ async def test_get_context_fallback_to_triplets_no_time(mock_graph_engine):
     """Test get_context falls back to triplets when no time is extracted."""
     retriever = TemporalRetriever()
 
-    with patch(
-        "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-        return_value=mock_graph_engine,
-    ), patch.object(
-        retriever, "get_triplets", return_value=[{"s": "a", "p": "b", "o": "c"}]
-    ) as mock_get_triplets, patch.object(
-        retriever, "resolve_edges_to_text", return_value="triplet text"
-    ) as mock_resolve:
+    with (
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch.object(
+            retriever, "get_triplets", return_value=[{"s": "a", "p": "b", "o": "c"}]
+        ) as mock_get_triplets,
+        patch.object(
+            retriever, "resolve_edges_to_text", return_value="triplet text"
+        ) as mock_resolve,
+    ):
+
         async def mock_extract_time(query):
             return None, None
 
@@ -311,14 +320,19 @@ async def test_get_context_no_events_found(mock_graph_engine):
 
     mock_graph_engine.collect_time_ids.return_value = []
 
-    with patch(
-        "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-        return_value=mock_graph_engine,
-    ), patch.object(
-        retriever, "get_triplets", return_value=[{"s": "a", "p": "b", "o": "c"}]
-    ) as mock_get_triplets, patch.object(
-        retriever, "resolve_edges_to_text", return_value="triplet text"
-    ) as mock_resolve:
+    with (
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch.object(
+            retriever, "get_triplets", return_value=[{"s": "a", "p": "b", "o": "c"}]
+        ) as mock_get_triplets,
+        patch.object(
+            retriever, "resolve_edges_to_text", return_value="triplet text"
+        ) as mock_resolve,
+    ):
+
         async def mock_extract_time(query):
             return "2024-01-01", "2024-12-31"
 
