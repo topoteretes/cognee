@@ -2,9 +2,7 @@ import asyncio
 from typing import Type, List, Optional
 from pydantic import BaseModel
 
-from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
-from cognee.tasks.storage import index_graph_edges
 from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.get_default_ontology_resolver import (
