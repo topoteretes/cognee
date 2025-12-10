@@ -164,6 +164,8 @@ async def test_summaries_retriever_context(setup_test_environment_with_summaries
 
     context = await retriever.get_context("Christina")
 
+    assert isinstance(context, list), "Context should be a list"
+    assert len(context) > 0, "Context should not be empty"
     assert context[0]["text"] == "C.M.", "Failed to get Christina Mayer"
 
 
