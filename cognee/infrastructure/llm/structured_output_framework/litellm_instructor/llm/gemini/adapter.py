@@ -10,7 +10,6 @@ from instructor.core import InstructorRetryException
 
 import logging
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
-from cognee.shared.logging_utils import get_logger
 
 from tenacity import (
     retry,

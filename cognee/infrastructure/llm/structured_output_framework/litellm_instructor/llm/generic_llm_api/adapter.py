@@ -27,6 +27,8 @@ from tenacity import (
     before_sleep_log,
 )
 
+from ..types import TranscriptionReturnType
+
 logger = get_logger()
 observe = get_observe()
 
@@ -191,7 +193,7 @@ class GenericAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def create_transcript(self, input) -> Optional[BaseModel]:
+    async def create_transcript(self, input) -> Optional[TranscriptionReturnType]:
         """
         Generate an audio transcript from a user query.
 
@@ -214,7 +216,7 @@ class GenericAPIAdapter(LLMInterface):
             raise ValueError(
                 f"Could not determine MIME type for audio file: {input}. Is the extension correct?"
             )
-        return litellm.completion(
+        response =  litellm.completion(
             model=self.transcription_model,
             messages=[
                 {
@@ -234,6 +236,11 @@ class GenericAPIAdapter(LLMInterface):
             api_base=self.endpoint,
             max_retries=self.MAX_RETRIES,
         )
+        if response and response.choices and len(response.choices) > 0:
+            return TranscriptionReturnType(response.choices[0].message.content,response)
+        else:
+            return None
+
 
     @observe(as_type="transcribe_image")
     @retry(

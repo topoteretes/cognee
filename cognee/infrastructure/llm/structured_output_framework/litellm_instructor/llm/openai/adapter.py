@@ -1,6 +1,6 @@
 import litellm
 import instructor
-from typing import Type
+from typing import Type, Optional
 from pydantic import BaseModel
 from openai import ContentFilterFinishReasonError
 from litellm.exceptions import ContentPolicyViolationError
@@ -25,6 +25,7 @@ from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
+from ..types import TranscriptionReturnType
 
 logger = get_logger()
 
@@ -200,7 +201,7 @@ class OpenAIAdapter(GenericAPIAdapter):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def create_transcript(self, input):
+    async def create_transcript(self, input) -> Optional[TranscriptionReturnType]:
         """
         Generate an audio transcript from a user query.
 
@@ -228,7 +229,9 @@ class OpenAIAdapter(GenericAPIAdapter):
                 api_version=self.api_version,
                 max_retries=self.MAX_RETRIES,
             )
+            if transcription:
+                return TranscriptionReturnType(transcription.text, transcription)
 
-        return transcription
+        return None
 
-    # transcribe image inherited from GenericAdapter
+    # transcribe_image is inherited from GenericAPIAdapter

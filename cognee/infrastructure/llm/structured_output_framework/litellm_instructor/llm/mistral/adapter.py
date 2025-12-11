@@ -1,9 +1,9 @@
 import litellm
 import instructor
 from pydantic import BaseModel
-from typing import Type
-from litellm import JSONSchemaValidationError, transcription
-
+from typing import Type, Optional
+from litellm import JSONSchemaValidationError
+from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.observability.get_observe import get_observe
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
@@ -20,6 +20,7 @@ from tenacity import (
     retry_if_not_exception_type,
     before_sleep_log,
 )
+from ..types import TranscriptionReturnType
 from mistralai import Mistral
 
 logger = get_logger()
@@ -47,8 +48,6 @@ class MistralAdapter(GenericAPIAdapter):
         image_transcribe_model: str = None,
         instructor_mode: str = None,
     ):
-        from mistralai import Mistral
-
         super().__init__(
             api_key=api_key,
             model=model,
@@ -66,6 +65,7 @@ class MistralAdapter(GenericAPIAdapter):
             mode=instructor.Mode(self.instructor_mode),
             api_key=get_llm_config().llm_api_key,
         )
+        self.mistral_client = Mistral(api_key=self.api_key)
 
     @observe(as_type="generation")
     @retry(
@@ -135,7 +135,7 @@ class MistralAdapter(GenericAPIAdapter):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def create_transcript(self, input):
+    async def create_transcript(self, input) -> Optional[TranscriptionReturnType]:
         """
         Generate an audio transcript from a user query.
 
@@ -154,14 +154,14 @@ class MistralAdapter(GenericAPIAdapter):
         if self.transcription_model.startswith("mistral"):
             transcription_model = self.transcription_model.split("/")[-1]
         file_name = input.split("/")[-1]
-        client = Mistral(api_key=self.api_key)
-        with open(input, "rb") as f:
-            transcription_response = client.audio.transcriptions.complete(
+        async with open_data_file(input, mode="rb") as f:
+            transcription_response = self.mistral_client.audio.transcriptions.complete(
                 model=transcription_model,
                 file={
                     "content": f,
                     "file_name": file_name,
                 },
             )
-        # TODO: We need to standardize return type of create_transcript across different models.
-        return transcription_response
+            if transcription_response:
+                return TranscriptionReturnType(transcription_response.text, transcription_response)
+        return None

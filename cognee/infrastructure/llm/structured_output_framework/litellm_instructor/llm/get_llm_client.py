@@ -97,10 +97,11 @@ def get_llm_client(raise_api_key_error: bool = True):
         )
 
         return OllamaAPIAdapter(
+            llm_config.llm_endpoint,
             llm_config.llm_api_key,
             llm_config.llm_model,
+            "Ollama",
             max_completion_tokens,
-            llm_config.llm_endpoint,
             instructor_mode=llm_config.llm_instructor_mode.lower(),
         )
 
