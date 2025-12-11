@@ -72,6 +72,7 @@ jobs:
       - name: Run Temporal Graph with Neo4j (lancedb + sqlite)
         env:
           ENV: 'dev'
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
           LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
           LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -123,6 +124,7 @@ jobs:
         - name: Run Temporal Graph with Kuzu (postgres + pgvector)
           env:
             ENV: dev
+            ENABLE_BACKEND_ACCESS_CONTROL: 'false'
             LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
             LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
             LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -189,6 +191,7 @@ jobs:
       - name: Run Temporal Graph with Neo4j (postgres + pgvector)
         env:
           ENV: dev
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
           LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
           LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}

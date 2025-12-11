@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Union, Optional
 from uuid import UUID
 
+from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
@@ -273,6 +274,9 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     if chunks_per_batch is None:
         chunks_per_batch = 100
 
+    cognify_config = get_cognify_config()
+    embed_triplets = cognify_config.triplet_embedding
+
     default_tasks = [
         Task(classify_documents),
         Task(check_permissions_on_dataset, user=user, permissions=["write"]),
@@ -292,7 +296,11 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             summarize_text,
             task_config={"batch_size": chunks_per_batch},
         ),
-        Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
+        Task(
+            add_data_points,
+            embed_triplets=embed_triplets,
+            task_config={"batch_size": chunks_per_batch},
+        ),
     ]
 
     return default_tasks
