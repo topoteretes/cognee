@@ -1,5 +1,6 @@
 import pathlib
 import os
+import pytest
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -22,7 +23,8 @@ from collections import Counter
 logger = get_logger()
 
 
-async def main():
+@pytest.mark.asyncio
+async def test_search_db():
     # This test runs for multiple db settings, to run this locally set the corresponding db envs
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -265,7 +267,7 @@ async def main():
 
     await cognee.add(text_1, dataset_name)
 
-    await cognee.add([text], dataset_name)
+    await cognee.add([explanation_file_path_quantum], dataset_name)
 
     await cognee.cognify([dataset_name])
 
@@ -296,9 +298,3 @@ async def main():
             assert properties["feedback_weight"] >= 6, (
                 "Feedback weight calculation is not correct, it should be more then 6."
             )
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())

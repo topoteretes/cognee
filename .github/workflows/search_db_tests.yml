@@ -54,7 +54,7 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           VECTOR_DB_PROVIDER: 'lancedb'
           DB_PROVIDER: 'sqlite'
-        run: uv run python ./cognee/tests/test_search_db.py
+        run: uv run pytest cognee/tests/test_search_db.py -v
 
   run-neo4j-lance-sqlite-search-tests:
     name: Search test for Neo4j/LanceDB/Sqlite (Python ${{ matrix.python-version }})
@@ -100,7 +100,7 @@ jobs:
           GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
-        run: uv run python ./cognee/tests/test_search_db.py
+        run: uv run pytest cognee/tests/test_search_db.py -v
 
   run-kuzu-pgvector-postgres-search-tests:
       name: Search test for Kuzu/PGVector/Postgres (Python ${{ matrix.python-version }})
@@ -159,7 +159,7 @@ jobs:
             DB_PORT: 5432
             DB_USERNAME: cognee
             DB_PASSWORD: cognee
-          run: uv run python ./cognee/tests/test_search_db.py
+          run: uv run pytest cognee/tests/test_search_db.py -v
 
   run-neo4j-pgvector-postgres-search-tests:
     name: Search test for Neo4j/PGVector/Postgres (Python ${{ matrix.python-version }})
@@ -225,4 +225,4 @@ jobs:
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
-        run: uv run python ./cognee/tests/test_search_db.py
+        run: uv run pytest cognee/tests/test_search_db.py -v
