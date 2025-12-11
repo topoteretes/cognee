@@ -69,7 +69,7 @@ async def run_custom_pipeline(
         datasets=dataset,
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
-        pipeline_cache=pipeline_cache,
+        use_pipeline_cache=pipeline_cache,
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
         pipeline_name=pipeline_name,

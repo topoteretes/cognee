@@ -10,8 +10,8 @@ Architecture Overview:
 The pipeline_cache mechanism works at the dataset level:
 1. When a pipeline runs, it logs its status (INITIATED -> STARTED -> COMPLETED)
 2. Before each run, `check_pipeline_run_qualification()` checks the pipeline status
-3. If `pipeline_cache=True` and status is COMPLETED/STARTED, the pipeline skips
-4. If `pipeline_cache=False`, the pipeline always re-executes regardless of status
+3. If `use_pipeline_cache=True` and status is COMPLETED/STARTED, the pipeline skips
+4. If `use_pipeline_cache=False`, the pipeline always re-executes regardless of status
 """
 
 import pytest
@@ -46,7 +46,7 @@ class TestPipelineCache:
     @pytest.mark.asyncio
     async def test_pipeline_cache_off_allows_reexecution(self):
         """
-        Test that with pipeline_cache=False, the pipeline re-executes
+        Test that with use_pipeline_cache=False, the pipeline re-executes
         even when it has already completed for the dataset.
 
         Expected behavior:
@@ -70,7 +70,7 @@ class TestPipelineCache:
             data=["sample data"],  # Data is necessary to trigger processing
             user=user,
             pipeline_name="test_cache_off_pipeline",
-            pipeline_cache=False,
+            use_pipeline_cache=False,
         ):
             pipeline_results_1.append(result)
 
@@ -85,7 +85,7 @@ class TestPipelineCache:
             data=["sample data"],  # Data is necessary to trigger processing
             user=user,
             pipeline_name="test_cache_off_pipeline",
-            pipeline_cache=False,
+            use_pipeline_cache=False,
         ):
             pipeline_results_2.append(result)
 
@@ -120,7 +120,7 @@ class TestPipelineCache:
             user=user,
             data=["sample data"],  # Data is necessary to trigger processing
             pipeline_name=pipeline_name,
-            pipeline_cache=True,
+            use_pipeline_cache=True,
         ):
             pipeline_result.append(result)
 
@@ -134,7 +134,7 @@ class TestPipelineCache:
             user=user,
             data=["sample data"],  # Data is necessary to trigger processing
             pipeline_name=pipeline_name,
-            pipeline_cache=True,
+            use_pipeline_cache=True,
         ):
             pass
 
@@ -153,7 +153,7 @@ class TestPipelineCache:
             user=user,
             data=["sample data"],  # Data is necessary to trigger processing
             pipeline_name=pipeline_name,
-            pipeline_cache=True,
+            use_pipeline_cache=True,
         ):
             pass
 

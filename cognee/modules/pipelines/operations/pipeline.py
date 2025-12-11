@@ -38,7 +38,7 @@ async def run_pipeline(
     pipeline_name: str = "custom_pipeline",
     vector_db_config: dict = None,
     graph_db_config: dict = None,
-    pipeline_cache: bool = False,
+    use_pipeline_cache: bool = False,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
 ):
@@ -55,7 +55,7 @@ async def run_pipeline(
             data=data,
             pipeline_name=pipeline_name,
             context={"dataset": dataset},
-            pipeline_cache=pipeline_cache,
+            use_pipeline_cache=use_pipeline_cache,
             incremental_loading=incremental_loading,
             data_per_batch=data_per_batch,
         ):
@@ -69,7 +69,7 @@ async def run_pipeline_per_dataset(
     data=None,
     pipeline_name: str = "custom_pipeline",
     context: dict = None,
-    pipeline_cache=False,
+    use_pipeline_cache=False,
     incremental_loading=False,
     data_per_batch: int = 20,
 ):
@@ -83,7 +83,7 @@ async def run_pipeline_per_dataset(
     if process_pipeline_status:
         # If pipeline was already processed or is currently being processed
         # return status information to async generator and finish execution
-        if pipeline_cache:
+        if use_pipeline_cache:
             # If pipeline caching is enabled we do not proceed with re-processing
             yield process_pipeline_status
             return

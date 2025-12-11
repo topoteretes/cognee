@@ -238,7 +238,7 @@ async def cognify(
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
         incremental_loading=incremental_loading,
-        pipeline_cache=True,
+        use_pipeline_cache=True,
         pipeline_name="cognify_pipeline",
         data_per_batch=data_per_batch,
     )

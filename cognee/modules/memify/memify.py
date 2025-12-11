@@ -106,7 +106,7 @@ async def memify(
         datasets=authorized_dataset.id,
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
-        pipeline_cache=False,
+        use_pipeline_cache=False,
         incremental_loading=False,
         pipeline_name="memify_pipeline",
     )
