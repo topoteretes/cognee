@@ -156,13 +156,6 @@ async def test_retriever_contexts():
         f"TripletRetriever: Context did not contain 'germany' or 'netherlands'; got: {context_triplet!r}"
     )
 
-    # Cleanup
-    try:
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
-    except Exception:
-        pass
-
 
 @pytest.mark.asyncio
 async def test_retriever_triplets():
@@ -201,13 +194,6 @@ async def test_retriever_triplets():
             assert 0 <= node2_distance <= 1, (
                 f"{name}: node_2 vector_distance {distance} out of [0,1], this shouldn't happen"
             )
-
-    # Cleanup
-    try:
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
-    except Exception:
-        pass
 
 
 @pytest.mark.asyncio
@@ -275,13 +261,6 @@ async def test_search_operations():
         assert "netherlands" in text.lower(), (
             f"{name}: expected 'netherlands' in result, got: {text!r}"
         )
-
-    # Cleanup
-    try:
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
-    except Exception:
-        pass
 
 
 @pytest.mark.asyncio
@@ -360,13 +339,6 @@ async def test_graph_node_and_edge_counts():
         f"Expected at least six 'belongs_to_set' edges, but found {edge_type_counts.get('belongs_to_set', 0)}"
     )
 
-    # Cleanup
-    try:
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
-    except Exception:
-        pass
-
 
 @pytest.mark.asyncio
 async def test_node_field_validation():
@@ -438,13 +410,6 @@ async def test_node_field_validation():
                     f"Node {node_id} has invalid value for '{field}': {value!r}"
                 )
 
-    # Cleanup
-    try:
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
-    except Exception:
-        pass
-
 
 @pytest.mark.asyncio
 async def test_feedback_weight_calculation():
@@ -478,10 +443,3 @@ async def test_feedback_weight_calculation():
             assert properties["feedback_weight"] >= 6, (
                 "Feedback weight calculation is not correct, it should be more then 6."
             )
-
-    # Cleanup
-    try:
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
-    except Exception:
-        pass
