@@ -3,7 +3,7 @@
 Test client for Cognee MCP Server functionality.
 
 This script tests all the tools and functions available in the Cognee MCP server,
-including cognify, codify, search, prune, status checks, and utility functions.
+including cognify, search, prune, status checks, and utility functions.
 
 Usage:
     # Set your OpenAI API key first
@@ -35,7 +35,7 @@ from src.server import (
     load_class,
 )
 
-# Set timeout for cognify/codify to complete in
+# Set timeout for cognify to complete in
 TIMEOUT = 5 * 60  # 5 min  in seconds
 
 
@@ -151,12 +151,9 @@ DEBUG = True
 
                 expected_tools = {
                     "cognify",
-                    "codify",
                     "search",
                     "prune",
                     "cognify_status",
-                    "codify_status",
-                    "cognee_add_developer_rules",
                     "list_data",
                     "delete",
                 }
@@ -246,106 +243,6 @@ DEBUG = True
                 "message": f"{test_name} test failed",
             }
             print(f"❌ {test_name} test failed: {e}")
-
-    async def test_codify(self):
-        """Test the codify functionality using MCP client."""
-        print("\n🧪 Testing codify functionality...")
-        try:
-            async with self.mcp_server_session() as session:
-                codify_result = await session.call_tool(
-                    "codify", arguments={"repo_path": self.test_repo_dir}
-                )
-
-                start = time.time()  # mark the start
-                while True:
-                    try:
-                        # Wait a moment
-                        await asyncio.sleep(5)
-
-                        # Check if codify processing is finished
-                        status_result = await session.call_tool("codify_status", arguments={})
-                        if hasattr(status_result, "content") and status_result.content:
-                            status_text = (
-                                status_result.content[0].text
-                                if status_result.content
-                                else str(status_result)
-                            )
-                        else:
-                            status_text = str(status_result)
-
-                        if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_text:
-                            break
-                        elif time.time() - start > TIMEOUT:
-                            raise TimeoutError("Codify did not complete in 5min")
-                    except DatabaseNotCreatedError:
-                        if time.time() - start > TIMEOUT:
-                            raise TimeoutError("Database was not created in 5min")
-
-                self.test_results["codify"] = {
-                    "status": "PASS",
-                    "result": codify_result,
-                    "message": "Codify executed successfully",
-                }
-                print("✅ Codify test passed")
-
-        except Exception as e:
-            self.test_results["codify"] = {
-                "status": "FAIL",
-                "error": str(e),
-                "message": "Codify test failed",
-            }
-            print(f"❌ Codify test failed: {e}")
-
-    async def test_cognee_add_developer_rules(self):
-        """Test the cognee_add_developer_rules functionality using MCP client."""
-        print("\n🧪 Testing cognee_add_developer_rules functionality...")
-        try:
-            async with self.mcp_server_session() as session:
-                result = await session.call_tool(
-                    "cognee_add_developer_rules", arguments={"base_path": self.test_data_dir}
-                )
-
-                start = time.time()  # mark the start
-                while True:
-                    try:
-                        # Wait a moment
-                        await asyncio.sleep(5)
-
-                        # Check if developer rule cognify processing is finished
-                        status_result = await session.call_tool("cognify_status", arguments={})
-                        if hasattr(status_result, "content") and status_result.content:
-                            status_text = (
-                                status_result.content[0].text
-                                if status_result.content
-                                else str(status_result)
-                            )
-                        else:
-                            status_text = str(status_result)
-
-                        if str(PipelineRunStatus.DATASET_PROCESSING_COMPLETED) in status_text:
-                            break
-                        elif time.time() - start > TIMEOUT:
-                            raise TimeoutError(
-                                "Cognify of developer rules did not complete in 5min"
-                            )
-                    except DatabaseNotCreatedError:
-                        if time.time() - start > TIMEOUT:
-                            raise TimeoutError("Database was not created in 5min")
-
-                self.test_results["cognee_add_developer_rules"] = {
-                    "status": "PASS",
-                    "result": result,
-                    "message": "Developer rules addition executed successfully",
-                }
-                print("✅ Developer rules test passed")
-
-        except Exception as e:
-            self.test_results["cognee_add_developer_rules"] = {
-                "status": "FAIL",
-                "error": str(e),
-                "message": "Developer rules test failed",
-            }
-            print(f"❌ Developer rules test failed: {e}")
 
     async def test_search_functionality(self):
         """Test the search functionality with different search types using MCP client."""
@@ -680,9 +577,6 @@ class TestModel:
             test_text="Natural language processing (NLP) is an interdisciplinary subfield of computer science and information retrieval.",
             test_name="Cognify2",
         )
-
-        await self.test_codify()
-        await self.test_cognee_add_developer_rules()
 
         # Test list_data and delete functionality
         await self.test_list_data()
