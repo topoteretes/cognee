@@ -1,8 +1,11 @@
 import pathlib
 import os
+import warnings
 import pytest
 import pytest_asyncio
 import cognee
+
+
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
@@ -38,6 +41,27 @@ async def cleanup_litellm_clients():
 
         if hasattr(litellm, "close_litellm_async_clients"):
             # Ensure we await the cleanup coroutine
+            cleanup_coro = litellm.close_litellm_async_clients()
+            if cleanup_coro is not None:
+                await cleanup_coro
+    except (RuntimeError, Exception):
+        # Event loop might already be closing, ignore the error
+        pass
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def cleanup_litellm_clients_session():
+    """Session-scoped fixture to cleanup LiteLLM clients at the end of all tests.
+
+    This ensures cleanup happens before LiteLLM's own cleanup tries to run
+    during event loop closure, preventing RuntimeWarning in Python 3.10.
+    """
+    yield
+    # Final cleanup of LiteLLM async clients at session end
+    try:
+        import litellm
+
+        if hasattr(litellm, "close_litellm_async_clients"):
             cleanup_coro = litellm.close_litellm_async_clients()
             if cleanup_coro is not None:
                 await cleanup_coro
