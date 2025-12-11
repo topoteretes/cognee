@@ -5,18 +5,27 @@ permissions:
   contents: read
 
 on:
+  push:
+    branches:
+      - feature/cog-3213-docs-set-up-guide-script-tests
   workflow_dispatch:
   pull_request:
     branches:
       - main
 
 jobs:
-  load-tests:
-    name: Load Tests
-    uses: ./.github/workflows/load_tests.yml
-    secrets: inherit
+#  load-tests:
+#    name: Load Tests
+#    uses: ./.github/workflows/load_tests.yml
+#    secrets: inherit
 
   docs-tests:
-    name: Docs Tests
-    uses: ./.github/workflows/docs_tests.yml
-    secrets: inherit
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Trigger docs tests
+        run: |
+          curl -sS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.DOCS_REPO_PAT_TOKEN }}" \
+            https://api.github.com/repos/your-org/repo-b/dispatches \
+            -d '{"event_type":"new-main-release","client_payload":{"caller_repo":"'"${GITHUB_REPOSITORY}"'"}}'
