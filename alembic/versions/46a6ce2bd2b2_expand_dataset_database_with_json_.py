@@ -49,77 +49,6 @@ def _recreate_table_without_unique_constraint_sqlite(op, insp):
         sa.Column("graph_database_name", sa.String(), nullable=False),
         sa.Column("vector_database_provider", sa.String(), nullable=False),
         sa.Column("graph_database_provider", sa.String(), nullable=False),
-        sa.Column("vector_database_url", sa.String()),
-        sa.Column("graph_database_url", sa.String()),
-        sa.Column("vector_database_key", sa.String()),
-        sa.Column("graph_database_key", sa.String()),
-        sa.Column(
-            "graph_database_connection_info",
-            sa.JSON(),
-            nullable=False,
-            server_default=sa.text("'{}'"),
-        ),
-        sa.Column(
-            "vector_database_connection_info",
-            sa.JSON(),
-            nullable=False,
-            server_default=sa.text("'{}'"),
-        ),
-        sa.Column("created_at", sa.DateTime()),
-        sa.Column("updated_at", sa.DateTime()),
-        sa.ForeignKeyConstraint(["dataset_id"], ["datasets.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["owner_id"], ["principals.id"], ondelete="CASCADE"),
-    )
-
-    # Copy data into new table
-    conn.execute(
-        sa.text(f"""
-        INSERT INTO {TABLE_NAME}_new
-        SELECT
-            owner_id,
-            dataset_id,
-            vector_database_name,
-            graph_database_name,
-            vector_database_provider,
-            graph_database_provider,
-            vector_database_url,
-            graph_database_url,
-            vector_database_key,
-            graph_database_key,
-            COALESCE(graph_database_connection_info, '{{}}'),
-            COALESCE(vector_database_connection_info, '{{}}'),
-            created_at,
-            updated_at
-        FROM {TABLE_NAME}
-    """)
-    )
-
-    # Drop old table
-    op.drop_table(TABLE_NAME)
-
-    # Rename new table
-    op.rename_table(f"{TABLE_NAME}_new", TABLE_NAME)
-
-
-def _recreate_table_with_unique_constraint_sqlite(op, insp):
-    """
-    SQLite cannot drop unique constraints on individual columns. We must:
-    1. Create a new table without the unique constraints.
-    2. Copy data from the old table.
-    3. Drop the old table.
-    4. Rename the new table.
-    """
-    conn = op.get_bind()
-
-    # Create new table definition (without unique constraints)
-    op.create_table(
-        f"{TABLE_NAME}_new",
-        sa.Column("owner_id", sa.UUID()),
-        sa.Column("dataset_id", sa.UUID(), primary_key=True, nullable=False),
-        sa.Column("vector_database_name", sa.String(), nullable=False, unique=True),
-        sa.Column("graph_database_name", sa.String(), nullable=False, unique=True),
-        sa.Column("vector_database_provider", sa.String(), nullable=False),
-        sa.Column("graph_database_provider", sa.String(), nullable=False),
         sa.Column(
             "vector_dataset_database_handler",
             sa.String(),
@@ -169,6 +98,77 @@ def _recreate_table_with_unique_constraint_sqlite(op, insp):
             graph_database_provider,
             vector_dataset_database_handler,
             graph_dataset_database_handler,
+            vector_database_url,
+            graph_database_url,
+            vector_database_key,
+            graph_database_key,
+            COALESCE(graph_database_connection_info, '{{}}'),
+            COALESCE(vector_database_connection_info, '{{}}'),
+            created_at,
+            updated_at
+        FROM {TABLE_NAME}
+    """)
+    )
+
+    # Drop old table
+    op.drop_table(TABLE_NAME)
+
+    # Rename new table
+    op.rename_table(f"{TABLE_NAME}_new", TABLE_NAME)
+
+
+def _recreate_table_with_unique_constraint_sqlite(op, insp):
+    """
+    SQLite cannot drop unique constraints on individual columns. We must:
+    1. Create a new table without the unique constraints.
+    2. Copy data from the old table.
+    3. Drop the old table.
+    4. Rename the new table.
+    """
+    conn = op.get_bind()
+
+    # Create new table definition (without unique constraints)
+    op.create_table(
+        f"{TABLE_NAME}_new",
+        sa.Column("owner_id", sa.UUID()),
+        sa.Column("dataset_id", sa.UUID(), primary_key=True, nullable=False),
+        sa.Column("vector_database_name", sa.String(), nullable=False, unique=True),
+        sa.Column("graph_database_name", sa.String(), nullable=False, unique=True),
+        sa.Column("vector_database_provider", sa.String(), nullable=False),
+        sa.Column("graph_database_provider", sa.String(), nullable=False),
+        sa.Column("vector_database_url", sa.String()),
+        sa.Column("graph_database_url", sa.String()),
+        sa.Column("vector_database_key", sa.String()),
+        sa.Column("graph_database_key", sa.String()),
+        sa.Column(
+            "graph_database_connection_info",
+            sa.JSON(),
+            nullable=False,
+            server_default=sa.text("'{}'"),
+        ),
+        sa.Column(
+            "vector_database_connection_info",
+            sa.JSON(),
+            nullable=False,
+            server_default=sa.text("'{}'"),
+        ),
+        sa.Column("created_at", sa.DateTime()),
+        sa.Column("updated_at", sa.DateTime()),
+        sa.ForeignKeyConstraint(["dataset_id"], ["datasets.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["owner_id"], ["principals.id"], ondelete="CASCADE"),
+    )
+
+    # Copy data into new table
+    conn.execute(
+        sa.text(f"""
+        INSERT INTO {TABLE_NAME}_new
+        SELECT
+            owner_id,
+            dataset_id,
+            vector_database_name,
+            graph_database_name,
+            vector_database_provider,
+            graph_database_provider,
             vector_database_url,
             graph_database_url,
             vector_database_key,
