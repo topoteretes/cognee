@@ -2,7 +2,10 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from uuid import UUID
 
-from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_completion_cot_retriever import (
+    GraphCompletionCotRetriever,
+    _as_answer_text,
+)
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
@@ -639,3 +642,47 @@ async def test_get_completion_with_save_interaction_no_context(mock_edge):
 
     assert isinstance(completion, list)
     assert len(completion) == 1
+
+
+@pytest.mark.asyncio
+async def test_as_answer_text_with_typeerror():
+    """Test _as_answer_text handles TypeError when json.dumps fails."""
+    non_serializable = {1, 2, 3}
+
+    result = _as_answer_text(non_serializable)
+
+    assert isinstance(result, str)
+    assert result == str(non_serializable)
+
+
+@pytest.mark.asyncio
+async def test_as_answer_text_with_string():
+    """Test _as_answer_text with string input."""
+    result = _as_answer_text("test string")
+    assert result == "test string"
+
+
+@pytest.mark.asyncio
+async def test_as_answer_text_with_dict():
+    """Test _as_answer_text with dictionary input."""
+    test_dict = {"key": "value", "number": 42}
+    result = _as_answer_text(test_dict)
+    assert isinstance(result, str)
+    assert "key" in result
+    assert "value" in result
+
+
+@pytest.mark.asyncio
+async def test_as_answer_text_with_basemodel():
+    """Test _as_answer_text with Pydantic BaseModel input."""
+    from pydantic import BaseModel
+
+    class TestModel(BaseModel):
+        answer: str
+
+    test_model = TestModel(answer="test answer")
+    result = _as_answer_text(test_model)
+
+    assert isinstance(result, str)
+    assert "[Structured Response]" in result
+    assert "test answer" in result
