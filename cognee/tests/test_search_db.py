@@ -27,7 +27,7 @@ logger = get_logger()
 @pytest_asyncio.fixture(scope="function", autouse=True)
 async def cleanup_litellm_clients():
     """Fixture to properly cleanup LiteLLM async clients after each test.
-    
+
     This prevents RuntimeWarning in Python 3.10 about unawaited coroutine
     'close_litellm_async_clients' during event loop cleanup.
     """
