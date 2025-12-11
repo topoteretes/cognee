@@ -12,6 +12,7 @@ def create_vector_engine(
     vector_db_name: str,
     vector_db_port: str = "",
     vector_db_key: str = "",
+    vector_dataset_database_handler: str = "",
 ):
     """
     Create a vector database engine based on the specified provider.
