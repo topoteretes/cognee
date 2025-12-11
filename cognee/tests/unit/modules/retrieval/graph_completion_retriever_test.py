@@ -168,7 +168,7 @@ async def test_init_custom_params():
     assert retriever.user_prompt_path == "custom_user.txt"
     assert retriever.system_prompt_path == "custom_system.txt"
     assert retriever.system_prompt == "Custom prompt"
-    assert retriever.node_type == str
+    assert retriever.node_type is str
     assert retriever.node_name == ["node1"]
     assert retriever.save_interaction is True
     assert retriever.wide_search_top_k == 200
