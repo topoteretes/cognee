@@ -1,6 +1,7 @@
 import pathlib
 import os
 import pytest
+import pytest_asyncio
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -21,6 +22,19 @@ from cognee.modules.users.methods import get_default_user
 from collections import Counter
 
 logger = get_logger()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def cleanup_litellm_clients():
+    """Fixture to properly cleanup LiteLLM async clients after each test."""
+    yield
+    # Cleanup LiteLLM async clients to prevent RuntimeWarning about unawaited coroutine
+    try:
+        import litellm
+        if hasattr(litellm, "close_litellm_async_clients"):
+            await litellm.close_litellm_async_clients()
+    except Exception:
+        pass  # LiteLLM might not be available or already cleaned up
 
 
 async def setup_test_environment():
