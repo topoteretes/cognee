@@ -62,7 +62,7 @@ async def setup_search_db_environment():
 
     if has_collection:
         collection = await vector_engine.get_collection("Triplet_text")
-        count = await collection.count_rows() if hasattr(collection, 'count_rows') else "unknown"
+        count = await collection.count_rows() if hasattr(collection, "count_rows") else "unknown"
         logger.info(f"Triplet_text collection row count: {count}")
 
     graph_engine = await get_graph_engine()
@@ -71,7 +71,9 @@ async def setup_search_db_environment():
     query = "Next to which country is Germany located?"
     gk_retriever_context = await GraphCompletionCotRetriever().get_context(query=query)
     gk_cot_retriever_context = await GraphCompletionCotRetriever().get_context(query=query)
-    gk_ext_retriever_context = await GraphCompletionContextExtensionRetriever().get_context(query=query)
+    gk_ext_retriever_context = await GraphCompletionContextExtensionRetriever().get_context(
+        query=query
+    )
     gk_sum_retriever_context = await GraphSummaryCompletionRetriever().get_context(query=query)
     triplet_retriever_context = await TripletRetriever().get_context(query=query)
 
@@ -148,7 +150,6 @@ async def test_graph_vector_engine_consistency(setup_search_db_environment):
 async def test_retriever_contexts(setup_search_db_environment):
     """Test that all retrievers return valid contexts with expected content."""
 
-
     context_gk = setup_search_db_environment["gk_retriever_context"]
     context_gk_cot = setup_search_db_environment["gk_cot_retriever_context"]
     context_gk_ext = setup_search_db_environment["gk_ext_retriever_context"]
@@ -178,4 +179,3 @@ async def test_retriever_contexts(setup_search_db_environment):
     assert "germany" in lower_triplet or "netherlands" in lower_triplet, (
         f"TripletRetriever: Context did not contain 'germany' or 'netherlands'; got: {context_triplet!r}"
     )
-
