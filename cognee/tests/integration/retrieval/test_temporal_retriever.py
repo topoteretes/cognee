@@ -14,7 +14,11 @@ from cognee.modules.engine.models.Interval import Interval
 
 @pytest_asyncio.fixture
 async def setup_test_environment_with_events():
-    """Set up a clean test environment with temporal events."""
+    """
+    Prepare a clean test environment populated with temporal data for integration tests.
+    
+    Configures isolated system and data root directories for this test, removes any existing data and system metadata, runs global setup, and stores five Timestamp objects, one Interval spanning two timestamps, and four Event objects into the data store. Yields control to the test, then attempts to prune data and system metadata on teardown (errors during cleanup are ignored).
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(base_dir / ".cognee_system/test_temporal_retriever_with_events")
     data_directory_path = str(base_dir / ".data_storage/test_temporal_retriever_with_events")
@@ -129,7 +133,11 @@ async def setup_test_environment_with_events():
 
 @pytest_asyncio.fixture
 async def setup_test_environment_with_graph_data():
-    """Set up a clean test environment with graph data (for fallback to triplets)."""
+    """
+    Prepare a clean test environment populated with simple graph data for tests that require triplet fallback.
+    
+    Sets configuration to dedicated system and data test directories, clears any existing data and metadata, runs global setup, creates two DataPoint-derived entities (a Company and a Person who works for that Company), stores them, yields control for tests, and attempts to clean up data and metadata on teardown.
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(base_dir / ".cognee_system/test_temporal_retriever_with_graph")
     data_directory_path = str(base_dir / ".data_storage/test_temporal_retriever_with_graph")
@@ -172,7 +180,11 @@ async def setup_test_environment_with_graph_data():
 
 @pytest_asyncio.fixture
 async def setup_test_environment_empty():
-    """Set up a clean test environment without data."""
+    """
+    Prepare an isolated, empty test environment for temporal retriever integration tests.
+    
+    Configures test-specific system and data root directories, prunes any existing data and system metadata, runs global setup, then yields control to the test. After the test completes, attempts to prune data and system metadata again and ignores cleanup errors.
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(base_dir / ".cognee_system/test_temporal_retriever_empty")
     data_directory_path = str(base_dir / ".data_storage/test_temporal_retriever_empty")

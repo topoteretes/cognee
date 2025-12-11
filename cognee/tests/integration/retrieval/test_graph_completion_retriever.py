@@ -13,7 +13,11 @@ from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionR
 
 @pytest_asyncio.fixture
 async def setup_test_environment_simple():
-    """Set up a clean test environment with simple graph data."""
+    """
+    Create a temporary simple graph test environment and populate it with company and person entities.
+    
+    Configures Cognee system and data root directories, clears existing data and system metadata, defines Company and Person DataPoint schemas, adds two companies and five people with `works_for` relationships, yields control for tests to run, and attempts to prune data and metadata on teardown (errors are ignored).
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(base_dir / ".cognee_system/test_graph_completion_context_simple")
     data_directory_path = str(base_dir / ".data_storage/test_graph_completion_context_simple")
@@ -75,7 +79,11 @@ async def setup_test_environment_simple():
 
 @pytest_asyncio.fixture
 async def setup_test_environment_complex():
-    """Set up a clean test environment with complex graph data."""
+    """
+    Create and populate a clean test environment containing a complex graph of companies, people, vehicles, and homes.
+    
+    Configures Cognee system and data roots to isolated test directories, ensures a clean state, registers DataPoint schemas for Company, Car, Location, Home, and Person, and persists a set of entities with nested ownership relationships (two companies, five people, cars, and homes). Yields control so tests can run against the populated graph; on teardown it attempts to prune test data and system metadata (errors are ignored).
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(base_dir / ".cognee_system/test_graph_completion_context_complex")
     data_directory_path = str(base_dir / ".data_storage/test_graph_completion_context_complex")

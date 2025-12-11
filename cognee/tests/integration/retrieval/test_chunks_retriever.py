@@ -89,7 +89,12 @@ async def setup_test_environment_with_chunks_simple():
 
 @pytest_asyncio.fixture
 async def setup_test_environment_with_chunks_complex():
-    """Set up a clean test environment with complex chunks."""
+    """
+    Prepare a test environment and populate it with two documents and six document chunks.
+    
+    Creates two TextDocument entries ("Employee List" and "Car List") and six DocumentChunk entities (three chunks per document), writes them to storage, yields control to the caller for test execution, and prunes data and system metadata on teardown. The fixture configures isolated system and data root directories under
+    .cognee_system/test_chunks_retriever_context_complex and .data_storage/test_chunks_retriever_context_complex to avoid interfering with other tests.
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(base_dir / ".cognee_system/test_chunks_retriever_context_complex")
     data_directory_path = str(base_dir / ".data_storage/test_chunks_retriever_context_complex")

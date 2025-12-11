@@ -57,7 +57,11 @@ async def setup_test_environment_simple():
 
 @pytest_asyncio.fixture
 async def setup_test_environment_complex():
-    """Set up a clean test environment with complex graph data."""
+    """
+    Set up a temporary test environment populated with a complex graph of DataPoint entities for integration tests.
+    
+    Creates isolated system and data root directories, defines data model classes (Company, Car, Location, Home, Person), constructs sample companies and people with nested ownership and relationship edges, persists those entities, then yields control to the test. After the test completes, it attempts to prune persisted data and system metadata to restore a clean state.
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(
         base_dir / ".cognee_system/test_graph_completion_cot_context_complex"
@@ -129,7 +133,11 @@ async def setup_test_environment_complex():
 
 @pytest_asyncio.fixture
 async def setup_test_environment_empty():
-    """Set up a clean test environment without graph data."""
+    """
+    Create and configure an empty test environment for graph-based integration tests.
+    
+    Configures isolated system and data root directories, ensures no persisted data or system metadata exist, runs project setup, then yields control for the test. After the test completes, attempts to prune data and system metadata again to restore a clean state.
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(
         base_dir / ".cognee_system/test_get_graph_completion_cot_context_on_empty_graph"

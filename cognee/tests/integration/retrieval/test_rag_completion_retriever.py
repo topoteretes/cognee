@@ -89,7 +89,11 @@ async def setup_test_environment_with_chunks_simple():
 
 @pytest_asyncio.fixture
 async def setup_test_environment_with_chunks_complex():
-    """Set up a clean test environment with complex chunks."""
+    """
+    Prepare a clean test environment populated with multiple documents and document chunks for complex retrieval tests.
+    
+    Configures isolated system and data root directories under the repository base, prunes existing data and system metadata, calls global setup, creates two TextDocument objects with three DocumentChunk entries each (six chunks total), adds those chunks to the data store, then yields control to the test. After the test completes, attempts to prune data and system metadata again.
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(base_dir / ".cognee_system/test_rag_completion_context_complex")
     data_directory_path = str(base_dir / ".data_storage/test_rag_completion_context_complex")
@@ -180,7 +184,11 @@ async def setup_test_environment_with_chunks_complex():
 
 @pytest_asyncio.fixture
 async def setup_test_environment_empty():
-    """Set up a clean test environment without chunks."""
+    """
+    Prepare an empty test environment with no data chunks and perform teardown after the test.
+    
+    Configures isolated system and data root directories for this test, prunes any existing data and system metadata, yields control to the test, and then attempts to prune data and system metadata again during teardown (ignoring any errors).
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(
         base_dir / ".cognee_system/test_get_rag_completion_context_on_empty_graph"

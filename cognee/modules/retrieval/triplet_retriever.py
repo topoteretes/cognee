@@ -33,7 +33,15 @@ class TripletRetriever(BaseRetriever):
         system_prompt: Optional[str] = None,
         top_k: Optional[int] = 5,
     ):
-        """Initialize retriever with optional custom prompt paths."""
+        """
+        Configure a TripletRetriever instance with prompt template paths and retrieval options.
+        
+        Parameters:
+            user_prompt_path (str): Filesystem path to the user prompt template used when building LLM requests.
+            system_prompt_path (str): Filesystem path to the system prompt template used when building LLM requests.
+            system_prompt (Optional[str]): Optional inline system prompt that, if provided, overrides the template at `system_prompt_path`.
+            top_k (Optional[int]): Maximum number of triplets to retrieve for context; defaults to 5 when not specified.
+        """
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 5
@@ -41,22 +49,16 @@ class TripletRetriever(BaseRetriever):
 
     async def get_context(self, query: str) -> str:
         """
-        Retrieves relevant triplets as context.
-
-        Fetches triplets based on a query from a vector engine and combines their text.
-        Returns empty string if no triplets are found. Raises NoDataError if the collection is not
-        found.
-
+        Retrieve and concatenate text from the top matching triplets for a query.
+        
         Parameters:
-        -----------
-
-            - query (str): The query string used to search for relevant triplets.
-
+            query (str): Query used to search the triplet vector collection.
+        
         Returns:
-        --------
-
-            - str: A string containing the combined text of the retrieved triplets, or an
-              empty string if none are found.
+            str: Combined text of retrieved triplets separated by newlines, or an empty string if no triplets are found.
+        
+        Raises:
+            NoDataError: If the "Triplet_text" collection does not exist or is not available.
         """
         vector_engine = get_vector_engine()
 

@@ -15,7 +15,11 @@ from cognee.modules.retrieval.graph_completion_context_extension_retriever impor
 
 @pytest_asyncio.fixture
 async def setup_test_environment_simple():
-    """Set up a clean test environment with simple graph data."""
+    """
+    Prepare and yield a test environment populated with a simple person–company graph.
+    
+    Configures isolated system and data directories for the fixture, prunes existing data and system metadata, registers two DataPoint types (Company, Person), and persists sample entities: companies "Figma" and "Canva" and several Person instances linked via `works_for`. Yields control to the test, and on teardown attempts to prune data and system metadata.
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(
         base_dir / ".cognee_system/test_graph_completion_extension_context_simple"
@@ -61,7 +65,11 @@ async def setup_test_environment_simple():
 
 @pytest_asyncio.fixture
 async def setup_test_environment_complex():
-    """Set up a clean test environment with complex graph data."""
+    """
+    Set up a clean test environment populated with a complex graph of companies, people, vehicles, homes, and locations for integration tests.
+    
+    Creates two companies ("Figma" and "Canva") and multiple Person instances associated with those companies; some persons own Car and/or Home entities with Location data. Yields control to the test, and after the test completes it attempts to prune persisted data and system metadata to restore a clean state.
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(
         base_dir / ".cognee_system/test_graph_completion_extension_context_complex"
@@ -135,7 +143,11 @@ async def setup_test_environment_complex():
 
 @pytest_asyncio.fixture
 async def setup_test_environment_empty():
-    """Set up a clean test environment without graph data."""
+    """
+    Create and yield a clean, empty test environment for graph-related tests.
+    
+    Configures isolated system and data root directories for the fixture, removes all existing graph data and system metadata, runs initial setup, and yields control to the test. After the test completes, attempts to prune data and system metadata again and ignores any exceptions raised during teardown.
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(
         base_dir / ".cognee_system/test_get_graph_completion_extension_context_on_empty_graph"

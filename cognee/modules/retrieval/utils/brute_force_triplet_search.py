@@ -16,6 +16,20 @@ logger = get_logger(level=ERROR)
 
 
 def format_triplets(edges):
+    """
+    Format a sequence of Edge objects into a concatenated string of triplet records.
+    
+    Each triplet contains the node1 attributes, edge attributes, and node2 attributes as Python dicts,
+    with any key/value pairs whose value is None removed.
+    
+    Parameters:
+        edges (iterable): Iterable of Edge-like objects. Each object must expose `node1` and `node2`
+            attributes (objects with an `attributes` dict) and an `attributes` dict for the edge itself.
+    
+    Returns:
+        str: A single string composed of concatenated triplet blocks. Each block has the form:
+             "Node1: {…}\nEdge: {…}\nNode2: {…}\n\n\n", where dicts contain only non-None values.
+    """
     triplets = []
     for edge in edges:
         node1 = edge.node1

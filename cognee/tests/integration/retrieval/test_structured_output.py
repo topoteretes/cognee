@@ -112,6 +112,11 @@ async def _test_get_structured_graph_completion_context_extension():
 
 
 async def _test_get_structured_entity_completion():
+    """
+    Run integration checks that EntityCompletionRetriever returns both plain-string and structured TestAnswer responses.
+    
+    Creates an EntityCompletionRetriever with a DummyEntityExtractor and DummyContextProvider, requests a completion for "Who is Albert Einstein?", and asserts that the default response is a list of non-empty strings and that a request with response_model=TestAnswer returns a list of TestAnswer instances with non-empty fields.
+    """
     retriever = EntityCompletionRetriever(DummyEntityExtractor(), DummyContextProvider())
 
     # Test with string response model (default)
@@ -127,7 +132,11 @@ async def _test_get_structured_entity_completion():
 
 @pytest_asyncio.fixture
 async def setup_test_environment():
-    """Set up a clean test environment with graph and document data."""
+    """
+    Prepare a clean test environment with sample graph and document data for integration tests.
+    
+    Configures Cognee system and data root directories, removes existing data and system metadata, runs low-level setup, and stores sample data points: a Company and Person data model, a TextDocument with three DocumentChunks, and a Person Entity. Yields control for tests to run, then attempts to prune data and system metadata during teardown (errors during teardown are ignored).
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(base_dir / ".cognee_system/test_get_structured_completion")
     data_directory_path = str(base_dir / ".data_storage/test_get_structured_completion")

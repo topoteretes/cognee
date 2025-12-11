@@ -16,7 +16,11 @@ from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 
 @pytest_asyncio.fixture
 async def setup_test_environment_with_summaries():
-    """Set up a clean test environment with summaries."""
+    """
+    Prepare a fresh test environment populated with six TextSummary entities linked to two sample TextDocument records.
+    
+    Configures test-specific system and data root directories, removes any existing data and system metadata, performs low-level setup, creates two documents with three DocumentChunk entries each and corresponding TextSummary entities, and adds those summaries to the data store. Yields control to the test, then attempts to prune data and system metadata as teardown, ignoring any cleanup errors.
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(base_dir / ".cognee_system/test_summaries_retriever_context")
     data_directory_path = str(base_dir / ".data_storage/test_summaries_retriever_context")
@@ -137,7 +141,11 @@ async def setup_test_environment_with_summaries():
 
 @pytest_asyncio.fixture
 async def setup_test_environment_empty():
-    """Set up a clean test environment without summaries."""
+    """
+    Prepare a clean test environment configured for an empty summaries graph.
+    
+    Initializes Cognee system and data root directories for the empty test context, prunes any existing data and system metadata before the test, yields control to the test, and attempts to prune data and system metadata again during teardown (ignoring any errors).
+    """
     base_dir = pathlib.Path(__file__).parent.parent.parent.parent
     system_directory_path = str(base_dir / ".cognee_system/test_summaries_retriever_context_empty")
     data_directory_path = str(base_dir / ".data_storage/test_summaries_retriever_context_empty")

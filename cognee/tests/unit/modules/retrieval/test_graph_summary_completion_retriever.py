@@ -9,7 +9,12 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 
 @pytest.fixture
 def mock_edge():
-    """Create a mock edge."""
+    """
+    Create a mock Edge object for use in tests.
+    
+    Returns:
+        MagicMock: A MagicMock instance constrained to the `Edge` spec.
+    """
     edge = MagicMock(spec=Edge)
     return edge
 

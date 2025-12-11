@@ -9,7 +9,14 @@ from cognee.modules.engine.models import NodeSet
 
 @pytest.fixture
 def mock_feedback_evaluation():
-    """Create a mock feedback evaluation."""
+    """
+    Create a MagicMock simulating a UserFeedbackEvaluation with default values.
+    
+    The mock has `evaluation.value` set to "positive" and `score` set to 4.5.
+    
+    Returns:
+        MagicMock: Mocked UserFeedbackEvaluation instance with preset `evaluation.value` and `score`.
+    """
     evaluation = MagicMock(spec=UserFeedbackEvaluation)
     evaluation.evaluation = MagicMock()
     evaluation.evaluation.value = "positive"
@@ -19,7 +26,15 @@ def mock_feedback_evaluation():
 
 @pytest.fixture
 def mock_graph_engine():
-    """Create a mock graph engine."""
+    """
+    Create a mocked asynchronous graph engine configured for tests.
+    
+    Returns:
+        engine (AsyncMock): An AsyncMock with:
+            - `get_last_user_interaction_ids` set to return an empty list.
+            - `add_edges` as an AsyncMock callable.
+            - `apply_feedback_weight` as an AsyncMock callable.
+    """
     engine = AsyncMock()
     engine.get_last_user_interaction_ids = AsyncMock(return_value=[])
     engine.add_edges = AsyncMock()
