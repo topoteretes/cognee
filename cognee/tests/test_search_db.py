@@ -31,6 +31,7 @@ async def cleanup_litellm_clients():
     # Cleanup LiteLLM async clients to prevent RuntimeWarning about unawaited coroutine
     try:
         import litellm
+
         if hasattr(litellm, "close_litellm_async_clients"):
             await litellm.close_litellm_async_clients()
     except Exception:
