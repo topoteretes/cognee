@@ -30,6 +30,7 @@ class LanceDBTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         vector_db_name = "test.lance.db"
 
         return {
+            "vector_dataset_database_handler": "custom_lancedb_handler",
             "vector_database_name": vector_db_name,
             "vector_database_url": os.path.join(databases_directory_path, vector_db_name),
             "vector_database_provider": "lancedb",
@@ -44,6 +45,7 @@ class KuzuTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
         graph_db_name = "test.kuzu"
         return {
+            "graph_dataset_database_handler": "custom_kuzu_handler",
             "graph_database_name": graph_db_name,
             "graph_database_url": os.path.join(databases_directory_path, graph_db_name),
             "graph_database_provider": "kuzu",
