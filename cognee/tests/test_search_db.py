@@ -27,12 +27,24 @@ async def setup_test_environment():
     """Helper function to set up test environment with data, cognify, and triplet embeddings."""
     # This test runs for multiple db settings, to run this locally set the corresponding db envs
     
-    # Clear caches to ensure fresh engine instances for each test (prevents event loop issues)
+    # Dispose of existing engines and clear caches to ensure fresh instances for each test
+    # This prevents event loop issues when using deployed databases (Neo4j, PostgreSQL)
+    try:
+        from cognee.infrastructure.databases.vector import get_vector_engine
+        vector_engine = get_vector_engine()
+        # Dispose SQLAlchemy engine connection pool if it exists
+        if hasattr(vector_engine, 'engine') and hasattr(vector_engine.engine, 'dispose'):
+            await vector_engine.engine.dispose(close=True)
+    except Exception:
+        pass  # Engine might not exist yet
+    
     from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
     from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
+    from cognee.infrastructure.databases.relational.create_relational_engine import create_relational_engine
     
     create_graph_engine.cache_clear()
     create_vector_engine.cache_clear()
+    create_relational_engine.cache_clear()
     
     logger.info("Starting test setup: pruning data and system")
     await cognee.prune.prune_data()
@@ -79,7 +91,17 @@ async def setup_test_environment():
 
 async def setup_test_environment_for_feedback():
     """Helper function to set up test environment for feedback weight calculation test."""
-    # Clear caches to ensure fresh engine instances for each test (prevents event loop issues)
+    # Dispose of existing engines and clear caches to ensure fresh instances for each test
+    # This prevents event loop issues when using deployed databases (Neo4j, PostgreSQL)
+    try:
+        from cognee.infrastructure.databases.vector import get_vector_engine
+        vector_engine = get_vector_engine()
+        # Dispose SQLAlchemy engine connection pool if it exists
+        if hasattr(vector_engine, 'engine') and hasattr(vector_engine.engine, 'dispose'):
+            await vector_engine.engine.dispose(close=True)
+    except Exception:
+        pass  # Engine might not exist yet
+    
     from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
     from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import create_relational_engine
