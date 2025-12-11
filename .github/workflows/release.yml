@@ -1,0 +1,154 @@
+name: release.yml
+on:
+  workflow_dispatch:
+    inputs:
+      flavour:
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - main
+        description: Dev or Main release
+      test_mode:
+        required: true
+        type: boolean
+        description: Aka Dry Run. If true, it won't affect public indices or repositories
+
+jobs:
+  release-github:
+    name: Create GitHub Release from ${{ inputs.flavour }}
+    outputs:
+      tag: ${{ steps.create_tag.outputs.tag }}
+      version: ${{ steps.create_tag.outputs.version }}
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out ${{ inputs.flavour }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.flavour }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Create and push git tag
+        id: create_tag
+        env: 
+          TEST_MODE: ${{ inputs.test_mode }}
+        run: |
+          VERSION="$(uv version --short)"
+          TAG="v${VERSION}"
+
+          echo "Tag to create: ${TAG}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          if [ "$TEST_MODE" = "false" ]; then
+            git tag "${TAG}"
+            git push origin "${TAG}"
+          else 
+            echo "Test mode is enabled. Skipping tag creation and push."
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.create_tag.outputs.tag }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  
+  release-pypi-package:    
+    needs: release-github
+    name: Release PyPI Package from ${{ inputs.flavour }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out ${{ inputs.flavour }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.flavour }}
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      
+      - name: Install Python
+        run: uv python install
+      
+      - name: Install dependencies
+        run: uv sync --locked --all-extras
+      
+      - name: Build distributions
+        run: uv build
+      
+      - name: Publish ${{ inputs.flavour }} release to TestPyPI
+        if: ${{ !inputs.test_mode }}
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.TEST_PYPI_TOKEN }}
+        run: uv publish --publish-url https://test.pypi.org/legacy/
+      
+      - name: Publish ${{ inputs.flavour }} release to PyPI
+        if: ${{ !inputs.test_mode }}
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: uv publish
+  
+  release-docker-image:    
+    needs: release-github
+    name: Release Docker Image from ${{ inputs.flavour }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out ${{ inputs.flavour }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.flavour }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}      
+
+      - name: Build and push Dev Docker Image
+        if: ${{ inputs.flavour == 'dev' }}        
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ !inputs.test_mode }}
+          tags: cognee/cognee:${{ needs.release-github.outputs.version }}
+          labels: |
+            version=${{ needs.release-github.outputs.version }}
+            flavour=${{ inputs.flavour }}
+          cache-from: type=registry,ref=cognee/cognee:buildcache
+          cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
+
+      - name: Build and push Main Docker Image
+        if: ${{ inputs.flavour == 'main' }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ !inputs.test_mode }}
+          tags: | 
+            cognee/cognee:${{ needs.release-github.outputs.version }}
+            cognee/cognee:latest
+          labels: |
+            version=${{ needs.release-github.outputs.version }}
+            flavour=${{ inputs.flavour }}
+          cache-from: type=registry,ref=cognee/cognee:buildcache
+          cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
