@@ -26,6 +26,14 @@ logger = get_logger()
 async def setup_test_environment():
     """Helper function to set up test environment with data, cognify, and triplet embeddings."""
     # This test runs for multiple db settings, to run this locally set the corresponding db envs
+    
+    # Clear caches to ensure fresh engine instances for each test (prevents event loop issues)
+    from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
+    from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
+    
+    create_graph_engine.cache_clear()
+    create_vector_engine.cache_clear()
+    
     logger.info("Starting test setup: pruning data and system")
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -71,6 +79,13 @@ async def setup_test_environment():
 
 async def setup_test_environment_for_feedback():
     """Helper function to set up test environment for feedback weight calculation test."""
+    # Clear caches to ensure fresh engine instances for each test (prevents event loop issues)
+    from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
+    from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
+    
+    create_graph_engine.cache_clear()
+    create_vector_engine.cache_clear()
+    
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
@@ -111,12 +126,6 @@ async def test_graph_vector_engine_consistency():
         f"Expected {len(edges)} edges but got {len(collection)} in Triplet_text collection"
     )
 
-    # Cleanup
-    try:
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
-    except Exception:
-        pass
 
 
 @pytest.mark.asyncio
