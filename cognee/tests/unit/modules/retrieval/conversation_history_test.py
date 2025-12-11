@@ -158,9 +158,7 @@ class TestConversationHistoryUtils:
         """Test save_conversation_history returns False when user_id is None."""
         session_user.set(None)
 
-        with patch(
-            "cognee.modules.retrieval.utils.session_cache.CacheConfig"
-        ) as MockCacheConfig:
+        with patch("cognee.modules.retrieval.utils.session_cache.CacheConfig") as MockCacheConfig:
             mock_config = MagicMock()
             mock_config.caching = True
             MockCacheConfig.return_value = mock_config
@@ -183,9 +181,7 @@ class TestConversationHistoryUtils:
         user = create_mock_user()
         session_user.set(user)
 
-        with patch(
-            "cognee.modules.retrieval.utils.session_cache.CacheConfig"
-        ) as MockCacheConfig:
+        with patch("cognee.modules.retrieval.utils.session_cache.CacheConfig") as MockCacheConfig:
             mock_config = MagicMock()
             mock_config.caching = False
             MockCacheConfig.return_value = mock_config
@@ -305,9 +301,7 @@ class TestConversationHistoryUtils:
         """Test get_conversation_history returns empty string when user_id is None."""
         session_user.set(None)
 
-        with patch(
-            "cognee.modules.retrieval.utils.session_cache.CacheConfig"
-        ) as MockCacheConfig:
+        with patch("cognee.modules.retrieval.utils.session_cache.CacheConfig") as MockCacheConfig:
             mock_config = MagicMock()
             mock_config.caching = True
             MockCacheConfig.return_value = mock_config
@@ -326,9 +320,7 @@ class TestConversationHistoryUtils:
         user = create_mock_user()
         session_user.set(user)
 
-        with patch(
-            "cognee.modules.retrieval.utils.session_cache.CacheConfig"
-        ) as MockCacheConfig:
+        with patch("cognee.modules.retrieval.utils.session_cache.CacheConfig") as MockCacheConfig:
             mock_config = MagicMock()
             mock_config.caching = False
             MockCacheConfig.return_value = mock_config
@@ -367,9 +359,7 @@ class TestConversationHistoryUtils:
 
                 await get_conversation_history(session_id=None)
 
-                mock_cache.get_latest_qa.assert_called_once_with(
-                    str(user.id), "default_session"
-                )
+                mock_cache.get_latest_qa.assert_called_once_with(str(user.id), "default_session")
 
     @pytest.mark.asyncio
     async def test_get_conversation_history_cache_engine_none(self):
@@ -406,9 +396,7 @@ class TestConversationHistoryUtils:
         from cognee.infrastructure.databases.exceptions import CacheConnectionError
 
         mock_cache = create_mock_cache_engine([])
-        mock_cache.get_latest_qa = AsyncMock(
-            side_effect=CacheConnectionError("Connection failed")
-        )
+        mock_cache.get_latest_qa = AsyncMock(side_effect=CacheConnectionError("Connection failed"))
 
         cache_module = importlib.import_module(
             "cognee.infrastructure.databases.cache.get_cache_engine"

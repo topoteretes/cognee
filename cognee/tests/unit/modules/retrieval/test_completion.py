@@ -227,7 +227,8 @@ class TestGenerateCompletion:
             )
 
             mock_render.assert_called_once_with(
-                "user_prompt.txt", {"question": "What is AI?", "context": "AI is artificial intelligence"}
+                "user_prompt.txt",
+                {"question": "What is AI?", "context": "AI is artificial intelligence"},
             )
 
 
