@@ -15,6 +15,7 @@ class Data(Base):
     id = Column(UUID, primary_key=True, default=uuid4)
 
     name = Column(String)
+    label = Column(String, nullable=True)  # Custom label for user-friendly identification
     extension = Column(String)
     mime_type = Column(String)
     original_extension = Column(String, nullable=True)
@@ -49,6 +50,7 @@ class Data(Base):
         return {
             "id": str(self.id),
             "name": self.name,
+            "label": self.label,
             "extension": self.extension,
             "mimeType": self.mime_type,
             "rawDataLocation": self.raw_data_location,

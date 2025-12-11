@@ -5,7 +5,7 @@ from typing import Union, BinaryIO, Any, List, Optional
 
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.data.models import Data
+from cognee.modules.data.models import Data, DataItem
 from cognee.modules.ingestion.exceptions import IngestionError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_default_user
@@ -78,6 +78,11 @@ async def ingest_data(
         dataset_data_map = {str(data.id): True for data in dataset_data}
 
         for data_item in data:
+            # Extract label and actual data if DataItem is provided
+            label = None
+            if isinstance(data_item, DataItem):
+                label = data_item.label
+                data_item = data_item.data
             # Get file path of data item or create a file if it doesn't exist
             original_file_path = await save_data_item_to_storage(data_item)
             # Transform file path to be OS usable
@@ -125,6 +130,7 @@ async def ingest_data(
 
             if data_point is not None:
                 data_point.name = original_file_metadata["name"]
+                data_point.label = label  # Set custom label if provided
                 data_point.raw_data_location = cognee_storage_file_path
                 data_point.original_data_location = original_file_metadata["file_path"]
                 data_point.extension = storage_file_metadata["extension"]
@@ -153,6 +159,7 @@ async def ingest_data(
                 data_point = Data(
                     id=data_id,
                     name=original_file_metadata["name"],
+                    label=label,  # Set custom label if provided
                     raw_data_location=cognee_storage_file_path,
                     original_data_location=original_file_metadata["file_path"],
                     extension=storage_file_metadata["extension"],

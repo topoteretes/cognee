@@ -44,6 +44,7 @@ class DatasetDTO(OutDTO):
 class DataDTO(OutDTO):
     id: UUID
     name: str
+    label: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     extension: str

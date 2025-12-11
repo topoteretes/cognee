@@ -30,6 +30,7 @@ from cognee.modules.visualization.cognee_network_visualization import (
     cognee_network_visualization,
 )
 from .api.v1.ui import start_ui
+from .modules.data.models import DataItem
 
 # Pipelines
 from .modules import pipelines
