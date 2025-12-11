@@ -1,9 +1,6 @@
 name: test | mcp
 
 on:
-  push:
-    branches:
-      - feature/cog-3543-remove-anything-codify-related-from-mcp-test
   workflow_call:
 
 jobs:
