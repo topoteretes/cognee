@@ -12,9 +12,18 @@ from cognee.modules.users.models import User, DatasetDatabase
 from cognee.infrastructure.databases.dataset_database_handler import DatasetDatabaseHandlerInterface
 
 
-class Neo4jAuraDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
+class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     """
-    Handler for interacting with Neo4j Aura Dataset databases.
+    Handler for a quick development PoC integration of Cognee multi-user and permission mode with Neo4j Aura databases.
+    This handler creates a new Neo4j Aura instance for each Cognee dataset created.
+
+    Improvements needed to be production ready:
+    - Secret management for client credentials, currently secrets are encrypted and stored in the Cognee relational database,
+      a secret manager or a similar system should be used instead.
+
+    Quality of life improvements:
+    - Allow configuration of different Neo4j Aura plans and regions.
+    - Requests should be made async, currently a blocking requests library is used.
     """
 
     @classmethod
@@ -34,7 +43,7 @@ class Neo4jAuraDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
         if graph_config.graph_database_provider != "neo4j":
             raise ValueError(
-                "Neo4jAuraDatasetDatabaseHandler can only be used with Neo4j graph database provider."
+                "Neo4jAuraDevDatasetDatabaseHandler can only be used with Neo4j graph database provider."
             )
 
         graph_db_name = f"{dataset_id}"
@@ -134,6 +143,7 @@ class Neo4jAuraDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     ) -> DatasetDatabase:
         """
         Resolve and decrypt connection info for the Neo4j dataset database.
+        In this case, decrypt the password stored in the database.
 
         Args:
             dataset_database: DatasetDatabase instance containing encrypted connection info.
