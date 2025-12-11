@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
+from uuid import UUID
 
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
@@ -589,3 +590,59 @@ async def test_get_completion_with_save_interaction_no_context(mock_edge):
 
     assert isinstance(completion, list)
     assert len(completion) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_completion_with_save_interaction_all_conditions_met(mock_edge):
+    """Test get_completion with save_interaction when all conditions are met (line 216)."""
+    mock_graph_engine = AsyncMock()
+    mock_graph_engine.is_empty = AsyncMock(return_value=False)
+
+    retriever = GraphCompletionRetriever(save_interaction=True)
+
+    mock_node1 = MagicMock()
+    mock_node2 = MagicMock()
+    mock_edge.node1 = mock_node1
+    mock_edge.node2 = mock_node2
+
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
+            return_value=[mock_edge],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
+            return_value="Resolved context",
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
+            return_value="Generated answer",
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.extract_uuid_from_node",
+            side_effect=[
+                UUID("550e8400-e29b-41d4-a716-446655440000"),
+                UUID("550e8400-e29b-41d4-a716-446655440001"),
+            ],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.add_data_points",
+        ) as mock_add_data,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
+        completion = await retriever.get_completion("test query", context=[mock_edge])
+
+    assert isinstance(completion, list)
+    assert len(completion) == 1
+    assert completion[0] == "Generated answer"
+    mock_add_data.assert_awaited_once()
