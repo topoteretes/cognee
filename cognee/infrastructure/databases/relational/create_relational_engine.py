@@ -1,5 +1,6 @@
 from .sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
 from functools import lru_cache
+from urllib.parse import quote_plus
 
 
 @lru_cache
@@ -43,9 +44,10 @@ def create_relational_engine(
             # Test if asyncpg is available
             import asyncpg
 
-            connection_string = (
-                f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
-            )
+            encoded_username = quote_plus(db_username)
+            encoded_password = quote_plus(db_password)
+
+            connection_string = f"postgresql+asyncpg://{encoded_username}:{encoded_password}@{db_host}:{db_port}/{db_name}"
         except ImportError:
             raise ImportError(
                 "PostgreSQL dependencies are not installed. Please install with 'pip install cognee\"[postgres]\"' or 'pip install cognee\"[postgres-binary]\"' to use PostgreSQL functionality."
