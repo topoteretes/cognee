@@ -24,18 +24,26 @@ from collections import Counter
 logger = get_logger()
 
 
-@pytest_asyncio.fixture(autouse=True)
+@pytest_asyncio.fixture(scope="function", autouse=True)
 async def cleanup_litellm_clients():
-    """Fixture to properly cleanup LiteLLM async clients after each test."""
+    """Fixture to properly cleanup LiteLLM async clients after each test.
+    
+    This prevents RuntimeWarning in Python 3.10 about unawaited coroutine
+    'close_litellm_async_clients' during event loop cleanup.
+    """
     yield
-    # Cleanup LiteLLM async clients to prevent RuntimeWarning about unawaited coroutine
+    # Cleanup LiteLLM async clients before event loop closes
     try:
         import litellm
 
         if hasattr(litellm, "close_litellm_async_clients"):
-            await litellm.close_litellm_async_clients()
-    except Exception:
-        pass  # LiteLLM might not be available or already cleaned up
+            # Ensure we await the cleanup coroutine
+            cleanup_coro = litellm.close_litellm_async_clients()
+            if cleanup_coro is not None:
+                await cleanup_coro
+    except (RuntimeError, Exception):
+        # Event loop might already be closing, ignore the error
+        pass
 
 
 async def setup_test_environment():
