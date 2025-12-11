@@ -8,7 +8,6 @@ class TestGenerateCompletion:
     async def test_generate_completion_with_system_prompt(self):
         """Test generate_completion with provided system_prompt."""
         mock_llm_response = "Generated answer"
-        mock_llm_gateway = AsyncMock(return_value=mock_llm_response)
 
         with (
             patch(
@@ -42,7 +41,6 @@ class TestGenerateCompletion:
     async def test_generate_completion_without_system_prompt(self):
         """Test generate_completion reads system_prompt from file when not provided."""
         mock_llm_response = "Generated answer"
-        mock_llm_gateway = AsyncMock(return_value=mock_llm_response)
 
         with (
             patch(
@@ -79,7 +77,6 @@ class TestGenerateCompletion:
     async def test_generate_completion_with_conversation_history(self):
         """Test generate_completion includes conversation_history in system_prompt."""
         mock_llm_response = "Generated answer"
-        mock_llm_gateway = AsyncMock(return_value=mock_llm_response)
 
         with (
             patch(
@@ -122,7 +119,6 @@ class TestGenerateCompletion:
     async def test_generate_completion_with_conversation_history_and_custom_system_prompt(self):
         """Test generate_completion includes conversation_history with custom system_prompt."""
         mock_llm_response = "Generated answer"
-        mock_llm_gateway = AsyncMock(return_value=mock_llm_response)
 
         with (
             patch(
@@ -163,7 +159,6 @@ class TestGenerateCompletion:
         """Test generate_completion with custom response_model."""
         mock_response_model = MagicMock()
         mock_llm_response = {"answer": "Generated answer"}
-        mock_llm_gateway = AsyncMock(return_value=mock_llm_response)
 
         with (
             patch(
@@ -237,7 +232,6 @@ class TestSummarizeText:
     async def test_summarize_text_with_system_prompt(self):
         """Test summarize_text with provided system_prompt."""
         mock_llm_response = "Summary text"
-        mock_llm_gateway = AsyncMock(return_value=mock_llm_response)
 
         with patch(
             "cognee.modules.retrieval.utils.completion.LLMGateway.acreate_structured_output",
@@ -263,7 +257,6 @@ class TestSummarizeText:
     async def test_summarize_text_without_system_prompt(self):
         """Test summarize_text reads system_prompt from file when not provided."""
         mock_llm_response = "Summary text"
-        mock_llm_gateway = AsyncMock(return_value=mock_llm_response)
 
         with (
             patch(
@@ -294,7 +287,6 @@ class TestSummarizeText:
     async def test_summarize_text_default_prompt_path(self):
         """Test summarize_text uses default prompt path when not provided."""
         mock_llm_response = "Summary text"
-        mock_llm_gateway = AsyncMock(return_value=mock_llm_response)
 
         with (
             patch(
@@ -323,7 +315,6 @@ class TestSummarizeText:
     async def test_summarize_text_custom_prompt_path(self):
         """Test summarize_text uses custom prompt path when provided."""
         mock_llm_response = "Summary text"
-        mock_llm_gateway = AsyncMock(return_value=mock_llm_response)
 
         with (
             patch(
