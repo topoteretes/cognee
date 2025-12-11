@@ -313,3 +313,5 @@ def downgrade() -> None:
 
     op.drop_column("dataset_database", "vector_database_connection_info")
     op.drop_column("dataset_database", "graph_database_connection_info")
+    op.drop_column("dataset_database", "vector_dataset_database_handler")
+    op.drop_column("dataset_database", "graph_dataset_database_handler")
