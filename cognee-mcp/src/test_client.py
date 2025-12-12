@@ -634,5 +634,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    logger = setup_logging(log_level=INFO)
+    logger = setup_logging(log_level=ERROR)
     asyncio.run(main())
