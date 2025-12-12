@@ -90,7 +90,7 @@ jobs:
         run: uv build
       
       - name: Publish ${{ inputs.flavour }} release to TestPyPI
-        if: ${{ !inputs.test_mode }}
+        if: ${{ inputs.test_mode }}
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.TEST_PYPI_TOKEN }}
         run: uv publish --publish-url https://test.pypi.org/legacy/
