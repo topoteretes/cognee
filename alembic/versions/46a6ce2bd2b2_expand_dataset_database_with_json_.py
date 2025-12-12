@@ -49,6 +49,20 @@ def _recreate_table_without_unique_constraint_sqlite(op, insp):
         sa.Column("graph_database_name", sa.String(), nullable=False),
         sa.Column("vector_database_provider", sa.String(), nullable=False),
         sa.Column("graph_database_provider", sa.String(), nullable=False),
+        sa.Column(
+            "vector_dataset_database_handler",
+            sa.String(),
+            unique=False,
+            nullable=False,
+            server_default="lancedb",
+        ),
+        sa.Column(
+            "graph_dataset_database_handler",
+            sa.String(),
+            unique=False,
+            nullable=False,
+            server_default="kuzu",
+        ),
         sa.Column("vector_database_url", sa.String()),
         sa.Column("graph_database_url", sa.String()),
         sa.Column("vector_database_key", sa.String()),
@@ -82,6 +96,8 @@ def _recreate_table_without_unique_constraint_sqlite(op, insp):
             graph_database_name,
             vector_database_provider,
             graph_database_provider,
+            vector_dataset_database_handler,
+            graph_dataset_database_handler,
             vector_database_url,
             graph_database_url,
             vector_database_key,
@@ -120,6 +136,20 @@ def _recreate_table_with_unique_constraint_sqlite(op, insp):
         sa.Column("graph_database_name", sa.String(), nullable=False, unique=True),
         sa.Column("vector_database_provider", sa.String(), nullable=False),
         sa.Column("graph_database_provider", sa.String(), nullable=False),
+        sa.Column(
+            "vector_dataset_database_handler",
+            sa.String(),
+            unique=False,
+            nullable=False,
+            server_default="lancedb",
+        ),
+        sa.Column(
+            "graph_dataset_database_handler",
+            sa.String(),
+            unique=False,
+            nullable=False,
+            server_default="kuzu",
+        ),
         sa.Column("vector_database_url", sa.String()),
         sa.Column("graph_database_url", sa.String()),
         sa.Column("vector_database_key", sa.String()),
@@ -153,6 +183,8 @@ def _recreate_table_with_unique_constraint_sqlite(op, insp):
             graph_database_name,
             vector_database_provider,
             graph_database_provider,
+            vector_dataset_database_handler,
+            graph_dataset_database_handler,
             vector_database_url,
             graph_database_url,
             vector_database_key,
@@ -193,6 +225,22 @@ def upgrade() -> None:
             ),
         )
 
+    vector_dataset_database_handler = _get_column(
+        insp, "dataset_database", "vector_dataset_database_handler"
+    )
+    if not vector_dataset_database_handler:
+        # Add LanceDB as the default graph dataset database handler
+        op.add_column(
+            "dataset_database",
+            sa.Column(
+                "vector_dataset_database_handler",
+                sa.String(),
+                unique=False,
+                nullable=False,
+                server_default="lancedb",
+            ),
+        )
+
     graph_database_connection_info_column = _get_column(
         insp, "dataset_database", "graph_database_connection_info"
     )
@@ -205,6 +253,22 @@ def upgrade() -> None:
                 unique=False,
                 nullable=False,
                 server_default=sa.text("'{}'"),
+            ),
+        )
+
+    graph_dataset_database_handler = _get_column(
+        insp, "dataset_database", "graph_dataset_database_handler"
+    )
+    if not graph_dataset_database_handler:
+        # Add Kuzu as the default graph dataset database handler
+        op.add_column(
+            "dataset_database",
+            sa.Column(
+                "graph_dataset_database_handler",
+                sa.String(),
+                unique=False,
+                nullable=False,
+                server_default="kuzu",
             ),
         )
 
@@ -265,3 +329,5 @@ def downgrade() -> None:
 
     op.drop_column("dataset_database", "vector_database_connection_info")
     op.drop_column("dataset_database", "graph_database_connection_info")
+    op.drop_column("dataset_database", "vector_dataset_database_handler")
+    op.drop_column("dataset_database", "graph_dataset_database_handler")

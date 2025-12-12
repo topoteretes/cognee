@@ -131,6 +131,7 @@ class Neo4jAuraDevDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             "graph_database_url": graph_db_url,
             "graph_database_provider": "neo4j",
             "graph_database_key": graph_db_key,
+            "graph_dataset_database_handler": "neo4j_aura_dev",
             "graph_database_connection_info": {
                 "graph_database_username": graph_db_username,
                 "graph_database_password": encrypted_db_password_string,
