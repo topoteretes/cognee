@@ -327,6 +327,13 @@ async def test_search_db():
         )
 
         if backend_access_control_enabled():
+            wrapper = search_results[0]
+            assert isinstance(wrapper, dict), f"{name}: expected wrapper dict in access control mode"
+            assert wrapper.get("dataset_id"), f"{name}: missing dataset_id in wrapper"
+            assert wrapper.get("dataset_name") == "test_dataset", (
+                f"{name}: unexpected dataset_name {wrapper.get('dataset_name')!r}"
+            )
+            assert "graphs" in wrapper, f"{name}: missing graphs key in wrapper"
             text = search_results[0]["search_result"][0]
         else:
             text = search_results[0]
@@ -348,6 +355,11 @@ async def test_search_db():
 
         payloads = search_results
         if "search_result" in first and "text" not in first:
+            assert first.get("dataset_id"), f"{name}: missing dataset_id in wrapper"
+            assert first.get("dataset_name") == "test_dataset", (
+                f"{name}: unexpected dataset_name {first.get('dataset_name')!r}"
+            )
+            assert "graphs" in first, f"{name}: missing graphs key in wrapper"
             payloads = (first.get("search_result") or [None])[0]
 
         assert isinstance(payloads, list), (
