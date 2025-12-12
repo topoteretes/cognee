@@ -315,10 +315,12 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           STORAGE_BACKEND: 's3'
           AWS_REGION: eu-west-1
+          AWS_ENDPOINT_URL: https://s3-eu-west-1.amazonaws.com
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_S3_DEV_USER_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_S3_DEV_USER_SECRET_KEY }}
+          STORAGE_BUCKET_NAME: github-runner-cognee-tests
           DATA_ROOT_DIRECTORY: "s3://github-runner-cognee-tests/cognee/data"
           SYSTEM_ROOT_DIRECTORY: "s3://github-runner-cognee-tests/cognee/system"
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           DB_PROVIDER: 'postgres'
           DB_NAME: 'cognee_db'
           DB_HOST: '127.0.0.1'
