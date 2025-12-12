@@ -23,6 +23,7 @@ import tempfile
 import time
 from contextlib import asynccontextmanager
 from cognee.shared.logging_utils import setup_logging
+from logging import ERROR, INFO
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -407,27 +408,32 @@ DEBUG = True
                         raise Exception("Delete returned no content")
 
                 else:
+                    logger = setup_logging(log_level=INFO)
                     # Test with invalid UUIDs to check error handling
-                    try:
-                         await session.call_tool(
-                            "delete",
-                            arguments={
-                                "data_id": "invalid-uuid",
-                                "dataset_id": "another-invalid-uuid",
-                                "mode": "soft",
-                            },
-                        )
-                    except Exception as e:
-                        assert ("Invalid UUID format" in e)
-                        self.test_results["delete_error_handling"] = {
-                            "status": "PASS",
-                            "result": e,
-                            "message": "delete error handling works correctly",
-                        }
-                        print("✅ delete error handling test passed")
+                    invalid_result = await session.call_tool(
+                        "delete",
+                        arguments={
+                            "data_id": "invalid-uuid",
+                            "dataset_id": "another-invalid-uuid",
+                            "mode": "soft",
+                        },
+                    )
 
+                    if invalid_result.content and len(invalid_result.content) > 0:
+                        invalid_content = invalid_result.content[0].text
+
+                        if "Invalid UUID format" in invalid_content:
+                            self.test_results["delete_error_handling"] = {
+                                "status": "PASS",
+                                "result": invalid_content,
+                                "message": "delete error handling works correctly",
+                            }
+                            print("✅ delete error handling test passed")
+                        else:
+                            raise Exception(f"Expected UUID error not found: {invalid_content}")
                     else:
                         raise Exception("Delete error test returned no content")
+                    logger = setup_logging(log_level=ERROR)
 
         except Exception as e:
             self.test_results["delete"] = {
@@ -630,7 +636,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    from logging import ERROR
-
     logger = setup_logging(log_level=ERROR)
     asyncio.run(main())
