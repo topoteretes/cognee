@@ -208,21 +208,21 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.data.methods import get_dataset, delete_dataset
+        from cognee.modules.data.methods import delete_dataset
 
-        dataset = await get_dataset(user.id, dataset_id)
+        dataset = await get_authorized_existing_datasets([dataset_id], "delete", user)
 
         if dataset is None:
             raise DatasetNotFoundError(message=f"Dataset ({str(dataset_id)}) not found.")
 
-        await delete_dataset(dataset)
+        await delete_dataset(dataset[0])
 
     @router.delete(
         "/{dataset_id}/data/{data_id}",
         response_model=None,
         responses={404: {"model": ErrorResponseDTO}},
     )
-    async def delete_data(
+    async def delete_data(  # TODO: Is this endpoint needed? It seems redundant with data deletion elsewhere
         dataset_id: UUID, data_id: UUID, user: User = Depends(get_authenticated_user)
     ):
         """
