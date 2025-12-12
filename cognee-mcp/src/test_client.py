@@ -408,25 +408,24 @@ DEBUG = True
 
                 else:
                     # Test with invalid UUIDs to check error handling
-                    invalid_result = await session.call_tool(
-                        "delete",
-                        arguments={
-                            "data_id": "invalid-uuid",
-                            "dataset_id": "another-invalid-uuid",
-                            "mode": "soft",
-                        },
-                    )
-
-                    if invalid_result.content and len(invalid_result.content) > 0:
-                        invalid_content = invalid_result.content[0].text
-
-                        assert("Invalid UUID format" in invalid_content)
+                    try:
+                         await session.call_tool(
+                            "delete",
+                            arguments={
+                                "data_id": "invalid-uuid",
+                                "dataset_id": "another-invalid-uuid",
+                                "mode": "soft",
+                            },
+                        )
+                    except Exception as e:
+                        assert ("Invalid UUID format" in e)
                         self.test_results["delete_error_handling"] = {
                             "status": "PASS",
-                            "result": invalid_content,
+                            "result": e,
                             "message": "delete error handling works correctly",
                         }
                         print("✅ delete error handling test passed")
+
                     else:
                         raise Exception("Delete error test returned no content")
 
