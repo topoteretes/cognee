@@ -23,6 +23,14 @@ from collections import Counter
 
 logger = get_logger()
 
+# LiteLLM (Python 3.10) can emit a RuntimeWarning at process shutdown:
+# "coroutine 'close_litellm_async_clients' was never awaited"
+# This is triggered from LiteLLM's own cleanup code during loop.close() (after tests finish).
+# CI treats this as a failure in some runs, so we silence *only this* warning for this module.
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:coroutine 'close_litellm_async_clients' was never awaited:RuntimeWarning"
+)
+
 
 @pytest_asyncio.fixture(scope="function", autouse=True)
 async def cleanup_resources():
