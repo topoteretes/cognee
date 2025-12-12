@@ -1,7 +1,41 @@
 import pathlib
 import os
+import warnings
+import atexit
+import inspect
 import pytest
 import pytest_asyncio
+
+# In Python 3.10, LiteLLM registers an atexit hook (`register_async_client_cleanup`) that
+# can schedule/instantiate an event loop during interpreter shutdown and still emit:
+#   RuntimeWarning: coroutine 'close_litellm_async_clients' was never awaited
+# In some CI environments this can also end the process with exit code 139 (SIGSEGV)
+# during teardown.
+#
+# This test module already explicitly closes LiteLLM clients in `cleanup_resources`,
+# so we prevent *LiteLLM's* atexit registration for this module only.
+_real_atexit_register = atexit.register
+
+
+def _filtered_atexit_register(func, *args, **kwargs):
+    for frame in inspect.stack():
+        filename = frame.filename.replace("\\", "/")
+        if "litellm/llms/custom_httpx/async_client_cleanup.py" in filename:
+            return func
+    return _real_atexit_register(func, *args, **kwargs)
+
+
+atexit.register = _filtered_atexit_register
+
+# NOTE: This warning is emitted *after* pytest finishes (during interpreter shutdown)
+# by LiteLLM's own cleanup code in Python 3.10. Since it happens post-test, pytest-level
+# warning filters may not apply reliably, so we filter it at the Python warnings layer.
+warnings.filterwarnings(
+    "ignore",
+    message=r".*coroutine 'close_litellm_async_clients' was never awaited.*",
+    category=RuntimeWarning,
+)
+
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
