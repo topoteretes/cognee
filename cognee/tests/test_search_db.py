@@ -318,12 +318,13 @@ async def feedback_state():
 
 @pytest.mark.asyncio
 async def test_e2e_graph_vector_consistency(e2e_state):
+    """Graph and vector stores contain the same triplet edges."""
     assert e2e_state["graph_edges_count"] == e2e_state["vector_collection_edges_count"]
 
 
 @pytest.mark.asyncio
 async def test_e2e_retriever_contexts(e2e_state):
-    query = "Next to which country is Germany located?"
+    """All retrievers return non-empty, well-typed contexts."""
     contexts = e2e_state["contexts"]
 
     for name in [
@@ -367,6 +368,7 @@ async def test_e2e_retriever_contexts(e2e_state):
 
 @pytest.mark.asyncio
 async def test_e2e_retriever_triplets_have_vector_distances(e2e_state):
+    """Graph retriever triplets include sane vector_distance metadata."""
     for name, triplets in e2e_state["triplets"].items():
         assert isinstance(triplets, list), f"{name}: Triplets should be a list"
         assert triplets, f"{name}: Triplets list should not be empty"
@@ -383,6 +385,7 @@ async def test_e2e_retriever_triplets_have_vector_distances(e2e_state):
 
 @pytest.mark.asyncio
 async def test_e2e_search_results_and_wrappers(e2e_state):
+    """Search returns expected shapes across search types and access modes."""
     from cognee.context_global_variables import backend_access_control_enabled
 
     sr = e2e_state["search_results"]
@@ -436,6 +439,7 @@ async def test_e2e_search_results_and_wrappers(e2e_state):
 
 @pytest.mark.asyncio
 async def test_e2e_graph_side_effects_and_node_fields(e2e_state):
+    """Search interactions create expected graph nodes/edges and required fields."""
     graph = e2e_state["graph_snapshot"]
     nodes, edges = graph
 
@@ -468,6 +472,7 @@ async def test_e2e_graph_side_effects_and_node_fields(e2e_state):
 
 @pytest.mark.asyncio
 async def test_e2e_feedback_weight_calculation(feedback_state):
+    """Positive feedback increases used_graph_element_to_answer feedback_weight."""
     _nodes, edges = feedback_state["graph_snapshot"]
     for _from_node, _to_node, relationship_name, properties in edges:
         if relationship_name == "used_graph_element_to_answer":
