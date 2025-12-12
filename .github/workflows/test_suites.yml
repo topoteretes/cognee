@@ -72,6 +72,7 @@ jobs:
 
   search-db-tests:
     name: Search Test on Different DBs
+    needs: [basic-tests, e2e-tests, graph-db-tests]
     uses: ./.github/workflows/search_db_tests.yml
     secrets: inherit
 
