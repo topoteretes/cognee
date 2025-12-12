@@ -27,7 +27,7 @@ logger = get_logger()
 @pytest_asyncio.fixture(scope="function", autouse=True)
 async def cleanup_resources():
     """Fixture to properly cleanup resources after each test.
-    
+
     - LiteLLM async clients: prevents RuntimeWarning in Python 3.10
     - PGVector SQLAlchemy connections: ensures connection pools are properly closed
     """
@@ -174,12 +174,13 @@ async def setup_test_environment_for_feedback():
 
 
 @pytest.mark.asyncio
-async def test_graph_vector_engine_consistency():
-    """Test that graph edges match triplet collection in vector engine."""
+async def test_graph_vector_and_retrieval():
+    """Combine graph/vector consistency + retriever checks to avoid repeating expensive setup."""
     await setup_test_environment()
 
+    # --- Graph/vector engine consistency ---
     graph_engine = await get_graph_engine()
-    nodes, edges = await graph_engine.get_graph_data()
+    _nodes, edges = await graph_engine.get_graph_data()
 
     vector_engine = get_vector_engine()
     collection = await vector_engine.search(
@@ -190,12 +191,7 @@ async def test_graph_vector_engine_consistency():
         f"Expected {len(edges)} edges but got {len(collection)} in Triplet_text collection"
     )
 
-
-@pytest.mark.asyncio
-async def test_retriever_contexts():
-    """Test that all retrievers return valid contexts with expected content."""
-    await setup_test_environment()
-
+    # --- Retriever contexts ---
     query = "Next to which country is Germany located?"
 
     context_gk = await GraphCompletionRetriever().get_context(query=query)
@@ -204,7 +200,6 @@ async def test_retriever_contexts():
     context_gk_sum = await GraphSummaryCompletionRetriever().get_context(query=query)
     context_triplet = await TripletRetriever().get_context(query=query)
 
-    # Test graph-based retrievers (should return lists)
     for name, context in [
         ("GraphCompletionRetriever", context_gk),
         ("GraphCompletionCotRetriever", context_gk_cot),
@@ -220,7 +215,6 @@ async def test_retriever_contexts():
             f"{name}: Context did not contain 'germany' or 'netherlands'; got: {context!r}"
         )
 
-    # Test triplet retriever (should return string)
     assert isinstance(context_triplet, str), "TripletRetriever: Context should be a string"
     assert len(context_triplet) > 0, "TripletRetriever: Context should not be empty"
     lower_triplet = context_triplet.lower()
@@ -228,14 +222,7 @@ async def test_retriever_contexts():
         f"TripletRetriever: Context did not contain 'germany' or 'netherlands'; got: {context_triplet!r}"
     )
 
-
-@pytest.mark.asyncio
-async def test_retriever_triplets():
-    """Test that retrievers return valid triplets with proper vector distances."""
-    await setup_test_environment()
-
-    query = "Next to which country is Germany located?"
-
+    # --- Retriever triplets + vector distance validation ---
     triplets_gk = await GraphCompletionRetriever().get_triplets(query=query)
     triplets_gk_cot = await GraphCompletionCotRetriever().get_triplets(query=query)
     triplets_gk_ext = await GraphCompletionContextExtensionRetriever().get_triplets(query=query)
@@ -269,8 +256,8 @@ async def test_retriever_triplets():
 
 
 @pytest.mark.asyncio
-async def test_search_operations():
-    """Test different search types and verify results contain expected content."""
+async def test_search_and_graph_side_effects():
+    """Combine search result checks + graph side effects to avoid repeating expensive setup."""
     await setup_test_environment()
 
     completion_gk = await cognee.search(
@@ -334,47 +321,6 @@ async def test_search_operations():
             f"{name}: expected 'netherlands' in result, got: {text!r}"
         )
 
-
-@pytest.mark.asyncio
-async def test_graph_node_and_edge_counts():
-    """Test that graph contains expected node and edge counts after search operations."""
-    await setup_test_environment()
-
-    # First perform searches to create interaction and feedback nodes
-    await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="Where is germany located, next to which country?",
-        save_interaction=True,
-    )
-    await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION_COT,
-        query_text="What is the country next to germany??",
-        save_interaction=True,
-    )
-    await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
-        query_text="What is the name of the country next to germany",
-        save_interaction=True,
-    )
-    await cognee.search(
-        query_type=SearchType.FEEDBACK, query_text="This was not the best answer", last_k=1
-    )
-    await cognee.search(
-        query_type=SearchType.GRAPH_SUMMARY_COMPLETION,
-        query_text="Next to which country is Germany located?",
-        save_interaction=True,
-    )
-    await cognee.search(
-        query_type=SearchType.TRIPLET_COMPLETION,
-        query_text="Next to which country is Germany located?",
-        save_interaction=True,
-    )
-    await cognee.search(
-        query_type=SearchType.FEEDBACK,
-        query_text="This answer was great",
-        last_k=1,
-    )
-
     graph_engine = await get_graph_engine()
     graph = await graph_engine.get_graph_data()
 
@@ -411,49 +357,7 @@ async def test_graph_node_and_edge_counts():
         f"Expected at least six 'belongs_to_set' edges, but found {edge_type_counts.get('belongs_to_set', 0)}"
     )
 
-
-@pytest.mark.asyncio
-async def test_node_field_validation():
-    """Test that user interaction and feedback nodes have required fields with valid values."""
-    await setup_test_environment()
-
-    # First perform searches to create interaction and feedback nodes
-    await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="Where is germany located, next to which country?",
-        save_interaction=True,
-    )
-    await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION_COT,
-        query_text="What is the country next to germany??",
-        save_interaction=True,
-    )
-    await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
-        query_text="What is the name of the country next to germany",
-        save_interaction=True,
-    )
-    await cognee.search(
-        query_type=SearchType.FEEDBACK, query_text="This was not the best answer", last_k=1
-    )
-    await cognee.search(
-        query_type=SearchType.GRAPH_SUMMARY_COMPLETION,
-        query_text="Next to which country is Germany located?",
-        save_interaction=True,
-    )
-    await cognee.search(
-        query_type=SearchType.TRIPLET_COMPLETION,
-        query_text="Next to which country is Germany located?",
-        save_interaction=True,
-    )
-    await cognee.search(
-        query_type=SearchType.FEEDBACK,
-        query_text="This answer was great",
-        last_k=1,
-    )
-
-    graph_engine = await get_graph_engine()
-    graph = await graph_engine.get_graph_data()
+    # Node field validation on the same graph produced above
     nodes = graph[0]
 
     required_fields_user_interaction = {"question", "answer", "context"}
