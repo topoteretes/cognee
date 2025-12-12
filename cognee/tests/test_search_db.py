@@ -25,13 +25,25 @@ logger = get_logger()
 
 
 @pytest_asyncio.fixture(scope="function", autouse=True)
-async def cleanup_litellm_clients():
-    """Fixture to properly cleanup LiteLLM async clients after each test.
-
-    This prevents RuntimeWarning in Python 3.10 about unawaited coroutine
-    'close_litellm_async_clients' during event loop cleanup.
+async def cleanup_resources():
+    """Fixture to properly cleanup resources after each test.
+    
+    - LiteLLM async clients: prevents RuntimeWarning in Python 3.10
+    - PGVector SQLAlchemy connections: ensures connection pools are properly closed
     """
     yield
+    # Cleanup PGVector SQLAlchemy engine connections
+    try:
+        from cognee.infrastructure.databases.vector import get_vector_engine
+
+        vector_engine = get_vector_engine()
+        # Dispose SQLAlchemy engine connection pool if it exists (for PGVector)
+        if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
+            await vector_engine.engine.dispose(close=True)
+    except (RuntimeError, Exception):
+        # Event loop might already be closing or engine might not exist, ignore
+        pass
+
     # Cleanup LiteLLM async clients before event loop closes
     try:
         import litellm
