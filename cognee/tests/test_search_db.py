@@ -2,7 +2,7 @@ import pathlib
 import os
 import warnings
 import atexit
-import inspect
+from types import CodeType
 import pytest
 import pytest_asyncio
 
@@ -18,34 +18,52 @@ _real_atexit_register = atexit.register
 
 
 def _filtered_atexit_register(func, *args, **kwargs):
-    for frame in inspect.stack():
-        filename = frame.filename.replace("\\", "/")
-        if "litellm/llms/custom_httpx/async_client_cleanup.py" in filename:
-            return func
+    # LiteLLM's cleanup wrapper is defined in `litellm.llms.custom_httpx.async_client_cleanup`.
+    # Block registering it to avoid post-test RuntimeWarning + occasional SIGSEGV in Py3.10 CI.
+    mod = getattr(func, "__module__", "") or ""
+    if mod.startswith("litellm.llms.custom_httpx.async_client_cleanup"):
+        return func
     return _real_atexit_register(func, *args, **kwargs)
 
 
 atexit.register = _filtered_atexit_register
 
 
-# If LiteLLM was imported/initialized elsewhere (plugins, other imports) before this module,
-# its atexit handler may already be registered. In Python 3.10 this can emit a RuntimeWarning
-# at shutdown and (in some CI runs) crash the process (exit code 139). Remove those handlers.
+def _is_litellm_async_cleanup_func(func) -> bool:
+    """Identify LiteLLM's async client cleanup atexit wrapper."""
+    try:
+        mod = getattr(func, "__module__", "") or ""
+        if mod.startswith("litellm.llms.custom_httpx.async_client_cleanup"):
+            return True
+        code: CodeType | None = getattr(func, "__code__", None)
+        if code and "litellm/llms/custom_httpx/async_client_cleanup.py" in code.co_filename.replace(
+            "\\", "/"
+        ):
+            return True
+    except Exception:
+        return False
+    return False
+
+
 def _remove_litellm_atexit_handlers() -> None:
+    """Remove LiteLLM cleanup handlers if registered before we patch atexit.register."""
     handlers = getattr(atexit, "_exithandlers", None)
     if not handlers:
         return
-
-    def _is_litellm_cleanup(handler) -> bool:
+    kept = []
+    for h in list(handlers):
         try:
-            func = handler[0]
-            mod = getattr(func, "__module__", "") or ""
-            return "litellm.llms.custom_httpx.async_client_cleanup" in mod
+            func = h[0]
         except Exception:
-            return False
-
-    atexit._exithandlers = [h for h in handlers if not _is_litellm_cleanup(h)]  # type: ignore[attr-defined]
-
+            kept.append(h)
+            continue
+        if _is_litellm_async_cleanup_func(func):
+            continue
+        kept.append(h)
+    try:
+        atexit._exithandlers[:] = kept  # type: ignore[attr-defined]
+    except Exception:
+        atexit._exithandlers = kept  # type: ignore[attr-defined]
 
 # NOTE: This warning is emitted *after* pytest finishes (during interpreter shutdown)
 # by LiteLLM's own cleanup code in Python 3.10. Since it happens post-test, pytest-level
@@ -55,6 +73,10 @@ warnings.filterwarnings(
     message=r".*coroutine 'close_litellm_async_clients' was never awaited.*",
     category=RuntimeWarning,
 )
+
+# If LiteLLM registered its atexit cleanup before this module loaded (e.g. via plugins),
+# remove it now. We already explicitly close clients in `cleanup_resources`.
+_remove_litellm_atexit_handlers()
 
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -76,9 +98,6 @@ from cognee.modules.users.methods import get_default_user
 from collections import Counter
 
 logger = get_logger()
-
-# Proactively remove any already-registered LiteLLM atexit cleanup hook.
-_remove_litellm_atexit_handlers()
 
 # LiteLLM (Python 3.10) can emit a RuntimeWarning at process shutdown:
 # "coroutine 'close_litellm_async_clients' was never awaited"
@@ -122,8 +141,7 @@ async def cleanup_resources():
         # Event loop might already be closing, ignore the error
         pass
 
-    # Remove LiteLLM's atexit handler in case it got registered after imports.
-    # This prevents post-test shutdown warnings/crashes in Python 3.10 CI.
+    # Ensure LiteLLM's atexit cleanup isn't present (it can get registered during runtime).
     try:
         _remove_litellm_atexit_handlers()
     except Exception:
