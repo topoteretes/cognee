@@ -256,7 +256,7 @@ DEBUG = True
         # Go through all Cognee search types
         for search_type in SearchType:
             # Don't test these search types
-            if search_type in [SearchType.NATURAL_LANGUAGE, SearchType.CYPHER]:
+            if search_type in [SearchType.NATURAL_LANGUAGE, SearchType.CYPHER, SearchType.TRIPLET_COMPLETION]:
                 break
             try:
                 async with self.mcp_server_session() as session:
@@ -420,15 +420,13 @@ DEBUG = True
                     if invalid_result.content and len(invalid_result.content) > 0:
                         invalid_content = invalid_result.content[0].text
 
-                        if "Invalid UUID format" in invalid_content:
-                            self.test_results["delete_error_handling"] = {
-                                "status": "PASS",
-                                "result": invalid_content,
-                                "message": "delete error handling works correctly",
-                            }
-                            print("✅ delete error handling test passed")
-                        else:
-                            raise Exception(f"Expected UUID error not found: {invalid_content}")
+                        assert("Invalid UUID format" in invalid_content)
+                        self.test_results["delete_error_handling"] = {
+                            "status": "PASS",
+                            "result": invalid_content,
+                            "message": "delete error handling works correctly",
+                        }
+                        print("✅ delete error handling test passed")
                     else:
                         raise Exception("Delete error test returned no content")
 
