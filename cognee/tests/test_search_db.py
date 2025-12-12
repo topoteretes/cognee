@@ -27,6 +27,7 @@ def _filtered_atexit_register(func, *args, **kwargs):
 
 atexit.register = _filtered_atexit_register
 
+
 # If LiteLLM was imported/initialized elsewhere (plugins, other imports) before this module,
 # its atexit handler may already be registered. In Python 3.10 this can emit a RuntimeWarning
 # at shutdown and (in some CI runs) crash the process (exit code 139). Remove those handlers.
