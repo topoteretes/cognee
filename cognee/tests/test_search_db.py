@@ -27,6 +27,25 @@ def _filtered_atexit_register(func, *args, **kwargs):
 
 atexit.register = _filtered_atexit_register
 
+# If LiteLLM was imported/initialized elsewhere (plugins, other imports) before this module,
+# its atexit handler may already be registered. In Python 3.10 this can emit a RuntimeWarning
+# at shutdown and (in some CI runs) crash the process (exit code 139). Remove those handlers.
+def _remove_litellm_atexit_handlers() -> None:
+    handlers = getattr(atexit, "_exithandlers", None)
+    if not handlers:
+        return
+
+    def _is_litellm_cleanup(handler) -> bool:
+        try:
+            func = handler[0]
+            mod = getattr(func, "__module__", "") or ""
+            return "litellm.llms.custom_httpx.async_client_cleanup" in mod
+        except Exception:
+            return False
+
+    atexit._exithandlers = [h for h in handlers if not _is_litellm_cleanup(h)]  # type: ignore[attr-defined]
+
+
 # NOTE: This warning is emitted *after* pytest finishes (during interpreter shutdown)
 # by LiteLLM's own cleanup code in Python 3.10. Since it happens post-test, pytest-level
 # warning filters may not apply reliably, so we filter it at the Python warnings layer.
@@ -56,6 +75,9 @@ from cognee.modules.users.methods import get_default_user
 from collections import Counter
 
 logger = get_logger()
+
+# Proactively remove any already-registered LiteLLM atexit cleanup hook.
+_remove_litellm_atexit_handlers()
 
 # LiteLLM (Python 3.10) can emit a RuntimeWarning at process shutdown:
 # "coroutine 'close_litellm_async_clients' was never awaited"
@@ -97,6 +119,13 @@ async def cleanup_resources():
                 await cleanup_coro
     except (RuntimeError, Exception):
         # Event loop might already be closing, ignore the error
+        pass
+
+    # Remove LiteLLM's atexit handler in case it got registered after imports.
+    # This prevents post-test shutdown warnings/crashes in Python 3.10 CI.
+    try:
+        _remove_litellm_atexit_handlers()
+    except Exception:
         pass
 
 
