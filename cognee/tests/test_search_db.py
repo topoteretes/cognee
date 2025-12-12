@@ -328,7 +328,9 @@ async def test_search_db():
 
         if backend_access_control_enabled():
             wrapper = search_results[0]
-            assert isinstance(wrapper, dict), f"{name}: expected wrapper dict in access control mode"
+            assert isinstance(wrapper, dict), (
+                f"{name}: expected wrapper dict in access control mode"
+            )
             assert wrapper.get("dataset_id"), f"{name}: missing dataset_id in wrapper"
             assert wrapper.get("dataset_name") == "test_dataset", (
                 f"{name}: unexpected dataset_name {wrapper.get('dataset_name')!r}"
