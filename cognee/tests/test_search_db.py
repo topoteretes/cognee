@@ -1,8 +1,5 @@
 import pathlib
 import os
-import warnings
-import atexit
-import inspect
 import pytest
 from collections import Counter
 
@@ -23,56 +20,6 @@ from cognee.modules.retrieval.triplet_retriever import TripletRetriever
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.methods import get_default_user
-
-# In Python 3.10, LiteLLM registers an atexit hook (`register_async_client_cleanup`) that
-# can schedule/instantiate an event loop during interpreter shutdown and still emit:
-#   RuntimeWarning: coroutine 'close_litellm_async_clients' was never awaited
-# In some CI environments this can also end the process with exit code 139 (SIGSEGV)
-# during teardown.
-#
-# This test module already explicitly closes LiteLLM clients in `cleanup_resources`,
-# so we prevent *LiteLLM's* atexit registration for this module only.
-_real_atexit_register = atexit.register
-
-
-def _filtered_atexit_register(func, *args, **kwargs):
-    for frame in inspect.stack():
-        filename = frame.filename.replace("\\", "/")
-        if "litellm/llms/custom_httpx/async_client_cleanup.py" in filename:
-            return func
-    return _real_atexit_register(func, *args, **kwargs)
-
-
-atexit.register = _filtered_atexit_register
-
-
-# If LiteLLM was imported/initialized elsewhere (plugins, other imports) before this module,
-# its atexit handler may already be registered. In Python 3.10 this can emit a RuntimeWarning
-# at shutdown and (in some CI runs) crash the process (exit code 139). Remove those handlers.
-def _remove_litellm_atexit_handlers() -> None:
-    handlers = getattr(atexit, "_exithandlers", None)
-    if not handlers:
-        return
-
-    def _is_litellm_cleanup(handler) -> bool:
-        try:
-            func = handler[0]
-            mod = getattr(func, "__module__", "") or ""
-            return "litellm.llms.custom_httpx.async_client_cleanup" in mod
-        except Exception:
-            return False
-
-    atexit._exithandlers = [h for h in handlers if not _is_litellm_cleanup(h)]  # type: ignore[attr-defined]
-
-
-# NOTE: This warning is emitted *after* pytest finishes (during interpreter shutdown)
-# by LiteLLM's own cleanup code in Python 3.10. Since it happens post-test, pytest-level
-# warning filters may not apply reliably, so we filter it at the Python warnings layer.
-warnings.filterwarnings(
-    "ignore",
-    message=r".*coroutine 'close_litellm_async_clients' was never awaited.*",
-    category=RuntimeWarning,
-)
 
 logger = get_logger()
 
@@ -440,26 +387,3 @@ async def test_search_db():
             assert properties["feedback_weight"] >= 6, (
                 "Feedback weight calculation is not correct, it should be more then 6."
             )
-
-    # Best-effort cleanup (helps avoid CI shutdown warnings/crashes).
-    try:
-        vector_engine = get_vector_engine()
-        if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
-            await vector_engine.engine.dispose(close=True)
-    except Exception:
-        pass
-
-    try:
-        import litellm
-
-        if hasattr(litellm, "close_litellm_async_clients"):
-            cleanup_coro = litellm.close_litellm_async_clients()
-            if cleanup_coro is not None:
-                await cleanup_coro
-    except Exception:
-        pass
-
-    try:
-        _remove_litellm_atexit_handlers()
-    except Exception:
-        pass
