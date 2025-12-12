@@ -36,6 +36,7 @@ class LanceDBDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             "vector_database_url": os.path.join(databases_directory_path, vector_db_name),
             "vector_database_key": vector_config.vector_db_key,
             "vector_database_name": vector_db_name,
+            "vector_dataset_database_handler": "lancedb",
         }
 
     @classmethod
