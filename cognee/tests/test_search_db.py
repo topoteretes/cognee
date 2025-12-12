@@ -4,7 +4,6 @@ import warnings
 import atexit
 import inspect
 import pytest
-import pytest_asyncio
 
 # In Python 3.10, LiteLLM registers an atexit hook (`register_async_client_cleanup`) that
 # can schedule/instantiate an event loop during interpreter shutdown and still emit:
@@ -76,6 +75,7 @@ from cognee.modules.users.methods import get_default_user
 from collections import Counter
 
 logger = get_logger()
+
 
 async def setup_test_environment():
     """Helper function to set up test environment with data, cognify, and triplet embeddings."""
@@ -193,8 +193,12 @@ async def setup_test_environment_for_feedback():
 
 
 @pytest.mark.asyncio
-async def test_graph_vector_and_retrieval():
-    """Combine graph/vector consistency + retriever checks to avoid repeating expensive setup."""
+async def test_search_db():
+    """Run all search-db checks in one test.
+
+    This intentionally keeps everything in a single test to avoid event loop churn between
+    tests when running against deployed databases.
+    """
     await setup_test_environment()
 
     # --- Graph/vector engine consistency ---
@@ -273,12 +277,7 @@ async def test_graph_vector_and_retrieval():
                 f"{name}: node_2 vector_distance {distance} out of [0,1], this shouldn't happen"
             )
 
-
-@pytest.mark.asyncio
-async def test_search_and_graph_side_effects():
-    """Combine search result checks + graph side effects to avoid repeating expensive setup."""
-    await setup_test_environment()
-
+    # --- Search operations + graph side effects ---
     completion_gk = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="Where is germany located, next to which country?",
@@ -348,12 +347,14 @@ async def test_search_and_graph_side_effects():
 
     # Assert there are exactly 4 CogneeUserInteraction nodes.
     assert type_counts.get("CogneeUserInteraction", 0) == 4, (
-        f"Expected exactly four CogneeUserInteraction nodes, but found {type_counts.get('CogneeUserInteraction', 0)}"
+        "Expected exactly four CogneeUserInteraction nodes, "
+        f"but found {type_counts.get('CogneeUserInteraction', 0)}"
     )
 
     # Assert there is exactly two CogneeUserFeedback nodes.
     assert type_counts.get("CogneeUserFeedback", 0) == 2, (
-        f"Expected exactly two CogneeUserFeedback nodes, but found {type_counts.get('CogneeUserFeedback', 0)}"
+        "Expected exactly two CogneeUserFeedback nodes, "
+        f"but found {type_counts.get('CogneeUserFeedback', 0)}"
     )
 
     # Assert there is exactly two NodeSet.
@@ -363,17 +364,20 @@ async def test_search_and_graph_side_effects():
 
     # Assert that there are at least 10 'used_graph_element_to_answer' edges.
     assert edge_type_counts.get("used_graph_element_to_answer", 0) >= 10, (
-        f"Expected at least ten 'used_graph_element_to_answer' edges, but found {edge_type_counts.get('used_graph_element_to_answer', 0)}"
+        "Expected at least ten 'used_graph_element_to_answer' edges, but found "
+        f"{edge_type_counts.get('used_graph_element_to_answer', 0)}"
     )
 
     # Assert that there are exactly 2 'gives_feedback_to' edges.
     assert edge_type_counts.get("gives_feedback_to", 0) == 2, (
-        f"Expected exactly two 'gives_feedback_to' edges, but found {edge_type_counts.get('gives_feedback_to', 0)}"
+        "Expected exactly two 'gives_feedback_to' edges, but found "
+        f"{edge_type_counts.get('gives_feedback_to', 0)}"
     )
 
     # Assert that there are at least 6 'belongs_to_set' edges.
     assert edge_type_counts.get("belongs_to_set", 0) >= 6, (
-        f"Expected at least six 'belongs_to_set' edges, but found {edge_type_counts.get('belongs_to_set', 0)}"
+        "Expected at least six 'belongs_to_set' edges, but found "
+        f"{edge_type_counts.get('belongs_to_set', 0)}"
     )
 
     # Node field validation on the same graph produced above
@@ -385,7 +389,8 @@ async def test_search_and_graph_side_effects():
     for node_id, data in nodes:
         if data.get("type") == "CogneeUserInteraction":
             assert required_fields_user_interaction.issubset(data.keys()), (
-                f"Node {node_id} is missing fields: {required_fields_user_interaction - set(data.keys())}"
+                f"Node {node_id} is missing fields: "
+                f"{required_fields_user_interaction - set(data.keys())}"
             )
 
             for field in required_fields_user_interaction:
@@ -405,10 +410,7 @@ async def test_search_and_graph_side_effects():
                     f"Node {node_id} has invalid value for '{field}': {value!r}"
                 )
 
-
-@pytest.mark.asyncio
-async def test_feedback_weight_calculation():
-    """Test that feedback weight is correctly calculated after multiple positive feedbacks."""
+    # --- Feedback weight calculation (run in fresh environment) ---
     await setup_test_environment_for_feedback()
 
     await cognee.search(
@@ -438,3 +440,26 @@ async def test_feedback_weight_calculation():
             assert properties["feedback_weight"] >= 6, (
                 "Feedback weight calculation is not correct, it should be more then 6."
             )
+
+    # Best-effort cleanup (helps avoid CI shutdown warnings/crashes).
+    try:
+        vector_engine = get_vector_engine()
+        if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
+            await vector_engine.engine.dispose(close=True)
+    except Exception:
+        pass
+
+    try:
+        import litellm
+
+        if hasattr(litellm, "close_litellm_async_clients"):
+            cleanup_coro = litellm.close_litellm_async_clients()
+            if cleanup_coro is not None:
+                await cleanup_coro
+    except Exception:
+        pass
+
+    try:
+        _remove_litellm_atexit_handlers()
+    except Exception:
+        pass
