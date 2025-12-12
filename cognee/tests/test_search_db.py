@@ -342,8 +342,20 @@ async def test_search_db():
     ]:
         assert isinstance(search_results, list), f"{name}: should return a list"
         assert search_results, f"{name}: should not be empty"
-        assert isinstance(search_results[0], dict), f"{name}: expected dict payloads"
-        assert str(search_results[0].get("text", "")).strip(), f"{name}: missing non-empty 'text'"
+
+        first = search_results[0]
+        assert isinstance(first, dict), f"{name}: expected dict entries, got {type(first).__name__}"
+
+        payloads = search_results
+        if "search_result" in first and "text" not in first:
+            payloads = (first.get("search_result") or [None])[0]
+
+        assert isinstance(payloads, list), (
+            f"{name}: expected list payloads, got {type(payloads).__name__}"
+        )
+        assert payloads, f"{name}: expected non-empty payload list"
+        assert isinstance(payloads[0], dict), f"{name}: expected dict payloads"
+        assert str(payloads[0].get("text", "")).strip(), f"{name}: missing non-empty 'text'"
 
     graph_engine = await get_graph_engine()
     graph = await graph_engine.get_graph_data()
