@@ -4,6 +4,25 @@ import warnings
 import atexit
 import inspect
 import pytest
+from collections import Counter
+
+import cognee
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.graph.utils import resolve_edges_to_text
+from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
+    GraphCompletionContextExtensionRetriever,
+)
+from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
+from cognee.modules.retrieval.graph_summary_completion_retriever import (
+    GraphSummaryCompletionRetriever,
+)
+from cognee.modules.retrieval.triplet_retriever import TripletRetriever
+from cognee.shared.logging_utils import get_logger
+from cognee.modules.search.types import SearchType
+from cognee.modules.users.methods import get_default_user
 
 # In Python 3.10, LiteLLM registers an atexit hook (`register_async_client_cleanup`) that
 # can schedule/instantiate an event loop during interpreter shutdown and still emit:
@@ -54,25 +73,6 @@ warnings.filterwarnings(
     message=r".*coroutine 'close_litellm_async_clients' was never awaited.*",
     category=RuntimeWarning,
 )
-
-import cognee
-from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.graph.utils import resolve_edges_to_text
-from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
-from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
-    GraphCompletionContextExtensionRetriever,
-)
-from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
-from cognee.modules.retrieval.graph_summary_completion_retriever import (
-    GraphSummaryCompletionRetriever,
-)
-from cognee.modules.retrieval.triplet_retriever import TripletRetriever
-from cognee.shared.logging_utils import get_logger
-from cognee.modules.search.types import SearchType
-from cognee.modules.users.methods import get_default_user
-from collections import Counter
 
 logger = get_logger()
 
