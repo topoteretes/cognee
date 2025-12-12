@@ -408,7 +408,6 @@ DEBUG = True
                         raise Exception("Delete returned no content")
 
                 else:
-                    logger = setup_logging(log_level=INFO)
                     # Test with invalid UUIDs to check error handling
                     invalid_result = await session.call_tool(
                         "delete",
@@ -433,7 +432,6 @@ DEBUG = True
                             raise Exception(f"Expected UUID error not found: {invalid_content}")
                     else:
                         raise Exception("Delete error test returned no content")
-                    logger = setup_logging(log_level=ERROR)
 
         except Exception as e:
             self.test_results["delete"] = {
@@ -636,5 +634,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    logger = setup_logging(log_level=ERROR)
+    logger = setup_logging(log_level=INFO)
     asyncio.run(main())
