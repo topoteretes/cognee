@@ -257,7 +257,11 @@ DEBUG = True
         # Go through all Cognee search types
         for search_type in SearchType:
             # Don't test these search types
-            if search_type in [SearchType.NATURAL_LANGUAGE, SearchType.CYPHER, SearchType.TRIPLET_COMPLETION]:
+            if search_type in [
+                SearchType.NATURAL_LANGUAGE,
+                SearchType.CYPHER,
+                SearchType.TRIPLET_COMPLETION,
+            ]:
                 break
             try:
                 async with self.mcp_server_session() as session:
