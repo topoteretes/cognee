@@ -28,5 +28,7 @@ async def delete_dataset(dataset: Dataset):
             await vector_dataset_database_handler["handler_instance"].delete_dataset(
                 dataset_database
             )
-
+    # TODO: Remove dataset from pipeline_run_status in Data objects related to dataset as well
+    #       This blocks recreation of the dataset with the same name and data after deletion as
+    #       it's marked as completed and will be just skipped even though it's empty.
     return await db_engine.delete_entity_by_id(dataset.__tablename__, dataset.id)
