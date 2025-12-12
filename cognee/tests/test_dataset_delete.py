@@ -62,12 +62,8 @@ async def main():
         await delete_dataset(dataset)
 
         # Confirm databases have been deleted
-        assert not os.path.exists(
-            os.path.join(cognee_directory_path, "databases", str(user.id), str(val))
-        ), "Graph database file not found."
-        assert not os.path.exists(
-            os.path.join(cognee_directory_path, "databases", str(user.id), str(val))
-        ), "Vector database file not found."
+        assert not os.path.exists(graph_db_path), "Graph database file found."
+        assert not os.path.exists(vector_db_path), "Vector database file found."
 
 
 if __name__ == "__main__":
