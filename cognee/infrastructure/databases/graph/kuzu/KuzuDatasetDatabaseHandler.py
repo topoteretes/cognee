@@ -47,6 +47,7 @@ class KuzuDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             "graph_database_url": graph_db_url,
             "graph_database_provider": graph_config.graph_database_provider,
             "graph_database_key": graph_db_key,
+            "graph_dataset_database_handler": "kuzu",
             "graph_database_connection_info": {
                 "graph_database_username": graph_db_username,
                 "graph_database_password": graph_db_password,

@@ -5,8 +5,6 @@ from cognee.context_global_variables import backend_access_control_enabled
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
-from cognee.infrastructure.databases.graph.config import get_graph_config
 from cognee.shared.cache import delete_cache
 from cognee.modules.users.models import DatasetDatabase
 from cognee.shared.logging_utils import get_logger
@@ -16,12 +14,13 @@ logger = get_logger()
 
 async def prune_graph_databases():
     async def _prune_graph_db(dataset_database: DatasetDatabase) -> dict:
-        graph_config = get_graph_config()
         from cognee.infrastructure.databases.dataset_database_handler.supported_dataset_database_handlers import (
             supported_dataset_database_handlers,
         )
 
-        handler = supported_dataset_database_handlers[graph_config.graph_dataset_database_handler]
+        handler = supported_dataset_database_handlers[
+            dataset_database.graph_dataset_database_handler
+        ]
         return await handler["handler_instance"].delete_dataset(dataset_database)
 
     db_engine = get_relational_engine()
@@ -40,13 +39,13 @@ async def prune_graph_databases():
 
 async def prune_vector_databases():
     async def _prune_vector_db(dataset_database: DatasetDatabase) -> dict:
-        vector_config = get_vectordb_config()
-
         from cognee.infrastructure.databases.dataset_database_handler.supported_dataset_database_handlers import (
             supported_dataset_database_handlers,
         )
 
-        handler = supported_dataset_database_handlers[vector_config.vector_dataset_database_handler]
+        handler = supported_dataset_database_handlers[
+            dataset_database.vector_dataset_database_handler
+        ]
         return await handler["handler_instance"].delete_dataset(dataset_database)
 
     db_engine = get_relational_engine()

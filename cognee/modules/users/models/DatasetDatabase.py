@@ -18,6 +18,9 @@ class DatasetDatabase(Base):
     vector_database_provider = Column(String, unique=False, nullable=False)
     graph_database_provider = Column(String, unique=False, nullable=False)
 
+    graph_dataset_database_handler = Column(String, unique=False, nullable=False)
+    vector_dataset_database_handler = Column(String, unique=False, nullable=False)
+
     vector_database_url = Column(String, unique=False, nullable=True)
     graph_database_url = Column(String, unique=False, nullable=True)
 
