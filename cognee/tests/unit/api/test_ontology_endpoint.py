@@ -179,7 +179,9 @@ def test_complete_multifile_workflow(client):
 
     upload_response_2 = client.post(
         "/api/v1/ontologies",
-        files=[("ontology_file", ("manufacturers.owl", io.BytesIO(file2_content), "application/xml"))],
+        files=[
+            ("ontology_file", ("manufacturers.owl", io.BytesIO(file2_content), "application/xml"))
+        ],
         data={"ontology_key": "manufacturers", "description": "Manufacturer ontology"},
     )
     assert upload_response_2.status_code == 200
