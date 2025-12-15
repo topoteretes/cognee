@@ -20,6 +20,9 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 from cognee.modules.pipelines.layers.check_pipeline_run_qualification import (
     check_pipeline_run_qualification,
 )
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunStarted,
+)
 from typing import Any
 
 logger = get_logger("cognee.pipeline")
@@ -35,6 +38,7 @@ async def run_pipeline(
     pipeline_name: str = "custom_pipeline",
     vector_db_config: dict = None,
     graph_db_config: dict = None,
+    use_pipeline_cache: bool = False,
     incremental_loading: bool = False,
     data_per_batch: int = 20,
 ):
@@ -51,6 +55,7 @@ async def run_pipeline(
             data=data,
             pipeline_name=pipeline_name,
             context={"dataset": dataset},
+            use_pipeline_cache=use_pipeline_cache,
             incremental_loading=incremental_loading,
             data_per_batch=data_per_batch,
         ):
@@ -64,6 +69,7 @@ async def run_pipeline_per_dataset(
     data=None,
     pipeline_name: str = "custom_pipeline",
     context: dict = None,
+    use_pipeline_cache=False,
     incremental_loading=False,
     data_per_batch: int = 20,
 ):
@@ -77,8 +83,18 @@ async def run_pipeline_per_dataset(
     if process_pipeline_status:
         # If pipeline was already processed or is currently being processed
         # return status information to async generator and finish execution
-        yield process_pipeline_status
-        return
+        if use_pipeline_cache:
+            # If pipeline caching is enabled we do not proceed with re-processing
+            yield process_pipeline_status
+            return
+        else:
+            # If pipeline caching is disabled we always return pipeline started information and proceed with re-processing
+            yield PipelineRunStarted(
+                pipeline_run_id=process_pipeline_status.pipeline_run_id,
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+                payload=data,
+            )
 
     pipeline_run = run_tasks(
         tasks,

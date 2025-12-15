@@ -2,9 +2,7 @@ import asyncio
 from typing import Type, List, Optional
 from pydantic import BaseModel
 
-from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
-from cognee.tasks.storage import index_graph_edges
 from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.get_default_ontology_resolver import (
@@ -25,6 +23,7 @@ from cognee.tasks.graph.exceptions import (
     InvalidChunkGraphInputError,
     InvalidOntologyAdapterError,
 )
+from cognee.modules.cognify.config import get_cognify_config
 
 
 async def integrate_chunk_graphs(
@@ -67,8 +66,6 @@ async def integrate_chunk_graphs(
             type(ontology_resolver).__name__ if ontology_resolver else "None"
         )
 
-    graph_engine = await get_graph_engine()
-
     if graph_model is not KnowledgeGraph:
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
             data_chunks[chunk_index].contains = chunk_graph
@@ -84,12 +81,13 @@ async def integrate_chunk_graphs(
         data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
     )
 
-    if len(graph_nodes) > 0:
-        await add_data_points(graph_nodes)
+    cognify_config = get_cognify_config()
+    embed_triplets = cognify_config.triplet_embedding
 
-    if len(graph_edges) > 0:
-        await graph_engine.add_edges(graph_edges)
-        await index_graph_edges(graph_edges)
+    if len(graph_nodes) > 0:
+        await add_data_points(
+            data_points=graph_nodes, custom_edges=graph_edges, embed_triplets=embed_triplets
+        )
 
     return data_chunks
 
