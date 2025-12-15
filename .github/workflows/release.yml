@@ -10,10 +10,6 @@ on:
           - dev
           - main
         description: Dev or Main release
-      test_mode:
-        required: true
-        type: boolean
-        description: Aka Dry Run. If true, it won't affect public indices or repositories
 
 jobs:
   release-github:
@@ -35,8 +31,6 @@ jobs:
 
       - name: Create and push git tag
         id: create_tag
-        env: 
-          TEST_MODE: ${{ inputs.test_mode }}
         run: |
           VERSION="$(uv version --short)"
           TAG="v${VERSION}"
@@ -48,13 +42,10 @@ jobs:
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-          if [ "$TEST_MODE" = "false" ]; then
-            git tag "${TAG}"
-            git push origin "${TAG}"
-          else 
-            echo "Test mode is enabled. Skipping tag creation and push."
-          fi
+          
+          git tag "${TAG}"
+          git push origin "${TAG}"
+          
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -89,14 +80,7 @@ jobs:
       - name: Build distributions
         run: uv build
       
-      - name: Publish ${{ inputs.flavour }} release to TestPyPI
-        if: ${{ inputs.test_mode }}
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.TEST_PYPI_TOKEN }}
-        run: uv publish --publish-url https://test.pypi.org/legacy/
-      
       - name: Publish ${{ inputs.flavour }} release to PyPI
-        if: ${{ !inputs.test_mode }}
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: uv publish
@@ -121,15 +105,15 @@ jobs:
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}      
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push Dev Docker Image
-        if: ${{ inputs.flavour == 'dev' }}        
+        if: ${{ inputs.flavour == 'dev' }}
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ !inputs.test_mode }}
+          push: true
           tags: cognee/cognee:${{ needs.release-github.outputs.version }}
           labels: |
             version=${{ needs.release-github.outputs.version }}
@@ -143,7 +127,6 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ !inputs.test_mode }}
           tags: | 
             cognee/cognee:${{ needs.release-github.outputs.version }}
             cognee/cognee:latest
