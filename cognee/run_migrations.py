@@ -34,7 +34,7 @@ async def run_migrations():
         )
 
     migration_result = subprocess.run(
-        ["alembic", "upgrade", "head"],
+        ["python", "-m", "alembic", "upgrade", "head"],
         capture_output=True,
         text=True,
         cwd=Path(package_root),
