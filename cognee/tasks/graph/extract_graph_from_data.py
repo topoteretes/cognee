@@ -97,6 +97,7 @@ async def extract_graph_from_data(
     graph_model: Type[BaseModel],
     config: Config = None,
     custom_prompt: Optional[str] = None,
+    **kwargs,
 ) -> List[DocumentChunk]:
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
@@ -111,7 +112,7 @@ async def extract_graph_from_data(
 
     chunk_graphs = await asyncio.gather(
         *[
-            extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt)
+            extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs)
             for chunk in data_chunks
         ]
     )

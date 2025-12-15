@@ -53,6 +53,7 @@ async def cognify(
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
     data_per_batch: int = 20,
+    **kwargs
 ):
     """
     Transform ingested data into a structured knowledge graph.
@@ -223,6 +224,7 @@ async def cognify(
             config=config,
             custom_prompt=custom_prompt,
             chunks_per_batch=chunks_per_batch,
+            **kwargs,
         )
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
@@ -251,6 +253,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     config: Config = None,
     custom_prompt: Optional[str] = None,
     chunks_per_batch: int = 100,
+    **kwargs,
 ) -> list[Task]:
     if config is None:
         ontology_config = get_ontology_env_config()
@@ -288,6 +291,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             config=config,
             custom_prompt=custom_prompt,
             task_config={"batch_size": chunks_per_batch},
+            **kwargs,
         ),  # Generate knowledge graphs from the document chunks.
         Task(
             summarize_text,
