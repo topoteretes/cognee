@@ -26,6 +26,7 @@ class VectorConfig(BaseSettings):
     vector_db_port: int = 1234
     vector_db_key: str = ""
     vector_db_provider: str = "lancedb"
+    vector_db_schema: str = ""  # NEW: PostgreSQL schema for pgvector isolation
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -60,6 +61,7 @@ class VectorConfig(BaseSettings):
             "vector_db_port": self.vector_db_port,
             "vector_db_key": self.vector_db_key,
             "vector_db_provider": self.vector_db_provider,
+            "vector_db_schema": self.vector_db_schema, # NEW: PostgreSQL schema for pgvector isolation
         }
 
 

@@ -61,7 +61,8 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
             databases_directory_path, dataset_database.vector_database_name
         ),
         "vector_db_key": "",
-        "vector_db_provider": "lancedb",
+        "vector_db_provider": "pgvector",  # CHANGED from "lancedb"
+        "vector_db_schema": dataset_database.vector_database_name,  # NEW: PostgreSQL schema for pgvector isolation
     }
 
     graph_config = {

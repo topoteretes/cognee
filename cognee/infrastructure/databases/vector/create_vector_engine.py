@@ -10,6 +10,7 @@ def create_vector_engine(
     vector_db_url: str,
     vector_db_port: str = "",
     vector_db_key: str = "",
+    vector_db_schema: str = "",
 ):
     """
     Create a vector database engine based on the specified provider.
@@ -30,7 +31,8 @@ def create_vector_engine(
         - vector_db_key (str): The API key or access token for the vector database instance.
         - vector_db_provider (str): The name of the vector database provider to use (e.g.,
           'pgvector').
-
+        - vector_db_schema (str): The schema for the vector database instance. Required for
+          pgvector.
     Returns:
     --------
 
@@ -76,6 +78,7 @@ def create_vector_engine(
             connection_string,
             vector_db_key,
             embedding_engine,
+            schema_name=vector_db_schema,
         )
 
     elif vector_db_provider.lower() == "chromadb":

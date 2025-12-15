@@ -31,9 +31,12 @@ async def get_or_create_dataset_database(
     db_engine = get_relational_engine()
 
     dataset_id = await get_unique_dataset_id(dataset, user)
+    # CHANGED: Generate schema name instead of file name
+    # Postgres identifiers: lowercase, no dashes, max 63 chars
+    dataset_id_hex = str(dataset_id).replace("-", "")
+    vector_db_name = f"vec_{dataset_id_hex}"  # e.g., "vec_9f305871db4f4dc6..."
 
-    vector_db_name = f"{dataset_id}.lance.db"
-    graph_db_name = f"{dataset_id}.pkl"
+    graph_db_name = f"graph_{dataset_id_hex}.pkl"
 
     async with db_engine.get_async_session() as session:
         # Create dataset if it doesn't exist
