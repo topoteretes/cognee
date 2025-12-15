@@ -15,9 +15,9 @@ def get_ontology_router() -> APIRouter:
 
     @router.post("", response_model=dict)
     async def upload_ontology(
-        ontology_key: str = Form(...),
+        ontology_key: List[str] = Form(...),
         ontology_file: List[UploadFile] = File(...),
-        descriptions: Optional[str] = Form(None),
+        descriptions: Optional[List[str]] = Form(None),
         user: User = Depends(get_authenticated_user),
     ):
         """
@@ -28,9 +28,9 @@ def get_ontology_router() -> APIRouter:
         - Multiple files: ontology_key=["key1", "key2"], ontology_file=[file1, file2]
 
         ## Request Parameters
-        - **ontology_key** (str): JSON array string of user-defined identifiers for the ontologies
+        - **ontology_key** (List[str]): Repeated field (e.g. ontology_key=foo&ontology_key=bar) of user-defined identifiers
         - **ontology_file** (List[UploadFile]): OWL format ontology files
-        - **descriptions** (Optional[str]): JSON array string of optional descriptions
+        - **descriptions** (Optional[List[str]]): Repeated optional descriptions aligned with ontology_key
 
         ## Response
         Returns metadata about uploaded ontologies including keys, filenames, sizes, and upload timestamps.
@@ -49,16 +49,8 @@ def get_ontology_router() -> APIRouter:
         )
 
         try:
-            import json
-
-            ontology_keys = json.loads(ontology_key)
-            description_list = json.loads(descriptions) if descriptions else None
-
-            if not isinstance(ontology_keys, list):
-                raise ValueError("ontology_key must be a JSON array")
-
             results = await ontology_service.upload_ontologies(
-                ontology_keys, ontology_file, user, description_list
+                ontology_key, ontology_file, user, descriptions
             )
 
             return {
@@ -73,8 +65,6 @@ def get_ontology_router() -> APIRouter:
                     for result in results
                 ]
             }
-        except (json.JSONDecodeError, ValueError) as e:
-            return JSONResponse(status_code=400, content={"error": str(e)})
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
 
