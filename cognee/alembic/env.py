@@ -79,8 +79,20 @@ async def run_async_migrations() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
+    try:
+        # 1. Check if an event loop is already running (e.g., in your application's main thread).
+        loop = asyncio.get_running_loop()
 
-    asyncio.run(run_async_migrations())
+        # 2. If a loop is running, use it to synchronously run the async task.
+        # This prevents the nested loop error.
+        print("Using existing event loop to run migrations.")
+        loop.run_until_complete(run_async_migrations())
+
+    except RuntimeError:
+        # 3. If no loop is running (e.g., when calling 'alembic upgrade head' directly),
+        # start a new one with asyncio.run().
+        print("Starting new event loop for migrations.")
+        asyncio.run(run_async_migrations())
 
 
 db_engine = get_relational_engine()

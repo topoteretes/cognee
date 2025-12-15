@@ -858,26 +858,11 @@ async def main():
 
         await setup()
 
-        # Run Alembic migrations from the main cognee directory where alembic.ini is located
+        # Run Cognee migrations
         logger.info("Running database migrations...")
-        migration_result = subprocess.run(
-            ["python", "-m", "alembic", "upgrade", "head"],
-            capture_output=True,
-            text=True,
-            cwd=Path(__file__).resolve().parent.parent.parent,
-        )
+        from cognee.run_migrations import run_migrations
 
-        if migration_result.returncode != 0:
-            migration_output = migration_result.stderr + migration_result.stdout
-            # Check for the expected UserAlreadyExists error (which is not critical)
-            if (
-                "UserAlreadyExists" in migration_output
-                or "User default_user@example.com already exists" in migration_output
-            ):
-                logger.warning("Warning: Default user already exists, continuing startup...")
-            else:
-                logger.error(f"Migration failed with unexpected error: {migration_output}")
-                sys.exit(1)
+        await run_migrations()
 
         logger.info("Database migrations done.")
     elif args.api_url:
