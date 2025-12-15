@@ -31,7 +31,10 @@ class LLMGateway:
 
             llm_client = get_llm_client()
             return llm_client.acreate_structured_output(
-                text_input=text_input, system_prompt=system_prompt, response_model=response_model, **kwargs
+                text_input=text_input,
+                system_prompt=system_prompt,
+                response_model=response_model,
+                **kwargs,
             )
 
     @staticmethod
