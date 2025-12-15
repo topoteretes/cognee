@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 import importlib.resources as pkg_resources
 
-# Assuming your package is named 'cognee' and the migrations are under 'cognee/migrations'
+# Assuming your package is named 'cognee' and the migrations are under 'cognee/alembic'
 # This is a placeholder for the path logic.
 MIGRATIONS_PACKAGE = "cognee"
 MIGRATIONS_DIR_NAME = "alembic"
