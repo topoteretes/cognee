@@ -44,3 +44,5 @@ async def run_migrations():
         migration_output = migration_result.stderr + migration_result.stdout
         print(f"Migration failed with unexpected error: {migration_output}")
         sys.exit(1)
+
+    print("Migration completed successfully.")
