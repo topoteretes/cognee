@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.5.0.dev1"
+version = "0.5.0"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
