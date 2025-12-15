@@ -222,7 +222,7 @@ def get_datasets_router() -> APIRouter:
         response_model=None,
         responses={404: {"model": ErrorResponseDTO}},
     )
-    async def delete_data(  # TODO: Is this endpoint needed? It seems redundant with data deletion elsewhere
+    async def delete_data(
         dataset_id: UUID, data_id: UUID, user: User = Depends(get_authenticated_user)
     ):
         """
