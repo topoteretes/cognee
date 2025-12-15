@@ -53,7 +53,7 @@ async def cognify(
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
     data_per_batch: int = 20,
-    **kwargs
+    **kwargs,
 ):
     """
     Transform ingested data into a structured knowledge graph.
