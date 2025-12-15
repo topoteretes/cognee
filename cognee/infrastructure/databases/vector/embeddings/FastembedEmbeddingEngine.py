@@ -17,6 +17,7 @@ from cognee.infrastructure.databases.exceptions import EmbeddingException
 from cognee.infrastructure.llm.tokenizer.TikToken import (
     TikTokenTokenizer,
 )
+from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
 logger = get_logger("FastembedEmbeddingEngine")
@@ -68,7 +69,7 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
 
     @retry(
         stop=stop_after_delay(128),
-        wait=wait_exponential_jitter(2, 128),
+        wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
@@ -96,11 +97,12 @@ class FastembedEmbeddingEngine(EmbeddingEngine):
             if self.mock:
                 return [[0.0] * self.dimensions for _ in text]
             else:
-                embeddings = self.embedding_model.embed(
-                    text,
-                    batch_size=len(text),
-                    parallel=None,
-                )
+                async with embedding_rate_limiter_context_manager():
+                    embeddings = self.embedding_model.embed(
+                        text,
+                        batch_size=len(text),
+                        parallel=None,
+                    )
 
                 return list(embeddings)
 

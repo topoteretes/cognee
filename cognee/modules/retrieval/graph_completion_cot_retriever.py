@@ -7,7 +7,7 @@ from cognee.shared.logging_utils import get_logger
 
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import (
-    generate_structured_completion,
+    generate_completion,
     summarize_text,
 )
 from cognee.modules.retrieval.utils.session_cache import (
@@ -44,7 +44,6 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
     questions based on reasoning. The public methods are:
 
     - get_completion
-    - get_structured_completion
 
     Instance variables include:
     - validation_system_prompt_path
@@ -66,6 +65,8 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
         save_interaction: bool = False,
+        wide_search_top_k: Optional[int] = 100,
+        triplet_distance_penalty: Optional[float] = 3.5,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -75,6 +76,8 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             node_type=node_type,
             node_name=node_name,
             save_interaction=save_interaction,
+            wide_search_top_k=wide_search_top_k,
+            triplet_distance_penalty=triplet_distance_penalty,
         )
         self.validation_system_prompt_path = validation_system_prompt_path
         self.validation_user_prompt_path = validation_user_prompt_path
@@ -121,7 +124,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 triplets += await self.get_context(followup_question)
                 context_text = await self.resolve_edges_to_text(list(set(triplets)))
 
-            completion = await generate_structured_completion(
+            completion = await generate_completion(
                 query=query,
                 context=context_text,
                 user_prompt_path=self.user_prompt_path,
@@ -165,24 +168,28 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
         return completion, context_text, triplets
 
-    async def get_structured_completion(
+    async def get_completion(
         self,
         query: str,
         context: Optional[List[Edge]] = None,
         session_id: Optional[str] = None,
-        max_iter: int = 4,
+        max_iter=4,
         response_model: Type = str,
-    ) -> Any:
+    ) -> List[Any]:
         """
-        Generate structured completion responses based on a user query and contextual information.
+        Generate completion responses based on a user query and contextual information.
 
-        This method applies the same chain-of-thought logic as get_completion but returns
+        This method interacts with a language model client to retrieve a structured response,
+        using a series of iterations to refine the answers and generate follow-up questions
+        based on reasoning derived from previous outputs. It raises exceptions if the context
+        retrieval fails or if the model encounters issues in generating outputs. It returns
         structured output using the provided response model.
 
         Parameters:
         -----------
+
             - query (str): The user's query to be processed and answered.
-            - context (Optional[List[Edge]]): Optional context that may assist in answering the query.
+            - context (Optional[Any]): Optional context that may assist in answering the query.
               If not provided, it will be fetched based on the query. (default None)
             - session_id (Optional[str]): Optional session identifier for caching. If None,
               defaults to 'default_session'. (default None)
@@ -192,7 +199,8 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
         Returns:
         --------
-            - Any: The generated structured completion based on the response model.
+
+            - List[str]: A list containing the generated answer to the user's query.
         """
         # Check if session saving is enabled
         cache_config = CacheConfig()
@@ -227,46 +235,5 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 answer=str(completion),
                 session_id=session_id,
             )
-
-        return completion
-
-    async def get_completion(
-        self,
-        query: str,
-        context: Optional[List[Edge]] = None,
-        session_id: Optional[str] = None,
-        max_iter=4,
-    ) -> List[str]:
-        """
-        Generate completion responses based on a user query and contextual information.
-
-        This method interacts with a language model client to retrieve a structured response,
-        using a series of iterations to refine the answers and generate follow-up questions
-        based on reasoning derived from previous outputs. It raises exceptions if the context
-        retrieval fails or if the model encounters issues in generating outputs.
-
-        Parameters:
-        -----------
-
-            - query (str): The user's query to be processed and answered.
-            - context (Optional[Any]): Optional context that may assist in answering the query.
-              If not provided, it will be fetched based on the query. (default None)
-            - session_id (Optional[str]): Optional session identifier for caching. If None,
-              defaults to 'default_session'. (default None)
-            - max_iter: The maximum number of iterations to refine the answer and generate
-              follow-up questions. (default 4)
-
-        Returns:
-        --------
-
-            - List[str]: A list containing the generated answer to the user's query.
-        """
-        completion = await self.get_structured_completion(
-            query=query,
-            context=context,
-            session_id=session_id,
-            max_iter=max_iter,
-            response_model=str,
-        )
 
         return [completion]

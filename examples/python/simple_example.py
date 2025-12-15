@@ -56,14 +56,6 @@ async def main():
     for result_text in search_results:
         print(result_text)
 
-    # Example output:
-    # ({'id': UUID('bc338a39-64d6-549a-acec-da60846dd90d'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 1, 211808, tzinfo=datetime.timezone.utc), 'name': 'natural language processing', 'description': 'An interdisciplinary subfield of computer science and information retrieval.'}, {'relationship_name': 'is_a_subfield_of', 'source_node_id': UUID('bc338a39-64d6-549a-acec-da60846dd90d'), 'target_node_id': UUID('6218dbab-eb6a-5759-a864-b3419755ffe0'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 15, 473137, tzinfo=datetime.timezone.utc)}, {'id': UUID('6218dbab-eb6a-5759-a864-b3419755ffe0'), 'updated_at': datetime.datetime(2024, 11, 21, 12, 23, 1, 211808, tzinfo=datetime.timezone.utc), 'name': 'computer science', 'description': 'The study of computation and information processing.'})
-    # (...)
-    # It represents nodes and relationships in the knowledge graph:
-    # - The first element is the source node (e.g., 'natural language processing').
-    # - The second element is the relationship between nodes (e.g., 'is_a_subfield_of').
-    # - The third element is the target node (e.g., 'computer science').
-
 
 if __name__ == "__main__":
     logger = setup_logging(log_level=ERROR)

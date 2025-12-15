@@ -1,11 +1,11 @@
-from uuid import uuid5, NAMESPACE_OID
+from uuid import UUID
 from .data_types import IngestionData
 
 from cognee.modules.users.models import User
+from cognee.modules.data.methods import get_unique_data_id
 
 
-def identify(data: IngestionData, user: User) -> str:
+async def identify(data: IngestionData, user: User) -> UUID:
     data_content_hash: str = data.get_identifier()
 
-    # return UUID hash of file contents + owner id
-    return uuid5(NAMESPACE_OID, f"{data_content_hash}{user.id}")
+    return await get_unique_data_id(data_identifier=data_content_hash, user=user)

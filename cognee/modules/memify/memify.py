@@ -12,9 +12,6 @@ from cognee.modules.users.models import User
 from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
     resolve_authorized_user_datasets,
 )
-from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
-    reset_dataset_pipeline_run_status,
-)
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
@@ -97,10 +94,6 @@ async def memify(
         *enrichment_tasks,
     ]
 
-    await reset_dataset_pipeline_run_status(
-        authorized_dataset.id, user, pipeline_names=["memify_pipeline"]
-    )
-
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
@@ -113,6 +106,7 @@ async def memify(
         datasets=authorized_dataset.id,
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
+        use_pipeline_cache=False,
         incremental_loading=False,
         pipeline_name="memify_pipeline",
     )

@@ -1,6 +1,7 @@
 from .User import User
 from .Role import Role
 from .UserRole import UserRole
+from .UserTenant import UserTenant
 from .DatasetDatabase import DatasetDatabase
 from .RoleDefaultPermissions import RoleDefaultPermissions
 from .UserDefaultPermissions import UserDefaultPermissions

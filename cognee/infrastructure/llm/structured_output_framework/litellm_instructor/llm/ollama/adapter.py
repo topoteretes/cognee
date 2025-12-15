@@ -11,6 +11,8 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
 )
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
+
 from tenacity import (
     retry,
     stop_after_delay,
@@ -42,8 +44,16 @@ class OllamaAPIAdapter(LLMInterface):
     - aclient
     """
 
+    default_instructor_mode = "json_mode"
+
     def __init__(
-        self, endpoint: str, api_key: str, model: str, name: str, max_completion_tokens: int
+        self,
+        endpoint: str,
+        api_key: str,
+        model: str,
+        name: str,
+        max_completion_tokens: int,
+        instructor_mode: str = None,
     ):
         self.name = name
         self.model = model
@@ -51,19 +61,22 @@ class OllamaAPIAdapter(LLMInterface):
         self.endpoint = endpoint
         self.max_completion_tokens = max_completion_tokens
 
+        self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
+
         self.aclient = instructor.from_openai(
-            OpenAI(base_url=self.endpoint, api_key=self.api_key), mode=instructor.Mode.JSON
+            OpenAI(base_url=self.endpoint, api_key=self.api_key),
+            mode=instructor.Mode(self.instructor_mode),
         )
 
     @retry(
         stop=stop_after_delay(128),
-        wait=wait_exponential_jitter(2, 128),
+        wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
     ) -> BaseModel:
         """
         Generate a structured output from the LLM using the provided text and system prompt.
@@ -84,33 +97,33 @@ class OllamaAPIAdapter(LLMInterface):
 
             - BaseModel: A structured output that conforms to the specified response model.
         """
-
-        response = self.aclient.chat.completions.create(
-            model=self.model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"{text_input}",
-                },
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-            ],
-            max_retries=5,
-            response_model=response_model,
-        )
+        async with llm_rate_limiter_context_manager():
+            response = self.aclient.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"{text_input}",
+                    },
+                    {
+                        "role": "system",
+                        "content": system_prompt,
+                    },
+                ],
+                max_retries=2,
+                response_model=response_model,
+            )
 
         return response
 
     @retry(
         stop=stop_after_delay(128),
-        wait=wait_exponential_jitter(2, 128),
+        wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def create_transcript(self, input_file: str) -> str:
+    async def create_transcript(self, input_file: str, **kwargs) -> str:
         """
         Generate an audio transcript from a user query.
 
@@ -149,7 +162,7 @@ class OllamaAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def transcribe_image(self, input_file: str) -> str:
+    async def transcribe_image(self, input_file: str, **kwargs) -> str:
         """
         Transcribe content from an image using base64 encoding.
 

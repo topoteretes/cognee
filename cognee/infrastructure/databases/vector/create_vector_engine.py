@@ -1,5 +1,6 @@
 from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
+from cognee.infrastructure.databases.graph.config import get_graph_context_config
 
 from functools import lru_cache
 
@@ -8,8 +9,10 @@ from functools import lru_cache
 def create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
+    vector_db_name: str,
     vector_db_port: str = "",
     vector_db_key: str = "",
+    vector_dataset_database_handler: str = "",
 ):
     """
     Create a vector database engine based on the specified provider.
@@ -27,6 +30,7 @@ def create_vector_engine(
         - vector_db_url (str): The URL for the vector database instance.
         - vector_db_port (str): The port for the vector database instance. Required for some
           providers.
+        - vector_db_name (str): The name of the vector database instance.
         - vector_db_key (str): The API key or access token for the vector database instance.
         - vector_db_provider (str): The name of the vector database provider to use (e.g.,
           'pgvector').
@@ -45,6 +49,7 @@ def create_vector_engine(
             url=vector_db_url,
             api_key=vector_db_key,
             embedding_engine=embedding_engine,
+            database_name=vector_db_name,
         )
 
     if vector_db_provider.lower() == "pgvector":
@@ -133,6 +138,6 @@ def create_vector_engine(
 
     else:
         raise EnvironmentError(
-            f"Unsupported graph database provider: {vector_db_provider}. "
+            f"Unsupported vector database provider: {vector_db_provider}. "
             f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics', 'ChromaDB'])}"
         )

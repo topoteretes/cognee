@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Union, Optional
 from uuid import UUID
 
+from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
@@ -52,6 +53,7 @@ async def cognify(
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
     data_per_batch: int = 20,
+    **kwargs,
 ):
     """
     Transform ingested data into a structured knowledge graph.
@@ -222,6 +224,7 @@ async def cognify(
             config=config,
             custom_prompt=custom_prompt,
             chunks_per_batch=chunks_per_batch,
+            **kwargs,
         )
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
@@ -236,6 +239,7 @@ async def cognify(
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
         incremental_loading=incremental_loading,
+        use_pipeline_cache=True,
         pipeline_name="cognify_pipeline",
         data_per_batch=data_per_batch,
     )
@@ -249,6 +253,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     config: Config = None,
     custom_prompt: Optional[str] = None,
     chunks_per_batch: int = 100,
+    **kwargs,
 ) -> list[Task]:
     if config is None:
         ontology_config = get_ontology_env_config()
@@ -270,6 +275,9 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     if chunks_per_batch is None:
         chunks_per_batch = 100
 
+    cognify_config = get_cognify_config()
+    embed_triplets = cognify_config.triplet_embedding
+
     default_tasks = [
         Task(classify_documents),
         Task(
@@ -283,12 +291,17 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             config=config,
             custom_prompt=custom_prompt,
             task_config={"batch_size": chunks_per_batch},
+            **kwargs,
         ),  # Generate knowledge graphs from the document chunks.
         Task(
             summarize_text,
             task_config={"batch_size": chunks_per_batch},
         ),
-        Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
+        Task(
+            add_data_points,
+            embed_triplets=embed_triplets,
+            task_config={"batch_size": chunks_per_batch},
+        ),
     ]
 
     return default_tasks
