@@ -1,17 +1,28 @@
 import pytest
 import uuid
 from fastapi.testclient import TestClient
-from unittest.mock import patch, Mock, AsyncMock
+from unittest.mock import Mock
 from types import SimpleNamespace
-import importlib
 from cognee.api.client import app
+from cognee.modules.users.methods import get_authenticated_user
 
-gau_mod = importlib.import_module("cognee.modules.users.methods.get_authenticated_user")
+
+@pytest.fixture(scope="session")
+def test_client():
+    # Keep a single TestClient (and event loop) for the whole module.
+    # Re-creating TestClient repeatedly can break async DB connections (asyncpg loop mismatch).
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture
-def client():
-    return TestClient(app)
+def client(test_client, mock_default_user):
+    async def override_get_authenticated_user():
+        return mock_default_user
+
+    app.dependency_overrides[get_authenticated_user] = override_get_authenticated_user
+    yield test_client
+    app.dependency_overrides.pop(get_authenticated_user, None)
 
 
 @pytest.fixture
@@ -32,12 +43,8 @@ def mock_default_user():
     )
 
 
-@patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-def test_upload_ontology_success(mock_get_default_user, client, mock_default_user):
+def test_upload_ontology_success(client):
     """Test successful ontology upload"""
-    import json
-
-    mock_get_default_user.return_value = mock_default_user
     ontology_content = (
         b"<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'></rdf:RDF>"
     )
@@ -46,7 +53,7 @@ def test_upload_ontology_success(mock_get_default_user, client, mock_default_use
     response = client.post(
         "/api/v1/ontologies",
         files=[("ontology_file", ("test.owl", ontology_content, "application/xml"))],
-        data={"ontology_key": json.dumps([unique_key]), "description": json.dumps(["Test"])},
+        data={"ontology_key": unique_key, "description": "Test"},
     )
 
     assert response.status_code == 200
@@ -55,10 +62,8 @@ def test_upload_ontology_success(mock_get_default_user, client, mock_default_use
     assert "uploaded_at" in data["uploaded_ontologies"][0]
 
 
-@patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-def test_upload_ontology_invalid_file(mock_get_default_user, client, mock_default_user):
+def test_upload_ontology_invalid_file(client):
     """Test 400 response for non-.owl files"""
-    mock_get_default_user.return_value = mock_default_user
     unique_key = f"test_ontology_{uuid.uuid4().hex[:8]}"
     response = client.post(
         "/api/v1/ontologies",
@@ -68,14 +73,10 @@ def test_upload_ontology_invalid_file(mock_get_default_user, client, mock_defaul
     assert response.status_code == 400
 
 
-@patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-def test_upload_ontology_missing_data(mock_get_default_user, client, mock_default_user):
+def test_upload_ontology_missing_data(client):
     """Test 400 response for missing file or key"""
-    import json
-
-    mock_get_default_user.return_value = mock_default_user
     # Missing file
-    response = client.post("/api/v1/ontologies", data={"ontology_key": json.dumps(["test"])})
+    response = client.post("/api/v1/ontologies", data={"ontology_key": "test"})
     assert response.status_code == 400
 
     # Missing key
@@ -85,34 +86,25 @@ def test_upload_ontology_missing_data(mock_get_default_user, client, mock_defaul
     assert response.status_code == 400
 
 
-@patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-def test_upload_ontology_unauthorized(mock_get_default_user, client, mock_default_user):
-    """Test behavior when default user is provided (no explicit authentication)"""
-    import json
-
+def test_upload_ontology_without_auth_header(client):
+    """Test behavior when no explicit authentication header is provided."""
     unique_key = f"test_ontology_{uuid.uuid4().hex[:8]}"
-    mock_get_default_user.return_value = mock_default_user
     response = client.post(
         "/api/v1/ontologies",
         files=[("ontology_file", ("test.owl", b"<rdf></rdf>", "application/xml"))],
-        data={"ontology_key": json.dumps([unique_key])},
+        data={"ontology_key": unique_key},
     )
 
-    # The current system provides a default user when no explicit authentication is given
-    # This test verifies the system works with conditional authentication
     assert response.status_code == 200
     data = response.json()
     assert data["uploaded_ontologies"][0]["ontology_key"] == unique_key
     assert "uploaded_at" in data["uploaded_ontologies"][0]
 
 
-@patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-def test_upload_multiple_ontologies(mock_get_default_user, client, mock_default_user):
-    """Test uploading multiple ontology files in single request"""
+def test_upload_multiple_ontologies_in_single_request_is_rejected(client):
+    """Uploading multiple ontology files in a single request should fail."""
     import io
 
-    mock_get_default_user.return_value = mock_default_user
-    # Create mock files
     file1_content = b"<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'></rdf:RDF>"
     file2_content = b"<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'></rdf:RDF>"
 
@@ -120,45 +112,34 @@ def test_upload_multiple_ontologies(mock_get_default_user, client, mock_default_
         ("ontology_file", ("vehicles.owl", io.BytesIO(file1_content), "application/xml")),
         ("ontology_file", ("manufacturers.owl", io.BytesIO(file2_content), "application/xml")),
     ]
-    data = {
-        "ontology_key": '["vehicles", "manufacturers"]',
-        "descriptions": '["Base vehicles", "Car manufacturers"]',
-    }
+    data = {"ontology_key": "vehicles", "description": "Base vehicles"}
 
     response = client.post("/api/v1/ontologies", files=files, data=data)
 
-    assert response.status_code == 200
-    result = response.json()
-    assert "uploaded_ontologies" in result
-    assert len(result["uploaded_ontologies"]) == 2
-    assert result["uploaded_ontologies"][0]["ontology_key"] == "vehicles"
-    assert result["uploaded_ontologies"][1]["ontology_key"] == "manufacturers"
+    assert response.status_code == 400
+    assert "Only one ontology_file is allowed" in response.json()["error"]
 
 
-@patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-def test_upload_endpoint_accepts_arrays(mock_get_default_user, client, mock_default_user):
-    """Test that upload endpoint accepts array parameters"""
+def test_upload_endpoint_rejects_array_style_fields(client):
+    """Array-style form values should be rejected (no backwards compatibility)."""
     import io
     import json
 
-    mock_get_default_user.return_value = mock_default_user
     file_content = b"<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'></rdf:RDF>"
 
     files = [("ontology_file", ("single.owl", io.BytesIO(file_content), "application/xml"))]
     data = {
         "ontology_key": json.dumps(["single_key"]),
-        "descriptions": json.dumps(["Single ontology"]),
+        "description": json.dumps(["Single ontology"]),
     }
 
     response = client.post("/api/v1/ontologies", files=files, data=data)
 
-    assert response.status_code == 200
-    result = response.json()
-    assert result["uploaded_ontologies"][0]["ontology_key"] == "single_key"
+    assert response.status_code == 400
+    assert "ontology_key must be a string" in response.json()["error"]
 
 
-@patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-def test_cognify_with_multiple_ontologies(mock_get_default_user, client, mock_default_user):
+def test_cognify_with_multiple_ontologies(client):
     """Test cognify endpoint accepts multiple ontology keys"""
     payload = {
         "datasets": ["test_dataset"],
@@ -172,14 +153,11 @@ def test_cognify_with_multiple_ontologies(mock_get_default_user, client, mock_de
     assert response.status_code in [200, 400, 409]  # May fail for other reasons, not type
 
 
-@patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-def test_complete_multifile_workflow(mock_get_default_user, client, mock_default_user):
-    """Test complete workflow: upload multiple ontologies → cognify with multiple keys"""
+def test_complete_multifile_workflow(client):
+    """Test workflow: upload ontologies one-by-one → cognify with multiple keys"""
     import io
-    import json
 
-    mock_get_default_user.return_value = mock_default_user
-    # Step 1: Upload multiple ontologies
+    # Step 1: Upload two ontologies (one-by-one)
     file1_content = b"""<?xml version="1.0"?>
     <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
              xmlns:owl="http://www.w3.org/2002/07/owl#">
@@ -192,17 +170,19 @@ def test_complete_multifile_workflow(mock_get_default_user, client, mock_default
         <owl:Class rdf:ID="Manufacturer"/>
     </rdf:RDF>"""
 
-    files = [
-        ("ontology_file", ("vehicles.owl", io.BytesIO(file1_content), "application/xml")),
-        ("ontology_file", ("manufacturers.owl", io.BytesIO(file2_content), "application/xml")),
-    ]
-    data = {
-        "ontology_key": json.dumps(["vehicles", "manufacturers"]),
-        "descriptions": json.dumps(["Vehicle ontology", "Manufacturer ontology"]),
-    }
+    upload_response_1 = client.post(
+        "/api/v1/ontologies",
+        files=[("ontology_file", ("vehicles.owl", io.BytesIO(file1_content), "application/xml"))],
+        data={"ontology_key": "vehicles", "description": "Vehicle ontology"},
+    )
+    assert upload_response_1.status_code == 200
 
-    upload_response = client.post("/api/v1/ontologies", files=files, data=data)
-    assert upload_response.status_code == 200
+    upload_response_2 = client.post(
+        "/api/v1/ontologies",
+        files=[("ontology_file", ("manufacturers.owl", io.BytesIO(file2_content), "application/xml"))],
+        data={"ontology_key": "manufacturers", "description": "Manufacturer ontology"},
+    )
+    assert upload_response_2.status_code == 200
 
     # Step 2: Verify ontologies are listed
     list_response = client.get("/api/v1/ontologies")
@@ -223,44 +203,42 @@ def test_complete_multifile_workflow(mock_get_default_user, client, mock_default
     assert cognify_response.status_code != 400  # Not a validation error
 
 
-@patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-def test_multifile_error_handling(mock_get_default_user, client, mock_default_user):
-    """Test error handling for invalid multifile uploads"""
+def test_upload_error_handling(client):
+    """Test error handling for invalid uploads (single-file endpoint)."""
     import io
     import json
 
-    # Test mismatched array lengths
+    # Array-style key should be rejected
     file_content = b"<rdf:RDF></rdf:RDF>"
     files = [("ontology_file", ("test.owl", io.BytesIO(file_content), "application/xml"))]
     data = {
-        "ontology_key": json.dumps(["key1", "key2"]),  # 2 keys, 1 file
-        "descriptions": json.dumps(["desc1"]),
+        "ontology_key": json.dumps(["key1", "key2"]),
+        "description": "desc1",
     }
 
     response = client.post("/api/v1/ontologies", files=files, data=data)
     assert response.status_code == 400
-    assert "Number of keys must match number of files" in response.json()["error"]
+    assert "ontology_key must be a string" in response.json()["error"]
 
-    # Test duplicate keys
-    files = [
-        ("ontology_file", ("test1.owl", io.BytesIO(file_content), "application/xml")),
-        ("ontology_file", ("test2.owl", io.BytesIO(file_content), "application/xml")),
-    ]
-    data = {
-        "ontology_key": json.dumps(["duplicate", "duplicate"]),
-        "descriptions": json.dumps(["desc1", "desc2"]),
-    }
+    # Duplicate key should be rejected
+    response_1 = client.post(
+        "/api/v1/ontologies",
+        files=[("ontology_file", ("test1.owl", io.BytesIO(file_content), "application/xml"))],
+        data={"ontology_key": "duplicate", "description": "desc1"},
+    )
+    assert response_1.status_code == 200
 
-    response = client.post("/api/v1/ontologies", files=files, data=data)
-    assert response.status_code == 400
-    assert "Duplicate ontology keys not allowed" in response.json()["error"]
+    response_2 = client.post(
+        "/api/v1/ontologies",
+        files=[("ontology_file", ("test2.owl", io.BytesIO(file_content), "application/xml"))],
+        data={"ontology_key": "duplicate", "description": "desc2"},
+    )
+    assert response_2.status_code == 400
+    assert "already exists" in response_2.json()["error"]
 
 
-@patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
-def test_cognify_missing_ontology_key(mock_get_default_user, client, mock_default_user):
+def test_cognify_missing_ontology_key(client):
     """Test cognify with non-existent ontology key"""
-    mock_get_default_user.return_value = mock_default_user
-
     payload = {
         "datasets": ["test_dataset"],
         "ontology_key": ["nonexistent_key"],
