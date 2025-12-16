@@ -42,7 +42,9 @@ class CognifyPayloadDTO(InDTO):
         default="", description="Custom prompt for entity extraction and graph generation"
     )
     ontology_key: Optional[List[str]] = Field(
-        default=None, description="Reference to one or more previously uploaded ontologies"
+        default=None,
+        examples=[[]],
+        description="Reference to one or more previously uploaded ontologies",
     )
 
 

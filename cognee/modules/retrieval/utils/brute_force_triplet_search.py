@@ -16,24 +16,6 @@ logger = get_logger(level=ERROR)
 
 
 def format_triplets(edges):
-    print("\n\n\n")
-
-    def filter_attributes(obj, attributes):
-        """Helper function to filter out non-None properties, including nested dicts."""
-        result = {}
-        for attr in attributes:
-            value = getattr(obj, attr, None)
-            if value is not None:
-                # If the value is a dict, extract relevant keys from it
-                if isinstance(value, dict):
-                    nested_values = {
-                        k: v for k, v in value.items() if k in attributes and v is not None
-                    }
-                    result[attr] = nested_values
-                else:
-                    result[attr] = value
-        return result
-
     triplets = []
     for edge in edges:
         node1 = edge.node1

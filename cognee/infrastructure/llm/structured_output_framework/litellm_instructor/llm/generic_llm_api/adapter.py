@@ -91,7 +91,7 @@ class GenericAPIAdapter(LLMInterface):
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
     ) -> BaseModel:
         """
         Generate a response from a user query.
@@ -216,7 +216,7 @@ class GenericAPIAdapter(LLMInterface):
             raise ValueError(
                 f"Could not determine MIME type for audio file: {input}. Is the extension correct?"
             )
-        response =  litellm.completion(
+        response = litellm.completion(
             model=self.transcription_model,
             messages=[
                 {
@@ -237,10 +237,9 @@ class GenericAPIAdapter(LLMInterface):
             max_retries=self.MAX_RETRIES,
         )
         if response and response.choices and len(response.choices) > 0:
-            return TranscriptionReturnType(response.choices[0].message.content,response)
+            return TranscriptionReturnType(response.choices[0].message.content, response)
         else:
             return None
-
 
     @observe(as_type="transcribe_image")
     @retry(
