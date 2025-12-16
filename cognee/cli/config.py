@@ -26,7 +26,7 @@ SEARCH_TYPE_CHOICES = [
 ]
 
 # Chunker choices
-CHUNKER_CHOICES = ["TextChunker", "LangchainChunker"]
+CHUNKER_CHOICES = ["TextChunker", "LangchainChunker", "CsvChunker"]
 
 # Output format choices
 OUTPUT_FORMAT_CHOICES = ["json", "pretty", "simple"]

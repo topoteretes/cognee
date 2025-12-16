@@ -16,14 +16,16 @@ async def create_dataset(dataset_name: str, user: User, session: AsyncSession) -
             .options(joinedload(Dataset.data))
             .filter(Dataset.name == dataset_name)
             .filter(Dataset.owner_id == owner_id)
+            .filter(Dataset.tenant_id == user.tenant_id)
         )
     ).first()
 
     if dataset is None:
         # Dataset id should be generated based on dataset_name and owner_id/user so multiple users can use the same dataset_name
         dataset_id = await get_unique_dataset_id(dataset_name=dataset_name, user=user)
-        dataset = Dataset(id=dataset_id, name=dataset_name, data=[])
-        dataset.owner_id = owner_id
+        dataset = Dataset(
+            id=dataset_id, name=dataset_name, data=[], owner_id=owner_id, tenant_id=user.tenant_id
+        )
 
         session.add(dataset)
 

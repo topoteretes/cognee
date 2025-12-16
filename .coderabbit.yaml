@@ -1,0 +1,127 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# .coderabbit.yaml
+language: en
+early_access: false
+enable_free_tier: true
+reviews:  
+  profile: chill
+  instructions: >-
+    # Code Review Instructions
+
+    - Ensure the code follows best practices and coding standards.
+    - For **Python** code, follow
+      [PEP 20](https://www.python.org/dev/peps/pep-0020/) and
+      [CEP-8](https://gist.github.com/reactive-firewall/b7ee98df9e636a51806e62ef9c4ab161)
+      standards.
+
+    # Documentation Review Instructions
+    - Verify that documentation and comments are clear and comprehensive.
+    - Verify that documentation and comments are free of spelling mistakes.
+
+    # Test Code Review Instructions
+    - Ensure that test code is automated, comprehensive, and follows testing best practices.
+    - Verify that all critical functionality is covered by tests.
+    - Ensure that test code follow
+      [CEP-8](https://gist.github.com/reactive-firewall/d840ee9990e65f302ce2a8d78ebe73f6)
+
+    # Misc.
+    - Confirm that the code meets the project's requirements and objectives.
+    - Confirm that copyright years are up-to date whenever a file is changed.
+  request_changes_workflow: false
+  high_level_summary: true
+  high_level_summary_placeholder: '@coderabbitai summary'
+  auto_title_placeholder: '@coderabbitai'
+  review_status: true
+  poem: false
+  collapse_walkthrough: false
+  sequence_diagrams: false
+  changed_files_summary: true
+  path_filters: ['!*.xc*/**', '!node_modules/**', '!dist/**', '!build/**', '!.git/**', '!venv/**', '!__pycache__/**']
+  path_instructions:
+    - path: README.md
+      instructions: >-
+        1. Consider the file 'README.md' the overview/introduction of the project.
+           Also consider the 'README.md' file the first place to look for project documentation.
+
+        2. When reviewing the file 'README.md' it should be linted with help
+           from the tools `markdownlint` and `languagetool`, pointing out any issues.
+
+        3. You may assume the file 'README.md' will contain GitHub flavor Markdown.
+    - path: '**/*.py'
+      instructions: >-
+        When reviewing Python code for this project:
+
+        1. Prioritize portability over clarity, especially when dealing with cross-Python compatibility. However, with the priority in mind, do still consider improvements to clarity when relevant.
+
+        2. As a general guideline, consider the code style advocated in the PEP 8 standard (excluding the use of spaces for indentation) and evaluate suggested changes for code style compliance.
+
+        3. As a style convention, consider the code style advocated in [CEP-8](https://gist.github.com/reactive-firewall/b7ee98df9e636a51806e62ef9c4ab161) and evaluate suggested changes for code style compliance.
+
+        4. As a general guideline, try to provide any relevant, official, and supporting documentation links to any tool's suggestions in review comments. This guideline is important for posterity.
+
+        5. As a general rule, undocumented function definitions and class definitions in the project's Python code are assumed incomplete. Please consider suggesting a short summary of the code for any of these incomplete definitions as docstrings when reviewing.
+    - path: cognee/tests/*
+      instructions: >-
+        When reviewing test code:
+
+        1. Prioritize portability over clarity, especially when dealing with cross-Python compatibility. However, with the priority in mind, do still consider improvements to clarity when relevant.
+
+        2. As a general guideline, consider the code style advocated in the PEP 8 standard (excluding the use of spaces for indentation) and evaluate suggested changes for code style compliance.
+
+        3. As a style convention, consider the code style advocated in [CEP-8](https://gist.github.com/reactive-firewall/b7ee98df9e636a51806e62ef9c4ab161) and evaluate suggested changes for code style compliance, pointing out any violations discovered.
+
+        4. As a general guideline, try to provide any relevant, official, and supporting documentation links to any tool's suggestions in review comments. This guideline is important for posterity.
+
+        5. As a project rule, Python source files with names prefixed by the string "test_" and located in the project's "tests" directory are the project's unit-testing code. It is safe, albeit a heuristic, to assume these are considered part of the project's minimal acceptance testing unless a justifying exception to this assumption is documented.
+
+        6. As a project rule, any files without extensions and with names prefixed by either the string "check_" or the string "test_", and located in the project's "tests" directory, are the project's non-unit test code. "Non-unit test" in this context refers to any type of testing other than unit testing, such as (but not limited to) functional testing, style linting, regression testing, etc. It can also be assumed that non-unit testing code is usually written as Bash shell scripts.
+    - path: requirements.txt
+      instructions: >-
+        * The project's own Python dependencies are recorded in 'requirements.txt' for production code.
+
+        * The project's testing-specific Python dependencies are recorded in 'tests/requirements.txt' and are used for testing the project.
+
+        * The project's documentation-specific Python dependencies are recorded in 'docs/requirements.txt' and are used only for generating Python-focused documentation for the project. 'docs/requirements.txt' may be absent if not applicable.
+
+        Consider these 'requirements.txt' files the records of truth regarding project dependencies.
+    - path: .github/**
+      instructions: >-
+        * When the project is hosted on GitHub: All GitHub-specific configurations, templates, and tools should be found in the '.github' directory tree.
+
+        * 'actionlint' erroneously generates false positives when dealing with GitHub's `${{ ... }}` syntax in conditionals.
+
+        * 'actionlint' erroneously generates incorrect solutions when suggesting the removal of valid `${{ ... }}` syntax.
+  abort_on_close: true
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    ignore_title_keywords: []
+    labels: []
+    drafts: false
+    base_branches:
+      - dev
+      - main
+  tools:
+    shellcheck:
+      enabled: true
+    ruff:
+      enabled: true
+      configuration:
+        extend_select:
+          - E  # Pycodestyle errors (style issues)
+          - F  # PyFlakes codes (logical errors)
+          - W  # Pycodestyle warnings
+          - N  # PEP 8 naming conventions
+        ignore:
+          - W191
+          - W391
+          - E117
+          - D208
+        line_length: 100
+        dummy_variable_rgx: '^(_.*|junk|extra)$'  # Variables starting with '_' or named 'junk' or 'extras', are considered dummy variables        
+    markdownlint:
+      enabled: true
+    yamllint:
+      enabled: true
+chat:
+  auto_reply: true

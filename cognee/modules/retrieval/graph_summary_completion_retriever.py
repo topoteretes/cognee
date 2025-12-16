@@ -26,6 +26,8 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
         save_interaction: bool = False,
+        wide_search_top_k: Optional[int] = 100,
+        triplet_distance_penalty: Optional[float] = 3.5,
     ):
         """Initialize retriever with default prompt paths and search parameters."""
         super().__init__(
@@ -36,6 +38,8 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
             node_name=node_name,
             save_interaction=save_interaction,
             system_prompt=system_prompt,
+            wide_search_top_k=wide_search_top_k,
+            triplet_distance_penalty=triplet_distance_penalty,
         )
         self.summarize_prompt_path = summarize_prompt_path
 

@@ -22,6 +22,7 @@ from .save_data_item_to_storage import save_data_item_to_storage
 from .data_item_to_text_file import data_item_to_text_file
 from .data_item import DataItem
 
+
 async def ingest_data(
     data: Any,
     dataset_name: str,
@@ -107,7 +108,7 @@ async def ingest_data(
 
                 # data_id is the hash of original file contents + owner id to avoid duplicate data
 
-                data_id = ingestion.identify(classified_data, user)
+                data_id = await ingestion.identify(classified_data, user)
                 original_file_metadata = classified_data.get_metadata()
 
             # Find metadata from Cognee data storage text file
@@ -178,7 +179,7 @@ async def ingest_data(
                     tenant_id=user.tenant_id if user.tenant_id else None,
                     pipeline_status={},
                     token_count=-1,
-                    label = current_label
+                    label=current_label,
                 )
 
                 new_datapoints.append(data_point)

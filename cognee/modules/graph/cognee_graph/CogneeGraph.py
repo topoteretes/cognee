@@ -56,6 +56,68 @@ class CogneeGraph(CogneeAbstractGraph):
     def get_edges(self) -> List[Edge]:
         return self.edges
 
+    async def _get_nodeset_subgraph(
+        self,
+        adapter,
+        node_type,
+        node_name,
+    ):
+        """Retrieve subgraph based on node type and name."""
+        logger.info("Retrieving graph filtered by node type and node name (NodeSet).")
+        nodes_data, edges_data = await adapter.get_nodeset_subgraph(
+            node_type=node_type, node_name=node_name
+        )
+        if not nodes_data or not edges_data:
+            raise EntityNotFoundError(
+                message="Nodeset does not exist, or empty nodeset projected from the database."
+            )
+        return nodes_data, edges_data
+
+    async def _get_full_or_id_filtered_graph(
+        self,
+        adapter,
+        relevant_ids_to_filter,
+    ):
+        """Retrieve full or ID-filtered graph with fallback."""
+        if relevant_ids_to_filter is None:
+            logger.info("Retrieving full graph.")
+            nodes_data, edges_data = await adapter.get_graph_data()
+            if not nodes_data or not edges_data:
+                raise EntityNotFoundError(message="Empty graph projected from the database.")
+            return nodes_data, edges_data
+
+        get_graph_data_fn = getattr(adapter, "get_id_filtered_graph_data", adapter.get_graph_data)
+        if getattr(adapter.__class__, "get_id_filtered_graph_data", None):
+            logger.info("Retrieving ID-filtered graph from database.")
+            nodes_data, edges_data = await get_graph_data_fn(target_ids=relevant_ids_to_filter)
+        else:
+            logger.info("Retrieving full graph from database.")
+            nodes_data, edges_data = await get_graph_data_fn()
+        if hasattr(adapter, "get_id_filtered_graph_data") and (not nodes_data or not edges_data):
+            logger.warning(
+                "Id filtered graph returned empty, falling back to full graph retrieval."
+            )
+            logger.info("Retrieving full graph")
+            nodes_data, edges_data = await adapter.get_graph_data()
+
+        if not nodes_data or not edges_data:
+            raise EntityNotFoundError("Empty graph projected from the database.")
+        return nodes_data, edges_data
+
+    async def _get_filtered_graph(
+        self,
+        adapter,
+        memory_fragment_filter,
+    ):
+        """Retrieve graph filtered by attributes."""
+        logger.info("Retrieving graph filtered by memory fragment")
+        nodes_data, edges_data = await adapter.get_filtered_graph_data(
+            attribute_filters=memory_fragment_filter
+        )
+        if not nodes_data or not edges_data:
+            raise EntityNotFoundError(message="Empty filtered graph projected from the database.")
+        return nodes_data, edges_data
+
     async def project_graph_from_db(
         self,
         adapter: Union[GraphDBInterface],
@@ -67,40 +129,39 @@ class CogneeGraph(CogneeAbstractGraph):
         memory_fragment_filter=[],
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        relevant_ids_to_filter: Optional[List[str]] = None,
+        triplet_distance_penalty: float = 3.5,
     ) -> None:
         if node_dimension < 1 or edge_dimension < 1:
             raise InvalidDimensionsError()
         try:
+            if node_type is not None and node_name not in [None, [], ""]:
+                nodes_data, edges_data = await self._get_nodeset_subgraph(
+                    adapter, node_type, node_name
+                )
+            elif len(memory_fragment_filter) == 0:
+                nodes_data, edges_data = await self._get_full_or_id_filtered_graph(
+                    adapter, relevant_ids_to_filter
+                )
+            else:
+                nodes_data, edges_data = await self._get_filtered_graph(
+                    adapter, memory_fragment_filter
+                )
+
             import time
 
             start_time = time.time()
-
-            # Determine projection strategy
-            if node_type is not None and node_name not in [None, [], ""]:
-                nodes_data, edges_data = await adapter.get_nodeset_subgraph(
-                    node_type=node_type, node_name=node_name
-                )
-                if not nodes_data or not edges_data:
-                    raise EntityNotFoundError(
-                        message="Nodeset does not exist, or empty nodetes projected from the database."
-                    )
-            elif len(memory_fragment_filter) == 0:
-                nodes_data, edges_data = await adapter.get_graph_data()
-                if not nodes_data or not edges_data:
-                    raise EntityNotFoundError(message="Empty graph projected from the database.")
-            else:
-                nodes_data, edges_data = await adapter.get_filtered_graph_data(
-                    attribute_filters=memory_fragment_filter
-                )
-                if not nodes_data or not edges_data:
-                    raise EntityNotFoundError(
-                        message="Empty filtered graph projected from the database."
-                    )
-
             # Process nodes
             for node_id, properties in nodes_data:
                 node_attributes = {key: properties.get(key) for key in node_properties_to_project}
-                self.add_node(Node(str(node_id), node_attributes, dimension=node_dimension))
+                self.add_node(
+                    Node(
+                        str(node_id),
+                        node_attributes,
+                        dimension=node_dimension,
+                        node_penalty=triplet_distance_penalty,
+                    )
+                )
 
             # Process edges
             for source_id, target_id, relationship_type, properties in edges_data:
@@ -118,6 +179,7 @@ class CogneeGraph(CogneeAbstractGraph):
                         attributes=edge_attributes,
                         directed=directed,
                         dimension=edge_dimension,
+                        edge_penalty=triplet_distance_penalty,
                     )
                     self.add_edge(edge)
 
@@ -149,30 +211,18 @@ class CogneeGraph(CogneeAbstractGraph):
                     node.add_attribute("vector_distance", score)
                     mapped_nodes += 1
 
-    async def map_vector_distances_to_graph_edges(
-        self, vector_engine, query_vector, edge_distances
-    ) -> None:
+    async def map_vector_distances_to_graph_edges(self, edge_distances) -> None:
         try:
-            if query_vector is None or len(query_vector) == 0:
-                raise ValueError("Failed to generate query embedding.")
-
             if edge_distances is None:
-                start_time = time.time()
-                edge_distances = await vector_engine.search(
-                    collection_name="EdgeType_relationship_name",
-                    query_vector=query_vector,
-                    limit=None,
-                )
-                projection_time = time.time() - start_time
-                logger.info(
-                    f"Edge collection distances were calculated separately from nodes in {projection_time:.2f}s"
-                )
+                return
 
             embedding_map = {result.payload["text"]: result.score for result in edge_distances}
 
             for edge in self.edges:
-                relationship_type = edge.attributes.get("relationship_type")
-                distance = embedding_map.get(relationship_type, None)
+                edge_key = edge.attributes.get("edge_text") or edge.attributes.get(
+                    "relationship_type"
+                )
+                distance = embedding_map.get(edge_key, None)
                 if distance is not None:
                     edge.attributes["vector_distance"] = distance
 

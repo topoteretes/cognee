@@ -42,11 +42,13 @@ async def add_user_to_role(user_id: UUID, role_id: UUID, owner_id: UUID):
             .first()
         )
 
+        user_tenants = await user.awaitable_attrs.tenants
+
         if not user:
             raise UserNotFoundError
         elif not role:
             raise RoleNotFoundError
-        elif user.tenant_id != role.tenant_id:
+        elif role.tenant_id not in [tenant.id for tenant in user_tenants]:
             raise TenantNotFoundError(
                 message="User tenant does not match role tenant. User cannot be added to role."
             )

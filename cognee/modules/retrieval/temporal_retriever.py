@@ -47,6 +47,8 @@ class TemporalRetriever(GraphCompletionRetriever):
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        wide_search_top_k: Optional[int] = 100,
+        triplet_distance_penalty: Optional[float] = 3.5,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -54,6 +56,8 @@ class TemporalRetriever(GraphCompletionRetriever):
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
+            wide_search_top_k=wide_search_top_k,
+            triplet_distance_penalty=triplet_distance_penalty,
         )
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
@@ -146,8 +150,12 @@ class TemporalRetriever(GraphCompletionRetriever):
         return self.descriptions_to_string(top_k_events)
 
     async def get_completion(
-        self, query: str, context: Optional[str] = None, session_id: Optional[str] = None
-    ) -> List[str]:
+        self,
+        query: str,
+        context: Optional[str] = None,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
+    ) -> List[Any]:
         """
         Generates a response using the query and optional context.
 
@@ -159,6 +167,7 @@ class TemporalRetriever(GraphCompletionRetriever):
               retrieved based on the query. (default None)
             - session_id (Optional[str]): Optional session identifier for caching. If None,
               defaults to 'default_session'. (default None)
+            - response_model (Type): The Pydantic model type for structured output. (default str)
 
         Returns:
         --------
@@ -186,6 +195,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                         user_prompt_path=self.user_prompt_path,
                         system_prompt_path=self.system_prompt_path,
                         conversation_history=conversation_history,
+                        response_model=response_model,
                     ),
                 )
             else:
@@ -194,6 +204,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                     context=context,
                     user_prompt_path=self.user_prompt_path,
                     system_prompt_path=self.system_prompt_path,
+                    response_model=response_model,
                 )
 
             if session_save:

@@ -1,9 +1,11 @@
 """Factory to get the appropriate cache coordination engine (e.g., Redis)."""
 
 from functools import lru_cache
+import os
 from typing import Optional
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.cache_db_interface import CacheDBInterface
+from cognee.infrastructure.databases.cache.fscache.FsCacheAdapter import FSCacheAdapter
 
 config = get_cache_config()
 
@@ -33,20 +35,28 @@ def create_cache_engine(
 
     Returns:
     --------
-    - CacheDBInterface: An instance of the appropriate cache adapter. :TODO: Now we support only Redis. later if we add more here we can split the logic
+    - CacheDBInterface: An instance of the appropriate cache adapter.
     """
     if config.caching:
         from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
 
-        return RedisAdapter(
-            host=cache_host,
-            port=cache_port,
-            username=cache_username,
-            password=cache_password,
-            lock_name=lock_key,
-            timeout=agentic_lock_expire,
-            blocking_timeout=agentic_lock_timeout,
-        )
+        if config.cache_backend == "redis":
+            return RedisAdapter(
+                host=cache_host,
+                port=cache_port,
+                username=cache_username,
+                password=cache_password,
+                lock_name=lock_key,
+                timeout=agentic_lock_expire,
+                blocking_timeout=agentic_lock_timeout,
+            )
+        elif config.cache_backend == "fs":
+            return FSCacheAdapter()
+        else:
+            raise ValueError(
+                f"Unsupported cache backend: '{config.cache_backend}'. "
+                f"Supported backends are: 'redis', 'fs'"
+            )
     else:
         return None
 

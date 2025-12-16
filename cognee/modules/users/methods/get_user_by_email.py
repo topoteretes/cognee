@@ -13,7 +13,7 @@ async def get_user_by_email(user_email: str):
         user = (
             await session.execute(
                 select(User)
-                .options(joinedload(User.roles), joinedload(User.tenant))
+                .options(joinedload(User.roles), joinedload(User.tenants))
                 .where(User.email == user_email)
             )
         ).scalar()

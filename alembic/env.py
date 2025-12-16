@@ -87,11 +87,6 @@ db_engine = get_relational_engine()
 
 print("Using database:", db_engine.db_uri)
 
-if "sqlite" in db_engine.db_uri:
-    from cognee.infrastructure.utils.run_sync import run_sync
-
-    run_sync(db_engine.create_database())
-
 config.set_section_option(
     config.config_ini_section,
     "SQLALCHEMY_DATABASE_URI",

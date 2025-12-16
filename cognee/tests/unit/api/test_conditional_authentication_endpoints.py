@@ -1,11 +1,10 @@
+import os
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from uuid import uuid4
 from fastapi.testclient import TestClient
 from types import SimpleNamespace
 import importlib
-
-from cognee.api.client import app
 
 
 # Fixtures for reuse across test classes
@@ -32,6 +31,10 @@ def mock_authenticated_user():
     )
 
 
+# To turn off authentication we need to set the environment variable before importing the module
+# Also both require_authentication and backend access control must be false
+os.environ["REQUIRE_AUTHENTICATION"] = "false"
+os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
 gau_mod = importlib.import_module("cognee.modules.users.methods.get_authenticated_user")
 
 
@@ -40,6 +43,8 @@ class TestConditionalAuthenticationEndpoints:
 
     @pytest.fixture
     def client(self):
+        from cognee.api.client import app
+
         """Create a test client."""
         return TestClient(app)
 
@@ -133,6 +138,8 @@ class TestConditionalAuthenticationBehavior:
 
     @pytest.fixture
     def client(self):
+        from cognee.api.client import app
+
         return TestClient(app)
 
     @pytest.mark.parametrize(
@@ -209,6 +216,8 @@ class TestConditionalAuthenticationErrorHandling:
 
     @pytest.fixture
     def client(self):
+        from cognee.api.client import app
+
         return TestClient(app)
 
     @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
@@ -232,7 +241,7 @@ class TestConditionalAuthenticationErrorHandling:
         # The exact error message may vary depending on the actual database connection
         # The important thing is that we get a 500 error when user creation fails
 
-    def test_current_environment_configuration(self):
+    def test_current_environment_configuration(self, client):
         """Test that current environment configuration is working properly."""
         # This tests the actual module state without trying to change it
         from cognee.modules.users.methods.get_authenticated_user import (

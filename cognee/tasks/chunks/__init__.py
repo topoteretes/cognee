@@ -1,4 +1,5 @@
 from .chunk_by_word import chunk_by_word
 from .chunk_by_sentence import chunk_by_sentence
 from .chunk_by_paragraph import chunk_by_paragraph
+from .chunk_by_row import chunk_by_row
 from .remove_disconnected_chunks import remove_disconnected_chunks

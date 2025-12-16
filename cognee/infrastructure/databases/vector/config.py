@@ -18,14 +18,17 @@ class VectorConfig(BaseSettings):
     Instance variables:
     - vector_db_url: The URL of the vector database.
     - vector_db_port: The port for the vector database.
+    - vector_db_name: The name of the vector database.
     - vector_db_key: The key for accessing the vector database.
     - vector_db_provider: The provider for the vector database.
     """
 
     vector_db_url: str = ""
     vector_db_port: int = 1234
+    vector_db_name: str = ""
     vector_db_key: str = ""
     vector_db_provider: str = "lancedb"
+    vector_dataset_database_handler: str = "lancedb"
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -58,8 +61,10 @@ class VectorConfig(BaseSettings):
         return {
             "vector_db_url": self.vector_db_url,
             "vector_db_port": self.vector_db_port,
+            "vector_db_name": self.vector_db_name,
             "vector_db_key": self.vector_db_key,
             "vector_db_provider": self.vector_db_provider,
+            "vector_dataset_database_handler": self.vector_dataset_database_handler,
         }
 
 
