@@ -109,7 +109,7 @@ class OpenAIAdapter(GenericAPIAdapter):
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
     ) -> BaseModel:
         """
         Generate a response from a user query.
@@ -151,6 +151,7 @@ class OpenAIAdapter(GenericAPIAdapter):
                     api_version=self.api_version,
                     response_model=response_model,
                     max_retries=self.MAX_RETRIES,
+                    **kwargs,
                 )
         except (
             ContentFilterFinishReasonError,
@@ -177,6 +178,7 @@ class OpenAIAdapter(GenericAPIAdapter):
                         # api_base=self.fallback_endpoint,
                         response_model=response_model,
                         max_retries=self.MAX_RETRIES,
+                        **kwargs,
                     )
             except (
                 ContentFilterFinishReasonError,
@@ -201,7 +203,7 @@ class OpenAIAdapter(GenericAPIAdapter):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def create_transcript(self, input) -> Optional[TranscriptionReturnType]:
+    async def create_transcript(self, input, **kwargs) -> Optional[TranscriptionReturnType]:
         """
         Generate an audio transcript from a user query.
 
@@ -228,6 +230,7 @@ class OpenAIAdapter(GenericAPIAdapter):
                 api_base=self.endpoint,
                 api_version=self.api_version,
                 max_retries=self.MAX_RETRIES,
+                **kwargs,
             )
             if transcription:
                 return TranscriptionReturnType(transcription.text, transcription)
