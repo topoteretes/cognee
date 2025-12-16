@@ -39,7 +39,6 @@ def _patch_side_effect_boundaries(monkeypatch, search_mod):
         return None
 
     async def dummy_prepare_search_result(search_result):
-        # search() and helpers mostly exchange tuples: (result, context, datasets)
         if isinstance(search_result, tuple) and len(search_result) == 3:
             result, context, datasets = search_result
             return {"result": result, "context": context, "graphs": {}, "datasets": datasets}
