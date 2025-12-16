@@ -1,6 +1,6 @@
 import litellm
 import instructor
-from typing import Type, Optional
+from typing import Type
 from pydantic import BaseModel
 from openai import ContentFilterFinishReasonError
 from litellm.exceptions import ContentPolicyViolationError

@@ -162,6 +162,5 @@ class MistralAdapter(GenericAPIAdapter):
                     "file_name": file_name,
                 },
             )
-            if transcription_response:
-                return TranscriptionReturnType(transcription_response.text, transcription_response)
-        return None
+
+            return TranscriptionReturnType(transcription_response.text, transcription_response)
