@@ -11,6 +11,7 @@ def create_relational_engine(
     db_username: str,
     db_password: str,
     db_provider: str,
+    database_connect_args: dict = None,
 ):
     """
     Create a relational database engine based on the specified parameters.
@@ -29,6 +30,7 @@ def create_relational_engine(
         - db_password (str): The password for database authentication, required for
           PostgreSQL.
         - db_provider (str): The type of database provider (e.g., 'sqlite' or 'postgres').
+        - database_connect_args (dict, optional): Database driver connection arguments.
 
     Returns:
     --------
@@ -51,4 +53,4 @@ def create_relational_engine(
                 "PostgreSQL dependencies are not installed. Please install with 'pip install cognee\"[postgres]\"' or 'pip install cognee\"[postgres-binary]\"' to use PostgreSQL functionality."
             )
 
-    return SQLAlchemyAdapter(connection_string)
+    return SQLAlchemyAdapter(connection_string, connect_args=database_connect_args)
