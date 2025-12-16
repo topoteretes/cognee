@@ -27,7 +27,9 @@ from tenacity import (
     before_sleep_log,
 )
 
-from ..types import TranscriptionReturnType
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
+    TranscriptionReturnType,
+)
 
 logger = get_logger()
 observe = get_observe()
@@ -216,7 +218,7 @@ class GenericAPIAdapter(LLMInterface):
             raise ValueError(
                 f"Could not determine MIME type for audio file: {input}. Is the extension correct?"
             )
-        response = litellm.completion(
+        response = await litellm.acompletion(
             model=self.transcription_model,
             messages=[
                 {
@@ -270,7 +272,7 @@ class GenericAPIAdapter(LLMInterface):
             raise ValueError(
                 f"Could not determine MIME type for image file: {input}. Is the extension correct?"
             )
-        return litellm.completion(
+        response = await litellm.acompletion(
             model=self.image_transcribe_model,
             messages=[
                 {
@@ -295,3 +297,4 @@ class GenericAPIAdapter(LLMInterface):
             max_completion_tokens=300,
             max_retries=self.MAX_RETRIES,
         )
+        return response
