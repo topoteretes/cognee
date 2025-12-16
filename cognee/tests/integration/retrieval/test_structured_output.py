@@ -1,9 +1,9 @@
 import asyncio
-
-import pytest
-import cognee
-import pathlib
 import os
+import pytest
+import pathlib
+import pytest_asyncio
+import cognee
 
 from pydantic import BaseModel
 from cognee.low_level import setup, DataPoint
@@ -125,80 +125,90 @@ async def _test_get_structured_entity_completion():
     _assert_structured_answer(structured_answer)
 
 
-class TestStructuredOutputCompletion:
-    @pytest.mark.asyncio
-    async def test_get_structured_completion(self):
-        system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_get_structured_completion"
-        )
-        cognee.config.system_root_directory(system_directory_path)
-        data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_get_structured_completion"
-        )
-        cognee.config.data_root_directory(data_directory_path)
+@pytest_asyncio.fixture
+async def setup_test_environment():
+    """Set up a clean test environment with graph and document data."""
+    base_dir = pathlib.Path(__file__).parent.parent.parent.parent
+    system_directory_path = str(base_dir / ".cognee_system/test_get_structured_completion")
+    data_directory_path = str(base_dir / ".data_storage/test_get_structured_completion")
 
+    cognee.config.system_root_directory(system_directory_path)
+    cognee.config.data_root_directory(data_directory_path)
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    await setup()
+
+    class Company(DataPoint):
+        name: str
+
+    class Person(DataPoint):
+        name: str
+        works_for: Company
+        works_since: int
+
+    company1 = Company(name="Figma")
+    person1 = Person(name="Steve Rodger", works_for=company1, works_since=2015)
+
+    entities = [company1, person1]
+    await add_data_points(entities)
+
+    document = TextDocument(
+        name="Steve Rodger's career",
+        raw_data_location="somewhere",
+        external_metadata="",
+        mime_type="text/plain",
+    )
+
+    chunk1 = DocumentChunk(
+        text="Steve Rodger",
+        chunk_size=2,
+        chunk_index=0,
+        cut_type="sentence_end",
+        is_part_of=document,
+        contains=[],
+    )
+    chunk2 = DocumentChunk(
+        text="Mike Broski",
+        chunk_size=2,
+        chunk_index=1,
+        cut_type="sentence_end",
+        is_part_of=document,
+        contains=[],
+    )
+    chunk3 = DocumentChunk(
+        text="Christina Mayer",
+        chunk_size=2,
+        chunk_index=2,
+        cut_type="sentence_end",
+        is_part_of=document,
+        contains=[],
+    )
+
+    entities = [chunk1, chunk2, chunk3]
+    await add_data_points(entities)
+
+    entity_type = EntityType(name="Person", description="A human individual")
+    entity = Entity(name="Albert Einstein", is_a=entity_type, description="A famous physicist")
+
+    entities = [entity]
+    await add_data_points(entities)
+
+    yield
+
+    try:
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
-        await setup()
+    except Exception:
+        pass
 
-        class Company(DataPoint):
-            name: str
 
-        class Person(DataPoint):
-            name: str
-            works_for: Company
-            works_since: int
-
-        company1 = Company(name="Figma")
-        person1 = Person(name="Steve Rodger", works_for=company1, works_since=2015)
-
-        entities = [company1, person1]
-        await add_data_points(entities)
-
-        document = TextDocument(
-            name="Steve Rodger's career",
-            raw_data_location="somewhere",
-            external_metadata="",
-            mime_type="text/plain",
-        )
-
-        chunk1 = DocumentChunk(
-            text="Steve Rodger",
-            chunk_size=2,
-            chunk_index=0,
-            cut_type="sentence_end",
-            is_part_of=document,
-            contains=[],
-        )
-        chunk2 = DocumentChunk(
-            text="Mike Broski",
-            chunk_size=2,
-            chunk_index=1,
-            cut_type="sentence_end",
-            is_part_of=document,
-            contains=[],
-        )
-        chunk3 = DocumentChunk(
-            text="Christina Mayer",
-            chunk_size=2,
-            chunk_index=2,
-            cut_type="sentence_end",
-            is_part_of=document,
-            contains=[],
-        )
-
-        entities = [chunk1, chunk2, chunk3]
-        await add_data_points(entities)
-
-        entity_type = EntityType(name="Person", description="A human individual")
-        entity = Entity(name="Albert Einstein", is_a=entity_type, description="A famous physicist")
-
-        entities = [entity]
-        await add_data_points(entities)
-
-        await _test_get_structured_graph_completion_cot()
-        await _test_get_structured_graph_completion()
-        await _test_get_structured_graph_completion_temporal()
-        await _test_get_structured_graph_completion_rag()
-        await _test_get_structured_graph_completion_context_extension()
-        await _test_get_structured_entity_completion()
+@pytest.mark.asyncio
+async def test_get_structured_completion(setup_test_environment):
+    """Integration test: verify structured output completion for all retrievers."""
+    await _test_get_structured_graph_completion_cot()
+    await _test_get_structured_graph_completion()
+    await _test_get_structured_graph_completion_temporal()
+    await _test_get_structured_graph_completion_rag()
+    await _test_get_structured_graph_completion_context_extension()
+    await _test_get_structured_entity_completion()
