@@ -93,7 +93,7 @@ async def test_unknown_query_type_raises_unsupported():
     import cognee.modules.search.methods.get_search_type_tools as mod
 
     with pytest.raises(UnsupportedSearchTypeError, match="UNKNOWN_TYPE"):
-        await mod.get_search_type_tools("UNKNOWN_TYPE", query_text="q")  # type: ignore[arg-type]
+        await mod.get_search_type_tools("UNKNOWN_TYPE", query_text="q")
 
 
 @pytest.mark.asyncio
@@ -130,7 +130,7 @@ async def test_coding_rules_uses_node_name_as_rules_nodeset_name():
     assert len(tools) == 1
     assert tools[0].__name__ == "get_existing_rules"
     assert tools[0].__self__.__class__ is CodingRulesRetriever
-    # Empty list should default to ["coding_agent_rules"]
+
     assert tools[0].__self__.rules_nodeset_name == ["coding_agent_rules"]
 
 
@@ -186,7 +186,6 @@ async def test_tool_construction_for_supported_search_types(
 ):
     import cognee.modules.search.methods.get_search_type_tools as mod
 
-    # Natural language is guarded by ALLOW_CYPHER_QUERY too
     monkeypatch.setenv("ALLOW_CYPHER_QUERY", "true")
 
     tools = await mod.get_search_type_tools(query_type, query_text="q")
@@ -217,5 +216,5 @@ async def test_some_completion_tools_are_callable_without_backends(monkeypatch):
     ]:
         tools = await mod.get_search_type_tools(query_type, query_text="q")
         completion = tools[0]
-        result = await completion("q", context=["ok"])  # type: ignore[call-arg]
+        result = await completion("q", context=["ok"])
         assert result == ["ok"]
