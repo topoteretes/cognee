@@ -25,7 +25,9 @@ from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 from cognee.infrastructure.files.utils.open_data_file import open_data_file
 from cognee.modules.observability.get_observe import get_observe
 from cognee.shared.logging_utils import get_logger
-from ..types import TranscriptionReturnType
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
+    TranscriptionReturnType,
+)
 
 logger = get_logger()
 
@@ -203,7 +205,7 @@ class OpenAIAdapter(GenericAPIAdapter):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def create_transcript(self, input, **kwargs) -> Optional[TranscriptionReturnType]:
+    async def create_transcript(self, input, **kwargs) -> TranscriptionReturnType:
         """
         Generate an audio transcript from a user query.
 
@@ -232,9 +234,6 @@ class OpenAIAdapter(GenericAPIAdapter):
                 max_retries=self.MAX_RETRIES,
                 **kwargs,
             )
-            if transcription:
-                return TranscriptionReturnType(transcription.text, transcription)
-
-        return None
+            return TranscriptionReturnType(transcription.text, transcription)
 
     # transcribe_image is inherited from GenericAPIAdapter

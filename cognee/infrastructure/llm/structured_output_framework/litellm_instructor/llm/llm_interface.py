@@ -1,9 +1,11 @@
 """LLM Interface"""
 
-from typing import Type, Protocol, Optional
+from typing import Type, Protocol
 from abc import abstractmethod
 from pydantic import BaseModel
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
+    TranscriptionReturnType,
+)
 
 
 class LLMInterface(Protocol):
@@ -37,7 +39,7 @@ class LLMInterface(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    async def create_transcript(self, input) -> Optional[BaseModel]:
+    async def create_transcript(self, input) -> TranscriptionReturnType:
         """
         Transcribe audio content to text.
 
@@ -55,7 +57,7 @@ class LLMInterface(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    async def transcribe_image(self, input) -> Optional[BaseModel]:
+    async def transcribe_image(self, input) -> BaseModel:
         """
         Analyze image content and return text description.
 
