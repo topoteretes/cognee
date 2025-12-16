@@ -3,9 +3,6 @@
 from typing import Type, Protocol
 from abc import abstractmethod
 from pydantic import BaseModel
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.types import (
-    TranscriptionReturnType,
-)
 
 
 class LLMInterface(Protocol):
