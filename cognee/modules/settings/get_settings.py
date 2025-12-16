@@ -16,6 +16,7 @@ class ModelName(Enum):
     anthropic = "anthropic"
     gemini = "gemini"
     mistral = "mistral"
+    bedrock = "bedrock"
 
 
 class LLMConfig(BaseModel):
@@ -76,6 +77,10 @@ def get_settings() -> SettingsDict:
         {
             "value": "mistral",
             "label": "Mistral",
+        },
+        {
+            "value": "bedrock",
+            "label": "Bedrock",
         },
     ]
 
@@ -155,6 +160,20 @@ def get_settings() -> SettingsDict:
                         {
                             "value": "mistral-large-2411",
                             "label": "Mistral Large 2.1",
+                        },
+                    ],
+                    "bedrock": [
+                        {
+                            "value": "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                            "label": "Claude 4.5 Sonnet",
+                        },
+                        {
+                            "value": "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+                            "label": "Claude 4.5 Haiku",
+                        },
+                        {
+                            "value": "eu.amazon.nova-lite-v1:0",
+                            "label": "Amazon Nova Lite",
                         },
                     ],
                 },

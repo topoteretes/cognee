@@ -148,8 +148,8 @@ class TestCogneeServerStart(unittest.TestCase):
             headers=headers,
             files=[("ontology_file", ("test.owl", ontology_content, "application/xml"))],
             data={
-                "ontology_key": json.dumps([ontology_key]),
-                "description": json.dumps(["Test ontology"]),
+                "ontology_key": ontology_key,
+                "description": "Test ontology",
             },
         )
         self.assertEqual(ontology_response.status_code, 200)

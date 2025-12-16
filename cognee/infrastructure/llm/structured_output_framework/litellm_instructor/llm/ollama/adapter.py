@@ -76,7 +76,7 @@ class OllamaAPIAdapter(LLMInterface):
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
     ) -> BaseModel:
         """
         Generate a structured output from the LLM using the provided text and system prompt.
@@ -123,7 +123,7 @@ class OllamaAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def create_transcript(self, input_file: str) -> str:
+    async def create_transcript(self, input_file: str, **kwargs) -> str:
         """
         Generate an audio transcript from a user query.
 
@@ -162,7 +162,7 @@ class OllamaAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def transcribe_image(self, input_file: str) -> str:
+    async def transcribe_image(self, input_file: str, **kwargs) -> str:
         """
         Transcribe content from an image using base64 encoding.
 
