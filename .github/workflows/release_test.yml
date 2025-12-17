@@ -5,9 +5,6 @@ permissions:
   contents: read
 
 on:
-  push:
-    branches:
-      - feature/cog-3213-docs-set-up-guide-script-tests
   workflow_dispatch:
   pull_request:
     branches:
