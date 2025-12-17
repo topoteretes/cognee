@@ -41,6 +41,11 @@ class CognifyPayloadDTO(InDTO):
     custom_prompt: Optional[str] = Field(
         default="", description="Custom prompt for entity extraction and graph generation"
     )
+    ontology_key: Optional[List[str]] = Field(
+        default=None,
+        examples=[[]],
+        description="Reference to one or more previously uploaded ontologies",
+    )
 
 
 def get_cognify_router() -> APIRouter:
@@ -68,6 +73,7 @@ def get_cognify_router() -> APIRouter:
         - **dataset_ids** (Optional[List[UUID]]): List of existing dataset UUIDs to process. UUIDs allow processing of datasets not owned by the user (if permitted).
         - **run_in_background** (Optional[bool]): Whether to execute processing asynchronously. Defaults to False (blocking).
         - **custom_prompt** (Optional[str]): Custom prompt for entity extraction and graph generation. If provided, this prompt will be used instead of the default prompts for knowledge graph extraction.
+        - **ontology_key** (Optional[List[str]]): Reference to one or more previously uploaded ontology files to use for knowledge graph construction.
 
         ## Response
         - **Blocking execution**: Complete pipeline run information with entity counts, processing duration, and success/failure status
@@ -82,7 +88,8 @@ def get_cognify_router() -> APIRouter:
         {
             "datasets": ["research_papers", "documentation"],
             "run_in_background": false,
-            "custom_prompt": "Extract entities focusing on technical concepts and their relationships. Identify key technologies, methodologies, and their interconnections."
+            "custom_prompt": "Extract entities focusing on technical concepts and their relationships. Identify key technologies, methodologies, and their interconnections.",
+            "ontology_key": ["medical_ontology_v1"]
         }
         ```
 
@@ -108,13 +115,35 @@ def get_cognify_router() -> APIRouter:
             )
 
         from cognee.api.v1.cognify import cognify as cognee_cognify
+        from cognee.api.v1.ontologies.ontologies import OntologyService
 
         try:
             datasets = payload.dataset_ids if payload.dataset_ids else payload.datasets
+            config_to_use = None
+
+            if payload.ontology_key:
+                ontology_service = OntologyService()
+                ontology_contents = ontology_service.get_ontology_contents(
+                    payload.ontology_key, user
+                )
+
+                from cognee.modules.ontology.ontology_config import Config
+                from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import (
+                    RDFLibOntologyResolver,
+                )
+                from io import StringIO
+
+                ontology_streams = [StringIO(content) for content in ontology_contents]
+                config_to_use: Config = {
+                    "ontology_config": {
+                        "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_streams)
+                    }
+                }
 
             cognify_run = await cognee_cognify(
                 datasets,
                 user,
+                config=config_to_use,
                 run_in_background=payload.run_in_background,
                 custom_prompt=payload.custom_prompt,
             )

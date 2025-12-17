@@ -10,6 +10,10 @@ on:
         required: false
         type: string
         default: '["3.10.x", "3.12.x", "3.13.x"]'
+      os: 
+        required: false
+        type: string
+        default: '["ubuntu-22.04", "macos-15", "windows-latest"]'
     secrets:
       LLM_PROVIDER:
         required: true
@@ -40,10 +44,11 @@ jobs:
   run-unit-tests:
     name: Unit tests ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ubuntu-22.04, macos-15, windows-latest]
+        os: ${{ fromJSON(inputs.os) }}
       fail-fast: false
     steps:
       - name: Check out
@@ -76,10 +81,11 @@ jobs:
   run-integration-tests:
     name: Integration tests ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ ubuntu-22.04, macos-15, windows-latest ]
+        os: ${{ fromJSON(inputs.os) }}
       fail-fast: false
     steps:
       - name: Check out
@@ -112,10 +118,11 @@ jobs:
   run-library-test:
     name: Library test ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ ubuntu-22.04, macos-15, windows-latest ]
+        os: ${{ fromJSON(inputs.os) }}
       fail-fast: false
     steps:
       - name: Check out
@@ -148,10 +155,11 @@ jobs:
   run-build-test:
     name: Build test ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ ubuntu-22.04, macos-15, windows-latest ]
+        os: ${{ fromJSON(inputs.os) }}
       fail-fast: false
     steps:
       - name: Check out
@@ -177,10 +185,11 @@ jobs:
   run-soft-deletion-test:
     name: Soft Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ ubuntu-22.04, macos-15, windows-latest ]
+        os: ${{ fromJSON(inputs.os) }}
       fail-fast: false
     steps:
       - name: Check out
@@ -214,10 +223,11 @@ jobs:
   run-hard-deletion-test:
     name: Hard Delete test ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       matrix:
         python-version: ${{ fromJSON(inputs.python-versions) }}
-        os: [ ubuntu-22.04, macos-15, windows-latest ]
+        os: ${{ fromJSON(inputs.os) }}
       fail-fast: false
     steps:
       - name: Check out

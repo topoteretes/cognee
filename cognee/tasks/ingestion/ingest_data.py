@@ -99,7 +99,7 @@ async def ingest_data(
 
                 # data_id is the hash of original file contents + owner id to avoid duplicate data
 
-                data_id = ingestion.identify(classified_data, user)
+                data_id = await ingestion.identify(classified_data, user)
                 original_file_metadata = classified_data.get_metadata()
 
             # Find metadata from Cognee data storage text file

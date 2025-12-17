@@ -29,9 +29,30 @@ class SQLAlchemyAdapter:
     functions.
     """
 
-    def __init__(self, connection_string: str):
+    def __init__(self, connection_string: str, connect_args: dict = None):
+        """
+        Initialize the SQLAlchemy adapter with connection settings.
+
+        Parameters:
+        -----------
+            connection_string (str): The database connection string (e.g., 'sqlite:///path/to/db'
+                or 'postgresql://user:pass@host:port/db').
+            connect_args (dict, optional): Database driver connection arguments.
+                Configuration is loaded from RelationalConfig.database_connect_args, which reads
+                from the DATABASE_CONNECT_ARGS environment variable.
+
+                Examples:
+                    PostgreSQL with SSL:
+                        DATABASE_CONNECT_ARGS='{"sslmode": "require", "connect_timeout": 10}'
+
+                    SQLite with custom timeout:
+                        DATABASE_CONNECT_ARGS='{"timeout": 60}'
+        """
         self.db_path: str = None
         self.db_uri: str = connection_string
+
+        # Use provided connect_args (already parsed from config)
+        final_connect_args = connect_args or {}
 
         if "sqlite" in connection_string:
             [prefix, db_path] = connection_string.split("///")
@@ -53,7 +74,7 @@ class SQLAlchemyAdapter:
             self.engine = create_async_engine(
                 connection_string,
                 poolclass=NullPool,
-                connect_args={"timeout": 30},
+                connect_args={**{"timeout": 30}, **final_connect_args},
             )
         else:
             self.engine = create_async_engine(
@@ -63,6 +84,7 @@ class SQLAlchemyAdapter:
                 pool_recycle=280,
                 pool_pre_ping=True,
                 pool_timeout=280,
+                connect_args=final_connect_args,
             )
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)

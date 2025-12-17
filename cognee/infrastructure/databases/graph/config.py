@@ -26,6 +26,7 @@ class GraphConfig(BaseSettings):
     - graph_database_username
     - graph_database_password
     - graph_database_port
+    - graph_database_key
     - graph_file_path
     - graph_model
     - graph_topology
@@ -41,10 +42,12 @@ class GraphConfig(BaseSettings):
     graph_database_username: str = ""
     graph_database_password: str = ""
     graph_database_port: int = 123
+    graph_database_key: str = ""
     graph_file_path: str = ""
     graph_filename: str = ""
     graph_model: object = KnowledgeGraph
     graph_topology: object = KnowledgeGraph
+    graph_dataset_database_handler: str = "kuzu"
     model_config = SettingsConfigDict(env_file=".env", extra="allow", populate_by_name=True)
 
     # Model validator updates graph_filename and path dynamically after class creation based on current database provider
@@ -90,10 +93,12 @@ class GraphConfig(BaseSettings):
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
             "graph_database_port": self.graph_database_port,
+            "graph_database_key": self.graph_database_key,
             "graph_file_path": self.graph_file_path,
             "graph_model": self.graph_model,
             "graph_topology": self.graph_topology,
             "model_config": self.model_config,
+            "graph_dataset_database_handler": self.graph_dataset_database_handler,
         }
 
     def to_hashable_dict(self) -> dict:
@@ -116,7 +121,9 @@ class GraphConfig(BaseSettings):
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
             "graph_database_port": self.graph_database_port,
+            "graph_database_key": self.graph_database_key,
             "graph_file_path": self.graph_file_path,
+            "graph_dataset_database_handler": self.graph_dataset_database_handler,
         }
 
 
