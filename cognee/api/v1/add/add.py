@@ -10,13 +10,14 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 )
 from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
 async def add(
-    data: Union[BinaryIO, list[BinaryIO], str, list[str]],
+    data: Union[BinaryIO, list[BinaryIO], str, list[str], DataItem, list[DataItem]],
     dataset_name: str = "main_dataset",
     user: User = None,
     node_set: Optional[List[str]] = None,
