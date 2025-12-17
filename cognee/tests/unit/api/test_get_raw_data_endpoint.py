@@ -97,7 +97,7 @@ def test_get_raw_data_local_file_downloads_bytes(client, monkeypatch, tmp_path):
         monkeypatch,
         dataset_id=dataset_id,
         data_id=data_id,
-        raw_data_location=f"file://{file_path}",
+        raw_data_location=file_path.as_uri(),
         name="example.txt",
         mime_type="text/plain",
     )
