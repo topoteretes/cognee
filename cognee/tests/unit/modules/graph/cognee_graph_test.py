@@ -241,12 +241,11 @@ async def test_map_vector_distances_to_graph_nodes(setup_graph):
 
     await graph.map_vector_distances_to_graph_nodes(node_distances)
 
-    assert graph.get_node("1").attributes.get("vector_distance") == 0.95
-    assert graph.get_node("2").attributes.get("vector_distance") == 0.87
+    assert graph.get_node("1").attributes.get("vector_distance") == [0.95]
+    assert graph.get_node("2").attributes.get("vector_distance") == [0.87]
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Will be updated in Phase 2 to expect list-based distances")
 async def test_map_vector_distances_partial_node_coverage(setup_graph):
     """Test mapping vector distances when only some nodes have results."""
     graph = setup_graph
@@ -267,13 +266,12 @@ async def test_map_vector_distances_partial_node_coverage(setup_graph):
 
     await graph.map_vector_distances_to_graph_nodes(node_distances)
 
-    assert graph.get_node("1").attributes.get("vector_distance") == 0.95
-    assert graph.get_node("2").attributes.get("vector_distance") == 0.87
-    assert graph.get_node("3").attributes.get("vector_distance") == 3.5
+    assert graph.get_node("1").attributes.get("vector_distance") == [0.95]
+    assert graph.get_node("2").attributes.get("vector_distance") == [0.87]
+    assert graph.get_node("3").attributes.get("vector_distance") == [3.5]
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Will be updated in Phase 2 to expect list-based distances")
 async def test_map_vector_distances_multiple_categories(setup_graph):
     """Test mapping vector distances from multiple collection categories."""
     graph = setup_graph
@@ -300,10 +298,36 @@ async def test_map_vector_distances_multiple_categories(setup_graph):
 
     await graph.map_vector_distances_to_graph_nodes(node_distances)
 
-    assert graph.get_node("1").attributes.get("vector_distance") == 0.95
-    assert graph.get_node("2").attributes.get("vector_distance") == 0.87
-    assert graph.get_node("3").attributes.get("vector_distance") == 0.92
-    assert graph.get_node("4").attributes.get("vector_distance") == 3.5
+    assert graph.get_node("1").attributes.get("vector_distance") == [0.95]
+    assert graph.get_node("2").attributes.get("vector_distance") == [0.87]
+    assert graph.get_node("3").attributes.get("vector_distance") == [0.92]
+    assert graph.get_node("4").attributes.get("vector_distance") == [3.5]
+
+
+@pytest.mark.asyncio
+async def test_map_vector_distances_to_graph_nodes_multi_query(setup_graph):
+    """Test mapping vector distances with multiple queries."""
+    graph = setup_graph
+
+    node1 = Node("1")
+    node2 = Node("2")
+    node3 = Node("3")
+    graph.add_node(node1)
+    graph.add_node(node2)
+    graph.add_node(node3)
+
+    node_distances = {
+        "Entity_name": [
+            [MockScoredResult("1", 0.95)],  # query 0
+            [MockScoredResult("2", 0.87)],  # query 1
+        ]
+    }
+
+    await graph.map_vector_distances_to_graph_nodes(node_distances, query_list_length=2)
+
+    assert graph.get_node("1").attributes.get("vector_distance") == [0.95, 3.5]
+    assert graph.get_node("2").attributes.get("vector_distance") == [3.5, 0.87]
+    assert graph.get_node("3").attributes.get("vector_distance") == [3.5, 3.5]
 
 
 @pytest.mark.asyncio
@@ -329,11 +353,10 @@ async def test_map_vector_distances_to_graph_edges_with_payload(setup_graph):
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
-    assert graph.edges[0].attributes.get("vector_distance") == 0.92
+    assert graph.edges[0].attributes.get("vector_distance") == [0.92]
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Will be updated in Phase 2 to expect list-based distances")
 async def test_map_vector_distances_partial_edge_coverage(setup_graph):
     """Test mapping edge distances when only some edges have results."""
     graph = setup_graph
@@ -356,8 +379,8 @@ async def test_map_vector_distances_partial_edge_coverage(setup_graph):
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
-    assert graph.edges[0].attributes.get("vector_distance") == 0.92
-    assert graph.edges[1].attributes.get("vector_distance") == 3.5
+    assert graph.edges[0].attributes.get("vector_distance") == [0.92]
+    assert graph.edges[1].attributes.get("vector_distance") == [3.5]
 
 
 @pytest.mark.asyncio
@@ -383,11 +406,10 @@ async def test_map_vector_distances_edges_fallback_to_relationship_type(setup_gr
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
-    assert graph.edges[0].attributes.get("vector_distance") == 0.85
+    assert graph.edges[0].attributes.get("vector_distance") == [0.85]
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Will be updated in Phase 2 to expect list-based distances")
 async def test_map_vector_distances_no_edge_matches(setup_graph):
     """Test edge mapping when no edges match the distance results."""
     graph = setup_graph
@@ -410,7 +432,7 @@ async def test_map_vector_distances_no_edge_matches(setup_graph):
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
-    assert graph.edges[0].attributes.get("vector_distance") == 3.5
+    assert graph.edges[0].attributes.get("vector_distance") == [3.5]
 
 
 @pytest.mark.asyncio
@@ -423,7 +445,37 @@ async def test_map_vector_distances_none_returns_early(setup_graph):
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=None)
 
-    assert graph.edges[0].attributes.get("vector_distance") == 3.5
+    assert graph.edges[0].attributes.get("vector_distance") == [3.5]
+
+
+@pytest.mark.asyncio
+async def test_map_vector_distances_to_graph_edges_multi_query(setup_graph):
+    """Test mapping edge distances with multiple queries."""
+    graph = setup_graph
+
+    node1 = Node("1")
+    node2 = Node("2")
+    node3 = Node("3")
+    graph.add_node(node1)
+    graph.add_node(node2)
+    graph.add_node(node3)
+
+    edge1 = Edge(node1, node2, attributes={"edge_text": "A"})
+    edge2 = Edge(node2, node3, attributes={"edge_text": "B"})
+    graph.add_edge(edge1)
+    graph.add_edge(edge2)
+
+    edge_distances = [
+        [MockScoredResult("e1", 0.1, payload={"text": "A"})],  # query 0
+        [MockScoredResult("e2", 0.2, payload={"text": "B"})],  # query 1
+    ]
+
+    await graph.map_vector_distances_to_graph_edges(
+        edge_distances=edge_distances, query_list_length=2
+    )
+
+    assert graph.edges[0].attributes.get("vector_distance") == [0.1, 3.5]
+    assert graph.edges[1].attributes.get("vector_distance") == [3.5, 0.2]
 
 
 @pytest.mark.asyncio
