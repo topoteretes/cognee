@@ -479,8 +479,10 @@ def get_datasets_router() -> APIRouter:
 
         raw_location = data.raw_data_location
 
-        if raw_location.startswith("file:"):
-            raw_location = urlparse(raw_location).path
+        if raw_location.startswith("file://"):
+            from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
+
+            raw_location = get_data_file_path(raw_location)
 
         if raw_location.startswith("s3://"):
             from cognee.infrastructure.files.utils.open_data_file import open_data_file
