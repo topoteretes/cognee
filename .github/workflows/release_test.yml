@@ -15,7 +15,6 @@ on:
 
 jobs:
   trigger-community-test-suite:
-    if: ${{ inputs.flavour == 'main' }}
     runs-on: ubuntu-22.04
     steps:
       - name: Trigger community tests
