@@ -8,6 +8,8 @@ from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
 from fastapi import HTTPException, Query, Depends
 from fastapi.responses import JSONResponse, FileResponse
+from urllib.parse import urlparse
+from pathlib import Path
 
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -475,6 +477,18 @@ def get_datasets_router() -> APIRouter:
                 message=f"Data ({data_id}) not found in dataset ({dataset_id})."
             )
 
-        return data.raw_data_location
+        raw_location = data.raw_data_location
+
+        if raw_location.startswith("file:"):
+            raw_location = urlparse(raw_location).path
+
+        path = Path(raw_location)
+
+        if not path.is_file():
+            raise DataNotFoundError(
+                message=f"Raw file not found on disk for data ({data_id})."
+            )
+
+        return FileResponse(path=path)
 
     return router
