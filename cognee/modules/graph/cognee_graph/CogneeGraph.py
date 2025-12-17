@@ -308,21 +308,33 @@ class CogneeGraph(CogneeAbstractGraph):
             logger.error(f"Error mapping vector distances to edges: {str(ex)}")
             raise ex
 
-    def _as_distance(self, value: Union[float, List[float], None]) -> float:
-        """Normalize distance value to float, handling None, lists, and scalars."""
-        if value is None:
-            return self.triplet_distance_penalty
-        if isinstance(value, list) and value:
-            return float(value[0])
-        if isinstance(value, (int, float)):
-            return float(value)
-        return self.triplet_distance_penalty
+    def _calculate_query_top_triplet_importances(
+        self,
+        k: int,
+        query_index: int = 0,
+    ) -> List[Edge]:
+        """Calculate top k triplet importances for a specific query index."""
 
-    async def calculate_top_triplet_importances(self, k: int) -> List[Edge]:
         def score(edge):
-            n1 = self._as_distance(edge.node1.attributes.get("vector_distance"))
-            n2 = self._as_distance(edge.node2.attributes.get("vector_distance"))
-            e = self._as_distance(edge.attributes.get("vector_distance"))
-            return n1 + n2 + e
+            distances = [
+                edge.node1.attributes.get("vector_distance"),
+                edge.node2.attributes.get("vector_distance"),
+                edge.attributes.get("vector_distance"),
+            ]
+            return sum(float(d[query_index]) for d in distances)
 
         return heapq.nsmallest(k, self.edges, key=score)
+
+    async def calculate_top_triplet_importances(
+        self, k: int, query_list_length: Optional[int] = None
+    ) -> Union[List[Edge], List[List[Edge]]]:
+        """Calculate top k triplet importances, supporting both single and multi-query modes."""
+        query_count = query_list_length or 1
+        results = [
+            self._calculate_query_top_triplet_importances(k=k, query_index=i)
+            for i in range(query_count)
+        ]
+
+        if query_list_length is None:
+            return results[0]
+        return results
