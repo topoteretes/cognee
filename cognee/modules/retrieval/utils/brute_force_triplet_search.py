@@ -16,24 +16,6 @@ logger = get_logger(level=ERROR)
 
 
 def format_triplets(edges):
-    print("\n\n\n")
-
-    def filter_attributes(obj, attributes):
-        """Helper function to filter out non-None properties, including nested dicts."""
-        result = {}
-        for attr in attributes:
-            value = getattr(obj, attr, None)
-            if value is not None:
-                # If the value is a dict, extract relevant keys from it
-                if isinstance(value, dict):
-                    nested_values = {
-                        k: v for k, v in value.items() if k in attributes and v is not None
-                    }
-                    result[attr] = nested_values
-                else:
-                    result[attr] = value
-        return result
-
     triplets = []
     for edge in edges:
         node1 = edge.node1
@@ -137,6 +119,9 @@ async def brute_force_triplet_search(
             "DocumentChunk_text",
         ]
 
+    if "EdgeType_relationship_name" not in collections:
+        collections.append("EdgeType_relationship_name")
+
     try:
         vector_engine = get_vector_engine()
     except Exception as e:
@@ -197,9 +182,7 @@ async def brute_force_triplet_search(
             )
 
         await memory_fragment.map_vector_distances_to_graph_nodes(node_distances=node_distances)
-        await memory_fragment.map_vector_distances_to_graph_edges(
-            vector_engine=vector_engine, query_vector=query_vector, edge_distances=edge_distances
-        )
+        await memory_fragment.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
 
         results = await memory_fragment.calculate_top_triplet_importances(k=top_k)
 

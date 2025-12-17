@@ -445,15 +445,21 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 - **cognify**: Turns your data into a structured knowledge graph and stores it in memory
 
+- **cognee_add_developer_rules**: Ingest core developer rule files into memory
+
 - **codify**: Analyse a code repository, build a code graph, stores it in memory
-
-- **search**: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS
-
-- **list_data**: List all datasets and their data items with IDs for deletion operations
 
 - **delete**: Delete specific data from a dataset (supports soft/hard deletion modes)
 
+- **get_developer_rules**: Retrieve all developer rules that were generated based on previous interactions
+
+- **list_data**: List all datasets and their data items with IDs for deletion operations
+
+- **save_interaction**: Logs user-agent interactions and query-answer pairs
+
 - **prune**: Reset cognee for a fresh start (removes all data)
+
+- **search**: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS, SUMMARIES, CYPHER, and FEELING_LUCKY
 
 - **cognify_status / codify_status**: Track pipeline progress
 
