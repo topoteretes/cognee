@@ -85,6 +85,7 @@ def _patch_raw_download_dependencies(
 
 
 def test_get_raw_data_local_file_downloads_bytes(client, monkeypatch, tmp_path):
+    """Downloads bytes from a file:// raw_data_location."""
     dataset_id = uuid.uuid4()
     data_id = uuid.uuid4()
 
@@ -107,6 +108,7 @@ def test_get_raw_data_local_file_downloads_bytes(client, monkeypatch, tmp_path):
 
 
 def test_get_raw_data_s3_streams_bytes_without_s3_dependency(client, monkeypatch):
+    """Streams bytes from an s3:// raw_data_location (mocked)."""
     dataset_id = uuid.uuid4()
     data_id = uuid.uuid4()
 
