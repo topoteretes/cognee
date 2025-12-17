@@ -26,11 +26,13 @@ class CogneeGraph(CogneeAbstractGraph):
     nodes: Dict[str, Node]
     edges: List[Edge]
     directed: bool
+    triplet_distance_penalty: float
 
     def __init__(self, directed: bool = True):
         self.nodes = {}
         self.edges = []
         self.directed = directed
+        self.triplet_distance_penalty = 3.5
 
     def add_node(self, node: Node) -> None:
         if node.id not in self.nodes:
@@ -148,6 +150,8 @@ class CogneeGraph(CogneeAbstractGraph):
                     adapter, memory_fragment_filter
                 )
 
+            self.triplet_distance_penalty = triplet_distance_penalty
+
             import time
 
             start_time = time.time()
@@ -230,11 +234,21 @@ class CogneeGraph(CogneeAbstractGraph):
             logger.error(f"Error mapping vector distances to edges: {str(ex)}")
             raise ex
 
+    def _as_distance(self, value: Union[float, List[float], None]) -> float:
+        """Normalize distance value to float, handling None, lists, and scalars."""
+        if value is None:
+            return self.triplet_distance_penalty
+        if isinstance(value, list) and value:
+            return float(value[0])
+        if isinstance(value, (int, float)):
+            return float(value)
+        return self.triplet_distance_penalty
+
     async def calculate_top_triplet_importances(self, k: int) -> List[Edge]:
         def score(edge):
-            n1 = edge.node1.attributes.get("vector_distance", 1)
-            n2 = edge.node2.attributes.get("vector_distance", 1)
-            e = edge.attributes.get("vector_distance", 1)
+            n1 = self._as_distance(edge.node1.attributes.get("vector_distance"))
+            n2 = self._as_distance(edge.node2.attributes.get("vector_distance"))
+            e = self._as_distance(edge.attributes.get("vector_distance"))
             return n1 + n2 + e
 
         return heapq.nsmallest(k, self.edges, key=score)
