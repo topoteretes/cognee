@@ -181,7 +181,7 @@ async def search(
                         "dataset_tenant_id": datasets[0].tenant_id,
                     }
                     if verbose:
-                        # Include graphs only in verbose mode to reduce payload size
+                        # Include graphs only in verbose mode
                         search_result_dict["graphs"] = graphs
 
                     return_value.append(search_result_dict)
@@ -193,7 +193,7 @@ async def search(
                         "dataset_tenant_id": datasets[0].tenant_id,
                     }
                     if verbose:
-                        # Include graphs only in verbose mode to reduce payload size
+                        # Include graphs only in verbose mode
                         search_result_dict["graphs"] = graphs
 
                     return_value.append(search_result_dict)
