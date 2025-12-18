@@ -126,6 +126,7 @@ Now, run a minimal pipeline:
 ```python
 import cognee
 import asyncio
+from pprint import pprint
 
 
 async def main():
@@ -143,7 +144,7 @@ async def main():
 
     # Display the results
     for result in results:
-        print(result)
+        pprint(result)
 
 
 if __name__ == '__main__':
