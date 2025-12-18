@@ -17,11 +17,12 @@ from cognee.modules.notebooks.methods.create_tutorial_notebooks import (
     _load_tutorial_cells,
 )
 
+from cognee.modules.notebooks.models.Notebook import Notebook, NotebookCell
+from cognee.shared.logging_utils import get_logger
+
 create_tutorial_notebooks_module = importlib.import_module(
     "cognee.modules.notebooks.methods.create_tutorial_notebooks"
 )
-from cognee.modules.notebooks.models.Notebook import Notebook, NotebookCell
-from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
