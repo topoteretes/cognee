@@ -95,6 +95,7 @@ function useDatasets(useCloud = false) {
       })
       .catch((error) => {
         console.error('Error fetching datasets:', error);
+        throw error;
       });
   }, [useCloud]);
 

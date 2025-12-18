@@ -13,10 +13,11 @@
     "classnames": "^2.5.1",
     "culori": "^4.0.1",
     "d3-force-3d": "^3.0.6",
-    "next": "16.0.4",
+    "next": "^16.0.10",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-force-graph-2d": "^1.27.1",
+    "react-markdown": "^10.1.0",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

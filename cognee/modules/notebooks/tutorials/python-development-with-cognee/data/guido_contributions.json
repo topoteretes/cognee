@@ -1,0 +1,976 @@
+[
+  {
+    "type": "pr",
+    "repository": "mypy",
+    "title": "Re-work indirect dependencies",
+    "description": "Wow, this was quite a ride. Indirect dependencies were always supported kind of on best effort. This PR puts them on some principled foundation. It fixes three crashes and three stale types reported. All tests are quite weird/obscure, they are designed to expose the flaws in current logic (plus one test that passes on master, but it covers important corner case, so I add it just in case ). A short summary of various fixes (in arbitrary order):\r\n* Update many outdated comments and docstrings\r\n* Missing transitive dependency is now considered stale\r\n* Handle transitive generic bases in indirection visitor\r\n* Handle chained alias targets in indirection visitor\r\n* Always record original aliases during semantic analysis\r\n* Delete `qualified_tvars` as a concept, they are not needed since long ago\r\n* Remove ad-hoc handling for `TypeInfo`s from `build.py`\r\n* Support symbols with setter type different from getter type\r\n\r\nIn general the logic should be more simple/straightforward now:\r\n* Get all types in a file (need both symbol types _and_ expression types since some types may be only local)\r\n* For each type _transitively_ find all named types in them (thus aggregating all interfaces the type depends on)\r\n* In case any type was forced using `get_proper_type()`, record the orginal type alias during semantic analysis\r\n\r\nNote since this makes the algorithm correct, it may also make it slower (most notably because we must visit generic bases). I tried to offset this by couple optimizations, hopefully performance impact will be minimal.",
+    "url": "https://github.com/python/mypy/pull/19798",
+    "date": "2025-09-05T13:54:52Z",
+    "sha_or_number": "19798",
+    "files_changed": [
+      "mypy/build.py",
+      "mypy/fixup.py",
+      "mypy/indirection.py",
+      "mypy/nodes.py",
+      "mypy/semanal.py",
+      "mypy/server/deps.py",
+      "mypy/test/typefixture.py",
+      "mypy/typeanal.py",
+      "test-data/unit/check-incremental.test"
+    ],
+    "additions": 0,
+    "deletions": 0,
+    "labels": [],
+    "related_issues": [],
+    "code_samples": [
+      {
+        "file_path": "mypy/build.py",
+        "language": "python",
+        "before_code": "from mypy.graph_utils import prepare_sccs, strongly_connected_components, topsort\nfrom mypy.indirection import TypeIndirectionVisitor\nfrom mypy.messages import MessageBuilder\nfrom mypy.nodes import Import, ImportAll, ImportBase, ImportFrom, MypyFile, SymbolTable, TypeInfo\nfrom mypy.partially_defined import PossiblyUndefinedVariableVisitor\nfrom mypy.semanal import SemanticAnalyzer\nfrom mypy.semanal_pass1 import SemanticAnalyzerPreAnalysis",
+        "after_code": "from mypy.graph_utils import prepare_sccs, strongly_connected_components, topsort\nfrom mypy.indirection import TypeIndirectionVisitor\nfrom mypy.messages import MessageBuilder\nfrom mypy.nodes import (\n    Decorator,\n    Import,\n    ImportAll,\n    ImportBase,\n    ImportFrom,\n    MypyFile,\n    OverloadedFuncDef,\n    SymbolTable,\n)\nfrom mypy.partially_defined import PossiblyUndefinedVariableVisitor\nfrom mypy.semanal import SemanticAnalyzer\nfrom mypy.semanal_pass1 import SemanticAnalyzerPreAnalysis",
+        "diff_context": "from mypy.graph_utils import prepare_sccs, strongly_connected_components, topsort\nfrom mypy.indirection import TypeIndirectionVisitor\nfrom mypy.messages import MessageBuilder\nfrom mypy.nodes import Import, ImportAll, ImportBase, ImportFrom, MypyFile, SymbolTable, TypeInfo\nfrom mypy.nodes import (\n    Decorator,\n    Import,\n    ImportAll,\n    ImportBase,\n    ImportFrom,\n    MypyFile,\n    OverloadedFuncDef,\n    SymbolTable,\n)\nfrom mypy.partially_defined import PossiblyUndefinedVariableVisitor\nfrom mypy.semanal import SemanticAnalyzer\nfrom mypy.semanal_pass1 import SemanticAnalyzerPreAnalysis",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      },
+      {
+        "file_path": "mypy/build.py",
+        "language": "python",
+        "before_code": "\nFor single nodes, processing is simple.  If the node was cached, we\ndeserialize the cache data and fix up cross-references.  Otherwise, we\ndo semantic analysis followed by type checking.  We also handle (c)\nabove; if a module has valid cache data *but* any of its\ndependencies was processed from source, then the module should be\nprocessed from source.\n\nA relatively simple optimization (outside SCCs) we might do in the\nfuture is as follows: if a node's cache data is valid, but one or more\nof its dependencies are out of date so we have to re-parse the node\nfrom source, once we have fully type-checked the node, we can decide\nwhether its symbol table actually changed compared to the cache data\n(by reading the cache data and comparing it to the data we would be\nwriting).  If there is no change we can declare the node up to date,\nand any node that depends (and for which we have cached data, and\nwhose other dependencies are up to date) on it won't need to be\nre-parsed from source.\n\nImport cycles\n-------------\n\nFinally we have to decide how to handle (c), import cycles.  Here\nwe'll need a modified version of the original state machine\n(build.py), but we only need to do this per SCC, and we won't have to\ndeal with changes to the list of nodes while we're processing it.",
+        "after_code": "\nFor single nodes, processing is simple.  If the node was cached, we\ndeserialize the cache data and fix up cross-references.  Otherwise, we\ndo semantic analysis followed by type checking.  Once we (re-)processed\nan SCC we check whether its interface (symbol table) is still fresh\n(matches previous cached value). If it is not, we consider dependent SCCs\nstale so that they need to be re-parsed as well.\n\nNote on indirect dependencies: normally dependencies are determined from\nimports, but since our type interfaces are \"opaque\" (i.e. symbol tables can\ncontain types identified by name), these are not enough.  We *must* also\nadd \"indirect\" dependencies from types to their definitions.  For this\npurpose, after we finished processing a module, we travers its type map and\nsymbol tables, and for each type we find (transitively) on which opaque/named\ntypes it depends.\n\nImport cycles\n-------------\n\nFinally we have to decide how to handle (b), import cycles.  Here\nwe'll need a modified version of the original state machine\n(build.py), but we only need to do this per SCC, and we won't have to\ndeal with changes to the list of nodes while we're processing it.",
+        "diff_context": "\nFor single nodes, processing is simple.  If the node was cached, we\ndeserialize the cache data and fix up cross-references.  Otherwise, we\ndo semantic analysis followed by type checking.  We also handle (c)\nabove; if a module has valid cache data *but* any of its\ndependencies was processed from source, then the module should be\nprocessed from source.\n\nA relatively simple optimization (outside SCCs) we might do in the\nfuture is as follows: if a node's cache data is valid, but one or more\nof its dependencies are out of date so we have to re-parse the node\nfrom source, once we have fully type-checked the node, we can decide\nwhether its symbol table actually changed compared to the cache data\n(by reading the cache data and comparing it to the data we would be\nwriting).  If there is no change we can declare the node up to date,\nand any node that depends (and for which we have cached data, and\nwhose other dependencies are up to date) on it won't need to be\nre-parsed from source.\ndo semantic analysis followed by type checking.  Once we (re-)processed\nan SCC we check whether its interface (symbol table) is still fresh\n(matches previous cached value). If it is not, we consider dependent SCCs\nstale so that they need to be re-parsed as well.\n\nNote on indirect dependencies: normally dependencies are determined from\nimports, but since our type interfaces are \"opaque\" (i.e. symbol tables can\ncontain types identified by name), these are not enough.  We *must* also\nadd \"indirect\" dependencies from types to their definitions.  For this\npurpose, after we finished processing a module, we travers its type map and\nsymbol tables, and for each type we find (transitively) on which opaque/named\ntypes it depends.\n\nImport cycles\n-------------\n\nFinally we have to decide how to handle (c), import cycles.  Here\nFinally we have to decide how to handle (b), import cycles.  Here\nwe'll need a modified version of the original state machine\n(build.py), but we only need to do this per SCC, and we won't have to\ndeal with changes to the list of nodes while we're processing it.",
+        "change_type": "modification",
+        "lines_of_context": 10,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": [
+          "generator_expression"
+        ]
+      },
+      {
+        "file_path": "mypy/build.py",
+        "language": "python",
+        "before_code": "\n            # We should always patch indirect dependencies, even in full (non-incremental) builds,\n            # because the cache still may be written, and it must be correct.\n            # TODO: find a more robust way to traverse *all* relevant types?\n            all_types = list(self.type_map().values())\n            for _, sym, _ in self.tree.local_definitions():\n                if sym.type is not None:\n                    all_types.append(sym.type)\n                if isinstance(sym.node, TypeInfo):\n                    # TypeInfo symbols have some extra relevant types.\n                    all_types.extend(sym.node.bases)\n                    if sym.node.metaclass_type:\n                        all_types.append(sym.node.metaclass_type)\n                    if sym.node.typeddict_type:\n                        all_types.append(sym.node.typeddict_type)\n                    if sym.node.tuple_type:\n                        all_types.append(sym.node.tuple_type)\n            self._patch_indirect_dependencies(self.type_checker().module_refs, all_types)\n\n            if self.options.dump_inference_stats:\n                dump_type_stats(",
+        "after_code": "\n            # We should always patch indirect dependencies, even in full (non-incremental) builds,\n            # because the cache still may be written, and it must be correct.\n            all_types = set(self.type_map().values())\n            for _, sym, _ in self.tree.local_definitions():\n                if sym.type is not None:\n                    all_types.add(sym.type)\n                # Special case: settable properties may have two types.\n                if isinstance(sym.node, OverloadedFuncDef) and sym.node.is_property:\n                    assert isinstance(first_node := sym.node.items[0], Decorator)\n                    if first_node.var.setter_type:\n                        all_types.add(first_node.var.setter_type)\n            # Using mod_alias_deps is unfortunate but needed, since it is highly impractical\n            # (and practically impossible) to avoid all get_proper_type() calls. For example,\n            # TypeInfo.bases and metaclass, *args and **kwargs, Overloaded.items, and trivial\n            # aliases like Text = str, etc. all currently forced to proper types. Thus, we need\n            # to record the original definitions as they are first seen in semanal.py.\n            self._patch_indirect_dependencies(\n                self.type_checker().module_refs | self.tree.mod_alias_deps, all_types\n            )\n\n            if self.options.dump_inference_stats:\n                dump_type_stats(",
+        "diff_context": "\n            # We should always patch indirect dependencies, even in full (non-incremental) builds,\n            # because the cache still may be written, and it must be correct.\n            # TODO: find a more robust way to traverse *all* relevant types?\n            all_types = list(self.type_map().values())\n            all_types = set(self.type_map().values())\n            for _, sym, _ in self.tree.local_definitions():\n                if sym.type is not None:\n                    all_types.append(sym.type)\n                if isinstance(sym.node, TypeInfo):\n                    # TypeInfo symbols have some extra relevant types.\n                    all_types.extend(sym.node.bases)\n                    if sym.node.metaclass_type:\n                        all_types.append(sym.node.metaclass_type)\n                    if sym.node.typeddict_type:\n                        all_types.append(sym.node.typeddict_type)\n                    if sym.node.tuple_type:\n                        all_types.append(sym.node.tuple_type)\n            self._patch_indirect_dependencies(self.type_checker().module_refs, all_types)\n                    all_types.add(sym.type)\n                # Special case: settable properties may have two types.\n                if isinstance(sym.node, OverloadedFuncDef) and sym.node.is_property:\n                    assert isinstance(first_node := sym.node.items[0], Decorator)\n                    if first_node.var.setter_type:\n                        all_types.add(first_node.var.setter_type)\n            # Using mod_alias_deps is unfortunate but needed, since it is highly impractical\n            # (and practically impossible) to avoid all get_proper_type() calls. For example,\n            # TypeInfo.bases and metaclass, *args and **kwargs, Overloaded.items, and trivial\n            # aliases like Text = str, etc. all currently forced to proper types. Thus, we need\n            # to record the original definitions as they are first seen in semanal.py.\n            self._patch_indirect_dependencies(\n                self.type_checker().module_refs | self.tree.mod_alias_deps, all_types\n            )\n\n            if self.options.dump_inference_stats:\n                dump_type_stats(",
+        "change_type": "modification",
+        "lines_of_context": 8,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": [
+          "generator_expression"
+        ]
+      },
+      {
+        "file_path": "mypy/build.py",
+        "language": "python",
+        "before_code": "            self._type_checker.reset()\n            self._type_checker = None\n\n    def _patch_indirect_dependencies(self, module_refs: set[str], types: list[Type]) -> None:\n        assert None not in types\n        valid = self.valid_references()\n",
+        "after_code": "            self._type_checker.reset()\n            self._type_checker = None\n\n    def _patch_indirect_dependencies(self, module_refs: set[str], types: set[Type]) -> None:\n        assert None not in types\n        valid = self.valid_references()\n",
+        "diff_context": "            self._type_checker.reset()\n            self._type_checker = None\n\n    def _patch_indirect_dependencies(self, module_refs: set[str], types: list[Type]) -> None:\n    def _patch_indirect_dependencies(self, module_refs: set[str], types: set[Type]) -> None:\n        assert None not in types\n        valid = self.valid_references()\n",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": "_patch_indirect_dependencies",
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": [
+          "function_definition"
+        ]
+      },
+      {
+        "file_path": "mypy/build.py",
+        "language": "python",
+        "before_code": "        for id in scc:\n            deps.update(graph[id].dependencies)\n        deps -= ascc\n        stale_deps = {id for id in deps if id in graph and not graph[id].is_interface_fresh()}\n        fresh = fresh and not stale_deps\n        undeps = set()\n        if fresh:",
+        "after_code": "        for id in scc:\n            deps.update(graph[id].dependencies)\n        deps -= ascc\n        # Note: if a dependency is not in graph anymore, it should be considered interface-stale.\n        # This is important to trigger any relevant updates from indirect dependencies that were\n        # removed in load_graph().\n        stale_deps = {id for id in deps if id not in graph or not graph[id].is_interface_fresh()}\n        fresh = fresh and not stale_deps\n        undeps = set()\n        if fresh:",
+        "diff_context": "        for id in scc:\n            deps.update(graph[id].dependencies)\n        deps -= ascc\n        stale_deps = {id for id in deps if id in graph and not graph[id].is_interface_fresh()}\n        # Note: if a dependency is not in graph anymore, it should be considered interface-stale.\n        # This is important to trigger any relevant updates from indirect dependencies that were\n        # removed in load_graph().\n        stale_deps = {id for id in deps if id not in graph or not graph[id].is_interface_fresh()}\n        fresh = fresh and not stale_deps\n        undeps = set()\n        if fresh:",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": [
+          "generator_expression"
+        ]
+      },
+      {
+        "file_path": "mypy/indirection.py",
+        "language": "python",
+        "before_code": "    def __init__(self) -> None:\n        # Module references are collected here\n        self.modules: set[str] = set()\n        # User to avoid infinite recursion with recursive type aliases\n        self.seen_aliases: set[types.TypeAliasType] = set()\n        # Used to avoid redundant work\n        self.seen_fullnames: set[str] = set()\n\n    def find_modules(self, typs: Iterable[types.Type]) -> set[str]:\n        self.modules = set()\n        self.seen_fullnames = set()\n        self.seen_aliases = set()\n        for typ in typs:\n            self._visit(typ)\n        return self.modules\n\n    def _visit(self, typ: types.Type) -> None:\n        if isinstance(typ, types.TypeAliasType):\n            # Avoid infinite recursion for recursive type aliases.\n            if typ not in self.seen_aliases:\n                self.seen_aliases.add(typ)\n        typ.accept(self)\n\n    def _visit_type_tuple(self, typs: tuple[types.Type, ...]) -> None:\n        # Micro-optimization: Specialized version of _visit for lists\n        for typ in typs:\n            if isinstance(typ, types.TypeAliasType):\n                # Avoid infinite recursion for recursive type aliases.\n                if typ in self.seen_aliases:\n                    continue\n                self.seen_aliases.add(typ)\n            typ.accept(self)\n\n    def _visit_type_list(self, typs: list[types.Type]) -> None:\n        # Micro-optimization: Specialized version of _visit for tuples\n        for typ in typs:\n            if isinstance(typ, types.TypeAliasType):\n                # Avoid infinite recursion for recursive type aliases.\n                if typ in self.seen_aliases:\n                    continue\n                self.seen_aliases.add(typ)\n            typ.accept(self)\n\n    def _visit_module_name(self, module_name: str) -> None:",
+        "after_code": "    def __init__(self) -> None:\n        # Module references are collected here\n        self.modules: set[str] = set()\n        # User to avoid infinite recursion with recursive types\n        self.seen_types: set[types.TypeAliasType | types.Instance] = set()\n        # Used to avoid redundant work\n        self.seen_fullnames: set[str] = set()\n\n    def find_modules(self, typs: Iterable[types.Type]) -> set[str]:\n        self.modules = set()\n        self.seen_fullnames = set()\n        self.seen_types = set()\n        for typ in typs:\n            self._visit(typ)\n        return self.modules\n\n    def _visit(self, typ: types.Type) -> None:\n        # Note: instances are needed for `class str(Sequence[str]): ...`\n        if (\n            isinstance(typ, types.TypeAliasType)\n            or isinstance(typ, types.ProperType)\n            and isinstance(typ, types.Instance)\n        ):\n            # Avoid infinite recursion for recursive types.\n            if typ in self.seen_types:\n                return\n            self.seen_types.add(typ)\n        typ.accept(self)\n\n    def _visit_type_tuple(self, typs: tuple[types.Type, ...]) -> None:\n        # Micro-optimization: Specialized version of _visit for lists\n        for typ in typs:\n            if (\n                isinstance(typ, types.TypeAliasType)\n                or isinstance(typ, types.ProperType)\n                and isinstance(typ, types.Instance)\n            ):\n                # Avoid infinite recursion for recursive types.\n                if typ in self.seen_types:\n                    continue\n                self.seen_types.add(typ)\n            typ.accept(self)\n\n    def _visit_type_list(self, typs: list[types.Type]) -> None:\n        # Micro-optimization: Specialized version of _visit for tuples\n        for typ in typs:\n            if (\n                isinstance(typ, types.TypeAliasType)\n                or isinstance(typ, types.ProperType)\n                and isinstance(typ, types.Instance)\n            ):\n                # Avoid infinite recursion for recursive types.\n                if typ in self.seen_types:\n                    continue\n                self.seen_types.add(typ)\n            typ.accept(self)\n\n    def _visit_module_name(self, module_name: str) -> None:",
+        "diff_context": "    def __init__(self) -> None:\n        # Module references are collected here\n        self.modules: set[str] = set()\n        # User to avoid infinite recursion with recursive type aliases\n        self.seen_aliases: set[types.TypeAliasType] = set()\n        # User to avoid infinite recursion with recursive types\n        self.seen_types: set[types.TypeAliasType | types.Instance] = set()\n        # Used to avoid redundant work\n        self.seen_fullnames: set[str] = set()\n\n    def find_modules(self, typs: Iterable[types.Type]) -> set[str]:\n        self.modules = set()\n        self.seen_fullnames = set()\n        self.seen_aliases = set()\n        self.seen_types = set()\n        for typ in typs:\n            self._visit(typ)\n        return self.modules\n\n    def _visit(self, typ: types.Type) -> None:\n        if isinstance(typ, types.TypeAliasType):\n            # Avoid infinite recursion for recursive type aliases.\n            if typ not in self.seen_aliases:\n                self.seen_aliases.add(typ)\n        # Note: instances are needed for `class str(Sequence[str]): ...`\n        if (\n            isinstance(typ, types.TypeAliasType)\n            or isinstance(typ, types.ProperType)\n            and isinstance(typ, types.Instance)\n        ):\n            # Avoid infinite recursion for recursive types.\n            if typ in self.seen_types:\n                return\n            self.seen_types.add(typ)\n        typ.accept(self)\n\n    def _visit_type_tuple(self, typs: tuple[types.Type, ...]) -> None:\n        # Micro-optimization: Specialized version of _visit for lists\n        for typ in typs:\n            if isinstance(typ, types.TypeAliasType):\n                # Avoid infinite recursion for recursive type aliases.\n                if typ in self.seen_aliases:\n            if (\n                isinstance(typ, types.TypeAliasType)\n                or isinstance(typ, types.ProperType)\n                and isinstance(typ, types.Instance)\n            ):\n                # Avoid infinite recursion for recursive types.\n                if typ in self.seen_types:\n                    continue\n                self.seen_aliases.add(typ)\n                self.seen_types.add(typ)\n            typ.accept(self)\n\n    def _visit_type_list(self, typs: list[types.Type]) -> None:\n        # Micro-optimization: Specialized version of _visit for tuples\n        for typ in typs:\n            if isinstance(typ, types.TypeAliasType):\n                # Avoid infinite recursion for recursive type aliases.\n                if typ in self.seen_aliases:\n            if (\n                isinstance(typ, types.TypeAliasType)\n                or isinstance(typ, types.ProperType)\n                and isinstance(typ, types.Instance)\n            ):\n                # Avoid infinite recursion for recursive types.\n                if typ in self.seen_types:\n                    continue\n                self.seen_aliases.add(typ)\n                self.seen_types.add(typ)\n            typ.accept(self)\n\n    def _visit_module_name(self, module_name: str) -> None:",
+        "change_type": "modification",
+        "lines_of_context": 29,
+        "function_name": "_visit_module_name",
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": [
+          "generator_expression",
+          "context_manager",
+          "class_definition",
+          "type_hint"
+        ]
+      },
+      {
+        "file_path": "mypy/indirection.py",
+        "language": "python",
+        "before_code": "        self._visit_type_list(t.arg_types)\n\n    def visit_instance(self, t: types.Instance) -> None:\n        self._visit_type_tuple(t.args)\n        if t.type:\n            # Uses of a class depend on everything in the MRO,\n            # as changes to classes in the MRO can add types to methods,\n            # change property types, change the MRO itself, etc.\n            for s in t.type.mro:\n                self._visit_module_name(s.module_name)\n            if t.type.metaclass_type is not None:\n                self._visit_module_name(t.type.metaclass_type.type.module_name)\n\n    def visit_callable_type(self, t: types.CallableType) -> None:\n        self._visit_type_list(t.arg_types)",
+        "after_code": "        self._visit_type_list(t.arg_types)\n\n    def visit_instance(self, t: types.Instance) -> None:\n        # Instance is named, record its definition and continue digging into\n        # components that constitute semantic meaning of this type: bases, metaclass,\n        # tuple type, and typeddict type.\n        # Note: we cannot simply record the MRO, in case an intermediate base contains\n        # a reference to type alias, this affects meaning of map_instance_to_supertype(),\n        # see e.g. testDoubleReexportGenericUpdated.\n        self._visit_type_tuple(t.args)\n        if t.type:\n            # Important optimization: instead of simply recording the definition and\n            # recursing into bases, record the MRO and only traverse generic bases.\n            for s in t.type.mro:\n                self._visit_module_name(s.module_name)\n                for base in s.bases:\n                    if base.args:\n                        self._visit_type_tuple(base.args)\n            if t.type.metaclass_type:\n                self._visit(t.type.metaclass_type)\n            if t.type.typeddict_type:\n                self._visit(t.type.typeddict_type)\n            if t.type.tuple_type:\n                self._visit(t.type.tuple_type)\n\n    def visit_callable_type(self, t: types.CallableType) -> None:\n        self._visit_type_list(t.arg_types)",
+        "diff_context": "        self._visit_type_list(t.arg_types)\n\n    def visit_instance(self, t: types.Instance) -> None:\n        # Instance is named, record its definition and continue digging into\n        # components that constitute semantic meaning of this type: bases, metaclass,\n        # tuple type, and typeddict type.\n        # Note: we cannot simply record the MRO, in case an intermediate base contains\n        # a reference to type alias, this affects meaning of map_instance_to_supertype(),\n        # see e.g. testDoubleReexportGenericUpdated.\n        self._visit_type_tuple(t.args)\n        if t.type:\n            # Uses of a class depend on everything in the MRO,\n            # as changes to classes in the MRO can add types to methods,\n            # change property types, change the MRO itself, etc.\n            # Important optimization: instead of simply recording the definition and\n            # recursing into bases, record the MRO and only traverse generic bases.\n            for s in t.type.mro:\n                self._visit_module_name(s.module_name)\n            if t.type.metaclass_type is not None:\n                self._visit_module_name(t.type.metaclass_type.type.module_name)\n                for base in s.bases:\n                    if base.args:\n                        self._visit_type_tuple(base.args)\n            if t.type.metaclass_type:\n                self._visit(t.type.metaclass_type)\n            if t.type.typeddict_type:\n                self._visit(t.type.typeddict_type)\n            if t.type.tuple_type:\n                self._visit(t.type.tuple_type)\n\n    def visit_callable_type(self, t: types.CallableType) -> None:\n        self._visit_type_list(t.arg_types)",
+        "change_type": "modification",
+        "lines_of_context": 10,
+        "function_name": "visit_callable_type",
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": [
+          "generator_expression"
+        ]
+      },
+      {
+        "file_path": "mypy/indirection.py",
+        "language": "python",
+        "before_code": "                self.seen_fullnames.add(fullname)\n\n    def visit_overloaded(self, t: types.Overloaded) -> None:\n        self._visit_type_list(list(t.items))\n        self._visit(t.fallback)\n\n    def visit_tuple_type(self, t: types.TupleType) -> None:",
+        "after_code": "                self.seen_fullnames.add(fullname)\n\n    def visit_overloaded(self, t: types.Overloaded) -> None:\n        for item in t.items:\n            self._visit(item)\n        self._visit(t.fallback)\n\n    def visit_tuple_type(self, t: types.TupleType) -> None:",
+        "diff_context": "                self.seen_fullnames.add(fullname)\n\n    def visit_overloaded(self, t: types.Overloaded) -> None:\n        self._visit_type_list(list(t.items))\n        for item in t.items:\n            self._visit(item)\n        self._visit(t.fallback)\n\n    def visit_tuple_type(self, t: types.TupleType) -> None:",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": "visit_tuple_type",
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      },
+      {
+        "file_path": "mypy/indirection.py",
+        "language": "python",
+        "before_code": "        self._visit(t.item)\n\n    def visit_type_alias_type(self, t: types.TypeAliasType) -> None:\n        self._visit(types.get_proper_type(t))",
+        "after_code": "        self._visit(t.item)\n\n    def visit_type_alias_type(self, t: types.TypeAliasType) -> None:\n        # Type alias is named, record its definition and continue digging into\n        # components that constitute semantic meaning of this type: target and args.\n        if t.alias:\n            self._visit_module_name(t.alias.module)\n            self._visit(t.alias.target)\n        self._visit_type_list(t.args)",
+        "diff_context": "        self._visit(t.item)\n\n    def visit_type_alias_type(self, t: types.TypeAliasType) -> None:\n        self._visit(types.get_proper_type(t))\n        # Type alias is named, record its definition and continue digging into\n        # components that constitute semantic meaning of this type: target and args.\n        if t.alias:\n            self._visit_module_name(t.alias.module)\n            self._visit(t.alias.target)\n        self._visit_type_list(t.args)",
+        "change_type": "modification",
+        "lines_of_context": 3,
+        "function_name": "visit_type_alias_type",
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      },
+      {
+        "file_path": "mypy/nodes.py",
+        "language": "python",
+        "before_code": "    defs: list[Statement]\n    # Type alias dependencies as mapping from target to set of alias full names\n    alias_deps: defaultdict[str, set[str]]\n    # Is there a UTF-8 BOM at the start?\n    is_bom: bool\n    names: SymbolTable",
+        "after_code": "    defs: list[Statement]\n    # Type alias dependencies as mapping from target to set of alias full names\n    alias_deps: defaultdict[str, set[str]]\n    # Same as above but for coarse-grained dependencies (i.e. modules instead of full names)\n    mod_alias_deps: set[str]\n    # Is there a UTF-8 BOM at the start?\n    is_bom: bool\n    names: SymbolTable",
+        "diff_context": "    defs: list[Statement]\n    # Type alias dependencies as mapping from target to set of alias full names\n    alias_deps: defaultdict[str, set[str]]\n    # Same as above but for coarse-grained dependencies (i.e. modules instead of full names)\n    mod_alias_deps: set[str]\n    # Is there a UTF-8 BOM at the start?\n    is_bom: bool\n    names: SymbolTable",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": [
+          "type_hint"
+        ]
+      },
+      {
+        "file_path": "mypy/nodes.py",
+        "language": "python",
+        "before_code": "    target: The target type. For generic aliases contains bound type variables\n        as nested types (currently TypeVar and ParamSpec are supported).\n    _fullname: Qualified name of this type alias. This is used in particular\n        to track fine grained dependencies from aliases.\n    alias_tvars: Type variables used to define this alias.\n    normalized: Used to distinguish between `A = List`, and `A = list`. Both\n        are internally stored using `builtins.list` (because `typing.List` is",
+        "after_code": "    target: The target type. For generic aliases contains bound type variables\n        as nested types (currently TypeVar and ParamSpec are supported).\n    _fullname: Qualified name of this type alias. This is used in particular\n        to track fine-grained dependencies from aliases.\n    module: Module where the alias was defined.\n    alias_tvars: Type variables used to define this alias.\n    normalized: Used to distinguish between `A = List`, and `A = list`. Both\n        are internally stored using `builtins.list` (because `typing.List` is",
+        "diff_context": "    target: The target type. For generic aliases contains bound type variables\n        as nested types (currently TypeVar and ParamSpec are supported).\n    _fullname: Qualified name of this type alias. This is used in particular\n        to track fine grained dependencies from aliases.\n        to track fine-grained dependencies from aliases.\n    module: Module where the alias was defined.\n    alias_tvars: Type variables used to define this alias.\n    normalized: Used to distinguish between `A = List`, and `A = list`. Both\n        are internally stored using `builtins.list` (because `typing.List` is",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      },
+      {
+        "file_path": "mypy/semanal.py",
+        "language": "python",
+        "before_code": "        declared_type_vars: TypeVarLikeList | None = None,\n        all_declared_type_params_names: list[str] | None = None,\n        python_3_12_type_alias: bool = False,\n    ) -> tuple[Type | None, list[TypeVarLikeType], set[str], list[str], bool]:\n        \"\"\"Check if 'rvalue' is a valid type allowed for aliasing (e.g. not a type variable).\n\n        If yes, return the corresponding type, a list of\n        qualified type variable names for generic aliases, a set of names the alias depends on,\n        and a list of type variables if the alias is generic.\n        A schematic example for the dependencies:\n            A = int\n            B = str\n            analyze_alias(Dict[A, B])[2] == {'__main__.A', '__main__.B'}\n        \"\"\"\n        dynamic = bool(self.function_stack and self.function_stack[-1].is_dynamic())\n        global_scope = not self.type and not self.function_stack",
+        "after_code": "        declared_type_vars: TypeVarLikeList | None = None,\n        all_declared_type_params_names: list[str] | None = None,\n        python_3_12_type_alias: bool = False,\n    ) -> tuple[Type | None, list[TypeVarLikeType], set[tuple[str, str]], bool]:\n        \"\"\"Check if 'rvalue' is a valid type allowed for aliasing (e.g. not a type variable).\n\n        If yes, return the corresponding type, a list of type variables for generic aliases,\n        a set of names the alias depends on, and True if the original type has empty tuple index.\n        An example for the dependencies:\n            A = int\n            B = str\n            analyze_alias(dict[A, B])[2] == {('mod', 'mod.A'), ('mod', 'mod.B')}\n        \"\"\"\n        dynamic = bool(self.function_stack and self.function_stack[-1].is_dynamic())\n        global_scope = not self.type and not self.function_stack",
+        "diff_context": "        declared_type_vars: TypeVarLikeList | None = None,\n        all_declared_type_params_names: list[str] | None = None,\n        python_3_12_type_alias: bool = False,\n    ) -> tuple[Type | None, list[TypeVarLikeType], set[str], list[str], bool]:\n    ) -> tuple[Type | None, list[TypeVarLikeType], set[tuple[str, str]], bool]:\n        \"\"\"Check if 'rvalue' is a valid type allowed for aliasing (e.g. not a type variable).\n\n        If yes, return the corresponding type, a list of\n        qualified type variable names for generic aliases, a set of names the alias depends on,\n        and a list of type variables if the alias is generic.\n        A schematic example for the dependencies:\n        If yes, return the corresponding type, a list of type variables for generic aliases,\n        a set of names the alias depends on, and True if the original type has empty tuple index.\n        An example for the dependencies:\n            A = int\n            B = str\n            analyze_alias(Dict[A, B])[2] == {'__main__.A', '__main__.B'}\n            analyze_alias(dict[A, B])[2] == {('mod', 'mod.A'), ('mod', 'mod.B')}\n        \"\"\"\n        dynamic = bool(self.function_stack and self.function_stack[-1].is_dynamic())\n        global_scope = not self.type and not self.function_stack",
+        "change_type": "modification",
+        "lines_of_context": 10,
+        "function_name": null,
+        "class_name": null,
+        "docstring": "\"\"\"Check if 'rvalue' is a valid type allowed for aliasing (e.g. not a type variable).",
+        "coding_patterns": [
+          "list_comprehension"
+        ]
+      },
+      {
+        "file_path": "mypy/semanal.py",
+        "language": "python",
+        "before_code": "        self.cur_mod_node.plugin_deps.setdefault(trigger, set()).add(target)\n\n    def add_type_alias_deps(\n        self, aliases_used: Collection[str], target: str | None = None\n    ) -> None:\n        \"\"\"Add full names of type aliases on which the current node depends.\n\n        This is used by fine-grained incremental mode to re-check the corresponding nodes.\n        If `target` is None, then the target node used will be the current scope.\n        \"\"\"\n        if not aliases_used:\n            # A basic optimization to avoid adding targets with no dependencies to\n            # the `alias_deps` dict.\n            return\n        if target is None:\n            target = self.scope.current_target()\n        self.cur_mod_node.alias_deps[target].update(aliases_used)\n\n    def is_mangled_global(self, name: str) -> bool:\n        # A global is mangled if there exists at least one renamed variant.",
+        "after_code": "        self.cur_mod_node.plugin_deps.setdefault(trigger, set()).add(target)\n\n    def add_type_alias_deps(\n        self, aliases_used: Collection[tuple[str, str]], target: str | None = None\n    ) -> None:\n        \"\"\"Add full names of type aliases on which the current node depends.\n\n        This is used by fine-grained incremental mode to re-check the corresponding nodes.\n        If `target` is None, then the target node used will be the current scope. For\n        coarse-grained mode, add just the module names where aliases are defined.\n        \"\"\"\n        if not aliases_used:\n            return\n        if target is None:\n            target = self.scope.current_target()\n        for mod, fn in aliases_used:\n            self.cur_mod_node.alias_deps[target].add(fn)\n            self.cur_mod_node.mod_alias_deps.add(mod)\n\n    def is_mangled_global(self, name: str) -> bool:\n        # A global is mangled if there exists at least one renamed variant.",
+        "diff_context": "        self.cur_mod_node.plugin_deps.setdefault(trigger, set()).add(target)\n\n    def add_type_alias_deps(\n        self, aliases_used: Collection[str], target: str | None = None\n        self, aliases_used: Collection[tuple[str, str]], target: str | None = None\n    ) -> None:\n        \"\"\"Add full names of type aliases on which the current node depends.\n\n        This is used by fine-grained incremental mode to re-check the corresponding nodes.\n        If `target` is None, then the target node used will be the current scope.\n        If `target` is None, then the target node used will be the current scope. For\n        coarse-grained mode, add just the module names where aliases are defined.\n        \"\"\"\n        if not aliases_used:\n            # A basic optimization to avoid adding targets with no dependencies to\n            # the `alias_deps` dict.\n            return\n        if target is None:\n            target = self.scope.current_target()\n        self.cur_mod_node.alias_deps[target].update(aliases_used)\n        for mod, fn in aliases_used:\n            self.cur_mod_node.alias_deps[target].add(fn)\n            self.cur_mod_node.mod_alias_deps.add(mod)\n\n    def is_mangled_global(self, name: str) -> bool:\n        # A global is mangled if there exists at least one renamed variant.",
+        "change_type": "modification",
+        "lines_of_context": 15,
+        "function_name": "is_mangled_global",
+        "class_name": null,
+        "docstring": "\"\"\"Add full names of type aliases on which the current node depends.",
+        "coding_patterns": [
+          "list_comprehension"
+        ]
+      }
+    ],
+    "commit_message_style": "concise_subject",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "pr",
+    "repository": "mypy",
+    "title": "chore: add cline_docs/ to .gitignore",
+    "description": "Cline is a commonly used LLM tool which, under certain conditions, creates a cline_docs/ folder with task status and todo items etc\r\n\r\nThis folder is only helpful locally (unless we decide we want to add actual guidelines for Cline here, but thats outside the scope of this PR) so this PR adds it to .gitignore\r\n\r\n<!-- If this pull request fixes an issue, add \"Fixes #NNN\" with the issue number. -->\r\n\r\n<!--\r\nChecklist:\r\n- Read the [Contributing Guidelines](https://github.com/python/mypy/blob/master/CONTRIBUTING.md)\r\n- Add tests for all changed behaviour.\r\n- If you can't add a test, please explain why and how you verified your changes work.\r\n- Make sure CI passes.\r\n- Please do not force push to the PR once it has been reviewed.\r\n-->\r\n",
+    "url": "https://github.com/python/mypy/pull/19797",
+    "date": "2025-09-05T02:35:14Z",
+    "sha_or_number": "19797",
+    "files_changed": [
+      ".gitignore"
+    ],
+    "additions": 0,
+    "deletions": 0,
+    "labels": [],
+    "related_issues": [],
+    "code_samples": [],
+    "commit_message_style": "concise_subject",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "pr",
+    "repository": "mypy",
+    "title": "[mypyc] Add type annotations to tests",
+    "description": "Missing type annotations can compromise test coverage. My eventual goal is to require annotations by default in all run tests.\r\n",
+    "url": "https://github.com/python/mypy/pull/19794",
+    "date": "2025-09-04T15:56:30Z",
+    "sha_or_number": "19794",
+    "files_changed": [
+      "mypyc/test-data/fixtures/ir.py",
+      "mypyc/test-data/fixtures/typing-full.pyi",
+      "mypyc/test-data/run-dunders.test",
+      "mypyc/test-data/run-singledispatch.test"
+    ],
+    "additions": 0,
+    "deletions": 0,
+    "labels": [],
+    "related_issues": [],
+    "code_samples": [
+      {
+        "file_path": "mypyc/test-data/fixtures/ir.py",
+        "language": "python",
+        "before_code": "    def __iadd__(self, value: Iterable[_T], /) -> List[_T]: ...  # type: ignore[misc]\n    def append(self, x: _T) -> None: pass\n    def pop(self, i: int = -1) -> _T: pass\n    def count(self, _T) -> int: pass\n    def extend(self, l: Iterable[_T]) -> None: pass\n    def insert(self, i: int, x: _T) -> None: pass\n    def sort(self) -> None: pass",
+        "after_code": "    def __iadd__(self, value: Iterable[_T], /) -> List[_T]: ...  # type: ignore[misc]\n    def append(self, x: _T) -> None: pass\n    def pop(self, i: int = -1) -> _T: pass\n    def count(self, x: _T) -> int: pass\n    def extend(self, l: Iterable[_T]) -> None: pass\n    def insert(self, i: int, x: _T) -> None: pass\n    def sort(self) -> None: pass",
+        "diff_context": "    def __iadd__(self, value: Iterable[_T], /) -> List[_T]: ...  # type: ignore[misc]\n    def append(self, x: _T) -> None: pass\n    def pop(self, i: int = -1) -> _T: pass\n    def count(self, _T) -> int: pass\n    def count(self, x: _T) -> int: pass\n    def extend(self, l: Iterable[_T]) -> None: pass\n    def insert(self, i: int, x: _T) -> None: pass\n    def sort(self) -> None: pass",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": "sort",
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": [
+          "function_definition",
+          "type_hint"
+        ]
+      },
+      {
+        "file_path": "mypyc/test-data/fixtures/ir.py",
+        "language": "python",
+        "before_code": "def id(o: object) -> int: pass\n# This type is obviously wrong but the test stubs don't have Sized anymore\ndef len(o: object) -> int: pass\ndef print(*object) -> None: pass\ndef isinstance(x: object, t: object) -> bool: pass\ndef iter(i: Iterable[_T]) -> Iterator[_T]: pass\n@overload",
+        "after_code": "def id(o: object) -> int: pass\n# This type is obviously wrong but the test stubs don't have Sized anymore\ndef len(o: object) -> int: pass\ndef print(*args: object) -> None: pass\ndef isinstance(x: object, t: object) -> bool: pass\ndef iter(i: Iterable[_T]) -> Iterator[_T]: pass\n@overload",
+        "diff_context": "def id(o: object) -> int: pass\n# This type is obviously wrong but the test stubs don't have Sized anymore\ndef len(o: object) -> int: pass\ndef print(*object) -> None: pass\ndef print(*args: object) -> None: pass\ndef isinstance(x: object, t: object) -> bool: pass\ndef iter(i: Iterable[_T]) -> Iterator[_T]: pass\n@overload",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": "iter",
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": [
+          "function_definition",
+          "type_hint"
+        ]
+      },
+      {
+        "file_path": "mypyc/test-data/fixtures/typing-full.pyi",
+        "language": "python",
+        "before_code": "class GenericMeta(type): pass\n\nclass _SpecialForm:\n    def __getitem__(self, index): ...\nclass TypeVar:\n    def __init__(self, name, *args, bound=None): ...\n    def __or__(self, other): ...\n\ncast = 0\noverload = 0",
+        "after_code": "class GenericMeta(type): pass\n\nclass _SpecialForm:\n    def __getitem__(self, index: Any) -> Any: ...\nclass TypeVar:\n    def __init__(self, name: str, *args: Any, bound: Any = None): ...\n    def __or__(self, other: Any) -> Any: ...\n\ncast = 0\noverload = 0",
+        "diff_context": "class GenericMeta(type): pass\n\nclass _SpecialForm:\n    def __getitem__(self, index): ...\n    def __getitem__(self, index: Any) -> Any: ...\nclass TypeVar:\n    def __init__(self, name, *args, bound=None): ...\n    def __or__(self, other): ...\n    def __init__(self, name: str, *args: Any, bound: Any = None): ...\n    def __or__(self, other: Any) -> Any: ...\n\ncast = 0\noverload = 0",
+        "change_type": "modification",
+        "lines_of_context": 7,
+        "function_name": "__or__",
+        "class_name": "TypeVar",
+        "docstring": null,
+        "coding_patterns": [
+          "function_definition",
+          "type_hint"
+        ]
+      }
+    ],
+    "commit_message_style": "concise_subject",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "pr",
+    "repository": "mypy",
+    "title": "Check functions without annotations in mypyc tests",
+    "description": "c.f. https://github.com/python/mypy/pull/19217#discussion_r2314303410\r\n\r\nDisallowing functions without annotations (where not relevant to the tests) is probably a good idea, but this creates a large number of failures which would take some time to go through (many due to common issues, like untyped functions in the fixtures).\r\n\r\nAs a smaller step in the right direction, this sets `check_untyped_defs = True` for the `run-*` tests so that we at least check functions without annotations. ",
+    "url": "https://github.com/python/mypy/pull/19792",
+    "date": "2025-09-04T14:42:17Z",
+    "sha_or_number": "19792",
+    "files_changed": [
+      "mypyc/test-data/fixtures/ir.py",
+      "mypyc/test-data/run-classes.test",
+      "mypyc/test/test_run.py"
+    ],
+    "additions": 0,
+    "deletions": 0,
+    "labels": [],
+    "related_issues": [],
+    "code_samples": [
+      {
+        "file_path": "mypyc/test-data/fixtures/ir.py",
+        "language": "python",
+        "before_code": "class type:\n    def __init__(self, o: object) -> None: ...\n    def __or__(self, o: object) -> Any: ...\n    __name__ : str\n    __annotations__: Dict[str, Any]\n",
+        "after_code": "class type:\n    def __init__(self, o: object) -> None: ...\n    def __or__(self, o: object) -> Any: ...\n    def __new__(cls, *args: object) -> Any: ...\n    __name__ : str\n    __annotations__: Dict[str, Any]\n",
+        "diff_context": "class type:\n    def __init__(self, o: object) -> None: ...\n    def __or__(self, o: object) -> Any: ...\n    def __new__(cls, *args: object) -> Any: ...\n    __name__ : str\n    __annotations__: Dict[str, Any]\n",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": "__new__",
+        "class_name": "type",
+        "docstring": null,
+        "coding_patterns": [
+          "function_definition"
+        ]
+      }
+    ],
+    "commit_message_style": "concise_subject",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "pr",
+    "repository": "mypy",
+    "title": "fix: Allow instantiation of type[None] in analyze_type_type_callee",
+    "description": "<!-- If this pull request fixes an issue, add \"Fixes #NNN\" with the issue number. -->\r\n\r\n(Explain how this PR changes mypy.)\r\n\r\n<!--\r\nChecklist:\r\n- Read the [Contributing Guidelines](https://github.com/python/mypy/blob/master/CONTRIBUTING.md)\r\n- Add tests for all changed behaviour.\r\n- If you can't add a test, please explain why and how you verified your changes work.\r\n- Make sure CI passes.\r\n- Please do not force push to the PR once it has been reviewed.\r\n-->\r\n\r\nFixes #19660\r\n\r\nAllow instantiation of NoneType in type checker\r\n\r\nThis change fixes the error \"Cannot instantiate type 'Type[None]'\"\r\nwhen calling NoneType() or type(None)().\r\n\r\nBy treating NoneType as a callable that returns None, mypy can now correctly\r\nhandle such calls without raising spurious errors.\r\n\r\nAlso, I added test case testTypeUsingTypeCNoneType covering:\r\n- direct calls to type(None)() and NoneType()\r\n- functions accepting type[None] and type[NoneType] parameters and invoking them\r\n\r\nThis ensures proper handling of NoneType instantiation and prevents spurious errors.",
+    "url": "https://github.com/python/mypy/pull/19782",
+    "date": "2025-09-02T06:13:12Z",
+    "sha_or_number": "19782",
+    "files_changed": [
+      "mypy/checkexpr.py",
+      "test-data/unit/check-classes.test"
+    ],
+    "additions": 0,
+    "deletions": 0,
+    "labels": [],
+    "related_issues": [
+      "19660"
+    ],
+    "code_samples": [
+      {
+        "file_path": "mypy/checkexpr.py",
+        "language": "python",
+        "before_code": "            return self.analyze_type_type_callee(tuple_fallback(item), context)\n        if isinstance(item, TypedDictType):\n            return self.typeddict_callable_from_context(item)\n\n        self.msg.unsupported_type_type(item, context)\n        return AnyType(TypeOfAny.from_error)",
+        "after_code": "            return self.analyze_type_type_callee(tuple_fallback(item), context)\n        if isinstance(item, TypedDictType):\n            return self.typeddict_callable_from_context(item)\n        if isinstance(item, NoneType):\n            # NoneType() returns None, so treat it as a callable that returns None\n            return CallableType(\n                arg_types=[],\n                arg_kinds=[],\n                arg_names=[],\n                ret_type=NoneType(),\n                fallback=self.named_type(\"builtins.function\"),\n                name=None,\n                from_type_type=True,\n            )\n\n        self.msg.unsupported_type_type(item, context)\n        return AnyType(TypeOfAny.from_error)",
+        "diff_context": "            return self.analyze_type_type_callee(tuple_fallback(item), context)\n        if isinstance(item, TypedDictType):\n            return self.typeddict_callable_from_context(item)\n        if isinstance(item, NoneType):\n            # NoneType() returns None, so treat it as a callable that returns None\n            return CallableType(\n                arg_types=[],\n                arg_kinds=[],\n                arg_names=[],\n                ret_type=NoneType(),\n                fallback=self.named_type(\"builtins.function\"),\n                name=None,\n                from_type_type=True,\n            )\n\n        self.msg.unsupported_type_type(item, context)\n        return AnyType(TypeOfAny.from_error)",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      }
+    ],
+    "commit_message_style": "standard",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "pr",
+    "repository": "mypy",
+    "title": "feat: new mypyc primitives for weakref.proxy",
+    "description": "This PR adds 2 new weakref primitives for weakref.proxy (1 and 2 arg)\r\n\r\nThe C code generates correctly, but I'm not entirely sure why this test is failing. The weakly-proxied object is being destroyed too early, while there should still be a strong reference to it. It also fails if we use the builtin weakref.proxy, so I believe this might be exposing a reference counting bug unrelated to this PR.\r\n\r\n<!--\r\nChecklist:\r\n- Read the [Contributing Guidelines](https://github.com/python/mypy/blob/master/CONTRIBUTING.md)\r\n- Add tests for all changed behaviour.\r\n- If you can't add a test, please explain why and how you verified your changes work.\r\n- Make sure CI passes.\r\n- Please do not force push to the PR once it has been reviewed.\r\n-->\r\n",
+    "url": "https://github.com/python/mypy/pull/19217",
+    "date": "2025-06-03T17:02:26Z",
+    "sha_or_number": "19217",
+    "files_changed": [
+      "mypyc/primitives/weakref_ops.py",
+      "mypyc/test-data/fixtures/ir.py",
+      "mypyc/test-data/irbuild-weakref.test",
+      "mypyc/test-data/run-weakref.test",
+      "test-data/unit/lib-stub/_weakref.pyi",
+      "test-data/unit/lib-stub/weakref.pyi"
+    ],
+    "additions": 0,
+    "deletions": 0,
+    "labels": [],
+    "related_issues": [],
+    "code_samples": [
+      {
+        "file_path": "mypyc/test-data/fixtures/ir.py",
+        "language": "python",
+        "before_code": "class UnicodeEncodeError(RuntimeError): pass\nclass UnicodeDecodeError(RuntimeError): pass\nclass NotImplementedError(RuntimeError): pass\n\nclass StopIteration(Exception):\n    value: Any",
+        "after_code": "class UnicodeEncodeError(RuntimeError): pass\nclass UnicodeDecodeError(RuntimeError): pass\nclass NotImplementedError(RuntimeError): pass\nclass ReferenceError(Exception): pass\n\nclass StopIteration(Exception):\n    value: Any",
+        "diff_context": "class UnicodeEncodeError(RuntimeError): pass\nclass UnicodeDecodeError(RuntimeError): pass\nclass NotImplementedError(RuntimeError): pass\nclass ReferenceError(Exception): pass\n\nclass StopIteration(Exception):\n    value: Any",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": "StopIteration",
+        "docstring": null,
+        "coding_patterns": [
+          "class_definition",
+          "type_hint"
+        ]
+      },
+      {
+        "file_path": "test-data/unit/lib-stub/_weakref.pyi",
+        "language": "python",
+        "before_code": "",
+        "after_code": "from typing import Any, Callable, TypeVar, overload\nfrom weakref import CallableProxyType, ProxyType\n\n_C = TypeVar(\"_C\", bound=Callable[..., Any])\n_T = TypeVar(\"_T\")\n\n# Return CallableProxyType if object is callable, ProxyType otherwise\n@overload\ndef proxy(object: _C, callback: Callable[[CallableProxyType[_C]], Any] | None = None, /) -> CallableProxyType[_C]: ...\n@overload\ndef proxy(object: _T, callback: Callable[[ProxyType[_T]], Any] | None = None, /) -> ProxyType[_T]: ...",
+        "diff_context": "from typing import Any, Callable, TypeVar, overload\nfrom weakref import CallableProxyType, ProxyType\n\n_C = TypeVar(\"_C\", bound=Callable[..., Any])\n_T = TypeVar(\"_T\")\n\n# Return CallableProxyType if object is callable, ProxyType otherwise\n@overload\ndef proxy(object: _C, callback: Callable[[CallableProxyType[_C]], Any] | None = None, /) -> CallableProxyType[_C]: ...\n@overload\ndef proxy(object: _T, callback: Callable[[ProxyType[_T]], Any] | None = None, /) -> ProxyType[_T]: ...",
+        "change_type": "addition",
+        "lines_of_context": 0,
+        "function_name": "proxy",
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": [
+          "decorator",
+          "function_definition"
+        ]
+      }
+    ],
+    "commit_message_style": "concise_subject",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "commit",
+    "repository": "cpython",
+    "title": "gh-128307: Update what's new in 3.13 and 3.14 with create_task changes of asyncio  (#134304)",
+    "description": "gh-128307: Update what's new in 3.13 and 3.14 with create_task changes of asyncio  (#134304)\n\nCo-authored-by: Adam Turner <9087854+AA-Turner@users.noreply.github.com>",
+    "url": "https://github.com/python/cpython/commit/28625d4f956f8d30671aba1daaac9735932983db",
+    "date": "2025-05-20T08:41:22Z",
+    "sha_or_number": "28625d4f956f8d30671aba1daaac9735932983db",
+    "files_changed": [
+      "Doc/whatsnew/3.13.rst",
+      "Doc/whatsnew/3.14.rst"
+    ],
+    "additions": 34,
+    "deletions": 0,
+    "labels": [],
+    "related_issues": [
+      "134304"
+    ],
+    "code_samples": [
+      {
+        "file_path": "Doc/whatsnew/3.13.rst",
+        "language": "restructuredtext",
+        "before_code": "  never awaited).\n  (Contributed by Arthur Tacca and Jason Zhang in :gh:`115957`.)\n\n\nbase64\n------",
+        "after_code": "  never awaited).\n  (Contributed by Arthur Tacca and Jason Zhang in :gh:`115957`.)\n\n* The function and methods named ``create_task`` have received a new\n  ``**kwargs`` argument that is passed through to the task constructor.\n  This change was accidentally added in 3.13.3,\n  and broke the API contract for custom task factories.\n  Several third-party task factories implemented workarounds for this.\n  In 3.13.4 and later releases the old factory contract is honored\n  once again (until 3.14).\n  To keep the workarounds working, the extra ``**kwargs`` argument still\n  allows passing additional keyword arguments to :class:`~asyncio.Task`\n  and to custom task factories.\n\n  This affects the following function and methods:\n  :meth:`asyncio.create_task`,\n  :meth:`asyncio.loop.create_task`,\n  :meth:`asyncio.TaskGroup.create_task`.\n  (Contributed by Thomas Grainger in :gh:`128307`.)\n\nbase64\n------",
+        "diff_context": "  never awaited).\n  (Contributed by Arthur Tacca and Jason Zhang in :gh:`115957`.)\n\n* The function and methods named ``create_task`` have received a new\n  ``**kwargs`` argument that is passed through to the task constructor.\n  This change was accidentally added in 3.13.3,\n  and broke the API contract for custom task factories.\n  Several third-party task factories implemented workarounds for this.\n  In 3.13.4 and later releases the old factory contract is honored\n  once again (until 3.14).\n  To keep the workarounds working, the extra ``**kwargs`` argument still\n  allows passing additional keyword arguments to :class:`~asyncio.Task`\n  and to custom task factories.\n\n  This affects the following function and methods:\n  :meth:`asyncio.create_task`,\n  :meth:`asyncio.loop.create_task`,\n  :meth:`asyncio.TaskGroup.create_task`.\n  (Contributed by Thomas Grainger in :gh:`128307`.)\n\nbase64\n------",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      },
+      {
+        "file_path": "Doc/whatsnew/3.14.rst",
+        "language": "restructuredtext",
+        "before_code": "  (Contributed by Semyon Moroz in :gh:`133367`.)\n\n\nbdb\n---\n",
+        "after_code": "  (Contributed by Semyon Moroz in :gh:`133367`.)\n\n\nasyncio\n-------\n\n* The function and methods named :func:`!create_task` now take an arbitrary\n  list of keyword arguments. All keyword arguments are passed to the\n  :class:`~asyncio.Task` constructor or the custom task factory.\n  (See :meth:`~asyncio.loop.set_task_factory` for details.)\n  The ``name`` and ``context`` keyword arguments are no longer special;\n  the name should now be set using the ``name`` keyword argument of the factory,\n  and ``context`` may be ``None``.\n\n  This affects the following function and methods:\n  :meth:`asyncio.create_task`,\n  :meth:`asyncio.loop.create_task`,\n  :meth:`asyncio.TaskGroup.create_task`.\n  (Contributed by Thomas Grainger in :gh:`128307`.)\n\n\nbdb\n---\n",
+        "diff_context": "  (Contributed by Semyon Moroz in :gh:`133367`.)\n\n\nasyncio\n-------\n\n* The function and methods named :func:`!create_task` now take an arbitrary\n  list of keyword arguments. All keyword arguments are passed to the\n  :class:`~asyncio.Task` constructor or the custom task factory.\n  (See :meth:`~asyncio.loop.set_task_factory` for details.)\n  The ``name`` and ``context`` keyword arguments are no longer special;\n  the name should now be set using the ``name`` keyword argument of the factory,\n  and ``context`` may be ``None``.\n\n  This affects the following function and methods:\n  :meth:`asyncio.create_task`,\n  :meth:`asyncio.loop.create_task`,\n  :meth:`asyncio.TaskGroup.create_task`.\n  (Contributed by Thomas Grainger in :gh:`128307`.)\n\n\nbdb\n---\n",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      }
+    ],
+    "commit_message_style": "references_issue; has_body",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "commit",
+    "repository": "cpython",
+    "title": "Update CODEOWNERS (#126005)",
+    "description": "Update CODEOWNERS (#126005)",
+    "url": "https://github.com/python/cpython/commit/905eddceb2d61da9087f0d303aa7e4a405d2261a",
+    "date": "2024-10-26T15:24:51Z",
+    "sha_or_number": "905eddceb2d61da9087f0d303aa7e4a405d2261a",
+    "files_changed": [
+      ".github/CODEOWNERS"
+    ],
+    "additions": 2,
+    "deletions": 2,
+    "labels": [],
+    "related_issues": [
+      "126005"
+    ],
+    "code_samples": [],
+    "commit_message_style": "concise_subject; imperative_mood; references_issue",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "commit",
+    "repository": "cpython",
+    "title": "Withdraw most of my ownership in favor of Mark (#119611)",
+    "description": "Withdraw most of my ownership in favor of Mark (#119611)",
+    "url": "https://github.com/python/cpython/commit/3ff06ebec4e8b466f76078aa9c97cea2093d52ab",
+    "date": "2024-05-27T18:07:16Z",
+    "sha_or_number": "3ff06ebec4e8b466f76078aa9c97cea2093d52ab",
+    "files_changed": [
+      ".github/CODEOWNERS"
+    ],
+    "additions": 6,
+    "deletions": 6,
+    "labels": [],
+    "related_issues": [
+      "119611"
+    ],
+    "code_samples": [],
+    "commit_message_style": "references_issue",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "commit",
+    "repository": "cpython",
+    "title": "gh-117549: Don't use designated initializers in headers (#118580)",
+    "description": "gh-117549: Don't use designated initializers in headers (#118580)\n\nThe designated initializer syntax in static inline functions in pycore_backoff.h\r\ncauses problems for C++ or MSVC users who aren't yet using C++20.\r\nWhile internal, pycore_backoff.h is included (indirectly, via pycore_code.h)\r\nby some key 3rd party software that does so for speed.",
+    "url": "https://github.com/python/cpython/commit/40cc809902304f60c6e1c933191dd4d64e570e28",
+    "date": "2024-05-05T19:28:55Z",
+    "sha_or_number": "40cc809902304f60c6e1c933191dd4d64e570e28",
+    "files_changed": [
+      "Include/internal/pycore_backoff.h",
+      "Misc/NEWS.d/next/Core and Builtins/2024-05-05-12-04-02.gh-issue-117549.kITawD.rst"
+    ],
+    "additions": 12,
+    "deletions": 2,
+    "labels": [],
+    "related_issues": [
+      "118580"
+    ],
+    "code_samples": [
+      {
+        "file_path": "Misc/NEWS.d/next/Core and Builtins/2024-05-05-12-04-02.gh-issue-117549.kITawD.rst",
+        "language": "restructuredtext",
+        "before_code": "",
+        "after_code": "Don't use designated initializer syntax in inline functions in internal\nheaders. They cause problems for C++ or MSVC users who aren't yet using the\nlatest C++ standard (C++20). While internal, pycore_backoff.h, is included\n(indirectly, via pycore_code.h) by some key 3rd party software that does so\nfor speed.",
+        "diff_context": "Don't use designated initializer syntax in inline functions in internal\nheaders. They cause problems for C++ or MSVC users who aren't yet using the\nlatest C++ standard (C++20). While internal, pycore_backoff.h, is included\n(indirectly, via pycore_code.h) by some key 3rd party software that does so\nfor speed.",
+        "change_type": "addition",
+        "lines_of_context": 0,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      }
+    ],
+    "commit_message_style": "references_issue; has_body",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "commit",
+    "repository": "cpython",
+    "title": "gh-74929: Rudimentary docs for PEP 667 (#118581)",
+    "description": "gh-74929: Rudimentary docs for PEP 667 (#118581)\n\nThis is *not* sufficient for the final 3.13 release, but it will do for beta 1:\r\n\r\n- What's new entry\r\n- Updated changelog entry (news blurb)\r\n- Mention the proxy for f_globals in the datamodel and Python frame object docs\r\n\r\nThis doesn't have any C API details (what's new refers to the PEP).",
+    "url": "https://github.com/python/cpython/commit/9c13d9e37a194f574b8591da634bf98419786448",
+    "date": "2024-05-05T15:31:26Z",
+    "sha_or_number": "9c13d9e37a194f574b8591da634bf98419786448",
+    "files_changed": [
+      "Doc/c-api/frame.rst",
+      "Doc/reference/datamodel.rst",
+      "Doc/whatsnew/3.13.rst",
+      "Misc/NEWS.d/next/Core and Builtins/2024-04-27-21-44-40.gh-issue-74929.C2nESp.rst"
+    ],
+    "additions": 22,
+    "deletions": 3,
+    "labels": [],
+    "related_issues": [
+      "118581"
+    ],
+    "code_samples": [
+      {
+        "file_path": "Doc/c-api/frame.rst",
+        "language": "restructuredtext",
+        "before_code": "\n.. c:function:: PyObject* PyFrame_GetLocals(PyFrameObject *frame)\n\n   Get the *frame*'s :attr:`~frame.f_locals` attribute (:class:`dict`).\n\n   Return a :term:`strong reference`.\n\n   .. versionadded:: 3.11\n\n\n.. c:function:: int PyFrame_GetLineNumber(PyFrameObject *frame)\n",
+        "after_code": "\n.. c:function:: PyObject* PyFrame_GetLocals(PyFrameObject *frame)\n\n   Get the *frame*'s :attr:`~frame.f_locals` attribute.\n   If the frame refers to a function or comprehension, this returns\n   a write-through proxy object that allows modifying the locals.\n   In all other cases (classes, modules) it returns the :class:`dict`\n   representing the frame locals directly.\n\n   Return a :term:`strong reference`.\n\n   .. versionadded:: 3.11\n\n   .. versionchanged:: 3.13\n      Return a proxy object for functions and comprehensions.\n\n\n.. c:function:: int PyFrame_GetLineNumber(PyFrameObject *frame)\n",
+        "diff_context": "\n.. c:function:: PyObject* PyFrame_GetLocals(PyFrameObject *frame)\n\n   Get the *frame*'s :attr:`~frame.f_locals` attribute (:class:`dict`).\n   Get the *frame*'s :attr:`~frame.f_locals` attribute.\n   If the frame refers to a function or comprehension, this returns\n   a write-through proxy object that allows modifying the locals.\n   In all other cases (classes, modules) it returns the :class:`dict`\n   representing the frame locals directly.\n\n   Return a :term:`strong reference`.\n\n   .. versionadded:: 3.11\n\n   .. versionchanged:: 3.13\n      Return a proxy object for functions and comprehensions.\n\n\n.. c:function:: int PyFrame_GetLineNumber(PyFrameObject *frame)\n",
+        "change_type": "modification",
+        "lines_of_context": 11,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      },
+      {
+        "file_path": "Doc/reference/datamodel.rst",
+        "language": "restructuredtext",
+        "before_code": "\n   * - .. attribute:: frame.f_locals\n     - The dictionary used by the frame to look up\n       :ref:`local variables <naming>`\n\n   * - .. attribute:: frame.f_globals\n     - The dictionary used by the frame to look up",
+        "after_code": "\n   * - .. attribute:: frame.f_locals\n     - The dictionary used by the frame to look up\n       :ref:`local variables <naming>`.\n       If the frame refers to a function or comprehension,\n       this may return a write-through proxy object.\n\n       .. versionchanged:: 3.13\n          Return a proxy for functions and comprehensions.\n\n   * - .. attribute:: frame.f_globals\n     - The dictionary used by the frame to look up",
+        "diff_context": "\n   * - .. attribute:: frame.f_locals\n     - The dictionary used by the frame to look up\n       :ref:`local variables <naming>`\n       :ref:`local variables <naming>`.\n       If the frame refers to a function or comprehension,\n       this may return a write-through proxy object.\n\n       .. versionchanged:: 3.13\n          Return a proxy for functions and comprehensions.\n\n   * - .. attribute:: frame.f_globals\n     - The dictionary used by the frame to look up",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      },
+      {
+        "file_path": "Doc/whatsnew/3.13.rst",
+        "language": "restructuredtext",
+        "before_code": "  Performance improvements are modest -- we expect to be improving this\n  over the next few releases.\n\nNew typing features:\n\n* :pep:`696`: Type parameters (:data:`typing.TypeVar`, :data:`typing.ParamSpec`,",
+        "after_code": "  Performance improvements are modest -- we expect to be improving this\n  over the next few releases.\n\n* :pep:`667`: :attr:`FrameType.f_locals <frame.f_locals>` when used in\n  a function now returns a write-through proxy to the frame's locals,\n  rather than a ``dict``. See the PEP for corresponding C API changes\n  and deprecations.\n\nNew typing features:\n\n* :pep:`696`: Type parameters (:data:`typing.TypeVar`, :data:`typing.ParamSpec`,",
+        "diff_context": "  Performance improvements are modest -- we expect to be improving this\n  over the next few releases.\n\n* :pep:`667`: :attr:`FrameType.f_locals <frame.f_locals>` when used in\n  a function now returns a write-through proxy to the frame's locals,\n  rather than a ``dict``. See the PEP for corresponding C API changes\n  and deprecations.\n\nNew typing features:\n\n* :pep:`696`: Type parameters (:data:`typing.TypeVar`, :data:`typing.ParamSpec`,",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      }
+    ],
+    "commit_message_style": "concise_subject; references_issue; has_body",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "commit",
+    "repository": "cpython",
+    "title": "gh-118335: Rename --experimental-interpreter on Windows to --experimental-jit-interpreter (#118497)",
+    "description": "gh-118335: Rename --experimental-interpreter on Windows to --experimental-jit-interpreter (#118497)\n\nAlso fix docs for this in whatsnew.",
+    "url": "https://github.com/python/cpython/commit/a37b0932285b5e883b13a46ff2a32f15d7339894",
+    "date": "2024-05-02T00:48:34Z",
+    "sha_or_number": "a37b0932285b5e883b13a46ff2a32f15d7339894",
+    "files_changed": [
+      "Doc/whatsnew/3.13.rst",
+      "PCbuild/build.bat"
+    ],
+    "additions": 5,
+    "deletions": 4,
+    "labels": [],
+    "related_issues": [
+      "118497"
+    ],
+    "code_samples": [],
+    "commit_message_style": "references_issue; has_body",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "commit",
+    "repository": "mypy",
+    "title": "Support TypeGuard (PEP 647) (#9865)",
+    "description": "Support TypeGuard (PEP 647) (#9865)\n\nPEP 647 is still in draft mode, but it is likely to be accepted, and this helps solve some real issues.",
+    "url": "https://github.com/python/mypy/commit/fffbe88fc54807c8b10ac40456522ad2faf8d350",
+    "date": "2021-01-18T18:13:36Z",
+    "sha_or_number": "fffbe88fc54807c8b10ac40456522ad2faf8d350",
+    "files_changed": [
+      "mypy/checker.py",
+      "mypy/checkexpr.py",
+      "mypy/constraints.py",
+      "mypy/expandtype.py",
+      "mypy/fixup.py",
+      "mypy/nodes.py",
+      "mypy/test/testcheck.py",
+      "mypy/typeanal.py",
+      "mypy/types.py",
+      "test-data/unit/check-python38.test",
+      "test-data/unit/check-serialize.test",
+      "test-data/unit/check-typeguard.test",
+      "test-data/unit/lib-stub/typing_extensions.pyi"
+    ],
+    "additions": 408,
+    "deletions": 9,
+    "labels": [],
+    "related_issues": [
+      "9865"
+    ],
+    "code_samples": [
+      {
+        "file_path": "mypy/checker.py",
+        "language": "python",
+        "before_code": "                if literal(expr) == LITERAL_TYPE:\n                    vartype = type_map[expr]\n                    return self.conditional_callable_type_map(expr, vartype)\n        elif isinstance(node, ComparisonExpr):\n            # Step 1: Obtain the types of each operand and whether or not we can\n            # narrow their types. (For example, we shouldn't try narrowing the",
+        "after_code": "                if literal(expr) == LITERAL_TYPE:\n                    vartype = type_map[expr]\n                    return self.conditional_callable_type_map(expr, vartype)\n            elif isinstance(node.callee, RefExpr):\n                if node.callee.type_guard is not None:\n                    # TODO: Follow keyword args or *args, **kwargs\n                    if node.arg_kinds[0] != nodes.ARG_POS:\n                        self.fail(\"Type guard requires positional argument\", node)\n                        return {}, {}\n                    if literal(expr) == LITERAL_TYPE:\n                        return {expr: TypeGuardType(node.callee.type_guard)}, {}\n        elif isinstance(node, ComparisonExpr):\n            # Step 1: Obtain the types of each operand and whether or not we can\n            # narrow their types. (For example, we shouldn't try narrowing the",
+        "diff_context": "                if literal(expr) == LITERAL_TYPE:\n                    vartype = type_map[expr]\n                    return self.conditional_callable_type_map(expr, vartype)\n            elif isinstance(node.callee, RefExpr):\n                if node.callee.type_guard is not None:\n                    # TODO: Follow keyword args or *args, **kwargs\n                    if node.arg_kinds[0] != nodes.ARG_POS:\n                        self.fail(\"Type guard requires positional argument\", node)\n                        return {}, {}\n                    if literal(expr) == LITERAL_TYPE:\n                        return {expr: TypeGuardType(node.callee.type_guard)}, {}\n        elif isinstance(node, ComparisonExpr):\n            # Step 1: Obtain the types of each operand and whether or not we can\n            # narrow their types. (For example, we shouldn't try narrowing the",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      },
+      {
+        "file_path": "mypy/checkexpr.py",
+        "language": "python",
+        "before_code": "                                        ret_type=self.object_type(),\n                                        fallback=self.named_type('builtins.function'))\n        callee_type = get_proper_type(self.accept(e.callee, type_context, always_allow_any=True))\n        if (self.chk.options.disallow_untyped_calls and\n                self.chk.in_checked_function() and\n                isinstance(callee_type, CallableType)",
+        "after_code": "                                        ret_type=self.object_type(),\n                                        fallback=self.named_type('builtins.function'))\n        callee_type = get_proper_type(self.accept(e.callee, type_context, always_allow_any=True))\n        if (isinstance(e.callee, RefExpr)\n                and isinstance(callee_type, CallableType)\n                and callee_type.type_guard is not None):\n            # Cache it for find_isinstance_check()\n            e.callee.type_guard = callee_type.type_guard\n        if (self.chk.options.disallow_untyped_calls and\n                self.chk.in_checked_function() and\n                isinstance(callee_type, CallableType)",
+        "diff_context": "                                        ret_type=self.object_type(),\n                                        fallback=self.named_type('builtins.function'))\n        callee_type = get_proper_type(self.accept(e.callee, type_context, always_allow_any=True))\n        if (isinstance(e.callee, RefExpr)\n                and isinstance(callee_type, CallableType)\n                and callee_type.type_guard is not None):\n            # Cache it for find_isinstance_check()\n            e.callee.type_guard = callee_type.type_guard\n        if (self.chk.options.disallow_untyped_calls and\n                self.chk.in_checked_function() and\n                isinstance(callee_type, CallableType)",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": [
+          "generator_expression"
+        ]
+      },
+      {
+        "file_path": "mypy/checkexpr.py",
+        "language": "python",
+        "before_code": "        \"\"\"\n        if literal(expr) >= LITERAL_TYPE:\n            restriction = self.chk.binder.get(expr)\n            # If the current node is deferred, some variables may get Any types that they\n            # otherwise wouldn't have. We don't want to narrow down these since it may\n            # produce invalid inferred Optional[Any] types, at least.",
+        "after_code": "        \"\"\"\n        if literal(expr) >= LITERAL_TYPE:\n            restriction = self.chk.binder.get(expr)\n            # Ignore the error about using get_proper_type().\n            if isinstance(restriction, TypeGuardType):  # type: ignore[misc]\n                # A type guard forces the new type even if it doesn't overlap the old.\n                return restriction.type_guard\n            # If the current node is deferred, some variables may get Any types that they\n            # otherwise wouldn't have. We don't want to narrow down these since it may\n            # produce invalid inferred Optional[Any] types, at least.",
+        "diff_context": "        \"\"\"\n        if literal(expr) >= LITERAL_TYPE:\n            restriction = self.chk.binder.get(expr)\n            # Ignore the error about using get_proper_type().\n            if isinstance(restriction, TypeGuardType):  # type: ignore[misc]\n                # A type guard forces the new type even if it doesn't overlap the old.\n                return restriction.type_guard\n            # If the current node is deferred, some variables may get Any types that they\n            # otherwise wouldn't have. We don't want to narrow down these since it may\n            # produce invalid inferred Optional[Any] types, at least.",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": null,
+        "docstring": "\"\"\"",
+        "coding_patterns": [
+          "type_hint"
+        ]
+      },
+      {
+        "file_path": "mypy/constraints.py",
+        "language": "python",
+        "before_code": "                for t, a in zip(template.arg_types, cactual.arg_types):\n                    # Negate direction due to function argument type contravariance.\n                    res.extend(infer_constraints(t, a, neg_op(self.direction)))\n            res.extend(infer_constraints(template.ret_type, cactual.ret_type,\n                                         self.direction))\n            return res\n        elif isinstance(self.actual, AnyType):",
+        "after_code": "                for t, a in zip(template.arg_types, cactual.arg_types):\n                    # Negate direction due to function argument type contravariance.\n                    res.extend(infer_constraints(t, a, neg_op(self.direction)))\n            template_ret_type, cactual_ret_type = template.ret_type, cactual.ret_type\n            if template.type_guard is not None:\n                template_ret_type = template.type_guard\n            if cactual.type_guard is not None:\n                cactual_ret_type = cactual.type_guard\n            res.extend(infer_constraints(template_ret_type, cactual_ret_type,\n                                         self.direction))\n            return res\n        elif isinstance(self.actual, AnyType):",
+        "diff_context": "                for t, a in zip(template.arg_types, cactual.arg_types):\n                    # Negate direction due to function argument type contravariance.\n                    res.extend(infer_constraints(t, a, neg_op(self.direction)))\n            res.extend(infer_constraints(template.ret_type, cactual.ret_type,\n            template_ret_type, cactual_ret_type = template.ret_type, cactual.ret_type\n            if template.type_guard is not None:\n                template_ret_type = template.type_guard\n            if cactual.type_guard is not None:\n                cactual_ret_type = cactual.type_guard\n            res.extend(infer_constraints(template_ret_type, cactual_ret_type,\n                                         self.direction))\n            return res\n        elif isinstance(self.actual, AnyType):",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": [
+          "type_hint"
+        ]
+      },
+      {
+        "file_path": "mypy/expandtype.py",
+        "language": "python",
+        "before_code": "\n    def visit_callable_type(self, t: CallableType) -> Type:\n        return t.copy_modified(arg_types=self.expand_types(t.arg_types),\n                               ret_type=t.ret_type.accept(self))\n\n    def visit_overloaded(self, t: Overloaded) -> Type:\n        items = []  # type: List[CallableType]",
+        "after_code": "\n    def visit_callable_type(self, t: CallableType) -> Type:\n        return t.copy_modified(arg_types=self.expand_types(t.arg_types),\n                               ret_type=t.ret_type.accept(self),\n                               type_guard=(t.type_guard.accept(self)\n                                           if t.type_guard is not None else None))\n\n    def visit_overloaded(self, t: Overloaded) -> Type:\n        items = []  # type: List[CallableType]",
+        "diff_context": "\n    def visit_callable_type(self, t: CallableType) -> Type:\n        return t.copy_modified(arg_types=self.expand_types(t.arg_types),\n                               ret_type=t.ret_type.accept(self))\n                               ret_type=t.ret_type.accept(self),\n                               type_guard=(t.type_guard.accept(self)\n                                           if t.type_guard is not None else None))\n\n    def visit_overloaded(self, t: Overloaded) -> Type:\n        items = []  # type: List[CallableType]",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": "visit_overloaded",
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      },
+      {
+        "file_path": "mypy/fixup.py",
+        "language": "python",
+        "before_code": "        for arg in ct.bound_args:\n            if arg:\n                arg.accept(self)\n\n    def visit_overloaded(self, t: Overloaded) -> None:\n        for ct in t.items():",
+        "after_code": "        for arg in ct.bound_args:\n            if arg:\n                arg.accept(self)\n        if ct.type_guard is not None:\n            ct.type_guard.accept(self)\n\n    def visit_overloaded(self, t: Overloaded) -> None:\n        for ct in t.items():",
+        "diff_context": "        for arg in ct.bound_args:\n            if arg:\n                arg.accept(self)\n        if ct.type_guard is not None:\n            ct.type_guard.accept(self)\n\n    def visit_overloaded(self, t: Overloaded) -> None:\n        for ct in t.items():",
+        "change_type": "modification",
+        "lines_of_context": 6,
+        "function_name": "visit_overloaded",
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      }
+    ],
+    "commit_message_style": "concise_subject; references_issue; has_body",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "commit",
+    "repository": "mypy",
+    "title": "Add a separate issue form to report crashes (#9549)",
+    "description": "Add a separate issue form to report crashes (#9549)",
+    "url": "https://github.com/python/mypy/commit/cca6e2fdc874b7538bd1d2ef70daab687b2a0363",
+    "date": "2020-10-08T22:30:06Z",
+    "sha_or_number": "cca6e2fdc874b7538bd1d2ef70daab687b2a0363",
+    "files_changed": [
+      ".github/ISSUE_TEMPLATE/crash.md"
+    ],
+    "additions": 41,
+    "deletions": 0,
+    "labels": [],
+    "related_issues": [
+      "9549"
+    ],
+    "code_samples": [
+      {
+        "file_path": ".github/ISSUE_TEMPLATE/crash.md",
+        "language": "markdown",
+        "before_code": "",
+        "after_code": "---\nname: Crash Report\nabout: Crash (traceback or \"INTERNAL ERROR\")\nlabels: \"crash\"\n---\n\n<!--\n  Use this form only if mypy reports an \"INTERNAL ERROR\" and/or gives a traceback.\n  Please include the traceback and all other messages below (use `mypy --show-traceback`).\n-->\n\n**Crash Report**\n\n(Tell us what happened.)\n\n**Traceback**\n\n```\n(Insert traceback and other messages from mypy here -- use `--show-traceback`.)\n```\n\n**To Reproduce**\n\n(Write what you did to reproduce the crash.  Full source code is\nappreciated.  We also very much appreciate it if you try to narrow the\nsource down to a small stand-alone example.)\n\n**Your Environment**\n\n<!-- Include as many relevant details about the environment you experienced the bug in -->\n\n- Mypy version used:\n- Mypy command-line flags:\n- Mypy configuration options from `mypy.ini` (and other config files):\n- Python version used:\n- Operating system and version:\n\n<!--\nYou can freely edit this text, please remove all the lines\nyou believe are unnecessary.\n-->",
+        "diff_context": "---\nname: Crash Report\nabout: Crash (traceback or \"INTERNAL ERROR\")\nlabels: \"crash\"\n---\n\n<!--\n  Use this form only if mypy reports an \"INTERNAL ERROR\" and/or gives a traceback.\n  Please include the traceback and all other messages below (use `mypy --show-traceback`).\n-->\n\n**Crash Report**\n\n(Tell us what happened.)\n\n**Traceback**\n\n```\n(Insert traceback and other messages from mypy here -- use `--show-traceback`.)\n```\n\n**To Reproduce**\n\n(Write what you did to reproduce the crash.  Full source code is\nappreciated.  We also very much appreciate it if you try to narrow the\nsource down to a small stand-alone example.)\n\n**Your Environment**\n\n<!-- Include as many relevant details about the environment you experienced the bug in -->\n\n- Mypy version used:\n- Mypy command-line flags:\n- Mypy configuration options from `mypy.ini` (and other config files):\n- Python version used:\n- Operating system and version:\n\n<!--\nYou can freely edit this text, please remove all the lines\nyou believe are unnecessary.\n-->",
+        "change_type": "addition",
+        "lines_of_context": 0,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      }
+    ],
+    "commit_message_style": "imperative_mood; references_issue",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "commit",
+    "repository": "mypy",
+    "title": "Make the new bug templates less markup-heavy (#9438)",
+    "description": "Make the new bug templates less markup-heavy (#9438)\n\n- Remove emoji\r\n- Instead of `## H2 headings` just use `**bold**`\r\n- Add link to docs\r\n- Add suggestion for new users not to file a bug",
+    "url": "https://github.com/python/mypy/commit/6f07cb6a2e02446b909846f99817f674675e826e",
+    "date": "2020-09-11T18:35:59Z",
+    "sha_or_number": "6f07cb6a2e02446b909846f99817f674675e826e",
+    "files_changed": [
+      ".github/ISSUE_TEMPLATE/bug.md",
+      ".github/ISSUE_TEMPLATE/documentation.md",
+      ".github/ISSUE_TEMPLATE/feature.md",
+      ".github/ISSUE_TEMPLATE/question.md"
+    ],
+    "additions": 24,
+    "deletions": 18,
+    "labels": [],
+    "related_issues": [
+      "9438"
+    ],
+    "code_samples": [
+      {
+        "file_path": ".github/ISSUE_TEMPLATE/bug.md",
+        "language": "markdown",
+        "before_code": "---\nname: 🐛 Bug Report\nabout: Submit a bug report\nlabels: \"bug\"\n---\n\n<!--\nNote: If the problem you are reporting is about a specific library function, then the typeshed tracker is better suited\nfor this report: https://github.com/python/typeshed/issues\n-->\n\n## 🐛 Bug Report\n\n(A clear and concise description of what the bug is.)\n\n## To Reproduce\n\n(Write your steps here:)\n\n1. Step 1...\n1. Step 2...\n1. Step 3...\n\n## Expected Behavior\n\n<!--\n  How did you expect your project to behave?",
+        "after_code": "---\nname: Bug Report\nabout: Submit a bug report\nlabels: \"bug\"\n---\n\n<!--\n  If you're new to mypy and you're not sure whether what you're experiencing is a mypy bug, please see the \"Question and Help\" form\n  instead.\n-->\n\n**Bug Report**\n\n<!--\nNote: If the problem you are reporting is about a specific library function, then the typeshed tracker is better suited\nfor this report: https://github.com/python/typeshed/issues\n-->\n\n(A clear and concise description of what the bug is.)\n\n**To Reproduce**\n\n(Write your steps here:)\n\n1. Step 1...\n2. Step 2...\n3. Step 3...\n\n**Expected Behavior**\n\n<!--\n  How did you expect your project to behave?",
+        "diff_context": "---\nname: 🐛 Bug Report\nname: Bug Report\nabout: Submit a bug report\nlabels: \"bug\"\n---\n\n<!--\n  If you're new to mypy and you're not sure whether what you're experiencing is a mypy bug, please see the \"Question and Help\" form\n  instead.\n-->\n\n**Bug Report**\n\n<!--\nNote: If the problem you are reporting is about a specific library function, then the typeshed tracker is better suited\nfor this report: https://github.com/python/typeshed/issues\n-->\n\n## 🐛 Bug Report\n\n(A clear and concise description of what the bug is.)\n\n## To Reproduce\n**To Reproduce**\n\n(Write your steps here:)\n\n1. Step 1...\n1. Step 2...\n1. Step 3...\n2. Step 2...\n3. Step 3...\n\n## Expected Behavior\n**Expected Behavior**\n\n<!--\n  How did you expect your project to behave?",
+        "change_type": "modification",
+        "lines_of_context": 20,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      }
+    ],
+    "commit_message_style": "references_issue; has_body",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "commit",
+    "repository": "mypy",
+    "title": "Add MYPY_CONFIG_FILE_DIR to environment when config file is read (2nd try) (#9414)",
+    "description": "Add MYPY_CONFIG_FILE_DIR to environment when config file is read (2nd try) (#9414)\n\n(This fixes the mistake I introduced in the previous version.)\r\n\r\nResubmit of #9403.\r\n\r\nFixes #7968.\r\n\r\nCo-authored-by: aghast <aghast@aghast.dev>",
+    "url": "https://github.com/python/mypy/commit/9d038469d80e36057c77e0a8a18831f829778f9d",
+    "date": "2020-09-04T20:55:14Z",
+    "sha_or_number": "9d038469d80e36057c77e0a8a18831f829778f9d",
+    "files_changed": [
+      "mypy/config_parser.py",
+      "mypy/test/testcmdline.py",
+      "test-data/unit/envvars.test"
+    ],
+    "additions": 15,
+    "deletions": 0,
+    "labels": [],
+    "related_issues": [
+      "9403",
+      "7968",
+      "9414"
+    ],
+    "code_samples": [],
+    "commit_message_style": "imperative_mood; references_issue; has_body",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "commit",
+    "repository": "mypy",
+    "title": "Revert \"Add MYPY_CONFIG_FILE_DIR to environment when config file is read (#9403)\"",
+    "description": "Revert \"Add MYPY_CONFIG_FILE_DIR to environment when config file is read (#9403)\"\n\nReason: This broke CI.\n\nThis reverts commit 652aca96609c876c47ca7eaa68d67ac1e36f4215.",
+    "url": "https://github.com/python/mypy/commit/57d3473ae906fe945953b874d3dcb66efb2710ca",
+    "date": "2020-09-04T02:45:27Z",
+    "sha_or_number": "57d3473ae906fe945953b874d3dcb66efb2710ca",
+    "files_changed": [
+      "mypy/config_parser.py",
+      "mypy/test/testcmdline.py",
+      "test-data/unit/envvars.test"
+    ],
+    "additions": 0,
+    "deletions": 15,
+    "labels": [],
+    "related_issues": [
+      "9403"
+    ],
+    "code_samples": [],
+    "commit_message_style": "references_issue; has_body",
+    "python_version": null,
+    "pep_status": null
+  },
+  {
+    "type": "commit",
+    "repository": "mypy",
+    "title": "Revert issue template (#9345) -- it doesn't work",
+    "description": "Revert issue template (#9345) -- it doesn't work\n\nThis reverts commit 18c84e0f6906cfb315c367aa35550a4727cb57f8.",
+    "url": "https://github.com/python/mypy/commit/42a522089c6b418727e143c181128e902acf0908",
+    "date": "2020-08-27T22:21:28Z",
+    "sha_or_number": "42a522089c6b418727e143c181128e902acf0908",
+    "files_changed": [
+      ".github/ISSUE_TEMPLATE/bug.md",
+      ".github/ISSUE_TEMPLATE/documentation.md",
+      ".github/ISSUE_TEMPLATE/feature.md",
+      ".github/ISSUE_TEMPLATE/question.md",
+      ".github/PULL_REQUEST_TEMPLATE.md",
+      "ISSUE_TEMPLATE.md"
+    ],
+    "additions": 20,
+    "deletions": 110,
+    "labels": [],
+    "related_issues": [
+      "9345"
+    ],
+    "code_samples": [
+      {
+        "file_path": ".github/ISSUE_TEMPLATE/bug.md",
+        "language": "markdown",
+        "before_code": "---\nname: 🐛 Bug Report\nlabels: \"bug\"\n---\n\n<!--\nNote: If the problem you are reporting is about a specific library function, then the typeshed tracker is better suited\nfor this report: https://github.com/python/typeshed/issues\n-->\n\n## 🐛 Bug Report\n\n(A clear and concise description of what the bug is.)\n\n## To Reproduce\n\n(Write your steps here:)\n\n1. Step 1...\n1. Step 2...\n1. Step 3...\n\n## Expected Behavior\n\n<!--\n  How did you expect your project to behave?\n  It’s fine if you’re not sure your understanding is correct.\n  Write down what you thought would happen. If you just expected no errors, you can delete this section.\n-->\n\n(Write what you thought would happen.)\n\n## Actual Behavior\n\n<!--\n  Did something go wrong?\n  Is something broken, or not behaving as you expected?\n-->\n\n(Write what happened.)\n\n## Your Environment\n\n<!-- Include as many relevant details about the environment you experienced the bug in -->\n\n- Mypy version used:\n- Mypy command-line flags:\n- Mypy configuration options from `mypy.ini` (and other config files):\n- Python version used:\n- Operating system and version:\n\n<!--\nYou can freely edit this text, please remove all the lines\nyou believe are unnecessary.\n-->",
+        "after_code": "",
+        "diff_context": "---\nname: 🐛 Bug Report\nlabels: \"bug\"\n---\n\n<!--\nNote: If the problem you are reporting is about a specific library function, then the typeshed tracker is better suited\nfor this report: https://github.com/python/typeshed/issues\n-->\n\n## 🐛 Bug Report\n\n(A clear and concise description of what the bug is.)\n\n## To Reproduce\n\n(Write your steps here:)\n\n1. Step 1...\n1. Step 2...\n1. Step 3...\n\n## Expected Behavior\n\n<!--\n  How did you expect your project to behave?\n  It’s fine if you’re not sure your understanding is correct.\n  Write down what you thought would happen. If you just expected no errors, you can delete this section.\n-->\n\n(Write what you thought would happen.)\n\n## Actual Behavior\n\n<!--\n  Did something go wrong?\n  Is something broken, or not behaving as you expected?\n-->\n\n(Write what happened.)\n\n## Your Environment\n\n<!-- Include as many relevant details about the environment you experienced the bug in -->\n\n- Mypy version used:\n- Mypy command-line flags:\n- Mypy configuration options from `mypy.ini` (and other config files):\n- Python version used:\n- Operating system and version:\n\n<!--\nYou can freely edit this text, please remove all the lines\nyou believe are unnecessary.\n-->",
+        "change_type": "deletion",
+        "lines_of_context": 0,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      },
+      {
+        "file_path": ".github/ISSUE_TEMPLATE/feature.md",
+        "language": "markdown",
+        "before_code": "---\nname: 🚀 Feature\nlabels: \"feature\"\n---\n\n## 🚀 Feature\n\n(A clear and concise description of your feature proposal.)\n\n## Pitch\n\n(Please explain why this feature should be implemented and how it would be used. Add examples, if applicable.)",
+        "after_code": "",
+        "diff_context": "---\nname: 🚀 Feature\nlabels: \"feature\"\n---\n\n## 🚀 Feature\n\n(A clear and concise description of your feature proposal.)\n\n## Pitch\n\n(Please explain why this feature should be implemented and how it would be used. Add examples, if applicable.)",
+        "change_type": "deletion",
+        "lines_of_context": 0,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      },
+      {
+        "file_path": ".github/PULL_REQUEST_TEMPLATE.md",
+        "language": "markdown",
+        "before_code": "### Have you read the [Contributing Guidelines](https://github.com/python/mypy/blob/master/CONTRIBUTING.md)?\n\n(Once you have, delete this section. If you leave it in, your PR may be closed without action.)\n\n### Description\n\n<!--\nIf this pull request closes or fixes an issue, write Closes #NNN\" or \"Fixes #NNN\" in that exact\nformat.\n-->\n\n(Explain how this PR changes mypy.)\n\n## Test Plan\n\n<!--\nIf this is a documentation change, rebuild the docs (link to instructions) and review the changed pages for markup errors.\nIf this is a code change, include new tests (link to the testing docs). Be sure to run the tests locally and fix any errors before submitting the PR (more instructions).\nIf this change cannot be tested by the CI, please explain how to verify it manually.\n-->\n\n(Write your test plan here. If you changed any code, please provide us with clear instructions on how you verified your changes work.)",
+        "after_code": "",
+        "diff_context": "### Have you read the [Contributing Guidelines](https://github.com/python/mypy/blob/master/CONTRIBUTING.md)?\n\n(Once you have, delete this section. If you leave it in, your PR may be closed without action.)\n\n### Description\n\n<!--\nIf this pull request closes or fixes an issue, write Closes #NNN\" or \"Fixes #NNN\" in that exact\nformat.\n-->\n\n(Explain how this PR changes mypy.)\n\n## Test Plan\n\n<!--\nIf this is a documentation change, rebuild the docs (link to instructions) and review the changed pages for markup errors.\nIf this is a code change, include new tests (link to the testing docs). Be sure to run the tests locally and fix any errors before submitting the PR (more instructions).\nIf this change cannot be tested by the CI, please explain how to verify it manually.\n-->\n\n(Write your test plan here. If you changed any code, please provide us with clear instructions on how you verified your changes work.)",
+        "change_type": "deletion",
+        "lines_of_context": 0,
+        "function_name": null,
+        "class_name": null,
+        "docstring": null,
+        "coding_patterns": []
+      }
+    ],
+    "commit_message_style": "concise_subject; references_issue; has_body",
+    "python_version": null,
+    "pep_status": null
+  }
+]
