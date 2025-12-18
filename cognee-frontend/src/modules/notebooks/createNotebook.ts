@@ -7,5 +7,7 @@ export default function createNotebook(notebookName: string, instance: CogneeIns
     headers: {
       "Content-Type": "application/json",
     },
-  }).then((response: Response) => response.json());
+  }).then((response: Response) => 
+    response.ok ? response.json() : Promise.reject(response)
+  );
 }

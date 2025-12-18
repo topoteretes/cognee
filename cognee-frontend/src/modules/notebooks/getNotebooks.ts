@@ -6,5 +6,7 @@ export default function getNotebooks(instance: CogneeInstance) {
     headers: {
       "Content-Type": "application/json",
     },
-  }).then((response) => response.json());
+  }).then((response: Response) => 
+    response.ok ? response.json() : Promise.reject(response)
+  );
 }

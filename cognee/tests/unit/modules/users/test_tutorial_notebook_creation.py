@@ -563,8 +563,7 @@ class TestCreateTutorialNotebooks:
 class TestNotebookFromIpynbString:
     """Test cases for Notebook.from_ipynb_string (legacy method, still used)."""
 
-    @pytest.mark.asyncio
-    async def test_notebook_from_ipynb_string_success(self):
+    def test_notebook_from_ipynb_string_success(self):
         """Test successful creation of notebook from JSON string."""
         import json
 
@@ -603,8 +602,7 @@ class TestNotebookFromIpynbString:
         assert notebook.cells[0].type == "markdown"
         assert notebook.cells[1].type == "code"
 
-    @pytest.mark.asyncio
-    async def test_notebook_from_ipynb_string_invalid_json(self):
+    def test_notebook_from_ipynb_string_invalid_json(self):
         """Test error handling for invalid JSON."""
         user_id = uuid4()
         invalid_json = "{ invalid json content"

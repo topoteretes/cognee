@@ -4,7 +4,7 @@ const localApiUrl = process.env.NEXT_PUBLIC_LOCAL_API_URL || "http://localhost:8
 
 export default async function localFetch(url: URL | RequestInfo, options: RequestInit = {}): Promise<Response> {
   return global.fetch(
-    localApiUrl + "/api" + url,
+    localApiUrl + "/api" + (typeof url === "string" ? url : url.toString()),
     {
       ...options,
       credentials: "include",
