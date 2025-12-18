@@ -1,13 +1,14 @@
+import os, pathlib, cognee
+from cognee_community_vector_adapter_qdrant import register
+
 from agno.agent import Agent
 from agno.models.google import Gemini
 
 from tools import CogneeTools
 from constants import INSTRUCTIONS, MY_PREFERENCE
+
 from dotenv import load_dotenv
 load_dotenv()
-
-import os, pathlib, cognee
-from cognee_community_vector_adapter_qdrant import register
 
 def get_db_config():
    system_path = pathlib.Path(__file__).parent
@@ -22,6 +23,7 @@ def get_db_config():
    cognee.config.set_graph_db_config({"graph_database_provider": "kuzu"})
 
 def main():
+    get_db_config()
     cognee_tools = CogneeTools()
     llm = Gemini(id="gemini-2.5-flash")
 
