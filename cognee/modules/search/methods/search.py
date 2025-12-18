@@ -141,6 +141,7 @@ async def search(
     )
 
     if use_combined_context:
+        # Note: combined context search must always be verbose and return a CombinedSearchResult with graphs info
         prepared_search_results = await prepare_search_result(
             search_results[0] if isinstance(search_results, list) else search_results
         )
