@@ -124,6 +124,8 @@ async def search(
 
         session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
 
+        verbose: If True, returns detailed result information including graph representation (when possible).
+
     Returns:
         list: Search results in format determined by query_type:
 
