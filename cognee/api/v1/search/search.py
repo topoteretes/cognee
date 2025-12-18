@@ -33,6 +33,7 @@ async def search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
+    verbose: bool = False,
 ) -> Union[List[SearchResult], CombinedSearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -123,6 +124,8 @@ async def search(
 
         session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
 
+        verbose: If True, returns detailed result information including graph representation (when possible).
+
     Returns:
         list: Search results in format determined by query_type:
 
@@ -204,6 +207,7 @@ async def search(
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
+        verbose=verbose,
     )
 
     return filtered_search_results
