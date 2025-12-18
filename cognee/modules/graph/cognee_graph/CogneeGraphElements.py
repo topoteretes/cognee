@@ -35,6 +35,26 @@ class Node:
         self.skeleton_edges = []
         self.status = np.ones(dimension, dtype=int)
 
+    def reset_vector_distances(self, query_count: int, default_penalty: float) -> None:
+        self.attributes["vector_distance"] = [default_penalty] * query_count
+
+    def ensure_vector_distance_list(self, query_count: int, default_penalty: float) -> List[float]:
+        distances = self.attributes.get("vector_distance")
+        if not isinstance(distances, list) or len(distances) != query_count:
+            distances = [default_penalty] * query_count
+            self.attributes["vector_distance"] = distances
+        return distances
+
+    def update_distance_for_query(
+        self,
+        query_index: int,
+        score: float,
+        query_count: int,
+        default_penalty: float,
+    ) -> None:
+        distances = self.ensure_vector_distance_list(query_count, default_penalty)
+        distances[query_index] = score
+
     def add_skeleton_neighbor(self, neighbor: "Node") -> None:
         if neighbor not in self.skeleton_neighbours:
             self.skeleton_neighbours.append(neighbor)
@@ -119,6 +139,32 @@ class Edge:
         self.attributes["vector_distance"] = None
         self.directed = directed
         self.status = np.ones(dimension, dtype=int)
+
+    def get_distance_key(self) -> Optional[str]:
+        key = self.attributes.get("edge_text") or self.attributes.get("relationship_type")
+        if key is None:
+            return None
+        return str(key)
+
+    def reset_vector_distances(self, query_count: int, default_penalty: float) -> None:
+        self.attributes["vector_distance"] = [default_penalty] * query_count
+
+    def ensure_vector_distance_list(self, query_count: int, default_penalty: float) -> List[float]:
+        distances = self.attributes.get("vector_distance")
+        if not isinstance(distances, list) or len(distances) != query_count:
+            distances = [default_penalty] * query_count
+            self.attributes["vector_distance"] = distances
+        return distances
+
+    def update_distance_for_query(
+        self,
+        query_index: int,
+        score: float,
+        query_count: int,
+        default_penalty: float,
+    ) -> None:
+        distances = self.ensure_vector_distance_list(query_count, default_penalty)
+        distances[query_index] = score
 
     def is_edge_alive_in_dimension(self, dimension: int) -> bool:
         if dimension < 0 or dimension >= len(self.status):

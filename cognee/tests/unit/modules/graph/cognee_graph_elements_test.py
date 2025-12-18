@@ -86,6 +86,46 @@ def test_node_hash():
     assert hash(node) == hash("node1")
 
 
+def test_node_vector_distance_stays_none():
+    """Test that vector_distance remains None when no distances are passed."""
+    node = Node("node1")
+    assert node.attributes.get("vector_distance") is None
+
+    # Verify it stays None even after other operations
+    node.add_attribute("other_attr", "value")
+    assert node.attributes.get("vector_distance") is None
+
+
+def test_node_vector_distance_with_custom_attributes():
+    """Test that vector_distance is None even when node has custom attributes."""
+    node = Node("node1", {"custom": "value", "another": 42})
+    assert node.attributes.get("vector_distance") is None
+    assert node.attributes["custom"] == "value"
+    assert node.attributes["another"] == 42
+
+
+def test_edge_vector_distance_stays_none():
+    """Test that vector_distance remains None when no distances are passed."""
+    node1 = Node("node1")
+    node2 = Node("node2")
+    edge = Edge(node1, node2)
+    assert edge.attributes.get("vector_distance") is None
+
+    # Verify it stays None even after other operations
+    edge.add_attribute("other_attr", "value")
+    assert edge.attributes.get("vector_distance") is None
+
+
+def test_edge_vector_distance_with_custom_attributes():
+    """Test that vector_distance is None even when edge has custom attributes."""
+    node1 = Node("node1")
+    node2 = Node("node2")
+    edge = Edge(node1, node2, {"weight": 5, "type": "test"})
+    assert edge.attributes.get("vector_distance") is None
+    assert edge.attributes["weight"] == 5
+    assert edge.attributes["type"] == "test"
+
+
 ### Tests for Edge ###
 
 
