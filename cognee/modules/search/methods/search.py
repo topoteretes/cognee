@@ -49,6 +49,7 @@ async def search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
+    verbose: bool = False,
 ) -> Union[CombinedSearchResult, List[SearchResult]]:
     """
 
@@ -173,25 +174,30 @@ async def search(
                 datasets = prepared_search_results["datasets"]
 
                 if only_context:
-                    return_value.append(
-                        {
-                            "search_result": [context] if context else None,
-                            "dataset_id": datasets[0].id,
-                            "dataset_name": datasets[0].name,
-                            "dataset_tenant_id": datasets[0].tenant_id,
-                            "graphs": graphs,
-                        }
-                    )
+                    search_result_dict = {
+                        "search_result": [context] if context else None,
+                        "dataset_id": datasets[0].id,
+                        "dataset_name": datasets[0].name,
+                        "dataset_tenant_id": datasets[0].tenant_id,
+                    }
+                    if verbose:
+                        # Include graphs only in verbose mode to reduce payload size
+                        search_result_dict["graphs"] = graphs
+
+                    return_value.append(search_result_dict)
                 else:
-                    return_value.append(
-                        {
-                            "search_result": [result] if result else None,
-                            "dataset_id": datasets[0].id,
-                            "dataset_name": datasets[0].name,
-                            "dataset_tenant_id": datasets[0].tenant_id,
-                            "graphs": graphs,
-                        }
-                    )
+                    search_result_dict = {
+                        "search_result": [result] if result else None,
+                        "dataset_id": datasets[0].id,
+                        "dataset_name": datasets[0].name,
+                        "dataset_tenant_id": datasets[0].tenant_id,
+                    }
+                    if verbose:
+                        # Include graphs only in verbose mode to reduce payload size
+                        search_result_dict["graphs"] = graphs
+
+                    return_value.append(search_result_dict)
+
             return return_value
         else:
             return_value = []
