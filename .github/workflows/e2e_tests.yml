@@ -288,7 +288,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./cognee/tests/test_permissions.py
+        run: uv run pytest cognee/tests/test_permissions.py -v --log-level=INFO
 
   test-multi-tenancy:
     name: Test multi tenancy with different situations in Cognee
