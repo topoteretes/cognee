@@ -614,7 +614,7 @@ async def test_calculate_top_triplet_importances_default_distances(setup_graph):
 
     # When no distances are set, calculate_top_triplet_importances should handle None
     # by either raising an error or skipping edges with None distances
-    with pytest.raises(TypeError, match="'NoneType' object is not subscriptable"):
+    with pytest.raises(ValueError):
         await graph.calculate_top_triplet_importances(k=1)
 
 
@@ -695,7 +695,7 @@ async def test_calculate_top_triplet_importances_raises_on_short_list(setup_grap
     edge.add_attribute("vector_distance", [0.3])
     graph.add_edge(edge)
 
-    with pytest.raises(IndexError):
+    with pytest.raises(ValueError):
         await graph.calculate_top_triplet_importances(k=1, query_list_length=2)
 
 
@@ -716,5 +716,5 @@ async def test_calculate_top_triplet_importances_raises_on_missing_attribute(set
     del edge.attributes["vector_distance"]
     graph.add_edge(edge)
 
-    with pytest.raises((KeyError, TypeError)):
+    with pytest.raises(ValueError):
         await graph.calculate_top_triplet_importances(k=1, query_list_length=1)
