@@ -468,7 +468,7 @@ async def test_map_vector_distances_no_edge_matches(setup_graph):
 
 @pytest.mark.asyncio
 async def test_map_vector_distances_none_returns_early(setup_graph):
-    """Test that edge_distances=None returns early without error and vector_distance stays None."""
+    """Test that edge_distances=None returns early without error and vector_distance is set to default penalty."""
     graph = setup_graph
     graph.add_node(Node("1"))
     graph.add_node(Node("2"))
@@ -476,12 +476,12 @@ async def test_map_vector_distances_none_returns_early(setup_graph):
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=None)
 
-    assert graph.edges[0].attributes.get("vector_distance") is None
+    assert graph.edges[0].attributes.get("vector_distance") == [3.5]
 
 
 @pytest.mark.asyncio
 async def test_map_vector_distances_empty_nodes_returns_early(setup_graph):
-    """Test that node_distances={} returns early without error and vector_distance stays None."""
+    """Test that node_distances={} returns early without error and vector_distance is set to default penalty."""
     graph = setup_graph
     node1 = Node("1")
     node2 = Node("2")
@@ -490,8 +490,8 @@ async def test_map_vector_distances_empty_nodes_returns_early(setup_graph):
 
     await graph.map_vector_distances_to_graph_nodes({})
 
-    assert node1.attributes.get("vector_distance") is None
-    assert node2.attributes.get("vector_distance") is None
+    assert node1.attributes.get("vector_distance") == [3.5]
+    assert node2.attributes.get("vector_distance") == [3.5]
 
 
 @pytest.mark.asyncio
