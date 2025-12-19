@@ -1,4 +1,3 @@
-
 from typing import Union
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models import DocumentChunk
