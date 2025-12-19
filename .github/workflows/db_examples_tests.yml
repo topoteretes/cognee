@@ -74,7 +74,7 @@ jobs:
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
         run: |
-          uv run python new-examples/configurations/database_examples/neo4j_graph_database_configuration.py
+          uv run python examples/database_examples/neo4j_example.py
 
   run-db-example-kuzu:
     name: "Kuzu DB Example Test"
@@ -106,7 +106,7 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPH_DATABASE_PROVIDER: "kuzu"
         run: |
-          uv run python new-examples/configurations/database_examples/kuzu_graph_database_configuration.py
+          uv run python examples/database_examples/kuzu_example.py
 
   run-db-example-pgvector:
     name: "PostgreSQL PGVector DB Example Test"
@@ -151,4 +151,4 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: |
-          uv run python new-examples/configurations/database_examples/pgvector_postgres_vector_database_configuration.py
+          uv run python examples/database_examples/pgvector_example.py

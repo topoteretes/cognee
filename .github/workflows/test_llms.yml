@@ -33,7 +33,7 @@ jobs:
           EMBEDDING_MODEL: "gemini/text-embedding-004"
           EMBEDDING_DIMENSIONS: "768"
           EMBEDDING_MAX_TOKENS: "8076"
-        run: uv run python ./new-examples/demos/simple_default_cognee_pipelines_example.py
+        run: uv run python ./examples/python/simple_example.py
 
   test-fastembed:
     name: Run Fastembed Test
@@ -58,7 +58,7 @@ jobs:
           EMBEDDING_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
           EMBEDDING_DIMENSIONS: "384"
           EMBEDDING_MAX_TOKENS: "256"
-        run: uv run python ./new-examples/demos/simple_default_cognee_pipelines_example.py
+        run: uv run python ./examples/python/simple_example.py
 
   test-openrouter:
     name: Run OpenRouter Test
@@ -83,4 +83,4 @@ jobs:
           EMBEDDING_MODEL: "openai/text-embedding-3-large"
           EMBEDDING_DIMENSIONS: "3072"
           EMBEDDING_MAX_TOKENS: "8191"
-        run: uv run python ./new-examples/demos/simple_default_cognee_pipelines_example.py
+        run: uv run python ./examples/python/simple_example.py

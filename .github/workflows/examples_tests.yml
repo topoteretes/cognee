@@ -24,7 +24,7 @@ jobs:
           ENV: 'dev'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: uv run python ./new-examples/demos/multimedia_processing/multimedia_audio_image_processing_example.py
+        run: uv run python ./examples/python/multimedia_example.py
 
   test-eval-example:
     name: Run Eval Example
@@ -112,7 +112,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./new-examples/custom_pipelines/dynamic_steps_resume_analysis_hr_example.py
+        run: uv run python ./examples/python/dynamic_steps_example.py
 
   test-temporal-example:
     name: Run Temporal Tests
@@ -138,7 +138,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./new-examples/demos/temporal_awareness_example.py
+        run: uv run python ./examples/python/temporal_example.py
 
   test-ontology-example:
     name: Run Ontology Tests
@@ -164,7 +164,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./new-examples/demos/ontology_reference_vocabulary/ontology_as_reference_vocabulary_example.py
+        run: uv run python ./examples/python/ontology_demo_example.py
 
   test-agentic-reasoning:
     name: Run Agentic Reasoning Tests
@@ -190,7 +190,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./new-examples/custom_pipelines/agentic_reasoning_procurement_example.py
+        run: uv run python ./examples/python/agentic_reasoning_procurement_example.py
 
   test-memify:
     name: Run Memify Example
@@ -216,7 +216,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./new-examples/custom_pipelines/memify_coding_agent_rule_extraction_example.py
+        run: uv run python ./examples/python/memify_coding_agent_example.py
 
   test-custom-pipeline:
     name: Run Custom Pipeline Example
@@ -242,7 +242,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./new-examples/custom_pipelines/custom_cognify_pipeline_example.py
+        run: uv run python ./examples/python/run_custom_pipeline_example.py
 
   test-permissions-example:
     name: Run Permissions Example
@@ -268,7 +268,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./new-examples/configurations/permissions_example/user_permissions_and_access_control_example.py
+        run: uv run python ./examples/python/permissions_example.py
   test_docling_add:
     name: Run Add with Docling Test
     runs-on: macos-15

@@ -7,7 +7,7 @@ on:
       - 'cognee/modules/graph/utils/get_graph_from_model.py'
       - 'cognee/infrastructure/engine/models/Edge.py'
       - 'cognee/tests/unit/interfaces/graph/test_weighted_edges.py'
-      - 'new-examples/demos/weighted_edges_relationships_example.py'
+      - 'examples/python/weighted_edges_example.py'
       - '.github/workflows/weighted_edges_tests.yml'
   pull_request:
     branches: [ main, dev ]
@@ -15,7 +15,7 @@ on:
       - 'cognee/modules/graph/utils/get_graph_from_model.py'
       - 'cognee/infrastructure/engine/models/Edge.py'
       - 'cognee/tests/unit/interfaces/graph/test_weighted_edges.py'
-      - 'new-examples/demos/weighted_edges_relationships_example.py'
+      - 'examples/python/weighted_edges_example.py'
       - '.github/workflows/weighted_edges_tests.yml'
 
 env:
@@ -128,13 +128,13 @@ jobs:
 
       - name: Test Weighted Edges Example
         run: |
-          uv run python new-examples/demos/weighted_edges_relationships_example.py
+          uv run python examples/python/weighted_edges_example.py
 
       - name: Verify Visualization File Created
         run: |
-          if [ -f "new-examples/demos/weighted_graph_visualization.html" ]; then
+          if [ -f "examples/python/weighted_graph_visualization.html" ]; then
             echo "✅ Visualization file created successfully"
-            ls -la new-examples/demos/weighted_graph_visualization.html
+            ls -la examples/python/weighted_graph_visualization.html
           else
             echo "❌ Visualization file not found"
             exit 1
@@ -159,11 +159,11 @@ jobs:
       - name: Run Linting on Weighted Edges Files
         uses: astral-sh/ruff-action@v2
         with:
-          args: "check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py new-examples/demos/weighted_edges_relationships_example.py"
+          args: "check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py examples/python/weighted_edges_example.py"
 
       - name: Run Formatting Check on Weighted Edges Files
         uses: astral-sh/ruff-action@v2
         with:
-          args: "format --check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py new-examples/demos/weighted_edges_relationships_example.py"
+          args: "format --check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py examples/python/weighted_edges_example.py"
 
  

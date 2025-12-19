@@ -158,7 +158,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Run Simple Examples
-        run: uv run python ./new-examples/demos/simple_default_cognee_pipelines_example.py
+        run: uv run python ./examples/python/simple_example.py
 
   simple-examples-baml:
     name: Run Simple Examples BAML
@@ -196,7 +196,7 @@ jobs:
           extra-dependencies: "baml"
 
       - name: Run Simple Examples
-        run: uv run python ./new-examples/demos/simple_default_cognee_pipelines_example.py
+        run: uv run python ./examples/python/simple_example.py
 
   graph-tests:
     name: Run Basic Graph Tests
@@ -226,4 +226,4 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Run Graph Tests
-        run: uv run python ./new-examples/custom_pipelines/code_graph_repository_analysis_example.py --repo_path ./cognee/tasks/graph
+        run: uv run python ./examples/python/code_graph_example.py --repo_path ./cognee/tasks/graph

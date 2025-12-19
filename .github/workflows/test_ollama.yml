@@ -101,4 +101,4 @@ jobs:
           EMBEDDING_ENDPOINT: "http://localhost:11434/api/embed"
           EMBEDDING_DIMENSIONS: "4096"
           HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
-        run: uv run python ./new-examples/demos/simple_default_cognee_pipelines_example.py
+        run: uv run python ./examples/python/simple_example.py
