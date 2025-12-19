@@ -250,12 +250,12 @@ class CogneeGraph(CogneeAbstractGraph):
             if not scored_results:
                 continue
 
-            per_query_lists = self._normalize_query_distance_lists(
+            per_query_scored_results = self._normalize_query_distance_lists(
                 scored_results, query_list_length, f"Collection '{collection_name}'"
             )
 
-            for query_index, scored_list in enumerate(per_query_lists):
-                for result in scored_list:
+            for query_index, scored_results in enumerate(per_query_scored_results):
+                for result in scored_results:
                     node_id = str(getattr(result, "id", None))
                     if not node_id:
                         continue
@@ -283,12 +283,12 @@ class CogneeGraph(CogneeAbstractGraph):
         if not edge_distances:
             return None
 
-        per_query_edge_lists = self._normalize_query_distance_lists(
+        per_query_scored_results = self._normalize_query_distance_lists(
             edge_distances, query_list_length, "edge_distances"
         )
 
-        for query_index, scored_list in enumerate(per_query_edge_lists):
-            for result in scored_list:
+        for query_index, scored_results in enumerate(per_query_scored_results):
+            for result in scored_results:
                 payload = getattr(result, "payload", None)
                 if not isinstance(payload, dict):
                     continue
