@@ -219,7 +219,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         else:
             try:
                 tokenizer = HuggingFaceTokenizer(
-                    model=self.model.replace("hosted_vllm/", ""),
+                    model=self.model.replace("hosted_vllm/", "").replace("openai/", ""),
                     max_completion_tokens=self.max_completion_tokens,
                 )
             except Exception as e:
@@ -231,3 +231,4 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
         logger.debug(f"Tokenizer loaded for model: {self.model}")
         return tokenizer
+
