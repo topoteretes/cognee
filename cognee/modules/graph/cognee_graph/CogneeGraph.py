@@ -183,8 +183,6 @@ class CogneeGraph(CogneeAbstractGraph):
 
             self.triplet_distance_penalty = triplet_distance_penalty
 
-            import time
-
             start_time = time.time()
             # Process nodes
             for node_id, properties in nodes_data:
