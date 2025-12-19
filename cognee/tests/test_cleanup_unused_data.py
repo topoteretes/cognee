@@ -116,7 +116,7 @@ async def test_textdocument_cleanup_with_sql():
         retrieved_timestamp = updated_data.last_accessed
         if retrieved_timestamp.tzinfo is None:
             retrieved_timestamp = retrieved_timestamp.replace(tzinfo=timezone.utc)
-        assert retrieved_timestamp == aged_timestamp, f"Timestamp should be updated to aged value"
+        assert retrieved_timestamp == aged_timestamp, "Timestamp should be updated to aged value"
 
     # Step 5: Test cleanup (document-level is now the default)
     from cognee.tasks.cleanup.cleanup_unused_data import cleanup_unused_data
