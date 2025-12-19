@@ -8,6 +8,7 @@ from cognee.modules.retrieval.utils.session_cache import (
     save_conversation_history,
     get_conversation_history,
 )
+from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
@@ -65,7 +66,7 @@ class CompletionRetriever(BaseRetriever):
 
             if len(found_chunks) == 0:
                 return ""
-
+            await update_node_access_timestamps(found_chunks)
             # Combine all chunks text returned from vector search (number of chunks is determined by top_k
             chunks_payload = [found_chunk.payload["text"] for found_chunk in found_chunks]
             combined_context = "\n".join(chunks_payload)
