@@ -269,7 +269,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run pytest cognee/tests/test_permissions_example.py -v --log-level=INFO
+        run: uv run python ./examples/python/permissions_example.py
 
   test-s3-permissions-example: # Make sure permission and multi-user mode work with S3 file system
     name: Run Permissions Example
@@ -327,7 +327,7 @@ jobs:
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
-        run: uv run pytest cognee/tests/test_permissions_example.py -v --log-level=INFO
+        run: uv run python ./examples/python/permissions_example.py
 
   test_docling_add:
     name: Run Add with Docling Test
