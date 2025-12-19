@@ -120,3 +120,33 @@ async def test_permissions_example_flow(permissions_example_env):
 
     ai_cognify_result = await cognee.cognify(["AI"], user=user_1)
     quantum_cognify_result = await cognee.cognify(["QUANTUM"], user=user_2)
+
+    ai_dataset_id = _extract_dataset_id_from_cognify(ai_cognify_result)
+    quantum_dataset_id = _extract_dataset_id_from_cognify(quantum_cognify_result)
+    assert ai_dataset_id is not None
+    assert quantum_dataset_id is not None
+
+    with llm_patch:
+        # user_1 can read own dataset.
+        search_results = await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text="What is in the document?",
+            user=user_1,
+            datasets=[ai_dataset_id],
+        )
+    assert isinstance(search_results, list) and len(search_results) == 1
+    assert search_results[0]["dataset_name"] == "AI"
+    assert search_results[0]["search_result"] == ["MOCK_ANSWER"]
+
+    # user_1 can't read dataset owned by user_2.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text="What is in the document?",
+            user=user_1,
+            datasets=[quantum_dataset_id],
+        )
+
+    # user_1 can't add to user_2's dataset.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.add([explanation_file_path], dataset_id=quantum_dataset_id, user=user_1)
