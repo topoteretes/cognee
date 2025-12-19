@@ -150,3 +150,63 @@ async def test_permissions_example_flow(permissions_example_env):
     # user_1 can't add to user_2's dataset.
     with pytest.raises(PermissionDeniedError):
         await cognee.add([explanation_file_path], dataset_id=quantum_dataset_id, user=user_1)
+
+        # user_2 grants read permission to user_1 for QUANTUM dataset.
+        await authorized_give_permission_on_datasets(
+            user_1.id, [quantum_dataset_id], "read", user_2.id
+        )
+
+        with llm_patch:
+            # Now user_1 can read QUANTUM dataset via dataset_id.
+            search_results = await cognee.search(
+                query_type=SearchType.GRAPH_COMPLETION,
+                query_text="What is in the document?",
+                user=user_1,
+                dataset_ids=[quantum_dataset_id],
+            )
+        assert isinstance(search_results, list) and len(search_results) == 1
+        assert search_results[0]["dataset_name"] == "QUANTUM"
+        assert search_results[0]["search_result"] == ["MOCK_ANSWER"]
+
+        # Tenant + role scenario.
+        tenant_id = await create_tenant("CogneeLab", user_2.id)
+        await select_tenant(user_id=user_2.id, tenant_id=tenant_id)
+        role_id = await create_role(role_name="Researcher", owner_id=user_2.id)
+
+        user_3 = await create_user("user_3@example.com", "example")
+        await add_user_to_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
+        await add_user_to_role(user_id=user_3.id, role_id=role_id, owner_id=user_2.id)
+        await select_tenant(user_id=user_3.id, tenant_id=tenant_id)
+
+        # Can't grant role permission on a dataset that isn't part of the active tenant.
+        with pytest.raises(PermissionDeniedError):
+            await authorized_give_permission_on_datasets(
+                role_id, [quantum_dataset_id], "read", user_2.id
+            )
+
+        # Re-create QUANTUM dataset in CogneeLab tenant so role permissions can be assigned.
+        user_2 = await get_user(user_2.id)  # refresh tenant context
+        await cognee.add([text], dataset_name="QUANTUM_COGNEE_LAB", user=user_2)
+        quantum_cognee_lab_cognify_result = await cognee.cognify(
+            ["QUANTUM_COGNEE_LAB"], user=user_2
+        )
+        quantum_cognee_lab_dataset_id = _extract_dataset_id_from_cognify(
+            quantum_cognee_lab_cognify_result
+        )
+        assert quantum_cognee_lab_dataset_id is not None
+
+        await authorized_give_permission_on_datasets(
+            role_id, [quantum_cognee_lab_dataset_id], "read", user_2.id
+        )
+
+        with llm_patch:
+            # user_3 can read via role permission.
+            search_results = await cognee.search(
+                query_type=SearchType.GRAPH_COMPLETION,
+                query_text="What is in the document?",
+                user=user_3,
+                dataset_ids=[quantum_cognee_lab_dataset_id],
+            )
+        assert isinstance(search_results, list) and len(search_results) == 1
+        assert search_results[0]["dataset_name"] == "QUANTUM_COGNEE_LAB"
+        assert search_results[0]["search_result"] == ["MOCK_ANSWER"]
