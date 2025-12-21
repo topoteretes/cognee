@@ -192,7 +192,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
                 if (n.type) entries.push({k:'Type', v: n.type});
                 if (n.id) entries.push({k:'ID', v: n.id});
                 var desc = pickDescription(n) || pickDescription(n.properties);
-                if (desc) entries.push({k:'Description', v: truncate(desc.replace(/\s+/g,' ').trim(), 280)});
+                if (desc) entries.push({k:'Description', v: truncate(desc.replace(/\\s+/g,' ').trim(), 280)});
                 if (n.properties) {
                     Object.keys(n.properties).slice(0, 12).forEach(function(key){
                         var v = n.properties[key];
@@ -210,7 +210,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
                 }
                 if (e.relationship_type) entries.push({k:'Type', v: e.relationship_type});
                 var edesc = pickDescription(e.edge_info);
-                if (edesc) entries.push({k:'Description', v: truncate(edesc.replace(/\s+/g,' ').trim(), 280)});
+                if (edesc) entries.push({k:'Description', v: truncate(edesc.replace(/\\s+/g,' ').trim(), 280)});
                 renderInfo('Edge', entries);
             }
 
