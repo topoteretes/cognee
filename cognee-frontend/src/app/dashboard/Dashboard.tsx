@@ -15,6 +15,8 @@ import AddDataToCognee from "./AddDataToCognee";
 import NotebooksAccordion from "./NotebooksAccordion";
 import CogneeInstancesAccordion from "./CogneeInstancesAccordion";
 import InstanceDatasetsAccordion from "./InstanceDatasetsAccordion";
+import cloudFetch from "@/modules/instances/cloudFetch";
+import localFetch from "@/modules/instances/localFetch";
 
 interface DashboardProps {
   user?: {
@@ -25,6 +27,17 @@ interface DashboardProps {
   };
   accessToken: string;
 }
+
+const cogneeInstances = {
+  cloudCognee: {
+    name: "CloudCognee",
+    fetch: cloudFetch,
+  },
+  localCognee: {
+    name: "LocalCognee",
+    fetch: localFetch,
+  }
+};
 
 export default function Dashboard({ accessToken }: DashboardProps) {
   fetch.setAccessToken(accessToken);
@@ -38,7 +51,7 @@ export default function Dashboard({ accessToken }: DashboardProps) {
     updateNotebook,
     saveNotebook,
     removeNotebook,
-  } = useNotebooks();
+  } = useNotebooks(cogneeInstances.localCognee);
 
   useEffect(() => {
     if (!notebooks.length) {

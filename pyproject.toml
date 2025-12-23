@@ -200,7 +200,8 @@ exclude = [
     "cognee/modules/users/models/Group.py",
     "cognee/modules/users/models/ACL.py",
     "cognee/modules/pipelines/models/Task.py",
-    "cognee/modules/data/models/Dataset.py"
+    "cognee/modules/data/models/Dataset.py",
+    "cognee/modules/notebooks/tutorials/"  # Ignore tutorial Python files
 ]
 
 [tool.ruff.lint]
