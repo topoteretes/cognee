@@ -81,6 +81,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             model=llm_config.llm_model,
             transcription_model=llm_config.transcription_model,
             max_completion_tokens=max_completion_tokens,
+            instructor_mode=llm_config.llm_instructor_mode.lower(),
             streaming=llm_config.llm_streaming,
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=llm_config.fallback_endpoint,
@@ -101,6 +102,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             llm_config.llm_model,
             "Ollama",
             max_completion_tokens=max_completion_tokens,
+            instructor_mode=llm_config.llm_instructor_mode.lower(),
         )
 
     elif provider == LLMProvider.ANTHROPIC:
@@ -109,7 +111,9 @@ def get_llm_client(raise_api_key_error: bool = True):
         )
 
         return AnthropicAdapter(
-            max_completion_tokens=max_completion_tokens, model=llm_config.llm_model
+            max_completion_tokens=max_completion_tokens,
+            model=llm_config.llm_model,
+            instructor_mode=llm_config.llm_instructor_mode.lower(),
         )
 
     elif provider == LLMProvider.CUSTOM:
@@ -126,6 +130,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             llm_config.llm_model,
             "Custom",
             max_completion_tokens=max_completion_tokens,
+            instructor_mode=llm_config.llm_instructor_mode.lower(),
             fallback_api_key=llm_config.fallback_api_key,
             fallback_endpoint=llm_config.fallback_endpoint,
             fallback_model=llm_config.fallback_model,
@@ -145,6 +150,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             max_completion_tokens=max_completion_tokens,
             endpoint=llm_config.llm_endpoint,
             api_version=llm_config.llm_api_version,
+            instructor_mode=llm_config.llm_instructor_mode.lower(),
         )
 
     elif provider == LLMProvider.MISTRAL:
@@ -160,6 +166,7 @@ def get_llm_client(raise_api_key_error: bool = True):
             model=llm_config.llm_model,
             max_completion_tokens=max_completion_tokens,
             endpoint=llm_config.llm_endpoint,
+            instructor_mode=llm_config.llm_instructor_mode.lower(),
         )
 
     else:

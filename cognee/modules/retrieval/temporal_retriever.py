@@ -47,6 +47,8 @@ class TemporalRetriever(GraphCompletionRetriever):
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        wide_search_top_k: Optional[int] = 100,
+        triplet_distance_penalty: Optional[float] = 3.5,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -54,6 +56,8 @@ class TemporalRetriever(GraphCompletionRetriever):
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
+            wide_search_top_k=wide_search_top_k,
+            triplet_distance_penalty=triplet_distance_penalty,
         )
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
