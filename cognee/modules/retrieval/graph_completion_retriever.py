@@ -16,7 +16,6 @@ from cognee.modules.retrieval.utils.session_cache import (
 )
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.utils.extract_uuid_from_node import extract_uuid_from_node
-from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.modules.retrieval.utils.models import CogneeUserInteraction
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -149,7 +148,6 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
         entity_nodes = get_entity_nodes_from_triplets(triplets)
           
-        await update_node_access_timestamps(entity_nodes) 
         return triplets
 
     async def convert_retrieved_objects_to_context(self, triplets: List[Edge]):
