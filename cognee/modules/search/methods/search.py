@@ -147,18 +147,7 @@ async def search(
         },
     )
 
-    # The rest of the code for logging and preparing results remains largely the same
-    # Ensure search_results is correctly defined for the subsequent logging/preparation logic
-    # based on how it was processed in the if/else blocks above.
-    # For now, let's assume 'search_results' should refer to 'raw_search_results'
-    # for the purpose of this part of the code, or be re-structured to use the
-    # collected components for the final output.
-
-    # This part needs careful adjustment based on the exact structure expected by prepare_search_result
-    # and the final return type.
-    # For simplicity here, let's re-assign search_results to raw_search_results for the original flow
     search_results = raw_search_results
-    # ... rest of the original function ...
 
     await log_result(
         query.id,
