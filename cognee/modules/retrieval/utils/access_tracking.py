@@ -25,12 +25,17 @@ async def update_node_access_timestamps(items: List[Any]):
     graph_engine = await get_graph_engine()  
     timestamp_dt = datetime.now(timezone.utc)  
   
-    # Extract node IDs  
+    # Extract node IDs - updated for graph node format  
     node_ids = []  
     for item in items:  
-        item_id = item.payload.get("id") if hasattr(item, 'payload') else item.get("id")  
-        if item_id:  
-            node_ids.append(str(item_id))  
+        # Handle graph nodes from prepare_search_result (direct id attribute)  
+        if hasattr(item, 'id'):  
+            node_ids.append(str(item.id))  
+        # Fallback for original retriever format  
+        elif hasattr(item, 'payload') and item.payload.get("id"):  
+            node_ids.append(str(item.payload.get("id")))  
+        elif isinstance(item, dict) and item.get("id"):  
+            node_ids.append(str(item.get("id")))  
   
     if not node_ids:  
         return  
