@@ -54,8 +54,7 @@ class SummariesRetriever(BaseRetriever):
                 "TextSummary_text", query, limit=self.top_k
             )
             logger.info(f"Found {len(summaries_results)} summaries from vector search")
-            
-        
+
         except CollectionNotFoundError as error:
             logger.error("TextSummary_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error

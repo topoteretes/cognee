@@ -28,6 +28,7 @@ class VectorConfig(BaseSettings):
     vector_db_name: str = ""
     vector_db_key: str = ""
     vector_db_provider: str = "lancedb"
+    vector_dataset_database_handler: str = "lancedb"
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -63,6 +64,7 @@ class VectorConfig(BaseSettings):
             "vector_db_name": self.vector_db_name,
             "vector_db_key": self.vector_db_key,
             "vector_db_provider": self.vector_db_provider,
+            "vector_dataset_database_handler": self.vector_dataset_database_handler,
         }
 
 

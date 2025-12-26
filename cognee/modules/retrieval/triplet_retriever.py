@@ -36,7 +36,7 @@ class TripletRetriever(BaseRetriever):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
-        self.top_k = top_k if top_k is not None else 1
+        self.top_k = top_k if top_k is not None else 5
         self.system_prompt = system_prompt
 
     async def get_context(self, query: str) -> str:

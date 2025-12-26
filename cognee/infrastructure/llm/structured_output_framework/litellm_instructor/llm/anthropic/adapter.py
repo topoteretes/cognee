@@ -3,7 +3,9 @@ from typing import Type
 from pydantic import BaseModel
 import litellm
 import instructor
+import anthropic
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.observability.get_observe import get_observe
 from tenacity import (
     retry,
     stop_after_delay,
@@ -12,38 +14,41 @@ from tenacity import (
     before_sleep_log,
 )
 
-from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llm_interface import (
-    LLMInterface,
+from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.generic_llm_api.adapter import (
+    GenericAPIAdapter,
 )
 from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 from cognee.infrastructure.llm.config import get_llm_config
 
 logger = get_logger()
+observe = get_observe()
 
 
-class AnthropicAdapter(LLMInterface):
+class AnthropicAdapter(GenericAPIAdapter):
     """
     Adapter for interfacing with the Anthropic API, enabling structured output generation
     and prompt display.
     """
 
-    name = "Anthropic"
-    model: str
     default_instructor_mode = "anthropic_tools"
 
-    def __init__(self, max_completion_tokens: int, model: str = None, instructor_mode: str = None):
-        import anthropic
-
+    def __init__(
+        self, api_key: str, model: str, max_completion_tokens: int, instructor_mode: str = None
+    ):
+        super().__init__(
+            api_key=api_key,
+            model=model,
+            max_completion_tokens=max_completion_tokens,
+            name="Anthropic",
+        )
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         self.aclient = instructor.patch(
-            create=anthropic.AsyncAnthropic(api_key=get_llm_config().llm_api_key).messages.create,
+            create=anthropic.AsyncAnthropic(api_key=self.api_key).messages.create,
             mode=instructor.Mode(self.instructor_mode),
         )
 
-        self.model = model
-        self.max_completion_tokens = max_completion_tokens
-
+    @observe(as_type="generation")
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
@@ -52,7 +57,7 @@ class AnthropicAdapter(LLMInterface):
         reraise=True,
     )
     async def acreate_structured_output(
-        self, text_input: str, system_prompt: str, response_model: Type[BaseModel]
+        self, text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
     ) -> BaseModel:
         """
         Generate a response from a user query.

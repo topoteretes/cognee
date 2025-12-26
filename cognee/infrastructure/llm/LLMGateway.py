@@ -11,7 +11,7 @@ class LLMGateway:
 
     @staticmethod
     def acreate_structured_output(
-        text_input: str, system_prompt: str, response_model: Type[BaseModel]
+        text_input: str, system_prompt: str, response_model: Type[BaseModel], **kwargs
     ) -> Coroutine:
         llm_config = get_llm_config()
         if llm_config.structured_output_framework.upper() == "BAML":
@@ -31,21 +31,11 @@ class LLMGateway:
 
             llm_client = get_llm_client()
             return llm_client.acreate_structured_output(
-                text_input=text_input, system_prompt=system_prompt, response_model=response_model
+                text_input=text_input,
+                system_prompt=system_prompt,
+                response_model=response_model,
+                **kwargs,
             )
-
-    @staticmethod
-    def create_structured_output(
-        text_input: str, system_prompt: str, response_model: Type[BaseModel]
-    ) -> BaseModel:
-        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
-            get_llm_client,
-        )
-
-        llm_client = get_llm_client()
-        return llm_client.create_structured_output(
-            text_input=text_input, system_prompt=system_prompt, response_model=response_model
-        )
 
     @staticmethod
     def create_transcript(input) -> Coroutine:

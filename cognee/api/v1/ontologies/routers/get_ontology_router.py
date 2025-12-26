@@ -1,4 +1,4 @@
-from fastapi import APIRouter, File, Form, UploadFile, Depends, HTTPException
+from fastapi import APIRouter, File, Form, UploadFile, Depends, Request
 from fastapi.responses import JSONResponse
 from typing import Optional, List
 
@@ -15,28 +15,25 @@ def get_ontology_router() -> APIRouter:
 
     @router.post("", response_model=dict)
     async def upload_ontology(
+        request: Request,
         ontology_key: str = Form(...),
-        ontology_file: List[UploadFile] = File(...),
-        descriptions: Optional[str] = Form(None),
+        ontology_file: UploadFile = File(...),
+        description: Optional[str] = Form(None),
         user: User = Depends(get_authenticated_user),
     ):
         """
-        Upload ontology files with their respective keys for later use in cognify operations.
-
-        Supports both single and multiple file uploads:
-        - Single file: ontology_key=["key"], ontology_file=[file]
-        - Multiple files: ontology_key=["key1", "key2"], ontology_file=[file1, file2]
+        Upload a single ontology file for later use in cognify operations.
 
         ## Request Parameters
-        - **ontology_key** (str): JSON array string of user-defined identifiers for the ontologies
-        - **ontology_file** (List[UploadFile]): OWL format ontology files
-        - **descriptions** (Optional[str]): JSON array string of optional descriptions
+        - **ontology_key** (str): User-defined identifier for the ontology.
+        - **ontology_file** (UploadFile): Single OWL format ontology file
+        - **description** (Optional[str]): Optional description for the ontology.
 
         ## Response
-        Returns metadata about uploaded ontologies including keys, filenames, sizes, and upload timestamps.
+        Returns metadata about the uploaded ontology including key, filename, size, and upload timestamp.
 
         ## Error Codes
-        - **400 Bad Request**: Invalid file format, duplicate keys, array length mismatches, file size exceeded
+        - **400 Bad Request**: Invalid file format, duplicate key, multiple files uploaded
         - **500 Internal Server Error**: File system or processing errors
         """
         send_telemetry(
@@ -49,16 +46,22 @@ def get_ontology_router() -> APIRouter:
         )
 
         try:
-            import json
+            # Enforce: exactly one uploaded file for "ontology_file"
+            form = await request.form()
+            uploaded_files = form.getlist("ontology_file")
+            if len(uploaded_files) != 1:
+                raise ValueError("Only one ontology_file is allowed")
 
-            ontology_keys = json.loads(ontology_key)
-            description_list = json.loads(descriptions) if descriptions else None
+            if ontology_key.strip().startswith(("[", "{")):
+                raise ValueError("ontology_key must be a string")
+            if description is not None and description.strip().startswith(("[", "{")):
+                raise ValueError("description must be a string")
 
-            if not isinstance(ontology_keys, list):
-                raise ValueError("ontology_key must be a JSON array")
-
-            results = await ontology_service.upload_ontologies(
-                ontology_keys, ontology_file, user, description_list
+            result = await ontology_service.upload_ontology(
+                ontology_key=ontology_key,
+                file=ontology_file,
+                user=user,
+                description=description,
             )
 
             return {
@@ -70,10 +73,9 @@ def get_ontology_router() -> APIRouter:
                         "uploaded_at": result.uploaded_at,
                         "description": result.description,
                     }
-                    for result in results
                 ]
             }
-        except (json.JSONDecodeError, ValueError) as e:
+        except ValueError as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})

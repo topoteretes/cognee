@@ -147,7 +147,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         # context = await self.resolve_edges_to_text(triplets)
 
         entity_nodes = get_entity_nodes_from_triplets(triplets)
-          
+
         return triplets
 
     async def convert_retrieved_objects_to_context(self, triplets: List[Edge]):

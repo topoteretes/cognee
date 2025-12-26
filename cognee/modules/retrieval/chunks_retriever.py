@@ -4,7 +4,7 @@ from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
-from datetime import datetime, timezone  
+from datetime import datetime, timezone
 
 logger = get_logger("ChunksRetriever")
 
@@ -27,7 +27,7 @@ class ChunksRetriever(BaseRetriever):
     ):
         self.top_k = top_k
 
-    async def get_context(self, query: str) -> Any:  
+    async def get_context(self, query: str) -> Any:
         """
         Retrieves document chunks context based on the query.
         Searches for document chunks relevant to the specified query using a vector engine.
