@@ -13,6 +13,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     LLMInterface,
 )
 import logging
+from cognee.shared.rate_limiting import llm_rate_limiter_context_manager
 from cognee.shared.logging_utils import get_logger
 from tenacity import (
     retry,
@@ -41,6 +42,7 @@ class GeminiAdapter(LLMInterface):
     name: str
     model: str
     api_key: str
+    default_instructor_mode = "json_mode"
 
     def __init__(
         self,
@@ -49,6 +51,7 @@ class GeminiAdapter(LLMInterface):
         model: str,
         api_version: str,
         max_completion_tokens: int,
+        instructor_mode: str = None,
         fallback_model: str = None,
         fallback_api_key: str = None,
         fallback_endpoint: str = None,
@@ -63,11 +66,15 @@ class GeminiAdapter(LLMInterface):
         self.fallback_api_key = fallback_api_key
         self.fallback_endpoint = fallback_endpoint
 
-        self.aclient = instructor.from_litellm(litellm.acompletion, mode=instructor.Mode.JSON)
+        self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
+
+        self.aclient = instructor.from_litellm(
+            litellm.acompletion, mode=instructor.Mode(self.instructor_mode)
+        )
 
     @retry(
         stop=stop_after_delay(128),
-        wait=wait_exponential_jitter(2, 128),
+        wait=wait_exponential_jitter(8, 128),
         retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
@@ -99,24 +106,25 @@ class GeminiAdapter(LLMInterface):
         """
 
         try:
-            return await self.aclient.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"""{text_input}""",
-                    },
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                ],
-                api_key=self.api_key,
-                max_retries=5,
-                api_base=self.endpoint,
-                api_version=self.api_version,
-                response_model=response_model,
-            )
+            async with llm_rate_limiter_context_manager():
+                return await self.aclient.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": f"""{text_input}""",
+                        },
+                        {
+                            "role": "system",
+                            "content": system_prompt,
+                        },
+                    ],
+                    api_key=self.api_key,
+                    max_retries=2,
+                    api_base=self.endpoint,
+                    api_version=self.api_version,
+                    response_model=response_model,
+                )
         except (
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,
@@ -134,23 +142,24 @@ class GeminiAdapter(LLMInterface):
                 )
 
             try:
-                return await self.aclient.chat.completions.create(
-                    model=self.fallback_model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": f"""{text_input}""",
-                        },
-                        {
-                            "role": "system",
-                            "content": system_prompt,
-                        },
-                    ],
-                    max_retries=5,
-                    api_key=self.fallback_api_key,
-                    api_base=self.fallback_endpoint,
-                    response_model=response_model,
-                )
+                async with llm_rate_limiter_context_manager():
+                    return await self.aclient.chat.completions.create(
+                        model=self.fallback_model,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": f"""{text_input}""",
+                            },
+                            {
+                                "role": "system",
+                                "content": system_prompt,
+                            },
+                        ],
+                        max_retries=2,
+                        api_key=self.fallback_api_key,
+                        api_base=self.fallback_endpoint,
+                        response_model=response_model,
+                    )
             except (
                 ContentFilterFinishReasonError,
                 ContentPolicyViolationError,
