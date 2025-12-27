@@ -56,5 +56,6 @@ class Data(Base):
             "createdAt": self.created_at.isoformat(),
             "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
             "nodeSet": self.node_set,
+            "label": self.label,
             # "datasets": [dataset.to_json() for dataset in self.datasets]
         }

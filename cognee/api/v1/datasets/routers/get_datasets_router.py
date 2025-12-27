@@ -50,6 +50,7 @@ class DataDTO(OutDTO):
     mime_type: str
     raw_data_location: str
     dataset_id: UUID
+    label: Optional[str] = None
 
 
 class GraphNodeDTO(OutDTO):
