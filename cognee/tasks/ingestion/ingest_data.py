@@ -120,6 +120,9 @@ async def ingest_data(
             # TODO: Maybe allow getting of external metadata through ingestion loader?
             ext_metadata = get_external_metadata_dict(data_item)
 
+            # Extract optional label from data_item if present
+            label = getattr(data_item, "label", None)
+
             if node_set:
                 ext_metadata["node_set"] = node_set
 
@@ -138,6 +141,7 @@ async def ingest_data(
                 data_point.file_size = original_file_metadata["file_size"]
                 data_point.external_metadata = ext_metadata
                 data_point.node_set = json.dumps(node_set) if node_set else None
+                data_point.label = label
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None
 
                 # Check if data is already in dataset
@@ -167,6 +171,7 @@ async def ingest_data(
                     node_set=json.dumps(node_set) if node_set else None,
                     data_size=original_file_metadata["file_size"],
                     tenant_id=user.tenant_id if user.tenant_id else None,
+                    label=label,
                     pipeline_status={},
                     token_count=-1,
                 )
