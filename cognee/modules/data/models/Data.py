@@ -29,6 +29,7 @@ class Data(Base):
     external_metadata = Column(JSON)
     # Store NodeSet as JSON list of strings
     node_set = Column(JSON, nullable=True)
+    label = Column(String, nullable=True)
     # MutableDict allows SQLAlchemy to notice key-value pair changes, without it changing a value for a key
     # wouldn't be noticed when commiting a database session
     pipeline_status = Column(MutableDict.as_mutable(JSON))
