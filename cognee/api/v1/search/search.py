@@ -11,6 +11,9 @@ from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.exceptions import CogneeValidationError
+from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 
 logger = get_logger()
 
@@ -176,7 +179,18 @@ async def search(
         datasets = [datasets]
 
     if user is None:
-        user = await get_default_user()
+        try:
+            user = await get_default_user()
+        except (DatabaseNotCreatedError, UserNotFoundError) as error:
+            # Provide a clear, actionable message instead of surfacing low-level stacktraces
+            raise CogneeValidationError(
+                message=(
+                    "Search prerequisites not met: no database/default user found. "
+                    "Initialize Cognee before searching by:\n"
+                    "• running `await cognee.add(...)` followed by `await cognee.cognify()`."
+                ),
+                name="SearchPreconditionError",
+            ) from error
 
     await set_session_user_context_variable(user)
 
