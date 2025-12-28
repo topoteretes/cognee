@@ -111,13 +111,18 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 return [data["embedding"] for data in response["data"]]
             else:
                 async with embedding_rate_limiter_context_manager():
-                    response = await litellm.aembedding(
-                        model=self.model,
-                        input=text,
-                        api_key=self.api_key,
-                        api_base=self.endpoint,
-                        api_version=self.api_version,
-                    )
+                    embedding_kwargs = {
+                        "model": self.model,
+                        "input": text,
+                        "api_key": self.api_key,
+                        "api_base": self.endpoint,
+                        "api_version": self.api_version,
+                    }
+                    # Pass through target embedding dimensions when supported
+                    if self.dimensions is not None:
+                        embedding_kwargs["dimensions"] = self.dimensions
+
+                    response = await litellm.aembedding(**embedding_kwargs)
 
                 return [data["embedding"] for data in response.data]
 
