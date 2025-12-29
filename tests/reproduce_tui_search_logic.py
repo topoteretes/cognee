@@ -139,11 +139,11 @@ async def test_empty_graph_handling():
     
     # Check that notify was called with warning
     # We allow flexible matching for the exact message but check 'warning' severity
+    assert screen.notify.called, "notify was not called"
     args = screen.notify.call_args
-    if args:
-        assert args[1].get('severity') == 'warning' or 'Knowledge graph is empty' in args[0][0]
-    else:
-        print("FAIL: notify was not called")
+    assert args is not None
+    # Assert specific conditions on args
+    assert args[1].get('severity') == 'warning' or 'Knowledge graph is empty' in args[0][0]
         
     print("SUCCESS: EntityNotFoundError was caught and handled correctly.")
 

@@ -126,16 +126,18 @@ class DeleteTUIScreen(BaseTUIScreen):
         """Async function to delete data."""
         status = self.query_one(".tui-status", Static)
         try:
+            if user_id is None:
+                user = await get_default_user()
+                resolved_user_id = user.id
+            else:
+                resolved_user_id = UUID(user_id)
+
             if dataset_name:
-                if user_id is None:
-                    user = await get_default_user()
-                    resolved_user_id = user.id
-                else:
-                    resolved_user_id = UUID(user_id)
                 await delete_dataset_by_name(dataset_name, resolved_user_id)
+                status.update(f"✓ Successfully deleted dataset '{dataset_name}'.")
             else:
                 await delete_data_by_user(resolved_user_id)
-            status.update(f"✓ Successfully deleted dataset '{dataset_name}'.")
+                status.update(f"✓ Successfully deleted all data for user {resolved_user_id}.")
         except Exception as e:
             status.update(f"✗ Error: {str(e)}")
         finally:
