@@ -46,10 +46,10 @@ class CognifyTUIScreen(BaseTUIScreen):
                 yield Static("⚡ Cognify Data", classes="tui-title-bordered")
             with Vertical(classes="tui-form"):
                 yield Label(
-                    "Dataset Name (optional, leave empty for all):", classes="tui-label-spaced"
+                    "Dataset Name:", classes="tui-label-spaced"
                 )
                 yield Input(
-                    placeholder="Leave empty to process all datasets", value="", id="dataset-input"
+                    placeholder="Enter the dataset name here.", value="", id="dataset-input"
                 )
 
                 yield Label("Chunker Type:", classes="tui-label-spaced")
