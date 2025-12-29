@@ -18,7 +18,10 @@ def get_client_auth_backend():
         from .default.default_jwt_strategy import DefaultJWTStrategy
 
         secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
-        lifetime_seconds = int(os.getenv("JWT_LIFETIME_SECONDS", "3600"))
+        try:
+            lifetime_seconds = int(os.getenv("JWT_LIFETIME_SECONDS", "3600"))
+        except ValueError:
+            lifetime_seconds = 3600
 
         return DefaultJWTStrategy(secret, lifetime_seconds=lifetime_seconds)
 
