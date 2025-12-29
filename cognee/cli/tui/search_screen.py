@@ -1,7 +1,7 @@
 import asyncio
 from textual.app import ComposeResult
-from textual.widgets import Input, Label, Static, Select
-from textual.containers import Container, Vertical, ScrollableContainer
+from textual.widgets import Input, Label, Static, Select, ListView, ListItem
+from textual.containers import Container, Vertical
 from textual.binding import Binding
 from cognee.cli.tui.base_screen import BaseTUIScreen
 
@@ -46,7 +46,7 @@ class SearchTUIScreen(BaseTUIScreen):
         margin-bottom: 1;
     }
 
-    #results-content {
+    #results-list {
         height: 1fr;
         overflow-y: auto;
     }
@@ -78,18 +78,21 @@ class SearchTUIScreen(BaseTUIScreen):
                 )
             with Container(id="results-container"):
                 yield Static("Results", id="results-title")
-                with ScrollableContainer(id="results-content"):
-                    yield Static(
-                        "Enter a query and click Search to see results.", id="results-text"
-                    )
+                yield ListView(id="results-list")
 
     def compose_footer(self) -> ComposeResult:
         yield Static("Ctrl+S: Search  •  Esc: Back  •  q: Quit", classes="tui-footer")
 
     def on_mount(self) -> None:
-        """Focus the query input on mount."""
+        """Focus the query input on mount and show initial help text."""
         query_input = self.query_one("#query-input", Input)
         query_input.focus()
+
+        # Add initial help text to list
+        results_list = self.query_one("#results-list", ListView)
+        results_list.mount(
+            ListItem(Label("Enter a query and click Search to see results."))
+        )
 
     def action_back(self) -> None:
         """Go back to home screen."""
@@ -128,17 +131,23 @@ class SearchTUIScreen(BaseTUIScreen):
         self.notify(f"Searching for: {query_text}", severity="information")
 
         # Update results to show loading
-        results_text = self.query_one("#results-text", Static)
-        results_text.update("🔍 Searching...")
+        results_list = self.query_one("#results-list", ListView)
+        results_list.clear()
+        results_list.mount(ListItem(Label("🔍 Searching...")))
 
         # Run async search
         asyncio.create_task(self._async_search(query_text, query_type))
 
     async def _async_search(self, query_text: str, query_type: str) -> None:
         """Async search operation."""
+        results_list = self.query_one("#results-list", ListView)
+
         try:
             import cognee
             from cognee.modules.search.types import SearchType
+            from cognee.infrastructure.databases.exceptions.exceptions import (
+                EntityNotFoundError,
+            )
 
             # Convert string to SearchType enum
             search_type = SearchType[query_type]
@@ -150,29 +159,43 @@ class SearchTUIScreen(BaseTUIScreen):
                 top_k=10,
             )
 
-            # Update results display
-            results_text = self.query_one("#results-text", Static)
+            # Clear loading message
+            results_list.clear()
 
             if not results:
-                results_text.update("No results found for your query.")
+                results_list.mount(
+                    ListItem(Label("No results found for your query."))
+                )
             else:
                 # Format results based on type
                 if query_type in ["GRAPH_COMPLETION", "RAG_COMPLETION"]:
-                    formatted = "\n\n".join([f"📝 {result}" for result in results])
+                    for result in results:
+                        results_list.mount(ListItem(Label(f"📝 {result}")))
                 elif query_type == "CHUNKS":
-                    formatted = "\n\n".join(
-                        [f"📄 Chunk {i + 1}:\n{result}" for i, result in enumerate(results)]
-                    )
+                    for i, result in enumerate(results):
+                        results_list.mount(
+                            ListItem(Label(f"📄 Chunk {i + 1}:\n{result}"))
+                        )
                 else:
-                    formatted = "\n\n".join([f"• {result}" for result in results])
+                    for result in results:
+                        results_list.mount(ListItem(Label(f"• {result}")))
+                
+                self.notify(f"✓ Found {len(results)} result(s)", severity="information")
 
-                results_text.update(formatted)
-
-            self.notify(f"✓ Found {len(results)} result(s)", severity="information")
+        except EntityNotFoundError:
+            results_list.clear()
+            results_list.mount(
+                ListItem(
+                    Label(
+                        "No data found. Please run 'cognee cognify' to process your data first."
+                    )
+                )
+            )
+            self.notify("Knowledge graph is empty", severity="warning")
 
         except Exception as e:
-            results_text = self.query_one("#results-text", Static)
-            results_text.update(f"❌ Error: {str(e)}")
+            results_list.clear()
+            results_list.mount(ListItem(Label(f"❌ Error: {str(e)}")))
             self.notify(f"Search failed: {str(e)}", severity="error")
 
         finally:
