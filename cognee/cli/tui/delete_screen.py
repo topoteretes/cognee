@@ -129,14 +129,16 @@ class DeleteTUIScreen(BaseTUIScreen):
             if dataset_name:
                 if user_id is None:
                     user = await get_default_user()
-                    user_id = user.id
-                await delete_dataset_by_name(dataset_name, user_id)
+                    resolved_user_id = user.id
+                else:
+                    resolved_user_id = UUID(user_id)
+                await delete_dataset_by_name(dataset_name, resolved_user_id)
             else:
-                await delete_data_by_user(UUID(user_id))
+                await delete_data_by_user(resolved_user_id)
+            status.update(f"✓ Successfully deleted dataset '{dataset_name}'.")
         except Exception as e:
             status.update(f"✗ Error: {str(e)}")
         finally:
-            status.update(f"✓ Successfully deleted dataset '{dataset_name}'.")
             self.is_processing = False
             self.clear_input()
 
@@ -161,10 +163,12 @@ class DeleteTUIScreen(BaseTUIScreen):
         try:
             status.update("🔍 Deleting all data...")
             if user_id is None:
-                user = await get_default_user()
-                user_id = user.id
-            await delete_data_by_user(user_id)
-            status.update(f"✓ Successfully deleted all data by user ")
+                user = await get_default_user() 
+                resolved_user_id = user.id
+            else:
+                resolved_user_id = UUID(user_id)
+            await delete_data_by_user(resolved_user_id)
+            status.update(f"✓ Successfully deleted all data by user {resolved_user_id}")
 
             # Clear inputs
             dataset_input = self.query_one("#dataset-input", Input)

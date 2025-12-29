@@ -163,6 +163,8 @@ class HomeScreen(BaseTUIScreen):
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         selected_index = event.index
+        self.current_index = selected_index
+        self._apply_highlight()
         if selected_index == 0:  # add
             self.app.push_screen(AddTUIScreen())
         elif selected_index == 1:  # search

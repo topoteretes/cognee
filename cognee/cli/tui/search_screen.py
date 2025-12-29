@@ -71,7 +71,7 @@ class SearchTUIScreen(BaseTUIScreen):
                         ("RAG Completion", "RAG_COMPLETION"),
                         ("Chunks", "CHUNKS"),
                         ("Summaries", "SUMMARIES"),
-                        ("Code", "CODE"),
+                        ("Coding Rules", "CODING_RULES"),
                     ],
                     value="GRAPH_COMPLETION",
                     id="query-type-select",

@@ -19,16 +19,13 @@ async def delete_data_by_user(user_id: UUID):
         user_id: UUID of the user whose data should be deleted
 
     Raises:
-        ValueError: If user is not found
+        EntityNotFoundError: If user is not found
     """
     db_engine = get_relational_engine()
 
     async with db_engine.get_async_session() as session:
         # Verify user exists
-        user = await get_user(user_id)
-        if not user:
-            raise ValueError(f"User with ID {user_id} not found")
-
+        await get_user(user_id)
         # Get all datasets owned by this user
         datasets_query = select(Dataset.id).where(Dataset.owner_id == user_id)
         user_datasets_ids = (await session.execute(datasets_query)).scalars().all()

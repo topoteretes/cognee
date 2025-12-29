@@ -4,8 +4,6 @@ from cognee.cli.config import DEFAULT_DOCS_URL
 import cognee.cli.echo as fmt
 from cognee.cli.exceptions import CliCommandException
 from cognee.cli.tui.home_screen import HomeScreen
-from textual.app import App
-from cognee.shared.logging_utils import setup_logging
 
 
 class TuiCommand(SupportsCliCommand):
@@ -27,7 +25,8 @@ class TuiCommand(SupportsCliCommand):
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
-
+            from textual.app import App
+            from cognee.shared.logging_utils import setup_logging
             class CogneeTUI(App):
                 """Main TUI application for cognee."""
 
