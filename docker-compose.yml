@@ -1,6 +1,7 @@
 services:
   cognee:
     container_name: cognee
+    restart: always
     networks:
       - cognee-network
     build:
@@ -14,6 +15,7 @@ services:
       - HOST=0.0.0.0
       - ENVIRONMENT=local
       - LOG_LEVEL=INFO
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-*}
     extra_hosts:
       # Allows the container to reach your local machine using "host.docker.internal" instead of "localhost"
       - "host.docker.internal:host-gateway"
@@ -68,6 +70,9 @@ services:
   # If you want to use Cognee with a UI environment you can integrate the Cognee MCP Server into Cursor / Claude Desktop / Visual Studio Code (through Cline/Roo)
   frontend:
     container_name: frontend
+    restart: always
+    environment:
+      - NEXT_PUBLIC_BACKEND_API_URL=${NEXT_PUBLIC_BACKEND_API_URL:-http://localhost:8000}
     profiles:
         - ui
     build:
@@ -85,6 +90,7 @@ services:
   neo4j:
     image: neo4j:latest
     container_name: neo4j
+    restart: always
     profiles:
       - neo4j
     ports:
@@ -99,6 +105,7 @@ services:
   chromadb:
     image: chromadb/chroma:0.6.3
     container_name: chromadb
+    restart: always
     profiles:
       - chromadb
     environment:
@@ -117,6 +124,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     container_name: postgres
+    restart: always
     profiles:
       - postgres
     environment:
