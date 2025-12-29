@@ -16,7 +16,10 @@ def get_api_auth_backend():
 
     def get_jwt_strategy() -> JWTStrategy[models.UP, models.ID]:
         secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
-        lifetime_seconds = int(os.getenv("JWT_LIFETIME_SECONDS", "3600"))
+        try:
+            lifetime_seconds = int(os.getenv("JWT_LIFETIME_SECONDS", "3600"))
+        except ValueError:
+            lifetime_seconds = 3600
         
         return APIJWTStrategy(secret, lifetime_seconds=lifetime_seconds)
 
