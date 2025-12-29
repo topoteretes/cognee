@@ -16,7 +16,6 @@ def get_api_auth_backend():
 
     def get_jwt_strategy() -> JWTStrategy[models.UP, models.ID]:
         secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
-        # 使用环境变量配置过期时间，默认与 client_auth_backend 保持一致（3600秒）
         lifetime_seconds = int(os.getenv("JWT_LIFETIME_SECONDS", "3600"))
         
         return APIJWTStrategy(secret, lifetime_seconds=lifetime_seconds)
