@@ -188,17 +188,16 @@ def get_llm_client(raise_api_key_error: bool = True):
             instructor_mode=llm_config.llm_instructor_mode.lower(),
         )
 
-    
     elif provider == LLMProvider.LLAMA_CPP:
         from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.llama_cpp.adapter import (
             LlamaCppAPIAdapter,
         )
 
         # Get optional local mode parameters (will be None if not set)
-        model_path = getattr(llm_config, 'llama_cpp_model_path', None)
-        n_ctx = getattr(llm_config, 'llama_cpp_n_ctx', 2048)
-        n_gpu_layers = getattr(llm_config, 'llama_cpp_n_gpu_layers', 0)
-        chat_format = getattr(llm_config, 'llama_cpp_chat_format', 'chatml')
+        model_path = getattr(llm_config, "llama_cpp_model_path", None)
+        n_ctx = getattr(llm_config, "llama_cpp_n_ctx", 2048)
+        n_gpu_layers = getattr(llm_config, "llama_cpp_n_gpu_layers", 0)
+        chat_format = getattr(llm_config, "llama_cpp_chat_format", "chatml")
 
         return LlamaCppAPIAdapter(
             model=llm_config.llm_model,
