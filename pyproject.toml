@@ -104,6 +104,7 @@ anthropic = ["anthropic>=0.27"]
 deepeval = ["deepeval>=3.0.1,<4"]
 posthog = ["posthog>=3.5.0,<4"]
 groq = ["groq>=0.8.0,<1.0.0"]
+llama-cpp = ["llama-cpp-python[server]>=0.3.0,<1.0.0"]
 chromadb = [
     "chromadb>=0.6,<0.7",
     "pypika==0.48.9",
