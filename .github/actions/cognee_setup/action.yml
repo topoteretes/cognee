@@ -10,6 +10,10 @@ inputs:
     description: "Additional extra dependencies to install (space-separated)"
     required: false
     default: ""
+  rebuild-lockfile:
+    description: "Whether to rebuild the uv lockfile"
+    required: false
+    default: "false"
 
 runs:
   using: "composite"
@@ -26,6 +30,7 @@ runs:
         enable-cache: true
 
     - name: Rebuild uv lockfile
+      if: ${{ inputs.rebuild-lockfile == 'true' }}
       shell: bash
       run: |
         rm uv.lock

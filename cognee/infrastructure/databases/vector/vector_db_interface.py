@@ -1,7 +1,9 @@
 from typing import List, Protocol, Optional, Any
 from abc import abstractmethod
-from uuid import UUID
 from cognee.infrastructure.engine import DataPoint
+from .models.PayloadSchema import PayloadSchema
+from uuid import UUID
+from cognee.modules.users.models import User
 
 
 class VectorDBInterface(Protocol):
@@ -215,3 +217,36 @@ class VectorDBInterface(Protocol):
             - Any: The schema object suitable for this vector database
         """
         return model_type
+
+    @classmethod
+    async def create_dataset(cls, dataset_id: Optional[UUID], user: Optional[User]) -> dict:
+        """
+        Return a dictionary with connection info for a vector database for the given dataset.
+        Function can auto handle deploying of the actual database if needed, but is not necessary.
+        Only providing connection info is sufficient, this info will be mapped when trying to connect to the provided dataset in the future.
+        Needed for Cognee multi-tenant/multi-user and backend access control support.
+
+        Dictionary returned from this function will be used to create a DatasetDatabase row in the relational database.
+        From which internal mapping of dataset -> database connection info will be done.
+
+        Each dataset needs to map to a unique vector database when backend access control is enabled to facilitate a separation of concern for data.
+
+        Args:
+            dataset_id: UUID of the dataset if needed by the database creation logic
+            user: User object if needed by the database creation logic
+        Returns:
+            dict: Connection info for the created vector database instance.
+        """
+        pass
+
+    async def delete_dataset(self, dataset_id: UUID, user: User) -> None:
+        """
+        Delete the vector database for the given dataset.
+        Function should auto handle deleting of the actual database or send a request to the proper service to delete the database.
+        Needed for maintaining a database for Cognee multi-tenant/multi-user and backend access control.
+
+        Args:
+            dataset_id: UUID of the dataset
+            user: User object
+        """
+        pass

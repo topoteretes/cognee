@@ -13,7 +13,7 @@ class Data(Base):
     __tablename__ = "data"
 
     id = Column(UUID, primary_key=True, default=uuid4)
-
+    label = Column(String, nullable=True)
     name = Column(String)
     extension = Column(String)
     mime_type = Column(String)
@@ -36,6 +36,7 @@ class Data(Base):
     data_size = Column(Integer, nullable=True)  # File size in bytes
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), onupdate=lambda: datetime.now(timezone.utc))
+    last_accessed = Column(DateTime(timezone=True), nullable=True)
 
     datasets = relationship(
         "Dataset",
@@ -49,6 +50,7 @@ class Data(Base):
         return {
             "id": str(self.id),
             "name": self.name,
+            "label": self.label,
             "extension": self.extension,
             "mimeType": self.mime_type,
             "rawDataLocation": self.raw_data_location,

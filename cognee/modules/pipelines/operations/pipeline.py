@@ -20,6 +20,10 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 from cognee.modules.pipelines.layers.check_pipeline_run_qualification import (
     check_pipeline_run_qualification,
 )
+from cognee.modules.pipelines.models.PipelineRunInfo import (
+    PipelineRunStarted,
+)
+from typing import Any
 
 logger = get_logger("cognee.pipeline")
 
@@ -32,6 +36,7 @@ async def run_pipeline(
     datasets: Optional[Union[str, list[str], list[UUID]]] = None,
     user: Optional[User] = None,
     pipeline_name: str = "custom_pipeline",
+    use_pipeline_cache: bool = False,
     vector_db_config: Optional[dict] = None,
     graph_db_config: Optional[dict] = None,
     incremental_loading: bool = False,
@@ -50,8 +55,9 @@ async def run_pipeline(
             tasks=tasks,
             data=data,
             pipeline_name=pipeline_name,
+            context={"dataset": dataset},
+            use_pipeline_cache=use_pipeline_cache,
             incremental_loading=incremental_loading,
-            context=context,
             data_per_batch=data_per_batch,
         ):
             yield run_info
@@ -63,6 +69,7 @@ async def run_pipeline_per_dataset(
     tasks: list[Task],
     data: Optional[list[Data]] = None,
     pipeline_name: str = "custom_pipeline",
+    use_pipeline_cache=False,
     incremental_loading=False,
     context: Optional[Dict] = None,
     data_per_batch: int = 20,
@@ -77,11 +84,28 @@ async def run_pipeline_per_dataset(
     if process_pipeline_status:
         # If pipeline was already processed or is currently being processed
         # return status information to async generator and finish execution
-        yield process_pipeline_status
-        return
+        if use_pipeline_cache:
+            # If pipeline caching is enabled we do not proceed with re-processing
+            yield process_pipeline_status
+            return
+        else:
+            # If pipeline caching is disabled we always return pipeline started information and proceed with re-processing
+            yield PipelineRunStarted(
+                pipeline_run_id=process_pipeline_status.pipeline_run_id,
+                dataset_id=dataset.id,
+                dataset_name=dataset.name,
+                payload=data,
+            )
 
     pipeline_run = run_tasks(
-        tasks, dataset.id, data, user, pipeline_name, context, incremental_loading, data_per_batch
+        tasks,
+        dataset.id,
+        data,
+        user,
+        pipeline_name,
+        context,
+        incremental_loading,
+        data_per_batch,
     )
 
     async for pipeline_run_info in pipeline_run:

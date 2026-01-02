@@ -2002,3 +2002,134 @@ class KuzuAdapter(GraphDBInterface):
         time_ids_list = [item[0] for item in time_nodes]
 
         return ", ".join(f"'{uid}'" for uid in time_ids_list)
+
+    async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
+        """
+        Retrieve a batch of triplets (start_node, relationship, end_node) from the graph.
+
+        Parameters:
+        -----------
+            - offset (int): Number of triplets to skip before returning results.
+            - limit (int): Maximum number of triplets to return.
+
+        Returns:
+        --------
+            - list[dict[str, Any]]: A list of triplets, where each triplet is a dictionary
+              with keys: 'start_node', 'relationship_properties', 'end_node'.
+
+        Raises:
+        -------
+            - ValueError: If offset or limit are negative.
+            - Exception: Re-raises any exceptions from query execution.
+        """
+        if offset < 0:
+            raise ValueError(f"Offset must be non-negative, got {offset}")
+        if limit < 0:
+            raise ValueError(f"Limit must be non-negative, got {limit}")
+
+        query = """
+        MATCH (start_node:Node)-[relationship:EDGE]->(end_node:Node)
+        RETURN {
+            start_node: {
+                id: start_node.id,
+                name: start_node.name,
+                type: start_node.type,
+                properties: start_node.properties
+            },
+            relationship_properties: {
+                relationship_name: relationship.relationship_name,
+                properties: relationship.properties
+            },
+            end_node: {
+                id: end_node.id,
+                name: end_node.name,
+                type: end_node.type,
+                properties: end_node.properties
+            }
+        } AS triplet
+        SKIP $offset LIMIT $limit
+        """
+
+        try:
+            results = await self.query(query, {"offset": offset, "limit": limit})
+        except Exception as e:
+            logger.error(f"Failed to execute triplet query: {str(e)}")
+            logger.error(f"Query: {query}")
+            logger.error(f"Parameters: offset={offset}, limit={limit}")
+            raise
+
+        triplets = []
+        for idx, row in enumerate(results):
+            try:
+                if not row or len(row) == 0:
+                    logger.warning(f"Skipping empty row at index {idx} in triplet batch")
+                    continue
+
+                if not isinstance(row[0], dict):
+                    logger.warning(
+                        f"Skipping invalid row at index {idx}: expected dict, got {type(row[0])}"
+                    )
+                    continue
+
+                triplet = row[0]
+
+                if "start_node" not in triplet:
+                    logger.warning(f"Skipping triplet at index {idx}: missing 'start_node' key")
+                    continue
+
+                if not isinstance(triplet["start_node"], dict):
+                    logger.warning(f"Skipping triplet at index {idx}: 'start_node' is not a dict")
+                    continue
+
+                triplet["start_node"] = self._parse_node_properties(triplet["start_node"].copy())
+
+                if "relationship_properties" not in triplet:
+                    logger.warning(
+                        f"Skipping triplet at index {idx}: missing 'relationship_properties' key"
+                    )
+                    continue
+
+                if not isinstance(triplet["relationship_properties"], dict):
+                    logger.warning(
+                        f"Skipping triplet at index {idx}: 'relationship_properties' is not a dict"
+                    )
+                    continue
+
+                rel_props = triplet["relationship_properties"].copy()
+                relationship_name = rel_props.get("relationship_name") or ""
+
+                if rel_props.get("properties"):
+                    try:
+                        parsed_props = json.loads(rel_props["properties"])
+                        if isinstance(parsed_props, dict):
+                            rel_props.update(parsed_props)
+                            del rel_props["properties"]
+                        else:
+                            logger.warning(
+                                f"Parsed relationship properties is not a dict for triplet at index {idx}"
+                            )
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.warning(
+                            f"Failed to parse relationship properties JSON for triplet at index {idx}: {e}"
+                        )
+
+                rel_props["relationship_name"] = relationship_name
+                triplet["relationship_properties"] = rel_props
+
+                if "end_node" not in triplet:
+                    logger.warning(f"Skipping triplet at index {idx}: missing 'end_node' key")
+                    continue
+
+                if not isinstance(triplet["end_node"], dict):
+                    logger.warning(f"Skipping triplet at index {idx}: 'end_node' is not a dict")
+                    continue
+
+                triplet["end_node"] = self._parse_node_properties(triplet["end_node"].copy())
+
+                triplets.append(triplet)
+
+            except Exception as e:
+                logger.error(f"Error processing triplet at index {idx}: {e}", exc_info=True)
+                continue
+
+        return triplets

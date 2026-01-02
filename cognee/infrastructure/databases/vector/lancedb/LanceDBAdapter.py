@@ -194,6 +194,8 @@ class LanceDBAdapter(VectorDBInterface):
             for (data_point_index, data_point) in enumerate(data_points)
         ]
 
+        lance_data_points = list({dp.id: dp for dp in lance_data_points}.values())
+
         async with self.VECTOR_DB_LOCK:
             await (
                 collection.merge_insert("id")

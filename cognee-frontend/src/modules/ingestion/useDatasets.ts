@@ -26,7 +26,6 @@ function filterDatasets(datasets: Dataset[], searchValue: string) {
 function useDatasets(useCloud = false, searchValue: string = "") {
   const allDatasets = useRef<Dataset[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   // const statusTimeout = useRef<any>(null);
 
   // const fetchDatasetStatuses = useCallback((datasets: Dataset[]) => {
@@ -116,6 +115,7 @@ function useDatasets(useCloud = false, searchValue: string = "") {
       })
       .catch((error) => {
         console.error('Error fetching datasets:', error);
+        throw error;
       });
   }, [searchValue, useCloud]);
 

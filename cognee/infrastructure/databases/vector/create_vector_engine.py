@@ -1,3 +1,5 @@
+from sqlalchemy import URL
+
 from .supported_databases import supported_databases
 from .embeddings import get_embedding_engine
 from cognee.infrastructure.databases.graph.config import get_graph_context_config
@@ -12,6 +14,7 @@ def create_vector_engine(
     vector_db_name: str,
     vector_db_port: str = "",
     vector_db_key: str = "",
+    vector_dataset_database_handler: str = "",
 ):
     """
     Create a vector database engine based on the specified provider.
@@ -65,8 +68,13 @@ def create_vector_engine(
         if not (db_host and db_port and db_name and db_username and db_password):
             raise EnvironmentError("Missing requred pgvector credentials!")
 
-        connection_string: str = (
-            f"postgresql+asyncpg://{db_username}:{db_password}@{db_host}:{db_port}/{db_name}"
+        connection_string = URL.create(
+            "postgresql+asyncpg",
+            username=db_username,
+            password=db_password,
+            host=db_host,
+            port=int(db_port),
+            database=db_name,
         )
 
         try:

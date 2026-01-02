@@ -8,7 +8,7 @@ from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
 from contextlib import asynccontextmanager
-from typing import Optional, Any, List, Dict, Type, Tuple
+from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
@@ -1524,3 +1524,25 @@ class Neo4jAdapter(GraphDBInterface):
         time_ids_list = [item["id"] for item in time_nodes if "id" in item]
 
         return ", ".join(f"'{uid}'" for uid in time_ids_list)
+
+    async def get_triplets_batch(self, offset: int, limit: int) -> list[dict[str, Any]]:
+        """
+        Retrieve a batch of triplets (start_node, relationship, end_node) from the graph.
+
+        Parameters:
+        -----------
+            - offset (int): Number of triplets to skip before returning results.
+            - limit (int): Maximum number of triplets to return.
+
+        Returns:
+        --------
+            - list[dict[str, Any]]: A list of triplets.
+        """
+        query = f"""
+        MATCH (start_node:`{BASE_LABEL}`)-[relationship]->(end_node:`{BASE_LABEL}`)
+        RETURN start_node, properties(relationship) AS relationship_properties, end_node
+        SKIP $offset LIMIT $limit
+        """
+        results = await self.query(query, {"offset": offset, "limit": limit})
+
+        return results
