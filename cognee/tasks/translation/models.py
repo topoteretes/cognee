@@ -37,7 +37,7 @@ class TranslatedContent(DataPoint):
     translation_timestamp: datetime = None
     translated_from: Optional[DocumentChunk] = None
 
-    metadata: dict = {"index_fields": ["source_language", "original_chunk_id", "translated_text"]}
+    metadata: dict = {"index_fields": ["source_language", "translated_text"]}
 
     def __init__(self, **data):
         if data.get("translation_timestamp") is None:
@@ -69,4 +69,4 @@ class LanguageMetadata(DataPoint):
     character_count: int
     language_name: Optional[str] = None
 
-    metadata: dict = {"index_fields": ["detected_language", "content_id"]}
+    metadata: dict = {"index_fields": ["detected_language"]}
