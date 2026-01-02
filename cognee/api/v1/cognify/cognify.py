@@ -335,25 +335,27 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             )
         )
 
-    default_tasks.extend([
-        Task(
-            extract_graph_from_data,
-            graph_model=graph_model,
-            config=config,
-            custom_prompt=custom_prompt,
-            task_config={"batch_size": chunks_per_batch},
-            **kwargs,
-        ),  # Generate knowledge graphs from the document chunks.
-        Task(
-            summarize_text,
-            task_config={"batch_size": chunks_per_batch},
-        ),
-        Task(
-            add_data_points,
-            embed_triplets=embed_triplets,
-            task_config={"batch_size": chunks_per_batch},
-        ),
-    ])
+    default_tasks.extend(
+        [
+            Task(
+                extract_graph_from_data,
+                graph_model=graph_model,
+                config=config,
+                custom_prompt=custom_prompt,
+                task_config={"batch_size": chunks_per_batch},
+                **kwargs,
+            ),  # Generate knowledge graphs from the document chunks.
+            Task(
+                summarize_text,
+                task_config={"batch_size": chunks_per_batch},
+            ),
+            Task(
+                add_data_points,
+                embed_triplets=embed_triplets,
+                task_config={"batch_size": chunks_per_batch},
+            ),
+        ]
+    )
 
     return default_tasks
 
@@ -413,10 +415,12 @@ async def get_temporal_tasks(
             )
         )
 
-    temporal_tasks.extend([
-        Task(extract_events_and_timestamps, task_config={"batch_size": chunks_per_batch}),
-        Task(extract_knowledge_graph_from_events),
-        Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
-    ])
+    temporal_tasks.extend(
+        [
+            Task(extract_events_and_timestamps, task_config={"batch_size": chunks_per_batch}),
+            Task(extract_knowledge_graph_from_events),
+            Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
+        ]
+    )
 
     return temporal_tasks
