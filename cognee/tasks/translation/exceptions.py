@@ -10,7 +10,9 @@ class TranslationError(Exception):
 class LanguageDetectionError(TranslationError):
     """Exception raised when language detection fails."""
 
-    def __init__(self, message: str = "Failed to detect language", original_error: Exception = None):
+    def __init__(
+        self, message: str = "Failed to detect language", original_error: Exception = None
+    ):
         super().__init__(message, original_error)
 
 
