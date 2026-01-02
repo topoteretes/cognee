@@ -89,8 +89,7 @@ class AzureTranslationProvider(TranslationProvider):
 
             return TranslationResult(
                 translated_text=translation["text"],
-                source_language=source_language
-                or detected_language.get("language", "unknown"),
+                source_language=source_language or detected_language.get("language", "unknown"),
                 target_language=target_language,
                 confidence_score=detected_language.get("score", 0.9),
                 provider=self.provider_name,

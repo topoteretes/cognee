@@ -101,7 +101,5 @@ class OpenAITranslationProvider(TranslationProvider):
         Returns:
             List of TranslationResult objects
         """
-        tasks = [
-            self.translate(text, target_language, source_language) for text in texts
-        ]
+        tasks = [self.translate(text, target_language, source_language) for text in texts]
         return await asyncio.gather(*tasks)

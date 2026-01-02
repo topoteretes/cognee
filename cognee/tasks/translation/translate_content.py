@@ -88,9 +88,7 @@ async def translate_content(
 
         try:
             # Detect language
-            detection = await detect_language_async(
-                chunk.text, target_language, threshold
-            )
+            detection = await detect_language_async(chunk.text, target_language, threshold)
 
             # Create language metadata
             language_metadata = LanguageMetadata(
@@ -117,8 +115,7 @@ async def translate_content(
 
             # Translate the content
             logger.debug(
-                f"Translating chunk {chunk.id} from {detection.language_code} "
-                f"to {target_language}"
+                f"Translating chunk {chunk.id} from {detection.language_code} to {target_language}"
             )
 
             translation_result = await provider.translate(
