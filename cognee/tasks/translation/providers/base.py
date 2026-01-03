@@ -1,3 +1,11 @@
+"""
+Base classes for translation providers.
+
+This module defines the abstract interface that all translation providers must implement.
+Providers handle the actual translation of text using external services like OpenAI,
+Google Translate, or Azure Translator.
+"""
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
