@@ -316,7 +316,7 @@ async def save_interaction(data: str) -> list:
 
 
 @mcp.tool()
-async def search(search_query: str, search_type: str) -> list:
+async def search(search_query: str, search_type: str, top_k: int = 5) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -425,13 +425,13 @@ async def search(search_query: str, search_type: str) -> list:
 
     """
 
-    async def search_task(search_query: str, search_type: str) -> str:
+    async def search_task(search_query: str, search_type: str, top_k: int) -> str:
         """Search the knowledge graph"""
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
         with redirect_stdout(sys.stderr):
             search_results = await cognee_client.search(
-                query_text=search_query, query_type=search_type
+                query_text=search_query, query_type=search_type, top_k=top_k
             )
 
             # Handle different result formats based on API vs direct mode
@@ -465,7 +465,7 @@ async def search(search_query: str, search_type: str) -> list:
                 else:
                     return str(search_results)
 
-    search_results = await search_task(search_query, search_type)
+    search_results = await search_task(search_query, search_type, top_k)
     return [types.TextContent(type="text", text=search_results)]
 
 
