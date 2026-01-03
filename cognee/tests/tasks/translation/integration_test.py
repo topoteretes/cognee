@@ -4,8 +4,9 @@ Integration tests for multilingual content translation feature.
 Tests the full cognify pipeline with translation enabled.
 """
 
-import asyncio
 import os
+
+import pytest
 
 from cognee import add, cognify, prune, search, SearchType
 from cognee.tasks.translation import translate_text
@@ -17,12 +18,10 @@ def has_openai_key():
     return bool(os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY"))
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_quick_translation():
     """Quick smoke test for translation feature"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     await prune.prune_data()
     await prune.prune_system(metadata=True)
 
@@ -39,12 +38,10 @@ async def test_quick_translation():
     assert result is not None
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_translation_basic():
     """Test basic translation functionality with English text"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     await prune.prune_data()
     await prune.prune_system(metadata=True)
 
@@ -67,12 +64,10 @@ async def test_translation_basic():
     assert search_results is not None
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_translation_spanish():
     """Test translation with Spanish text"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     await prune.prune_data()
     await prune.prune_system(metadata=True)
 
@@ -100,12 +95,10 @@ async def test_translation_spanish():
     assert search_results is not None
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_translation_french():
     """Test translation with French text"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     await prune.prune_data()
     await prune.prune_system(metadata=True)
 
@@ -133,12 +126,10 @@ async def test_translation_french():
     assert search_results is not None
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_translation_disabled():
     """Test that cognify works without translation"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     await prune.prune_data()
     await prune.prune_system(metadata=True)
 
@@ -153,12 +144,10 @@ async def test_translation_disabled():
     assert result is not None
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_translation_mixed_languages():
     """Test with multiple documents in different languages"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     await prune.prune_data()
     await prune.prune_system(metadata=True)
 
@@ -186,12 +175,10 @@ async def test_translation_mixed_languages():
     assert search_results is not None
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_direct_translation_function():
     """Test the translate_text convenience function directly"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     result = await translate_text(
         text="Hola, ¿cómo estás? Espero que tengas un buen día.",
         target_language="en",
@@ -204,6 +191,7 @@ async def test_direct_translation_function():
     assert result.provider == "openai"
 
 
+@pytest.mark.asyncio
 async def test_language_detection():
     """Test language detection directly"""
     test_texts = [
@@ -220,36 +208,3 @@ async def test_language_detection():
         # Only check requires_translation for high-confidence detections
         if result.confidence > 0.8:
             assert result.requires_translation == should_translate
-
-
-async def main():
-    """Run all translation integration tests"""
-    await test_quick_translation()
-    print("✓ test_quick_translation passed")
-
-    await test_language_detection()
-    print("✓ test_language_detection passed")
-
-    await test_direct_translation_function()
-    print("✓ test_direct_translation_function passed")
-
-    await test_translation_basic()
-    print("✓ test_translation_basic passed")
-
-    await test_translation_spanish()
-    print("✓ test_translation_spanish passed")
-
-    await test_translation_french()
-    print("✓ test_translation_french passed")
-
-    await test_translation_disabled()
-    print("✓ test_translation_disabled passed")
-
-    await test_translation_mixed_languages()
-    print("✓ test_translation_mixed_languages passed")
-
-    print("\nAll translation integration tests passed!")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

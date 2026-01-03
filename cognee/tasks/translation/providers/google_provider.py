@@ -48,7 +48,8 @@ class GoogleTranslationProvider(TranslationProvider):
         try:
             self._get_client()
             return True
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Google Translate not available: {e}")
             return False
 
     async def translate(
@@ -72,7 +73,7 @@ class GoogleTranslationProvider(TranslationProvider):
             client = self._get_client()
 
             # Run in thread pool since google-cloud-translate is synchronous
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             if source_language:
                 result = await loop.run_in_executor(
@@ -122,7 +123,7 @@ class GoogleTranslationProvider(TranslationProvider):
         """
         try:
             client = self._get_client()
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             if source_language:
                 results = await loop.run_in_executor(

@@ -64,6 +64,13 @@ class TranslationProvider(ABC):
         """
         pass
 
+    @abstractmethod
     def is_available(self) -> bool:
-        """Check if this provider is available (has required credentials)."""
-        return True
+        """Check if this provider is available (has required credentials).
+
+        All providers must implement this method to validate their credentials.
+
+        Returns:
+            True if the provider has valid credentials and is ready to use.
+        """
+        pass

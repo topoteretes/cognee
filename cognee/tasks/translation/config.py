@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal, Optional
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,7 +24,7 @@ class TranslationConfig(BaseSettings):
     # Translation provider settings
     translation_provider: TranslationProviderType = "openai"
     target_language: str = "en"
-    confidence_threshold: float = 0.8
+    confidence_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
 
     # Google Translate settings
     google_translate_api_key: Optional[str] = None
@@ -57,7 +58,7 @@ class TranslationConfig(BaseSettings):
         }
 
 
-@lru_cache
+@lru_cache()
 def get_translation_config() -> TranslationConfig:
     """Get the translation configuration singleton."""
     return TranslationConfig()

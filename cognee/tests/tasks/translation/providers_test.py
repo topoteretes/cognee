@@ -2,8 +2,10 @@
 Unit tests for translation providers
 """
 
-import asyncio
 import os
+
+import pytest
+
 from cognee.tasks.translation.providers import (
     get_translation_provider,
     OpenAITranslationProvider,
@@ -17,12 +19,10 @@ def has_openai_key():
     return bool(os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY"))
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_openai_provider_basic_translation():
     """Test basic translation with OpenAI provider"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     provider = OpenAITranslationProvider()
 
     result = await provider.translate(text="Hola mundo", target_language="en", source_language="es")
@@ -35,12 +35,10 @@ async def test_openai_provider_basic_translation():
     assert result.provider == "openai"
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_openai_provider_auto_detect_source():
     """Test translation with automatic source language detection"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     provider = OpenAITranslationProvider()
 
     result = await provider.translate(
@@ -53,12 +51,10 @@ async def test_openai_provider_auto_detect_source():
     assert result.target_language == "en"
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_openai_provider_long_text():
     """Test translation of longer text"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     provider = OpenAITranslationProvider()
 
     long_text = """
@@ -88,12 +84,10 @@ def test_get_translation_provider_invalid():
         pass
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_openai_batch_translation():
     """Test batch translation with OpenAI provider"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     provider = OpenAITranslationProvider()
 
     texts = ["Hola", "¿Cómo estás?", "Adiós"]
@@ -110,12 +104,10 @@ async def test_openai_batch_translation():
         assert result.target_language == "en"
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_translation_preserves_formatting():
     """Test that translation preserves basic formatting"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     provider = OpenAITranslationProvider()
 
     text_with_newlines = "Primera línea.\nSegunda línea."
@@ -129,12 +121,10 @@ async def test_translation_preserves_formatting():
     assert len(result.translated_text) > 0
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_translation_special_characters():
     """Test translation with special characters"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     provider = OpenAITranslationProvider()
 
     text = "¡Hola! ¿Cómo estás? Está bien."
@@ -145,12 +135,10 @@ async def test_translation_special_characters():
     assert len(result.translated_text) > 0
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_empty_text_translation():
     """Test translation with empty text - should return empty or handle gracefully"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     provider = OpenAITranslationProvider()
 
     # Empty text may either raise an error or return an empty result
@@ -161,41 +149,3 @@ async def test_empty_text_translation():
     except TranslationError:
         # This is also acceptable behavior
         pass
-
-
-async def main():
-    """Run all provider tests"""
-    # Sync tests
-    test_get_translation_provider_factory()
-    print("✓ test_get_translation_provider_factory passed")
-
-    test_get_translation_provider_invalid()
-    print("✓ test_get_translation_provider_invalid passed")
-
-    # Async tests
-    await test_openai_provider_basic_translation()
-    print("✓ test_openai_provider_basic_translation passed")
-
-    await test_openai_provider_auto_detect_source()
-    print("✓ test_openai_provider_auto_detect_source passed")
-
-    await test_openai_provider_long_text()
-    print("✓ test_openai_provider_long_text passed")
-
-    await test_openai_batch_translation()
-    print("✓ test_openai_batch_translation passed")
-
-    await test_translation_preserves_formatting()
-    print("✓ test_translation_preserves_formatting passed")
-
-    await test_translation_special_characters()
-    print("✓ test_translation_special_characters passed")
-
-    await test_empty_text_translation()
-    print("✓ test_empty_text_translation passed")
-
-    print("\nAll provider tests passed!")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

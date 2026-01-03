@@ -2,9 +2,11 @@
 Unit tests for translate_content task
 """
 
-import asyncio
 import os
 from uuid import uuid4
+
+import pytest
+
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
 from cognee.tasks.translation import translate_content
@@ -37,12 +39,10 @@ def create_test_chunk(text: str, chunk_index: int = 0):
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_translate_content_basic():
     """Test basic content translation"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     # Create test chunk with Spanish text
     original_text = "Hola mundo, esta es una prueba."
     chunk = create_test_chunk(original_text)
@@ -61,12 +61,10 @@ async def test_translate_content_basic():
     assert has_translated_content
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_translate_content_preserves_original():
     """Test that original text is preserved"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     original_text = "Bonjour le monde"
     chunk = create_test_chunk(original_text)
 
@@ -86,6 +84,7 @@ async def test_translate_content_preserves_original():
     assert translated_content.translated_text != original_text
 
 
+@pytest.mark.asyncio
 async def test_translate_content_skip_english():
     """Test skipping translation for English text"""
     # This test doesn't require API call since English text is skipped
@@ -110,12 +109,10 @@ async def test_translate_content_skip_english():
     assert not has_translated_content
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_translate_content_multiple_chunks():
     """Test translation of multiple chunks"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     # Use longer texts to ensure reliable language detection
     original_texts = [
         "Hola mundo, esta es una prueba de traducción.",
@@ -136,6 +133,7 @@ async def test_translate_content_multiple_chunks():
     assert translated_count >= 2  # At least 2 chunks should be translated
 
 
+@pytest.mark.asyncio
 async def test_translate_content_empty_list():
     """Test with empty chunk list"""
     result = await translate_content(data_chunks=[], target_language="en")
@@ -143,6 +141,7 @@ async def test_translate_content_empty_list():
     assert result == []
 
 
+@pytest.mark.asyncio
 async def test_translate_content_empty_text():
     """Test with chunk containing empty text"""
     chunk = create_test_chunk("")
@@ -153,12 +152,10 @@ async def test_translate_content_empty_text():
     assert result[0].text == ""
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_translate_content_language_metadata():
     """Test that LanguageMetadata is created correctly"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     # Use a longer, distinctly Spanish text to ensure reliable detection
     chunk = create_test_chunk(
         "La inteligencia artificial está cambiando el mundo de manera significativa"
@@ -180,12 +177,10 @@ async def test_translate_content_language_metadata():
     assert language_metadata.language_confidence > 0.0
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_translate_content_confidence_threshold():
     """Test with custom confidence threshold"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     # Use longer text for more reliable detection
     chunk = create_test_chunk("Hola mundo, esta es una frase más larga para mejor detección")
 
@@ -196,12 +191,10 @@ async def test_translate_content_confidence_threshold():
     assert len(result) == 1
 
 
+@pytest.mark.asyncio
+@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
 async def test_translate_content_no_preserve_original():
     """Test translation without preserving original"""
-    if not has_openai_key():
-        print("  (skipped - no API key)")
-        return
-
     # Use longer text for more reliable detection
     chunk = create_test_chunk("Bonjour le monde, comment allez-vous aujourd'hui")
 
@@ -218,39 +211,3 @@ async def test_translate_content_no_preserve_original():
 
     assert translated_content is not None
     assert translated_content.original_text == ""  # Should be empty
-
-
-async def main():
-    """Run all translate_content tests"""
-    await test_translate_content_basic()
-    print("✓ test_translate_content_basic passed")
-
-    await test_translate_content_preserves_original()
-    print("✓ test_translate_content_preserves_original passed")
-
-    await test_translate_content_skip_english()
-    print("✓ test_translate_content_skip_english passed")
-
-    await test_translate_content_multiple_chunks()
-    print("✓ test_translate_content_multiple_chunks passed")
-
-    await test_translate_content_empty_list()
-    print("✓ test_translate_content_empty_list passed")
-
-    await test_translate_content_empty_text()
-    print("✓ test_translate_content_empty_text passed")
-
-    await test_translate_content_language_metadata()
-    print("✓ test_translate_content_language_metadata passed")
-
-    await test_translate_content_confidence_threshold()
-    print("✓ test_translate_content_confidence_threshold passed")
-
-    await test_translate_content_no_preserve_original()
-    print("✓ test_translate_content_no_preserve_original passed")
-
-    print("\nAll translate_content tests passed!")
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
