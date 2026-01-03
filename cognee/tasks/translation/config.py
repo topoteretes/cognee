@@ -55,6 +55,7 @@ class TranslationConfig(BaseSettings):
             "confidence_threshold": self.confidence_threshold,
             "batch_size": self.batch_size,
             "max_retries": self.max_retries,
+            "timeout_seconds": self.timeout_seconds,
         }
 
 
