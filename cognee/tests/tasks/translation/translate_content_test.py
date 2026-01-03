@@ -13,9 +13,9 @@ from cognee.tasks.translation import translate_content
 from cognee.tasks.translation.models import TranslatedContent, LanguageMetadata
 
 
-def has_openai_key():
-    """Check if OpenAI API key is available"""
-    return bool(os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY"))
+def has_llm_api_key():
+    """Check if LLM API key is available"""
+    return bool(os.environ.get("LLM_API_KEY"))
 
 
 def create_test_chunk(text: str, chunk_index: int = 0):
@@ -40,7 +40,7 @@ def create_test_chunk(text: str, chunk_index: int = 0):
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translate_content_basic():
     """Test basic content translation"""
     # Create test chunk with Spanish text
@@ -48,7 +48,7 @@ async def test_translate_content_basic():
     chunk = create_test_chunk(original_text)
 
     result = await translate_content(
-        data_chunks=[chunk], target_language="en", translation_provider="openai"
+        data_chunks=[chunk], target_language="en", translation_provider="llm"
     )
 
     assert len(result) == 1
@@ -62,7 +62,7 @@ async def test_translate_content_basic():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translate_content_preserves_original():
     """Test that original text is preserved"""
     original_text = "Bonjour le monde"
@@ -110,7 +110,7 @@ async def test_translate_content_skip_english():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translate_content_multiple_chunks():
     """Test translation of multiple chunks"""
     # Use longer texts to ensure reliable language detection
@@ -153,7 +153,7 @@ async def test_translate_content_empty_text():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translate_content_language_metadata():
     """Test that LanguageMetadata is created correctly"""
     # Use a longer, distinctly Spanish text to ensure reliable detection
@@ -178,7 +178,7 @@ async def test_translate_content_language_metadata():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translate_content_confidence_threshold():
     """Test with custom confidence threshold"""
     # Use longer text for more reliable detection
@@ -192,7 +192,7 @@ async def test_translate_content_confidence_threshold():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translate_content_no_preserve_original():
     """Test translation without preserving original"""
     # Use longer text for more reliable detection

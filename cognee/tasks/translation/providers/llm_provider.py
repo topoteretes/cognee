@@ -4,6 +4,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
+from cognee.infrastructure.llm.config import get_llm_config
 from cognee.infrastructure.llm.prompts import read_query_prompt
 from cognee.shared.logging_utils import get_logger
 
@@ -20,17 +21,24 @@ class TranslationOutput(BaseModel):
     translation_notes: Optional[str] = None
 
 
-class OpenAITranslationProvider(TranslationProvider):
+class LLMTranslationProvider(TranslationProvider):
     """
-    Translation provider using OpenAI's LLM for translation.
+    Translation provider using the configured LLM for translation.
 
     This provider leverages the existing LLM infrastructure in Cognee
-    to perform translations using GPT models.
+    to perform translations using any LLM configured via LLM_PROVIDER
+    (OpenAI, Azure, Ollama, Anthropic, etc.).
+
+    The LLM used is determined by the cognee LLM configuration settings:
+    - LLM_PROVIDER: The LLM provider (openai, azure, ollama, etc.)
+    - LLM_MODEL: The model to use
+    - LLM_API_KEY: API key for the provider
     """
 
     @property
     def provider_name(self) -> str:
-        return "openai"
+        """Return 'llm' as the provider name."""
+        return "llm"
 
     async def translate(
         self,
@@ -39,7 +47,7 @@ class OpenAITranslationProvider(TranslationProvider):
         source_language: Optional[str] = None,
     ) -> TranslationResult:
         """
-        Translate text using OpenAI's LLM.
+        Translate text using the configured LLM.
 
         Args:
             text: The text to translate
@@ -92,7 +100,7 @@ class OpenAITranslationProvider(TranslationProvider):
             )
 
         except Exception as e:
-            logger.error(f"OpenAI translation failed: {e}")
+            logger.error(f"LLM translation failed: {e}")
             raise
 
     async def translate_batch(
@@ -103,7 +111,7 @@ class OpenAITranslationProvider(TranslationProvider):
         max_concurrent: int = 5,
     ) -> list[TranslationResult]:
         """
-        Translate multiple texts using OpenAI's LLM.
+        Translate multiple texts using the configured LLM.
 
         Uses a semaphore to limit concurrent requests and avoid API rate limits.
 
@@ -126,7 +134,10 @@ class OpenAITranslationProvider(TranslationProvider):
         return await asyncio.gather(*tasks)
 
     def is_available(self) -> bool:
-        """Check if OpenAI provider is available (has required credentials)."""
-        import os
-
-        return bool(os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY"))
+        """Check if LLM provider is available (has required credentials)."""
+        try:
+            llm_config = get_llm_config()
+            # Check if API key is configured (required for most providers)
+            return bool(llm_config.llm_api_key)
+        except Exception:
+            return False

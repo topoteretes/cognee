@@ -14,7 +14,7 @@ Main Components:
 - LanguageMetadata: DataPoint model for language information
 
 Supported Translation Providers:
-- OpenAI (default): Uses GPT models via existing LLM infrastructure
+- LLM (default): Uses the configured LLM via existing infrastructure
 - Google Translate: Requires google-cloud-translate package
 - Azure Translator: Requires Azure Translator API key
 
@@ -26,7 +26,7 @@ Example Usage:
     translated_chunks = await translate_content(
         chunks,
         target_language="en",
-        translation_provider="openai"
+        translation_provider="llm"
     )
 
     # Translate a single text
@@ -54,7 +54,7 @@ from .providers import (
     TranslationProvider,
     TranslationResult,
     get_translation_provider,
-    OpenAITranslationProvider,
+    LLMTranslationProvider,
     GoogleTranslationProvider,
     AzureTranslationProvider,
 )
@@ -84,7 +84,7 @@ __all__ = [
     "TranslationProvider",
     "TranslationResult",
     "get_translation_provider",
-    "OpenAITranslationProvider",
+    "LLMTranslationProvider",
     "GoogleTranslationProvider",
     "AzureTranslationProvider",
     # Exceptions

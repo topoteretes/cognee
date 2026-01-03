@@ -128,10 +128,10 @@ async def cognify(
                        content that needs translation. Defaults to False.
         target_language: Target language code for translation (e.g., "en", "es", "fr").
                         Only used when auto_translate=True. Defaults to "en" (English).
-        translation_provider: Translation service to use ("openai", "google", "azure").
-                             OpenAI uses the existing LLM infrastructure, Google requires
+        translation_provider: Translation service to use ("llm", "google", "azure").
+                             LLM uses the existing LLM infrastructure, Google requires
                              GOOGLE_TRANSLATE_API_KEY, Azure requires AZURE_TRANSLATOR_KEY.
-                             If not specified, uses TRANSLATION_PROVIDER env var or defaults to "openai".
+                             If not specified, uses TRANSLATION_PROVIDER env var or defaults to "llm".
 
     Returns:
         Union[dict, list[PipelineRunInfo]]:
@@ -202,7 +202,7 @@ async def cognify(
         await cognee.cognify(
             auto_translate=True,
             target_language="en",
-            translation_provider="openai"  # or "google", "azure"
+            translation_provider="llm"  # or "google", "azure"
         )
         ```
 
@@ -215,7 +215,7 @@ async def cognify(
         - LLM_PROVIDER, LLM_MODEL, VECTOR_DB_PROVIDER, GRAPH_DATABASE_PROVIDER
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
-        - TRANSLATION_PROVIDER: Default translation provider ("openai", "google", "azure")
+        - TRANSLATION_PROVIDER: Default translation provider ("llm", "google", "azure")
         - GOOGLE_TRANSLATE_API_KEY: API key for Google Translate
         - AZURE_TRANSLATOR_KEY: API key for Azure Translator
     """
@@ -387,7 +387,7 @@ async def get_temporal_tasks(
         chunks_per_batch (int, optional): Number of chunks to process in a single batch in Cognify
         auto_translate (bool, optional): If True, translate non-English content. Defaults to False.
         target_language (str, optional): Target language for translation. Defaults to "en".
-        translation_provider (str, optional): Translation provider to use ("openai", "google", "azure").
+        translation_provider (str, optional): Translation provider to use ("llm", "google", "azure").
 
     Returns:
         list[Task]: A list of Task objects representing the temporal processing pipeline.

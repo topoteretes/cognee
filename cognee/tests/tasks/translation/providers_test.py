@@ -8,22 +8,22 @@ import pytest
 
 from cognee.tasks.translation.providers import (
     get_translation_provider,
-    OpenAITranslationProvider,
+    LLMTranslationProvider,
     TranslationResult,
 )
 from cognee.tasks.translation.exceptions import TranslationError
 
 
-def has_openai_key():
-    """Check if OpenAI API key is available"""
-    return bool(os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY"))
+def has_llm_api_key():
+    """Check if LLM API key is available"""
+    return bool(os.environ.get("LLM_API_KEY"))
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
-async def test_openai_provider_basic_translation():
-    """Test basic translation with OpenAI provider"""
-    provider = OpenAITranslationProvider()
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
+async def test_llm_provider_basic_translation():
+    """Test basic translation with LLM provider (uses configured LLM)"""
+    provider = LLMTranslationProvider()
 
     result = await provider.translate(text="Hola mundo", target_language="en", source_language="es")
 
@@ -32,14 +32,14 @@ async def test_openai_provider_basic_translation():
     assert len(result.translated_text) > 0
     assert result.source_language == "es"
     assert result.target_language == "en"
-    assert result.provider == "openai"
+    assert result.provider == "llm"
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
-async def test_openai_provider_auto_detect_source():
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
+async def test_llm_provider_auto_detect_source():
     """Test translation with automatic source language detection"""
-    provider = OpenAITranslationProvider()
+    provider = LLMTranslationProvider()
 
     result = await provider.translate(
         text="Bonjour le monde",
@@ -52,10 +52,10 @@ async def test_openai_provider_auto_detect_source():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
-async def test_openai_provider_long_text():
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
+async def test_llm_provider_long_text():
     """Test translation of longer text"""
-    provider = OpenAITranslationProvider()
+    provider = LLMTranslationProvider()
 
     long_text = """
     La inteligencia artificial es una rama de la informática que se centra en 
@@ -71,8 +71,8 @@ async def test_openai_provider_long_text():
 
 def test_get_translation_provider_factory():
     """Test provider factory function"""
-    provider = get_translation_provider("openai")
-    assert isinstance(provider, OpenAITranslationProvider)
+    provider = get_translation_provider("llm")
+    assert isinstance(provider, LLMTranslationProvider)
 
 
 def test_get_translation_provider_invalid():
@@ -85,10 +85,10 @@ def test_get_translation_provider_invalid():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
-async def test_openai_batch_translation():
-    """Test batch translation with OpenAI provider"""
-    provider = OpenAITranslationProvider()
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
+async def test_llm_batch_translation():
+    """Test batch translation with LLM provider"""
+    provider = LLMTranslationProvider()
 
     texts = ["Hola", "¿Cómo estás?", "Adiós"]
 
@@ -105,10 +105,10 @@ async def test_openai_batch_translation():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translation_preserves_formatting():
     """Test that translation preserves basic formatting"""
-    provider = OpenAITranslationProvider()
+    provider = LLMTranslationProvider()
 
     text_with_newlines = "Primera línea.\nSegunda línea."
 
@@ -122,10 +122,10 @@ async def test_translation_preserves_formatting():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translation_special_characters():
     """Test translation with special characters"""
-    provider = OpenAITranslationProvider()
+    provider = LLMTranslationProvider()
 
     text = "¡Hola! ¿Cómo estás? Está bien."
 
@@ -136,10 +136,10 @@ async def test_translation_special_characters():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_empty_text_translation():
     """Test translation with empty text - should return empty or handle gracefully"""
-    provider = OpenAITranslationProvider()
+    provider = LLMTranslationProvider()
 
     # Empty text may either raise an error or return an empty result
     try:

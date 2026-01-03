@@ -13,13 +13,13 @@ from cognee.tasks.translation import translate_text
 from cognee.tasks.translation.detect_language import detect_language_async
 
 
-def has_openai_key():
-    """Check if OpenAI API key is available"""
-    return bool(os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY"))
+def has_llm_api_key():
+    """Check if LLM API key is available"""
+    return bool(os.environ.get("LLM_API_KEY"))
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_quick_translation():
     """Quick smoke test for translation feature"""
     await prune.prune_data()
@@ -32,7 +32,7 @@ async def test_quick_translation():
         datasets=["spanish_test"],
         auto_translate=True,
         target_language="en",
-        translation_provider="openai",
+        translation_provider="llm",
     )
 
     assert result is not None
@@ -40,7 +40,7 @@ async def test_quick_translation():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translation_basic():
     """Test basic translation functionality with English text"""
     await prune.prune_data()
@@ -53,7 +53,7 @@ async def test_translation_basic():
         datasets=["test_english"],
         auto_translate=True,
         target_language="en",
-        translation_provider="openai",
+        translation_provider="llm",
     )
 
     assert result is not None
@@ -66,7 +66,7 @@ async def test_translation_basic():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translation_spanish():
     """Test translation with Spanish text"""
     await prune.prune_data()
@@ -84,7 +84,7 @@ async def test_translation_spanish():
         datasets=["test_spanish"],
         auto_translate=True,
         target_language="en",
-        translation_provider="openai",
+        translation_provider="llm",
     )
 
     assert result is not None
@@ -97,7 +97,7 @@ async def test_translation_spanish():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translation_french():
     """Test translation with French text"""
     await prune.prune_data()
@@ -128,7 +128,7 @@ async def test_translation_french():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translation_disabled():
     """Test that cognify works without translation"""
     await prune.prune_data()
@@ -146,7 +146,7 @@ async def test_translation_disabled():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translation_mixed_languages():
     """Test with multiple documents in different languages"""
     await prune.prune_data()
@@ -177,19 +177,19 @@ async def test_translation_mixed_languages():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not has_openai_key(), reason="No OpenAI API key available")
+@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_direct_translation_function():
     """Test the translate_text convenience function directly"""
     result = await translate_text(
         text="Hola, ¿cómo estás? Espero que tengas un buen día.",
         target_language="en",
-        translation_provider="openai",
+        translation_provider="llm",
     )
 
     assert result.translated_text is not None
     assert result.translated_text != ""
     assert result.target_language == "en"
-    assert result.provider == "openai"
+    assert result.provider == "llm"
 
 
 @pytest.mark.asyncio
