@@ -98,7 +98,11 @@ class AzureTranslationProvider(TranslationProvider):
 
         except Exception as e:
             logger.error(f"Azure translation failed: {e}")
-            raise
+            raise TranslationProviderError(
+                provider=self.provider_name,
+                message=f"Translation failed: {e}",
+                original_error=e,
+            )
 
     async def translate_batch(
         self,
@@ -176,6 +180,10 @@ class AzureTranslationProvider(TranslationProvider):
 
         except Exception as e:
             logger.error(f"Azure batch translation failed: {e}")
-            raise
+            raise TranslationProviderError(
+                provider=self.provider_name,
+                message=f"Batch translation failed: {e}",
+                original_error=e,
+            )
 
         return all_results

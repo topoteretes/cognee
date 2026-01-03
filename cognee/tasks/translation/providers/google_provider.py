@@ -75,17 +75,15 @@ class GoogleTranslationProvider(TranslationProvider):
             # Run in thread pool since google-cloud-translate is synchronous
             loop = asyncio.get_running_loop()
 
+            # Build kwargs for translate call
+            translate_kwargs = {"target_language": target_language}
             if source_language:
-                result = await loop.run_in_executor(
-                    None,
-                    lambda: client.translate(
-                        text, target_language=target_language, source_language=source_language
-                    ),
-                )
-            else:
-                result = await loop.run_in_executor(
-                    None, lambda: client.translate(text, target_language=target_language)
-                )
+                translate_kwargs["source_language"] = source_language
+
+            result = await loop.run_in_executor(
+                None,
+                lambda: client.translate(text, **translate_kwargs),
+            )
 
             detected_language = result.get("detectedSourceLanguage", source_language or "unknown")
 
@@ -93,7 +91,8 @@ class GoogleTranslationProvider(TranslationProvider):
                 translated_text=result["translatedText"],
                 source_language=detected_language,
                 target_language=target_language,
-                confidence_score=0.9,  # Google Translate is generally reliable
+                # Google Translate API does not provide confidence scores
+                confidence_score=None,
                 provider=self.provider_name,
                 raw_response=result,
             )
@@ -125,17 +124,15 @@ class GoogleTranslationProvider(TranslationProvider):
             client = self._get_client()
             loop = asyncio.get_running_loop()
 
+            # Build kwargs for translate call
+            translate_kwargs = {"target_language": target_language}
             if source_language:
-                results = await loop.run_in_executor(
-                    None,
-                    lambda: client.translate(
-                        texts, target_language=target_language, source_language=source_language
-                    ),
-                )
-            else:
-                results = await loop.run_in_executor(
-                    None, lambda: client.translate(texts, target_language=target_language)
-                )
+                translate_kwargs["source_language"] = source_language
+
+            results = await loop.run_in_executor(
+                None,
+                lambda: client.translate(texts, **translate_kwargs),
+            )
 
             translation_results = []
             for result in results:
@@ -147,7 +144,8 @@ class GoogleTranslationProvider(TranslationProvider):
                         translated_text=result["translatedText"],
                         source_language=detected_language,
                         target_language=target_language,
-                        confidence_score=0.9,
+                        # Google Translate API does not provide confidence scores
+                        confidence_score=None,
                         provider=self.provider_name,
                         raw_response=result,
                     )

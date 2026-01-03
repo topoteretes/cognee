@@ -87,8 +87,13 @@ async def translate_content(
 
     # Process chunks
     processed_chunks = []
+    total_chunks = len(data_chunks)
 
-    for chunk in data_chunks:
+    for chunk_index, chunk in enumerate(data_chunks):
+        # Log progress for large batches
+        if chunk_index > 0 and chunk_index % 100 == 0:
+            logger.info(f"Translation progress: {chunk_index}/{total_chunks} chunks processed")
+
         if not hasattr(chunk, "text") or not chunk.text:
             processed_chunks.append(chunk)
             continue

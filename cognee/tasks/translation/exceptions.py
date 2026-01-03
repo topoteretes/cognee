@@ -5,6 +5,8 @@ class TranslationError(Exception):
         self.message = message
         self.original_error = original_error
         super().__init__(self.message)
+        if original_error:
+            self.__cause__ = original_error
 
 
 class LanguageDetectionError(TranslationError):

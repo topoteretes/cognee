@@ -18,7 +18,8 @@ class TranslationResult:
     translated_text: str
     source_language: str
     target_language: str
-    confidence_score: float
+    # Confidence score from the provider, or None if not available (e.g., Google Translate)
+    confidence_score: Optional[float]
     provider: str
     raw_response: Optional[dict] = None
 
