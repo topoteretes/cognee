@@ -6,6 +6,7 @@ from cognee.shared.logging_utils import get_logger
 
 from .base import TranslationProvider, TranslationResult
 from ..config import get_translation_config
+from ..exceptions import TranslationProviderError
 
 logger = get_logger(__name__)
 
@@ -48,9 +49,9 @@ class AzureTranslationProvider(TranslationProvider):
             TranslationResult with translated text and metadata
         """
         if not self.is_available():
-            raise ValueError(
-                "Azure Translator API key not configured. "
-                "Set AZURE_TRANSLATOR_KEY environment variable."
+            raise TranslationProviderError(
+                provider=self.provider_name,
+                message="Azure Translator API key not configured. Set AZURE_TRANSLATOR_KEY environment variable.",
             )
 
         endpoint = f"{self._config.azure_translator_endpoint}/translate"
