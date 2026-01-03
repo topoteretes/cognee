@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 async def translate_content(
     data_chunks: List[DocumentChunk],
-    target_language: str = "en",
+    target_language: str = None,
     translation_provider: TranslationProviderType = None,
     confidence_threshold: float = None,
     skip_if_target_language: bool = True,
@@ -32,7 +32,8 @@ async def translate_content(
     Args:
         data_chunks: List of DocumentChunk objects to process
         target_language: Target language code (default: "en" for English)
-        translation_provider: Translation service to use ("openai", "google", "azure")
+                        If not provided, uses config default
+        translation_provider: Translation service to use ("llm", "google", "azure")
                             If not provided, uses config default
         confidence_threshold: Minimum confidence for language detection (0.0 to 1.0)
                             If not provided, uses config default
@@ -61,7 +62,7 @@ async def translate_content(
         # Translate with specific provider
         translated_chunks = await translate_content(
             chunks,
-            translation_provider="openai",
+            translation_provider="llm",
             confidence_threshold=0.9
         )
         ```
@@ -75,11 +76,12 @@ async def translate_content(
     # Get configuration
     config = get_translation_config()
     provider_name = translation_provider or config.translation_provider
+    target_lang = target_language or config.target_language
     threshold = confidence_threshold or config.confidence_threshold
 
     logger.info(
         f"Starting translation task for {len(data_chunks)} chunks "
-        f"using {provider_name} provider, target language: {target_language}"
+        f"using {provider_name} provider, target language: {target_lang}"
     )
 
     # Get the translation provider
@@ -100,7 +102,7 @@ async def translate_content(
 
         try:
             # Detect language
-            detection = await detect_language_async(chunk.text, target_language, threshold)
+            detection = await detect_language_async(chunk.text, target_lang, threshold)
 
             # Create language metadata
             language_metadata = LanguageMetadata(
@@ -127,12 +129,12 @@ async def translate_content(
 
             # Translate the content
             logger.debug(
-                f"Translating chunk {chunk.id} from {detection.language_code} to {target_language}"
+                f"Translating chunk {chunk.id} from {detection.language_code} to {target_lang}"
             )
 
             translation_result = await provider.translate(
                 text=chunk.text,
-                target_language=target_language,
+                target_language=target_lang,
                 source_language=detection.language_code,
             )
 
@@ -160,7 +162,7 @@ async def translate_content(
 
             logger.debug(
                 f"Successfully translated chunk {chunk.id}: "
-                f"{detection.language_code} -> {target_language}"
+                f"{detection.language_code} -> {target_lang}"
             )
 
         except LanguageDetectionError as e:
@@ -186,7 +188,7 @@ def _add_to_chunk_contains(chunk: DocumentChunk, item) -> None:
 
 async def translate_text(
     text: str,
-    target_language: str = "en",
+    target_language: str = None,
     translation_provider: TranslationProviderType = None,
     source_language: Optional[str] = None,
 ) -> TranslationResult:
@@ -198,8 +200,10 @@ async def translate_text(
 
     Args:
         text: The text to translate
-        target_language: Target language code (default: "en")
+        target_language: Target language code (default: uses config, typically "en")
+                        If not provided, uses config default
         translation_provider: Translation service to use
+                            If not provided, uses config default
         source_language: Source language code (optional, auto-detected if not provided)
 
     Returns:
@@ -219,19 +223,20 @@ async def translate_text(
     """
     config = get_translation_config()
     provider_name = translation_provider or config.translation_provider
+    target_lang = target_language or config.target_language
 
     provider = get_translation_provider(provider_name)
 
     return await provider.translate(
         text=text,
-        target_language=target_language,
+        target_language=target_lang,
         source_language=source_language,
     )
 
 
 async def batch_translate_texts(
     texts: List[str],
-    target_language: str = "en",
+    target_language: str = None,
     translation_provider: TranslationProviderType = None,
     source_language: Optional[str] = None,
 ) -> List[TranslationResult]:
@@ -243,8 +248,10 @@ async def batch_translate_texts(
 
     Args:
         texts: List of texts to translate
-        target_language: Target language code (default: "en")
+        target_language: Target language code (default: uses config, typically "en")
+                        If not provided, uses config default
         translation_provider: Translation service to use
+                            If not provided, uses config default
         source_language: Source language code (optional)
 
     Returns:
@@ -264,11 +271,12 @@ async def batch_translate_texts(
     """
     config = get_translation_config()
     provider_name = translation_provider or config.translation_provider
+    target_lang = target_language or config.target_language
 
     provider = get_translation_provider(provider_name)
 
     return await provider.translate_batch(
         texts=texts,
-        target_language=target_language,
+        target_language=target_lang,
         source_language=source_language,
     )

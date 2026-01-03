@@ -1,12 +1,12 @@
 from .base import TranslationProvider, TranslationResult
-from .openai_provider import OpenAITranslationProvider
+from .llm_provider import LLMTranslationProvider
 from .google_provider import GoogleTranslationProvider
 from .azure_provider import AzureTranslationProvider
 
 __all__ = [
     "TranslationProvider",
     "TranslationResult",
-    "OpenAITranslationProvider",
+    "LLMTranslationProvider",
     "GoogleTranslationProvider",
     "AzureTranslationProvider",
     "get_translation_provider",
@@ -18,7 +18,10 @@ def get_translation_provider(provider_name: str) -> TranslationProvider:
     Factory function to get the appropriate translation provider.
 
     Args:
-        provider_name: Name of the provider ("openai", "google", or "azure")
+        provider_name: Name of the provider:
+            - "llm": Uses the configured LLM (OpenAI, Azure, Ollama, Anthropic, etc.)
+            - "google": Uses Google Cloud Translation API
+            - "azure": Uses Azure Translator API
 
     Returns:
         TranslationProvider instance
@@ -27,7 +30,7 @@ def get_translation_provider(provider_name: str) -> TranslationProvider:
         ValueError: If the provider name is not recognized
     """
     providers = {
-        "openai": OpenAITranslationProvider,
+        "llm": LLMTranslationProvider,
         "google": GoogleTranslationProvider,
         "azure": AzureTranslationProvider,
     }
