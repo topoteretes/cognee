@@ -16,7 +16,7 @@ Unit and integration tests for the multilingual content translation feature.
   - Edge cases (empty text, short text, mixed languages)
 
 - **providers_test.py** - Tests for translation provider implementations
-  - OpenAI provider basic translation
+  - LLM provider basic translation
   - Auto-detection of source language
   - Batch translation
   - Special characters and formatting preservation
@@ -73,6 +73,46 @@ uv run pytest cognee/tests/tasks/translation/ --cov=cognee.tasks.translation --c
 - LLM API key set in environment: `LLM_API_KEY=your_key`
 - Tests will be skipped if no API key is available
 
+**Note:** The translation feature uses the same LLM model configured for other cognee tasks (via `LLM_MODEL` and `LLM_PROVIDER` environment variables). This means any LLM provider supported by cognee (OpenAI, Azure, Anthropic, Ollama, etc.) can be used for translation.
+
+## Usage Example
+
+```python
+import cognee
+from cognee.tasks.translation import translate_text
+
+# Configure translation (optional - defaults to LLM provider)
+cognee.config.set_translation_config(
+    provider="llm",           # Uses configured LLM (default)
+    target_language="en",     # Target language code
+    confidence_threshold=0.7  # Minimum confidence for language detection
+)
+
+# Translate text directly
+result = await translate_text(
+    text="Bonjour le monde",
+    target_language="en"
+)
+print(result.translated_text)  # "Hello world"
+
+# Or use auto-translation in the cognify pipeline
+await cognee.add("Hola, ¿cómo estás?")
+await cognee.cognify(auto_translate=True)
+
+# Search works on translated content
+results = await cognee.search("how are you")
+```
+
+### Alternative Translation Providers
+
+```python
+# Use Google Cloud Translate (requires GOOGLE_TRANSLATE_API_KEY)
+cognee.config.set_translation_provider("google")
+
+# Use Azure Translator (requires AZURE_TRANSLATOR_KEY and AZURE_TRANSLATOR_REGION)
+cognee.config.set_translation_provider("azure")
+```
+
 ## Test Summary
 
 | Test File | Tests | Description |
@@ -101,7 +141,7 @@ uv run pytest cognee/tests/tasks/translation/ --cov=cognee.tasks.translation --c
 
 ### Translation Providers (9 tests)
 - ✅ Provider factory function
-- ✅ OpenAI translation
+- ✅ LLM translation
 - ✅ Batch operations
 - ✅ Auto source language detection
 - ✅ Long text handling
