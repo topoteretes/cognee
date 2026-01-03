@@ -36,6 +36,7 @@ async def test_quick_translation():
     )
 
     assert result is not None
+    assert len(result) > 0
 
 
 @pytest.mark.asyncio
