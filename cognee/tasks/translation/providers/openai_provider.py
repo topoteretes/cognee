@@ -100,19 +100,29 @@ class OpenAITranslationProvider(TranslationProvider):
         texts: list[str],
         target_language: str = "en",
         source_language: Optional[str] = None,
+        max_concurrent: int = 5,
     ) -> list[TranslationResult]:
         """
         Translate multiple texts using OpenAI's LLM.
+
+        Uses a semaphore to limit concurrent requests and avoid API rate limits.
 
         Args:
             texts: List of texts to translate
             target_language: Target language code
             source_language: Source language code (optional)
+            max_concurrent: Maximum concurrent translation requests (default: 5)
 
         Returns:
             List of TranslationResult objects
         """
-        tasks = [self.translate(text, target_language, source_language) for text in texts]
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def limited_translate(text: str) -> TranslationResult:
+            async with semaphore:
+                return await self.translate(text, target_language, source_language)
+
+        tasks = [limited_translate(text) for text in texts]
         return await asyncio.gather(*tasks)
 
     def is_available(self) -> bool:
