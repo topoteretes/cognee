@@ -63,3 +63,8 @@ class TranslationConfig(BaseSettings):
 def get_translation_config() -> TranslationConfig:
     """Get the translation configuration singleton."""
     return TranslationConfig()
+
+
+def clear_translation_config_cache():
+    """Clear the cached config for testing purposes."""
+    get_translation_config.cache_clear()
