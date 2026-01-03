@@ -389,6 +389,13 @@ async def search(search_query: str, search_type: str, top_k: int = 5) -> list:
 
         The search_type is case-insensitive and will be converted to uppercase.
 
+    top_k : int, optional
+        Maximum number of results to return (default: 5).
+        Controls the amount of context retrieved from the knowledge graph.
+        - Lower values (3-5): Faster, more focused results
+        - Higher values (10-20): More comprehensive, but slower and more context-heavy
+        Helps manage response size and context window usage in MCP clients.
+
     Returns
     -------
     list
@@ -426,7 +433,26 @@ async def search(search_query: str, search_type: str, top_k: int = 5) -> list:
     """
 
     async def search_task(search_query: str, search_type: str, top_k: int) -> str:
-        """Search the knowledge graph"""
+        """
+        Internal task to execute knowledge graph search with result formatting.
+
+        Handles the actual search execution and formats results appropriately
+        for MCP clients based on the search type and execution mode (API vs direct).
+
+        Parameters
+        ----------
+        search_query : str
+            The search query in natural language
+        search_type : str
+            Type of search to perform (GRAPH_COMPLETION, CHUNKS, etc.)
+        top_k : int
+            Maximum number of results to return
+
+        Returns
+        -------
+        str
+            Formatted search results as a string, with format depending on search_type
+        """
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
         with redirect_stdout(sys.stderr):
