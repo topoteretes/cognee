@@ -88,7 +88,7 @@ def get_language_name(language_code: str) -> str:
 def detect_language(
     text: str,
     target_language: str = "en",
-    confidence_threshold: float = None,
+    confidence_threshold: Optional[float] = None,
 ) -> LanguageDetectionResult:
     """
     Detect the language of the given text.
@@ -184,7 +184,7 @@ async def detect_language_async(
     """
     import asyncio
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
         None, detect_language, text, target_language, confidence_threshold
     )

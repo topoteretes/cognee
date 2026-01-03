@@ -38,6 +38,7 @@ class UnsupportedLanguageError(TranslationError):
         language: str,
         provider: str = None,
         message: str = None,
+        original_error: Exception = None,
     ):
         self.language = language
         self.provider = provider
@@ -45,11 +46,15 @@ class UnsupportedLanguageError(TranslationError):
             message = f"Language '{language}' is not supported"
             if provider:
                 message += f" by {provider}"
-        super().__init__(message)
+        super().__init__(message, original_error)
 
 
 class TranslationConfigError(TranslationError):
     """Exception raised when translation configuration is invalid."""
 
-    def __init__(self, message: str = "Invalid translation configuration"):
-        super().__init__(message)
+    def __init__(
+        self,
+        message: str = "Invalid translation configuration",
+        original_error: Exception = None,
+    ):
+        super().__init__(message, original_error)
