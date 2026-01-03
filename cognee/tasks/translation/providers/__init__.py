@@ -9,6 +9,7 @@ __all__ = [
     "OpenAITranslationProvider",
     "GoogleTranslationProvider",
     "AzureTranslationProvider",
+    "get_translation_provider",
 ]
 
 

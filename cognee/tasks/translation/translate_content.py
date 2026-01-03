@@ -44,6 +44,13 @@ async def translate_content(
         Chunks that required translation will have TranslatedContent
         objects in their 'contains' list.
 
+    Note:
+        This function mutates the input chunks in-place. Specifically:
+        - chunk.text is replaced with the translated text
+        - chunk.contains is updated with LanguageMetadata and TranslatedContent
+        The original text is preserved in TranslatedContent.original_text
+        if preserve_original=True.
+
     Example:
         ```python
         from cognee.tasks.translation import translate_content

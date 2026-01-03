@@ -1,4 +1,3 @@
-import asyncio
 from typing import Optional
 
 import aiohttp
@@ -142,12 +141,12 @@ class AzureTranslationProvider(TranslationProvider):
         batch_size = min(100, self._config.batch_size)
         all_results = []
 
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            body = [{"text": text} for text in batch]
+        try:
+            async with aiohttp.ClientSession() as session:
+                for i in range(0, len(texts), batch_size):
+                    batch = texts[i : i + batch_size]
+                    body = [{"text": text} for text in batch]
 
-            try:
-                async with aiohttp.ClientSession() as session:
                     async with session.post(
                         endpoint,
                         params=params,
@@ -158,24 +157,24 @@ class AzureTranslationProvider(TranslationProvider):
                         response.raise_for_status()
                         results = await response.json()
 
-                for result in results:
-                    translation = result["translations"][0]
-                    detected_language = result.get("detectedLanguage", {})
+                    for result in results:
+                        translation = result["translations"][0]
+                        detected_language = result.get("detectedLanguage", {})
 
-                    all_results.append(
-                        TranslationResult(
-                            translated_text=translation["text"],
-                            source_language=source_language
-                            or detected_language.get("language", "unknown"),
-                            target_language=target_language,
-                            confidence_score=detected_language.get("score", 0.9),
-                            provider=self.provider_name,
-                            raw_response=result,
+                        all_results.append(
+                            TranslationResult(
+                                translated_text=translation["text"],
+                                source_language=source_language
+                                or detected_language.get("language", "unknown"),
+                                target_language=target_language,
+                                confidence_score=detected_language.get("score", 0.9),
+                                provider=self.provider_name,
+                                raw_response=result,
+                            )
                         )
-                    )
 
-            except Exception as e:
-                logger.error(f"Azure batch translation failed: {e}")
-                raise
+        except Exception as e:
+            logger.error(f"Azure batch translation failed: {e}")
+            raise
 
         return all_results

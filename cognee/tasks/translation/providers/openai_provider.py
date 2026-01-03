@@ -52,6 +52,15 @@ class OpenAITranslationProvider(TranslationProvider):
         try:
             system_prompt = read_query_prompt("translate_content.txt")
 
+            # Validate system prompt was loaded successfully
+            if system_prompt is None:
+                logger.warning("translate_content.txt prompt file not found, using default prompt")
+                system_prompt = (
+                    "You are a professional translator. Translate the given text accurately "
+                    "while preserving the original meaning, tone, and style. "
+                    "Detect the source language if not provided."
+                )
+
             # Build the input with context
             if source_language:
                 input_text = (
@@ -75,6 +84,8 @@ class OpenAITranslationProvider(TranslationProvider):
                 translated_text=result.translated_text,
                 source_language=source_language or result.detected_source_language,
                 target_language=target_language,
+                # TODO: Consider deriving confidence from LLM response metadata
+                # or making configurable via TranslationConfig
                 confidence_score=0.95,  # LLM translations are generally high quality
                 provider=self.provider_name,
                 raw_response={"notes": result.translation_notes},
@@ -103,3 +114,9 @@ class OpenAITranslationProvider(TranslationProvider):
         """
         tasks = [self.translate(text, target_language, source_language) for text in texts]
         return await asyncio.gather(*tasks)
+
+    def is_available(self) -> bool:
+        """Check if OpenAI provider is available (has required credentials)."""
+        import os
+
+        return bool(os.environ.get("LLM_API_KEY") or os.environ.get("OPENAI_API_KEY"))
