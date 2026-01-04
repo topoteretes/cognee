@@ -8,12 +8,14 @@ from fastapi.encoders import jsonable_encoder
 
 from cognee.modules.search.types import SearchType, SearchResult, CombinedSearchResult
 from cognee.api.DTO import InDTO, OutDTO
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
+from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.models import User
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
+from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.exceptions import CogneeValidationError
 
 
 # Note: Datasets sent by name will only map to datasets owned by the request sender
@@ -138,6 +140,17 @@ def get_search_router() -> APIRouter:
             )
 
             return jsonable_encoder(results)
+        except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
+            # Return a clear 422 with actionable guidance instead of leaking a stacktrace
+            status_code = getattr(e, "status_code", 422)
+            return JSONResponse(
+                status_code=status_code,
+                content={
+                    "error": "Search prerequisites not met",
+                    "detail": str(e),
+                    "hint": "Run `await cognee.add(...)` then `await cognee.cognify()` before searching.",
+                },
+            )
         except PermissionDeniedError:
             return []
         except Exception as error:
