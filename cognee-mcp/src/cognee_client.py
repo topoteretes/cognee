@@ -151,7 +151,7 @@ class CogneeClient:
         query_type: str,
         datasets: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
-        top_k: int = 10,
+        top_k: int = 5,
     ) -> Any:
         """
         Search the knowledge graph.
@@ -192,7 +192,9 @@ class CogneeClient:
 
             with redirect_stdout(sys.stderr):
                 results = await self.cognee.search(
-                    query_type=SearchType[query_type.upper()], query_text=query_text
+                    query_type=SearchType[query_type.upper()],
+                    query_text=query_text,
+                    top_k=top_k
                 )
                 return results
 

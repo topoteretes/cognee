@@ -316,7 +316,7 @@ async def save_interaction(data: str) -> list:
 
 
 @mcp.tool()
-async def search(search_query: str, search_type: str) -> list:
+async def search(search_query: str, search_type: str, top_k: int = 5) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -389,6 +389,13 @@ async def search(search_query: str, search_type: str) -> list:
 
         The search_type is case-insensitive and will be converted to uppercase.
 
+    top_k : int, optional
+        Maximum number of results to return (default: 5).
+        Controls the amount of context retrieved from the knowledge graph.
+        - Lower values (3-5): Faster, more focused results
+        - Higher values (10-20): More comprehensive, but slower and more context-heavy
+        Helps manage response size and context window usage in MCP clients.
+
     Returns
     -------
     list
@@ -425,13 +432,32 @@ async def search(search_query: str, search_type: str) -> list:
 
     """
 
-    async def search_task(search_query: str, search_type: str) -> str:
-        """Search the knowledge graph"""
+    async def search_task(search_query: str, search_type: str, top_k: int) -> str:
+        """
+        Internal task to execute knowledge graph search with result formatting.
+
+        Handles the actual search execution and formats results appropriately
+        for MCP clients based on the search type and execution mode (API vs direct).
+
+        Parameters
+        ----------
+        search_query : str
+            The search query in natural language
+        search_type : str
+            Type of search to perform (GRAPH_COMPLETION, CHUNKS, etc.)
+        top_k : int
+            Maximum number of results to return
+
+        Returns
+        -------
+        str
+            Formatted search results as a string, with format depending on search_type
+        """
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
         with redirect_stdout(sys.stderr):
             search_results = await cognee_client.search(
-                query_text=search_query, query_type=search_type
+                query_text=search_query, query_type=search_type, top_k=top_k
             )
 
             # Handle different result formats based on API vs direct mode
@@ -465,7 +491,7 @@ async def search(search_query: str, search_type: str) -> list:
                 else:
                     return str(search_results)
 
-    search_results = await search_task(search_query, search_type)
+    search_results = await search_task(search_query, search_type, top_k)
     return [types.TextContent(type="text", text=search_results)]
 
 

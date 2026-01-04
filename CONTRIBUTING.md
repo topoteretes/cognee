@@ -97,6 +97,21 @@ git checkout -b feature/your-feature-name
 python cognee/cognee/tests/test_library.py
 ```
 
+### Running Simple Example
+
+Change .env.example into .env and provide your OPENAI_API_KEY as LLM_API_KEY
+
+Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
+
+```shell
+python cognee/cognee/examples/python/simple_example.py
+```
+or 
+
+```shell
+uv run python cognee/cognee/examples/python/simple_example.py
+```
+
 ## 4. 📤 Submitting Changes
 
 1. Install ruff on your system
