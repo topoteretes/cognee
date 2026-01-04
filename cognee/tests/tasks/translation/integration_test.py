@@ -18,10 +18,24 @@ def has_llm_api_key():
     return bool(os.environ.get("LLM_API_KEY"))
 
 
+async def reset_engines():
+    """Reset cached engines to avoid event loop issues between tests."""
+    from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
+    from cognee.infrastructure.databases.relational.create_relational_engine import (
+        create_relational_engine,
+    )
+    from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
+
+    create_graph_engine.cache_clear()
+    create_vector_engine.cache_clear()
+    create_relational_engine.cache_clear()
+
+
 @pytest.mark.asyncio
 @pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_quick_translation():
     """Quick smoke test for translation feature"""
+    await reset_engines()
     await prune.prune_data()
     await prune.prune_system(metadata=True)
 
@@ -43,6 +57,7 @@ async def test_quick_translation():
 @pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translation_basic():
     """Test basic translation functionality with English text"""
+    await reset_engines()
     await prune.prune_data()
     await prune.prune_system(metadata=True)
 
@@ -69,6 +84,7 @@ async def test_translation_basic():
 @pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translation_spanish():
     """Test translation with Spanish text"""
+    await reset_engines()
     await prune.prune_data()
     await prune.prune_system(metadata=True)
 
@@ -100,6 +116,7 @@ async def test_translation_spanish():
 @pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translation_french():
     """Test translation with French text"""
+    await reset_engines()
     await prune.prune_data()
     await prune.prune_system(metadata=True)
 
@@ -131,6 +148,7 @@ async def test_translation_french():
 @pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translation_disabled():
     """Test that cognify works without translation"""
+    await reset_engines()
     await prune.prune_data()
     await prune.prune_system(metadata=True)
 
@@ -149,6 +167,7 @@ async def test_translation_disabled():
 @pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
 async def test_translation_mixed_languages():
     """Test with multiple documents in different languages"""
+    await reset_engines()
     await prune.prune_data()
     await prune.prune_system(metadata=True)
 
