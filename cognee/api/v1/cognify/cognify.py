@@ -252,7 +252,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     chunk_size: int = None,
     config: Config = None,
     custom_prompt: Optional[str] = None,
-    chunks_per_batch: int = 100,
+    chunks_per_batch: int = None,
     **kwargs,
 ) -> list[Task]:
     if config is None:
@@ -272,11 +272,13 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
                 "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
             }
 
-    if chunks_per_batch is None:
-        chunks_per_batch = 100
-
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
+
+    if chunks_per_batch is None:
+        chunks_per_batch = (
+            cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 100
+        )
 
     default_tasks = [
         Task(classify_documents),
@@ -308,7 +310,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
 
 
 async def get_temporal_tasks(
-    user: User = None, chunker=TextChunker, chunk_size: int = None, chunks_per_batch: int = 10
+    user: User = None, chunker=TextChunker, chunk_size: int = None, chunks_per_batch: int = None
 ) -> list[Task]:
     """
     Builds and returns a list of temporal processing tasks to be executed in sequence.
@@ -330,7 +332,10 @@ async def get_temporal_tasks(
         list[Task]: A list of Task objects representing the temporal processing pipeline.
     """
     if chunks_per_batch is None:
-        chunks_per_batch = 10
+        from cognee.modules.cognify.config import get_cognify_config
+
+        configured = get_cognify_config().chunks_per_batch
+        chunks_per_batch = configured if configured is not None else 10
 
     temporal_tasks = [
         Task(classify_documents),
