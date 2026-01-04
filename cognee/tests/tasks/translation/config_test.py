@@ -3,6 +3,9 @@ Unit tests for translation configuration
 """
 
 from typing import get_args
+
+from pydantic import ValidationError
+
 from cognee.tasks.translation.config import (
     get_translation_config,
     TranslationConfig,
@@ -63,7 +66,7 @@ def test_confidence_threshold_validation():
         assert 0.0 <= config_invalid_low.confidence_threshold <= 1.0, (
             f"Invalid low value should be clamped, got {config_invalid_low.confidence_threshold}"
         )
-    except Exception:
+    except ValidationError:
         pass  # Expected validation error
 
     try:
@@ -74,7 +77,7 @@ def test_confidence_threshold_validation():
         assert 0.0 <= config_invalid_high.confidence_threshold <= 1.0, (
             f"Invalid high value should be clamped, got {config_invalid_high.confidence_threshold}"
         )
-    except Exception:
+    except ValidationError:
         pass  # Expected validation error
 
 

@@ -124,7 +124,10 @@ class AzureTranslationProvider(TranslationProvider):
             List of TranslationResult objects
         """
         if not self.is_available():
-            raise ValueError("Azure Translator API key not configured.")
+            raise TranslationProviderError(
+                provider=self.provider_name,
+                message="Azure Translator API key not configured. Set AZURE_TRANSLATOR_KEY environment variable.",
+            )
 
         endpoint = f"{self._config.azure_translator_endpoint}/translate"
 
