@@ -115,7 +115,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         """
         try:
             if self.mock:
-                dim = self.dimensions if self.dimensions is not None else 3072 
+                dim = self.dimensions if self.dimensions is not None else 3072
                 response = {"data": [{"embedding": [0.0] * dim} for _ in text]}
                 return [data["embedding"] for data in response["data"]]
             else:
