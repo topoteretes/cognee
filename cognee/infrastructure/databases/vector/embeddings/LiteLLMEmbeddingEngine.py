@@ -117,6 +117,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         api_key=self.api_key,
                         api_base=self.endpoint,
                         api_version=self.api_version,
+                        dimensions=self.dimensions,
                     )
 
                 return [data["embedding"] for data in response.data]
