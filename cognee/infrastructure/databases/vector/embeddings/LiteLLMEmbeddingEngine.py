@@ -28,6 +28,7 @@ from cognee.infrastructure.llm.tokenizer.TikToken import (
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
+litellm.drop_params = True
 logger = get_logger("LiteLLMEmbeddingEngine")
 
 
@@ -111,7 +112,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         """
         try:
             if self.mock:
-                response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}
+                dim = self.dimensions if self.dimensions is not None else 3072 
+                response = {"data": [{"embedding": [0.0] * dim} for _ in text]}
                 return [data["embedding"] for data in response["data"]]
             else:
                 async with embedding_rate_limiter_context_manager():
