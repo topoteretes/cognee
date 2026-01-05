@@ -64,6 +64,10 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         max_completion_tokens: int = 512,
         batch_size: int = 100,
     ):
+        """
+        Initializes the embedding engine with the specified model and provider.
+        Supports dimension configuration for compatible models.
+        """
         self.api_key = api_key
         self.endpoint = endpoint
         self.api_version = api_version
@@ -78,7 +82,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         if isinstance(enable_mocking, bool):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
-        
         if dimensions is not None:
             if not isinstance(dimensions, int) or dimensions <= 0:
                 raise ValueError("dimensions must be a positive integer")
@@ -184,7 +187,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
             - int: The size (dimensionality) of the embedding vectors.
         """
-        return self.dimensions
+        return self.dimensions if self.dimensions is not None else 3072
 
     def get_batch_size(self) -> int:
         """
