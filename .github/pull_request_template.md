@@ -10,18 +10,13 @@ DO NOT use AI-generated descriptions. We want to understand your thought process
 <!--
 * Key requirements to the new feature or modification;
 * Proof that the changes work and meet the requirements;
-* Include instructions on how to verify the changes. Describe how to test it locally;
-* Proof that it's sufficiently tested.
 -->
 
 ## Type of Change
 <!-- Please check the relevant option -->
 - [ ] Bug fix (non-breaking change that fixes an issue)
 - [ ] New feature (non-breaking change that adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to change)
-- [ ] Documentation update
 - [ ] Code refactoring
-- [ ] Performance improvement
 - [ ] Other (please specify):
 
 ## Screenshots
