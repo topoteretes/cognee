@@ -24,8 +24,8 @@ DO NOT use AI-generated descriptions. We want to understand your thought process
 - [ ] Performance improvement
 - [ ] Other (please specify):
 
-## Screenshots/Videos (if applicable)
-<!-- Add screenshots or videos to help explain your changes -->
+## Screenshots
+<!-- ADD SCREENSHOT OF LOCAL TESTS PASSING-->
 
 ## Pre-submission Checklist
 <!-- Please check all boxes that apply before submitting your PR -->
