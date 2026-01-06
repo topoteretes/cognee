@@ -11,4 +11,3 @@ async def delete_data_related_nodes(data_id: UUID, session: AsyncSession):
     nodes = (await session.scalars(select(Node).where(Node.data_id == data_id))).all()
 
     await session.execute(delete(Node).where(Node.id.in_([node.id for node in nodes])))
-

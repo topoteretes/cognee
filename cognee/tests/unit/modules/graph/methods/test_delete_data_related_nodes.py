@@ -41,4 +41,3 @@ async def test_delete_data_related_nodes_handles_empty_list():
 
     session.scalars.assert_awaited_once()
     session.execute.assert_awaited_once()
-
