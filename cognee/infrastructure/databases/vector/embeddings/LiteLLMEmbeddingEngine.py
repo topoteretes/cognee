@@ -30,7 +30,6 @@ from cognee.infrastructure.llm.tokenizer.TikToken import (
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
-litellm.drop_params = True
 logger = get_logger("LiteLLMEmbeddingEngine")
 
 
@@ -50,7 +49,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
     api_version: str
     provider: str
     model: str
-    dimensions: int
+    dimensions: Optional[int]
     mock: bool
 
     MAX_RETRIES = 5

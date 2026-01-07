@@ -1,6 +1,8 @@
-import pytest
 import os
 from unittest.mock import patch
+
+import pytest
+
 from cognee.infrastructure.databases.vector.embeddings.LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
 
 @pytest.mark.asyncio
@@ -46,3 +48,9 @@ async def test_litellm_embedding_invalid_dimensions():
         
     with pytest.raises(ValueError, match="dimensions must be a positive integer"):
         LiteLLMEmbeddingEngine(dimensions=-100)
+    
+    with pytest.raises(ValueError, match="dimensions must be a positive integer"):
+        LiteLLMEmbeddingEngine(dimensions="1024") # type: ignore
+
+    with pytest.raises(ValueError, match="dimensions must be a positive integer"):
+        LiteLLMEmbeddingEngine(dimensions=1024.5) # type: ignore
