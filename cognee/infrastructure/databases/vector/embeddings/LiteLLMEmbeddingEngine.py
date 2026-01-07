@@ -134,7 +134,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         litellm.aembedding(
                             model=self.model,
                             input=text,
-                            api_key=self.api_key if self.api_key and self.api_key.strip() != "" else "EMPTY",
+                            api_key=self.api_key
+                            if self.api_key and self.api_key.strip() != ""
+                            else "EMPTY",
                             api_base=self.endpoint,
                             api_version=self.api_version,
                         ),

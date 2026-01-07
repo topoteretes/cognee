@@ -20,7 +20,7 @@ def get_api_auth_backend():
             lifetime_seconds = int(os.getenv("JWT_LIFETIME_SECONDS", "3600"))
         except ValueError:
             lifetime_seconds = 3600
-        
+
         return APIJWTStrategy(secret, lifetime_seconds=lifetime_seconds)
 
     auth_backend = AuthenticationBackend(
