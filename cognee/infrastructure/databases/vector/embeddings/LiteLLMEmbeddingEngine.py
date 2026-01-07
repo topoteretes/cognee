@@ -30,6 +30,7 @@ from cognee.infrastructure.llm.tokenizer.TikToken import (
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
+litellm.drop_params = True
 logger = get_logger("LiteLLMEmbeddingEngine")
 
 
@@ -70,7 +71,6 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         self.api_version = api_version
         self.provider = provider
         self.model = model
-        self.dimensions = dimensions
         self.max_completion_tokens = max_completion_tokens
         self.tokenizer = self.get_tokenizer()
         self.retry_count = 0
@@ -80,6 +80,11 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         if isinstance(enable_mocking, bool):
             enable_mocking = str(enable_mocking).lower()
         self.mock = enable_mocking in ("true", "1", "yes")
+
+        if dimensions is not None:
+            if not isinstance(dimensions, int) or dimensions <= 0:
+                raise ValueError("dimensions must be a positive integer")
+        self.dimensions = dimensions
 
         # Validate provided custom embedding endpoint early to avoid long hangs later
         if self.endpoint:
@@ -125,18 +130,26 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         """
         try:
             if self.mock:
-                response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}
+                dim = self.dimensions if self.dimensions is not None else 3072
+                response = {"data": [{"embedding": [0.0] * dim} for _ in text]}
                 return [data["embedding"] for data in response["data"]]
             else:
                 async with embedding_rate_limiter_context_manager():
+                    kwargs = {}
+                    if self.dimensions is not None:
+                        kwargs["dimensions"] = self.dimensions
+
                     # Ensure each attempt does not hang indefinitely
                     response = await asyncio.wait_for(
                         litellm.aembedding(
                             model=self.model,
                             input=text,
-                            api_key=self.api_key if self.api_key and self.api_key.strip() != "" else "EMPTY",
+                            api_key=self.api_key
+                            if self.api_key and self.api_key.strip() != ""
+                            else "EMPTY",
                             api_base=self.endpoint,
                             api_version=self.api_version,
+                            **kwargs,
                         ),
                         timeout=30.0,
                     )
@@ -224,7 +237,7 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
             - int: The size (dimensionality) of the embedding vectors.
         """
-        return self.dimensions
+        return self.dimensions if self.dimensions is not None else 3072
 
     def get_batch_size(self) -> int:
         """
