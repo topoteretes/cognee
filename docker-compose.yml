@@ -123,20 +123,24 @@ services:
       - "3002:8000"
 
   postgres:
-    image: pgvector/pgvector:pg17
+    build: ./postgres-age-vector
     container_name: postgres
     restart: always
-    profiles:
-      - postgres
     environment:
       POSTGRES_USER: cognee
       POSTGRES_PASSWORD: cognee
       POSTGRES_DB: cognee_db
-      # - postgres_data:/var/lib/postgresql/data
     ports:
       - 5432:5432
     networks:
       - cognee-network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres-age-vector/init:/docker-entrypoint-initdb.d
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=age"
 
   redis:
     image: redis:7-alpine
