@@ -1,16 +1,16 @@
 > [!IMPORTANT]
 > **Note for contributors:** When branching out, create a new branch from the `dev` branch.
 
-# 🎉 Welcome to **cognee**! 
+# 🎉 Welcome to **cognee**!
 
-We're excited that you're interested in contributing to our project! 
-We want to ensure that every user and contributor feels welcome, included and supported to participate in cognee community. 
+We're excited that you're interested in contributing to our project!
+We want to ensure that every user and contributor feels welcome, included and supported to participate in cognee community.
 This guide will help you get started and ensure your contributions can be efficiently integrated into the project.
 
 ## 🌟 Quick Links
 
 - [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Discord Community](https://discord.gg/bcy8xFAtfd)  
+- [Discord Community](https://discord.gg/bcy8xFAtfd)
 - [Issue Tracker](https://github.com/topoteretes/cognee/issues)
 - [Cognee Docs](https://docs.cognee.ai)
 
@@ -106,7 +106,7 @@ Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virt
 ```shell
 python cognee/cognee/examples/python/simple_example.py
 ```
-or 
+or
 
 ```shell
 uv run python cognee/cognee/examples/python/simple_example.py

@@ -40,7 +40,7 @@ export default function useChat(dataset: Dataset) {
     setTrue: disableSearchRun,
     setFalse: enableSearchRun,
   } = useBoolean(false);
-  
+
   const refreshChat = useCallback(async () => {
     const data = await fetchMessages();
     return setMessages(data);
