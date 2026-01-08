@@ -90,7 +90,7 @@ export default function SearchView() {
     scrollToBottom();
 
     setSearchInputValue("");
-    
+
     // Pass topK to sendMessage
     sendMessage(chatInput, searchType, topK)
       .then(scrollToBottom)

@@ -46,10 +46,10 @@ async def test_textdocument_cleanup_with_sql():
 
     # Step 1: Add and cognify a test document
     dataset_name = "test_cleanup_dataset"
-    test_text = """        
-    Machine learning is a subset of artificial intelligence that enables systems to learn        
-    and improve from experience without being explicitly programmed. Deep learning uses        
-    neural networks with multiple layers to process data.        
+    test_text = """
+    Machine learning is a subset of artificial intelligence that enables systems to learn
+    and improve from experience without being explicitly programmed. Deep learning uses
+    neural networks with multiple layers to process data.
     """
 
     await setup()

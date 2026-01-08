@@ -17,6 +17,6 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
-      
+
       - name: Validate uv lockfile and project metadata
         run: uv lock --check || { echo "'uv lock --check' failed."; echo "Run 'uv lock' and push your changes."; exit 1; }
