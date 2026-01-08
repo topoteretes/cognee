@@ -316,7 +316,7 @@ async def save_interaction(data: str) -> list:
 
 
 @mcp.tool()
-async def search(search_query: str, search_type: str, top_k: int = 5) -> list:
+async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -390,7 +390,7 @@ async def search(search_query: str, search_type: str, top_k: int = 5) -> list:
         The search_type is case-insensitive and will be converted to uppercase.
 
     top_k : int, optional
-        Maximum number of results to return (default: 5).
+        Maximum number of results to return (default: 10).
         Controls the amount of context retrieved from the knowledge graph.
         - Lower values (3-5): Faster, more focused results
         - Higher values (10-20): More comprehensive, but slower and more context-heavy
