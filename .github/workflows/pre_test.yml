@@ -5,7 +5,7 @@ permissions:
   contents: read
 jobs:
   check-uv-lock:
-    name: Validate uv lockfile and project metadata
+    name: Lockfile and Pre-commit Hooks
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
