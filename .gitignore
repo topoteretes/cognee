@@ -147,6 +147,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+mise.toml
 
 # Spyder project settings
 .spyderproject

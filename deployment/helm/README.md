@@ -19,7 +19,7 @@ Clone the Repository Clone this repository to your local machine and navigate t
    helm install cognee ./cognee-chart
    ```
 
-**Uninstall Helm Release**:  
+**Uninstall Helm Release**:
    ```bash
    helm uninstall cognee
    ```
