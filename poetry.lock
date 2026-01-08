@@ -5293,6 +5293,36 @@ semantic-router = ["semantic-router ; python_version >= \"3.9\""]
 utils = ["numpydoc"]
 
 [[package]]
+name = "llama-cpp-python"
+version = "0.3.16"
+description = "Python bindings for the llama.cpp library"
+optional = true
+python-versions = ">=3.8"
+groups = ["main"]
+markers = "extra == \"llama-cpp\""
+files = [
+    {file = "llama_cpp_python-0.3.16.tar.gz", hash = "sha256:34ed0f9bd9431af045bb63d9324ae620ad0536653740e9bb163a2e1fcb973be6"},
+]
+
+[package.dependencies]
+diskcache = ">=5.6.1"
+fastapi = {version = ">=0.100.0", optional = true, markers = "extra == \"server\""}
+jinja2 = ">=2.11.3"
+numpy = ">=1.20.0"
+pydantic-settings = {version = ">=2.0.1", optional = true, markers = "extra == \"server\""}
+PyYAML = {version = ">=5.1", optional = true, markers = "extra == \"server\""}
+sse-starlette = {version = ">=1.6.1", optional = true, markers = "extra == \"server\""}
+starlette-context = {version = ">=0.3.6,<0.4", optional = true, markers = "extra == \"server\""}
+typing-extensions = ">=4.5.0"
+uvicorn = {version = ">=0.22.0", optional = true, markers = "extra == \"server\""}
+
+[package.extras]
+all = ["llama_cpp_python[dev,server,test]"]
+dev = ["black (>=23.3.0)", "httpx (>=0.24.1)", "mkdocs (>=1.4.3)", "mkdocs-material (>=9.1.18)", "mkdocstrings[python] (>=0.22.0)", "pytest (>=7.4.0)", "twine (>=4.0.2)"]
+server = ["PyYAML (>=5.1)", "fastapi (>=0.100.0)", "pydantic-settings (>=2.0.1)", "sse-starlette (>=1.6.1)", "starlette-context (>=0.3.6,<0.4)", "uvicorn (>=0.22.0)"]
+test = ["fastapi (>=0.100.0)", "httpx (>=0.24.1)", "huggingface-hub (>=0.23.0)", "pydantic-settings (>=2.0.1)", "pytest (>=7.4.0)", "scipy (>=1.10)", "sse-starlette (>=1.6.1)", "starlette-context (>=0.3.6,<0.4)"]
+
+[[package]]
 name = "llama-index-core"
 version = "0.12.52.post1"
 description = "Interface between LLMs and your data"
@@ -12339,6 +12369,29 @@ dev = ["duckdb (>=0.6)", "maturin (>=1.4,<2.0)", "mypy", "pandas", "pandas-stubs
 rs = ["sqlglotrs (==0.7.3)"]
 
 [[package]]
+name = "sse-starlette"
+version = "3.1.2"
+description = "SSE plugin for Starlette"
+optional = true
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "extra == \"llama-cpp\""
+files = [
+    {file = "sse_starlette-3.1.2-py3-none-any.whl", hash = "sha256:cd800dd349f4521b317b9391d3796fa97b71748a4da9b9e00aafab32dda375c8"},
+    {file = "sse_starlette-3.1.2.tar.gz", hash = "sha256:55eff034207a83a0eb86de9a68099bd0157838f0b8b999a1b742005c71e33618"},
+]
+
+[package.dependencies]
+anyio = ">=4.7.0"
+starlette = ">=0.49.1"
+
+[package.extras]
+daphne = ["daphne (>=4.2.0)"]
+examples = ["aiosqlite (>=0.21.0)", "fastapi (>=0.115.12)", "sqlalchemy[asyncio] (>=2.0.41)", "uvicorn (>=0.34.0)"]
+granian = ["granian (>=2.3.1)"]
+uvicorn = ["uvicorn (>=0.34.0)"]
+
+[[package]]
 name = "stack-data"
 version = "0.6.3"
 description = "Extract data from python stack frames and tracebacks for informative displays"
@@ -12377,6 +12430,22 @@ typing-extensions = {version = ">=4.10.0", markers = "python_version < \"3.13\""
 
 [package.extras]
 full = ["httpx (>=0.27.0,<0.29.0)", "itsdangerous", "jinja2", "python-multipart (>=0.0.18)", "pyyaml"]
+
+[[package]]
+name = "starlette-context"
+version = "0.3.6"
+description = "Middleware for Starlette that allows you to store and access the context data of a request. Can be used with logging so logs automatically use request headers such as x-request-id or x-correlation-id."
+optional = true
+python-versions = ">=3.8,<4.0"
+groups = ["main"]
+markers = "extra == \"llama-cpp\""
+files = [
+    {file = "starlette_context-0.3.6-py3-none-any.whl", hash = "sha256:b14ce373fbb6895a2182a7104b9f63ba20c8db83444005fb9a844dd77ad9895c"},
+    {file = "starlette_context-0.3.6.tar.gz", hash = "sha256:d361a36ba2d4acca3ab680f917b25e281533d725374752d47607a859041958cb"},
+]
+
+[package.dependencies]
+starlette = "*"
 
 [[package]]
 name = "structlog"
@@ -14428,6 +14497,7 @@ graphiti = ["graphiti-core"]
 groq = ["groq"]
 huggingface = ["transformers"]
 langchain = ["langchain_text_splitters", "langsmith"]
+llama-cpp = ["llama-cpp-python"]
 llama-index = ["llama-index-core"]
 mistral = ["mistral-common"]
 monitoring = ["langfuse", "sentry-sdk"]
@@ -14444,4 +14514,4 @@ scraping = ["APScheduler", "beautifulsoup4", "lxml", "lxml", "playwright", "prot
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.14"
-content-hash = "09f7040236a62a2d610e79e92394bb0c23e13ed41ba4de92c064ab4d5430b84e"
+content-hash = "deb552cfd9e8752ae2513a420ec008d7acda2ddf9a93cde4abb95967451c3d36"
