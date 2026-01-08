@@ -5,7 +5,7 @@ permissions:
   contents: read
 jobs:
   check-uv-lock:
-    name: Validate uv lockfile and project metadata
+    name: Lockfile and Pre-commit Hooks
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
@@ -20,3 +20,6 @@ jobs:
 
       - name: Validate uv lockfile and project metadata
         run: uv lock --check || { echo "'uv lock --check' failed."; echo "Run 'uv lock' and push your changes."; exit 1; }
+
+      - name: Run pre-commit hooks
+        uses: pre-commit/action@v3.0.1

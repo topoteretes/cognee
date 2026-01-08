@@ -62,6 +62,11 @@ Looking for a place to start? Try filtering for [good first issues](https://gith
 
 ## 2. 🛠️ Development Setup
 
+### Required tools
+* [Python](https://www.python.org/downloads/)
+* [uv](https://docs.astral.sh/uv/getting-started/installation/)
+* pre-commit: `uv run pip install pre-commit && pre-commit install`
+
 ### Fork and Clone
 
 1. Fork the [**cognee**](https://github.com/topoteretes/cognee) repository
@@ -93,29 +98,31 @@ git checkout -b feature/your-feature-name
 4. **Commits**: Write clear commit messages
 
 ### Running Tests
+
+Rename `.env.example` into `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
+
 ```shell
-python cognee/cognee/tests/test_library.py
+uv run python cognee/tests/test_library.py
 ```
 
 ### Running Simple Example
 
-Change .env.example into .env and provide your OPENAI_API_KEY as LLM_API_KEY
+Rename `.env.example` into `.env` and provide your OPENAI_API_KEY as LLM_API_KEY
 
 Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
 
 ```shell
-python cognee/cognee/examples/python/simple_example.py
+python examples/python/simple_example.py
 ```
 or
 
 ```shell
-uv run python cognee/cognee/examples/python/simple_example.py
+uv run python examples/python/simple_example.py
 ```
 
 ## 4. 📤 Submitting Changes
 
-1. Install ruff on your system
-2. Run ```ruff format .``` and ``` ruff check ``` and fix the issues
+1. Make sure that `pre-commit` and hooks are installed. See `Required tools` section for more information. Try executing `pre-commit run` if you are not sure.
 3. Push your changes:
 ```shell
 git add .
