@@ -1,7 +1,10 @@
 import os
 import json
 import asyncio
-from typing import List, Any
+from uuid import UUID, uuid4
+from pydantic import BaseModel
+from typing import Dict, List, Optional
+
 from cognee import prune
 from cognee import visualize_graph
 from cognee.low_level import setup, DataPoint
@@ -38,14 +41,19 @@ class Company(DataPoint):
     metadata: dict = {"index_fields": ["name"]}
 
 
-def ingest_files(data: List[Any]):
+class Data(BaseModel):
+    id: Optional[UUID] = uuid4()
+    payload: Dict[str, List]
+
+
+def ingest_files(data: List[Data]):
     people_data_points = {}
     departments_data_points = {}
     companies_data_points = {}
 
     for data_item in data:
-        people = data_item["people"]
-        companies = data_item["companies"]
+        people = data_item.payload["people"]
+        companies = data_item.payload["companies"]
 
         for person in people:
             new_person = Person(name=person["name"])
@@ -95,13 +103,12 @@ async def main():
     people_file_path = os.path.join(os.path.dirname(__file__), "people.json")
     people = json.loads(open(people_file_path, "r").read())
 
-    # Run tasks expects a list of data even if it is just one document
-    data = [{"companies": companies, "people": people}]
+    data = Data(payload={"companies": companies, "people": people})
 
     pipeline = run_tasks(
         [Task(ingest_files), Task(add_data_points)],
         dataset_id=datasets[0].id,
-        data=data,
+        data=[data],
         incremental_loading=False,
     )
 

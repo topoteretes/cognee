@@ -1,8 +1,10 @@
 import asyncio
 
 import cognee
+from cognee.modules.data.methods import get_dataset_data, get_datasets
+from cognee.modules.pipelines.operations import run_pipeline
 from cognee.shared.logging_utils import setup_logging, ERROR
-from cognee.modules.pipelines import Task, run_tasks
+from cognee.modules.pipelines import Task
 from cognee.tasks.temporal_awareness import build_graph_with_temporal_awareness
 from cognee.infrastructure.databases.relational import (
     create_db_and_tables as create_relational_db_and_tables,
@@ -35,10 +37,13 @@ async def main():
         await cognee.add(text)
 
     tasks = [
-        Task(build_graph_with_temporal_awareness, text_list=text_list),
+        Task(build_graph_with_temporal_awareness),
     ]
 
-    pipeline = run_tasks(tasks, user=user)
+    datasets = await get_datasets(user.id)
+    dataset_data = await get_dataset_data(datasets[0].id)  # type: ignore
+
+    pipeline = run_pipeline(tasks, data=dataset_data, datasets=[datasets[0].id], user=user)
 
     async for result in pipeline:
         print(result)

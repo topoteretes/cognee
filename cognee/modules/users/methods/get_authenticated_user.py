@@ -5,7 +5,7 @@ from ..models import User
 from ..get_fastapi_users import get_fastapi_users
 from .get_default_user import get_default_user
 from cognee.shared.logging_utils import get_logger
-from cognee.context_global_variables import backend_access_control_enabled
+
 
 
 logger = get_logger("get_authenticated_user")
