@@ -72,4 +72,3 @@ profile = "black"
 - E501: line too long -> break with parentheses
 - E225: missing whitespace around operator
 - E402: module import not at top of file
-
