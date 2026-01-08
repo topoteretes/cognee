@@ -1,18 +1,9 @@
-from uuid import UUID, uuid4
 from fastapi_users.exceptions import UserAlreadyExists
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.notebooks.models.Notebook import Notebook
-from cognee.modules.notebooks.methods.create_notebook import _create_tutorial_notebook
-from cognee.modules.users.exceptions import TenantNotFoundError
 from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.modules.users.get_user_db import get_user_db_context
 from cognee.modules.users.models.User import UserCreate
-from cognee.modules.users.models.Tenant import Tenant
-
-from sqlalchemy import select
-from typing import Optional
 
 
 async def create_user(
