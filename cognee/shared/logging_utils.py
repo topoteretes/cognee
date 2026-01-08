@@ -285,7 +285,7 @@ def cleanup_old_logs(logs_dir, max_files):
         return False
 
 
-def setup_logging(log_level=None, name=None):
+def setup_logging(log_level=None, name=None, enable_console_logging=True):
     """Sets up the logging configuration with structlog integration.
 
     Args:
@@ -465,7 +465,8 @@ def setup_logging(log_level=None, name=None):
     root_logger = logging.getLogger()
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
-    root_logger.addHandler(stream_handler)
+    if enable_console_logging:
+        root_logger.addHandler(stream_handler)
 
     # Note: root logger needs to be set at NOTSET to allow all messages through and specific stream and file handlers
     # can define their own levels.

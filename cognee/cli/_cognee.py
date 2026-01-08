@@ -92,6 +92,7 @@ def _discover_commands() -> List[Type[SupportsCliCommand]]:
         ("cognee.cli.commands.cognify_command", "CognifyCommand"),
         ("cognee.cli.commands.delete_command", "DeleteCommand"),
         ("cognee.cli.commands.config_command", "ConfigCommand"),
+        ("cognee.cli.commands.tui_command", "TuiCommand"),
     ]
 
     for module_path, class_name in command_modules:
