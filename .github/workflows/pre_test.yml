@@ -22,6 +22,4 @@ jobs:
         run: uv lock --check || { echo "'uv lock --check' failed."; echo "Run 'uv lock' and push your changes."; exit 1; }
 
       - name: Run pre-commit hooks
-        run: |
-          uv run pip install pre-commit
-          pre-commit run
+        uses: pre-commit/action@v3.0.1
