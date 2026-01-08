@@ -29,7 +29,7 @@ DO NOT use AI-generated descriptions. We want to understand your thought process
 
 ## Pre-submission Checklist
 <!-- Please check all boxes that apply before submitting your PR -->
-- [ ] **I have tested my changes thoroughly before submitting this PR**
+- [ ] **I have tested my changes thoroughly before submitting this PR** (See `CONTRIBUTING.md`)
 - [ ] **This PR contains minimal changes necessary to address the issue/feature**
 - [ ] My code follows the project's coding standards and style guidelines
 - [ ] I have added tests that prove my fix is effective or that my feature works

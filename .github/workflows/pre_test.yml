@@ -13,10 +13,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
         with:
-          enable-cache: true
+          python-version: '3.11.x'
 
       - name: Validate uv lockfile and project metadata
         run: uv lock --check || { echo "'uv lock --check' failed."; echo "Run 'uv lock' and push your changes."; exit 1; }
+
+      - name: Run pre-commit hooks
+        run: |
+          uv run pip install pre-commit
+          pre-commit run
