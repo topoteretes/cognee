@@ -32,7 +32,7 @@ dependencies = [
     "litellm>=1.76.0",
     "instructor>=1.9.1,<2.0.0",
     "filetype>=1.2.0,<2.0.0",
-    "aiohttp>=3.11.14,<4.0.0",
+    "aiohttp>=3.13.3,<4.0.0",
     "aiofiles>=23.2.1",
     "rdflib>=7.1.4,<7.2.0",
     "pypdf>=4.1.0,<7.0.0",
@@ -60,8 +60,7 @@ dependencies = [
     "fakeredis[lua]>=2.32.0",
     "diskcache>=5.6.3",
     "aiolimiter>=1.2.1",
-    "urllib3>=2.6.0",
-    "aiohttp>=3.13.3"
+    "urllib3>=2.6.0"
 ]
 
 [project.optional-dependencies]
