@@ -71,7 +71,7 @@ git clone https://github.com/<your-github-username>/cognee.git
 cd cognee
 ```
 In case you are working on Vector and Graph Adapters
-1. Fork the [**cognee**](https://github.com/topoteretes/cognee-community) repository
+1. Fork the [**cognee-community**](https://github.com/topoteretes/cognee-community) repository
 2. Clone your fork:
 ```shell
 git clone https://github.com/<your-github-username>/cognee-community.git
