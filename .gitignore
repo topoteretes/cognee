@@ -148,6 +148,7 @@ ENV/
 env.bak/
 venv.bak/
 mise.toml
+deployment/helm/values-local.yml
 
 # Spyder project settings
 .spyderproject
