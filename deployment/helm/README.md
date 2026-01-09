@@ -1,6 +1,7 @@
 
-# cognee-infra-helm
-General infrastructure setup for Cognee on Kubernetes using a Helm chart.
+# Example helm chart
+Example Helm chart fro Cognee with PostgreSQL and pgvector extension
+It is not ready for production usage
 
 ## Prerequisites
 Before deploying the Helm chart, ensure the following prerequisites are met: 
@@ -13,13 +14,22 @@ Before deploying the Helm chart, ensure the following prerequisites are met: 
 
 Clone the Repository Clone this repository to your local machine and navigate to the directory.
 
-## Deploy Helm Chart:
+## Example deploy Helm Chart:
 
    ```bash
-   helm install cognee ./cognee-chart
+   helm upgrade --install cognee deployment/helm \
+  --namespace cognee --create-namespace \
+  --set cognee.env.LLM_API_KEY="$YOUR_KEY"
    ```
 
 **Uninstall Helm Release**:
    ```bash
    helm uninstall cognee
    ```
+
+## Port forwarding
+To access cognee, run
+```
+kubectl port-forward svc/cognee-service -n cognee 8000
+```
+it will be available at localhost:8000
