@@ -165,6 +165,17 @@ services:
     networks:
       - cognee-network
 
+  age-viewer:
+    image: lorenzobattiston/apache-age-viewer-graph:tagname
+    container_name: age-viewer
+    restart: always
+    depends_on:
+      - postgres
+    networks:
+      - cognee-network
+    ports:
+      - "3001:3000"
+
 
 networks:
   cognee-network:
