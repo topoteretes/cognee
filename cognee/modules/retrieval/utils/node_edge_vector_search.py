@@ -12,11 +12,19 @@ logger = get_logger(level=ERROR)
 class NodeEdgeVectorSearch:
     """Manages vector search and distance retrieval for graph nodes and edges."""
 
-    def __init__(self, edge_collection: str = "EdgeType_relationship_name"):
+    def __init__(self, edge_collection: str = "EdgeType_relationship_name", vector_engine=None):
         self.edge_collection = edge_collection
+        self.vector_engine = vector_engine or self._init_vector_engine()
         self.query_vector: Optional[Any] = None
         self.node_distances: dict[str, list[Any]] = {}
         self.edge_distances: Optional[list[Any]] = None
+
+    def _init_vector_engine(self):
+        try:
+            return get_vector_engine()
+        except Exception as e:
+            logger.error("Failed to initialize vector engine: %s", e)
+            raise RuntimeError("Initialization error") from e
 
     def has_results(self) -> bool:
         """Checks if any collections returned results."""
@@ -42,18 +50,20 @@ class NodeEdgeVectorSearch:
         }
         return list(relevant_node_ids)
 
+    async def _embed_query(self, query: str):
+        """Embeds the query and stores the resulting vector."""
+        query_embeddings = await self.vector_engine.embedding_engine.embed_text([query])
+        self.query_vector = query_embeddings[0]
+
     async def embed_and_retrieve_distances(
         self, query: str, collections: List[str], wide_search_limit: Optional[int]
     ):
         """Embeds query and retrieves vector distances from all collections."""
-        vector_engine = get_vector_engine()
-
-        query_embeddings = await vector_engine.embedding_engine.embed_text([query])
-        self.query_vector = query_embeddings[0]
+        await self._embed_query(query)
 
         start_time = time.time()
         search_tasks = [
-            self._search_single_collection(vector_engine, wide_search_limit, collection)
+            self._search_single_collection(self.vector_engine, wide_search_limit, collection)
             for collection in collections
         ]
         search_results = await asyncio.gather(*search_tasks)

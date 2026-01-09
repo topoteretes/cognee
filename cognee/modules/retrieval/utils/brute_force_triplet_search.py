@@ -3,6 +3,7 @@ from typing import List, Optional, Type
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
@@ -74,7 +75,11 @@ async def _get_top_triplet_importances(
 ) -> List[Edge]:
     """Creates memory fragment (if needed), maps distances, and calculates top triplet importances."""
     if memory_fragment is None:
-        relevant_node_ids = vector_search.extract_relevant_node_ids() if wide_search_limit else None
+        if wide_search_limit is None:
+            relevant_node_ids = None
+        else:
+            relevant_node_ids = vector_search.extract_relevant_node_ids()
+
         memory_fragment = await get_memory_fragment(
             properties_to_project=properties_to_project,
             node_type=node_type,
@@ -157,6 +162,8 @@ async def brute_force_triplet_search(
             wide_search_limit,
             top_k,
         )
+    except CollectionNotFoundError:
+        return []
     except Exception as error:
         logger.error(
             "Error during brute force search for query: %s. Error: %s",
