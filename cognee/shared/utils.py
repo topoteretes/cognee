@@ -80,6 +80,8 @@ def _sanitize_nested_properties(obj: Union[Dict, List, Any], property_names: lis
 
 
 def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_properties: dict = {}):
+    if additional_properties is None:
+        additional_properties = {}
     if os.getenv("TELEMETRY_DISABLED"):
         return
 
