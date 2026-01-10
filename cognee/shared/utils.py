@@ -8,7 +8,7 @@ import http.server
 import socketserver
 from threading import Thread
 import pathlib
-from typing import Union
+from typing import Union, Any, Dict, List
 from uuid import uuid4, uuid5, NAMESPACE_OID, UUID
 
 from cognee.base_config import get_base_config
@@ -59,7 +59,7 @@ def get_anonymous_id():
     return anonymous_id
 
 
-def _sanitize_nested_properties(obj, property_names: list[str]):
+def _sanitize_nested_properties(obj: Union[Dict, List, Any], property_names: list[str]):
     """
     Recursively replaces any property whose key matches one of `property_names`
     (e.g., ['url', 'path']) in a nested dict or list with a uuid5 hash
@@ -109,7 +109,7 @@ def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_proper
         print(f"Error sending telemetry through proxy: {response.status_code}")
 
 
-def embed_logo(p, layout_scale, logo_alpha, position):
+def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):
     """
     Embed a logo into the graph visualization as a watermark.
     """
