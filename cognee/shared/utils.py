@@ -141,7 +141,9 @@ def embed_logo(p, layout_scale, logo_alpha, position):
 def start_visualization_server(
     host: str = "0.0.0.0",
     port: int = 8001,
-    handler_class=http.server.SimpleHTTPRequestHandler,
+    handler_class: type[
+        http.server.SimpleHTTPRequestHandler
+    ] = http.server.SimpleHTTPRequestHandler,
 ):
     """
     Spin up a simple HTTP server in a background thread to serve files.
