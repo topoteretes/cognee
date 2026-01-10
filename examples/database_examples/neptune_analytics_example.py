@@ -63,10 +63,10 @@ async def main():
     traversals.
     """
 
-    sample_text_2 = """Neptune Analytics is an ideal choice for investigatory, exploratory, or data-science workloads 
-    that require fast iteration for data, analytical and algorithmic processing, or vector search on graph data. It 
-    complements Amazon Neptune Database, a popular managed graph database. To perform intensive analysis, you can load 
-    the data from a Neptune Database graph or snapshot into Neptune Analytics. You can also load graph data that's 
+    sample_text_2 = """Neptune Analytics is an ideal choice for investigatory, exploratory, or data-science workloads
+    that require fast iteration for data, analytical and algorithmic processing, or vector search on graph data. It
+    complements Amazon Neptune Database, a popular managed graph database. To perform intensive analysis, you can load
+    the data from a Neptune Database graph or snapshot into Neptune Analytics. You can also load graph data that's
     stored in Amazon S3.
     """
 

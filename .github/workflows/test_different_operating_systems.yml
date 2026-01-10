@@ -10,7 +10,7 @@ on:
         required: false
         type: string
         default: '["3.10.x", "3.12.x", "3.13.x"]'
-      os: 
+      os:
         required: false
         type: string
         default: '["ubuntu-22.04", "macos-15", "windows-latest"]'
