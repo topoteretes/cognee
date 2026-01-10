@@ -59,7 +59,7 @@ def get_anonymous_id():
     return anonymous_id
 
 
-def _sanitize_nested_properties(obj: Union[Dict, List, Any], property_names: list[str]):
+def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
     """
     Recursively replaces any property whose key matches one of `property_names`
     (e.g., ['url', 'path']) in a nested dict or list with a uuid5 hash
