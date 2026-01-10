@@ -46,7 +46,7 @@ function useDatasets(useCloud = false) {
   //     checkDatasetStatuses(datasets);
   //   }, 50000);
   // }, [fetchDatasetStatuses]);
-  
+
   // useEffect(() => {
   //   return () => {
   //     if (statusTimeout.current !== null) {
@@ -95,6 +95,7 @@ function useDatasets(useCloud = false) {
       })
       .catch((error) => {
         console.error('Error fetching datasets:', error);
+        throw error;
       });
   }, [useCloud]);
 
