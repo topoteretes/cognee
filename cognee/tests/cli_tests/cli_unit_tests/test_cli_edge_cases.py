@@ -262,6 +262,7 @@ class TestCognifyCommandEdgeCases:
             ontology_file_path=None,
             chunker=TextChunker,
             run_in_background=False,
+            chunks_per_batch=None,
         )
 
     @patch("cognee.cli.commands.cognify_command.asyncio.run", side_effect=_mock_run)
@@ -295,6 +296,7 @@ class TestCognifyCommandEdgeCases:
             ontology_file_path="/nonexistent/path/ontology.owl",
             chunker=TextChunker,
             run_in_background=False,
+            chunks_per_batch=None,
         )
 
     @patch("cognee.cli.commands.cognify_command.asyncio.run")
