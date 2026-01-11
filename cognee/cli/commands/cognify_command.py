@@ -116,7 +116,7 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                         chunk_size=args.chunk_size,
                         ontology_file_path=args.ontology_file,
                         run_in_background=args.background,
-                        chunks_per_batch=getattr(args, 'chunks_per_batch', None),
+                        chunks_per_batch=getattr(args, "chunks_per_batch", None),
                     )
                     return result
                 except Exception as e:
