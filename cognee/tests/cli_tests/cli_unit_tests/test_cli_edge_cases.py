@@ -373,6 +373,7 @@ class TestCognifyCommandEdgeCases:
             ontology_file_path=None,
             chunker=TextChunker,
             run_in_background=False,
+            chunks_per_batch=None,
         )
 
 
