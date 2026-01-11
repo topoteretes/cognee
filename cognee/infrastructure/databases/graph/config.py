@@ -116,13 +116,13 @@ class GraphConfig(BaseSettings):
         """
         return {
             "graph_database_provider": self.graph_database_provider,
+            "graph_file_path": self.graph_file_path,
             "graph_database_url": self.graph_database_url,
             "graph_database_name": self.graph_database_name,
             "graph_database_username": self.graph_database_username,
             "graph_database_password": self.graph_database_password,
             "graph_database_port": self.graph_database_port,
             "graph_database_key": self.graph_database_key,
-            "graph_file_path": self.graph_file_path,
             "graph_dataset_database_handler": self.graph_dataset_database_handler,
         }
 
@@ -146,10 +146,18 @@ def get_graph_config():
 
 def get_graph_context_config():
     """This function will get the appropriate graph db config based on async context.
-    This allows the use of multiple graph databases for different threads, async tasks and parallelization
+    This allows the use of multiple graph databases for different threads, async tasks and parallelization.
+    Always returns a canonical mapping aligned with create_graph_engine(...) signature
+    so that caching keys are stable across the codebase.
     """
     from cognee.context_global_variables import graph_db_config
+    from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
+    from cognee.infrastructure.databases.utils.canonicalize import (
+        canonicalize_kwargs_for_signature,
+    )
 
-    if graph_db_config.get():
-        return graph_db_config.get()
-    return get_graph_config().to_hashable_dict()
+    context_cfg = graph_db_config.get() or {}
+    base_cfg = get_graph_config().to_dict()
+    return canonicalize_kwargs_for_signature(
+        raw_params=context_cfg, target_func=create_graph_engine, defaults=base_cfg
+    )

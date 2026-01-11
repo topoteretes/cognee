@@ -67,6 +67,22 @@ class VectorConfig(BaseSettings):
             "vector_dataset_database_handler": self.vector_dataset_database_handler,
         }
 
+    def to_hashable_dict(self) -> dict:
+        """
+        Return a canonical, hashable configuration dictionary for vector DB engines.
+        The keys and their order are aligned with create_vector_engine(...) signature to
+        ensure consistent lru_cache keys regardless of how the config was originally set.
+        """
+        # NOTE: Order here mirrors create_vector_engine signature
+        return {
+            "vector_db_provider": self.vector_db_provider,
+            "vector_db_url": self.vector_db_url,
+            "vector_db_name": self.vector_db_name,
+            "vector_db_port": self.vector_db_port,
+            "vector_db_key": self.vector_db_key,
+            "vector_dataset_database_handler": self.vector_dataset_database_handler,
+        }
+
 
 @lru_cache
 def get_vectordb_config():
@@ -87,9 +103,19 @@ def get_vectordb_config():
 
 
 def get_vectordb_context_config():
-    """This function will get the appropriate vector db config based on async context."""
-    from cognee.context_global_variables import vector_db_config
+    """This function will get the appropriate vector db config based on async context.
 
-    if vector_db_config.get():
-        return vector_db_config.get()
-    return get_vectordb_config().to_dict()
+    Always returns a canonical mapping aligned with create_vector_engine(...) signature
+    so that caching keys are stable across the codebase.
+    """
+    from cognee.context_global_variables import vector_db_config
+    from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
+    from cognee.infrastructure.databases.utils.canonicalize import (
+        canonicalize_kwargs_for_signature,
+    )
+
+    context_cfg = vector_db_config.get() or {}
+    base_cfg = get_vectordb_config().to_dict()
+    return canonicalize_kwargs_for_signature(
+        raw_params=context_cfg, target_func=create_vector_engine, defaults=base_cfg
+    )
