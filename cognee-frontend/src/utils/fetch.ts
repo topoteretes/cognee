@@ -57,7 +57,7 @@ export default async function fetch(url: string, options: RequestInit = {}, useC
           new Error("Backend server is not responding. Please check if the server is running.")
         );
       }
-      
+
       if (error.detail === undefined) {
         return Promise.reject(
           new Error("No connection to the server.")
@@ -74,7 +74,7 @@ export default async function fetch(url: string, options: RequestInit = {}, useC
 fetch.checkHealth = async () => {
   const maxRetries = 5;
   const retryDelay = 1000; // 1 second
-  
+
   for (let i = 0; i < maxRetries; i++) {
     try {
       const response = await global.fetch(`${backendApiUrl.replace("/api", "")}/health`);
@@ -90,7 +90,7 @@ fetch.checkHealth = async () => {
       await new Promise(resolve => setTimeout(resolve, retryDelay));
     }
   }
-  
+
   throw new Error("Backend server is not responding after multiple attempts");
 };
 
