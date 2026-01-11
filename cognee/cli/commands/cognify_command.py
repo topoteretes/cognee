@@ -62,6 +62,11 @@ After successful cognify processing, use `cognee search` to query the knowledge 
         parser.add_argument(
             "--verbose", "-v", action="store_true", help="Show detailed progress information"
         )
+        parser.add_argument(
+            "--chunks-per-batch",
+            type=int,
+            help="Number of chunks to process per task batch (try 50 for large single documents).",
+        )
 
     def execute(self, args: argparse.Namespace) -> None:
         try:
@@ -111,6 +116,7 @@ After successful cognify processing, use `cognee search` to query the knowledge 
                         chunk_size=args.chunk_size,
                         ontology_file_path=args.ontology_file,
                         run_in_background=args.background,
+                        chunks_per_batch=getattr(args, "chunks_per_batch", None),
                     )
                     return result
                 except Exception as e:

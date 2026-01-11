@@ -238,6 +238,7 @@ class TestCognifyCommand:
             ontology_file_path=None,
             chunker=TextChunker,
             run_in_background=False,
+            chunks_per_batch=None,
         )
 
     @patch("cognee.cli.commands.cognify_command.asyncio.run")
