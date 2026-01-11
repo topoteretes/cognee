@@ -40,12 +40,18 @@ export default function animate(
 ): void {
   const nodeLabelMap = new Map();
   const edgeLabelMap = new Map();
+  // Enhanced color palette with vibrant, distinguishable colors
   const colorPalette = [
-    new Color("#5C10F4"),
-    new Color("#A550FF"),
-    new Color("#0DFF00"),
-    new Color("#F4F4F4"),
-    new Color("#D8D8D8"),
+    new Color("#5C10F4"), // Deep Purple - Primary concepts
+    new Color("#A550FF"), // Light Purple - Algorithms
+    new Color("#0DFF00"), // Neon Green - Architectures
+    new Color("#00D9FF"), // Cyan - Technologies
+    new Color("#FF6B35"), // Coral - Applications
+    new Color("#F7B801"), // Golden Yellow - Data
+    new Color("#FF1E56"), // Hot Pink - Optimization
+    new Color("#00E5FF"), // Bright Cyan - Additional
+    new Color("#7DFF8C"), // Mint Green - Additional
+    new Color("#FFB347"), // Peach - Additional
   ];
   let lastColorIndex = 0;
   const colorPerType = new Map();
@@ -103,11 +109,12 @@ export default function animate(
   // Graph creation and layout
   const graph = createGraph(nodes, edges, forNode, forEdge);
 
+  // Improved layout parameters for better visualization
   const graphLayout = createForceLayout(graph, {
-    dragCoefficient: 1.0,
-    springLength: 200,
-    springCoefficient: 0.2,
-    gravity: -1000,
+    dragCoefficient: 0.8,     // Reduced for smoother movement
+    springLength: 180,         // Slightly tighter clustering
+    springCoefficient: 0.25,   // Stronger connections
+    gravity: -1200,            // Stronger repulsion for better spread
   });
 
   // Node Mesh
@@ -161,7 +168,8 @@ export default function animate(
   });
 
   const scene = new Scene();
-  scene.background = new Color("#000000");
+  // Darker background for better contrast with vibrant colors
+  scene.background = new Color("#0a0a0f");
   const renderer = new WebGLRenderer({ antialias: true });
 
   renderer.setPixelRatio(window.devicePixelRatio);
@@ -192,10 +200,10 @@ export default function animate(
   controls.enablePan = true;
   controls.enableZoom = true;
   controls.screenSpacePanning = true;
-  controls.minZoom = 1;
-  controls.maxZoom = 4;
+  controls.minZoom = 0.5;      // Allow zooming out more
+  controls.maxZoom = 6;         // Allow closer zoom for detail
   controls.enableDamping = true;
-  controls.dampingFactor = 0.05;
+  controls.dampingFactor = 0.08; // Smoother, more fluid motion
   controls.target.set(0, 0, 0);
 
   controls.update();
@@ -251,8 +259,8 @@ export default function animate(
   });
   // Node picking setup end
 
-  // Setup scene
-  for (let i = 0; i < 500; i++) {
+  // Setup scene - More layout iterations for better initial positioning
+  for (let i = 0; i < 800; i++) {
     graphLayout.step();
   }
 
@@ -360,7 +368,8 @@ export default function animate(
         graph.forEachLinkedNode(
           pickedNode.id,
           (otherNode: GraphNode, edge: GraphLink) => {
-            if (visibleLabels.length > 10) {
+            // Show more labels when zoomed in further
+            if (visibleLabels.length > 15) {
               return;
             }
 
