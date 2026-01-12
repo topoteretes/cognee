@@ -20,6 +20,7 @@ from cognee.modules.data.methods import (
 
 from .save_data_item_to_storage import save_data_item_to_storage
 from .data_item_to_text_file import data_item_to_text_file
+from .data_item import DataItem
 
 
 async def ingest_data(
@@ -78,8 +79,16 @@ async def ingest_data(
         dataset_data_map = {str(data.id): True for data in dataset_data}
 
         for data_item in data:
+            # Support for DataItem (custom label + data wrapper)
+            current_label = None
+            underlying_data = data_item
+
+            if isinstance(data_item, DataItem):
+                underlying_data = data_item.data
+                current_label = data_item.label
+
             # Get file path of data item or create a file if it doesn't exist
-            original_file_path = await save_data_item_to_storage(data_item)
+            original_file_path = await save_data_item_to_storage(underlying_data)
             # Transform file path to be OS usable
             actual_file_path = get_data_file_path(original_file_path)
 
@@ -99,7 +108,7 @@ async def ingest_data(
 
                 # data_id is the hash of original file contents + owner id to avoid duplicate data
 
-                data_id = ingestion.identify(classified_data, user)
+                data_id = await ingestion.identify(classified_data, user)
                 original_file_metadata = classified_data.get_metadata()
 
             # Find metadata from Cognee data storage text file
@@ -139,6 +148,7 @@ async def ingest_data(
                 data_point.external_metadata = ext_metadata
                 data_point.node_set = json.dumps(node_set) if node_set else None
                 data_point.tenant_id = user.tenant_id if user.tenant_id else None
+                data_point.label = current_label
 
                 # Check if data is already in dataset
                 if str(data_point.id) in dataset_data_map:
@@ -169,6 +179,7 @@ async def ingest_data(
                     tenant_id=user.tenant_id if user.tenant_id else None,
                     pipeline_status={},
                     token_count=-1,
+                    label=current_label,
                 )
 
                 new_datapoints.append(data_point)

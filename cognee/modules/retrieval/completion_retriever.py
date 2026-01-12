@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Optional
+from typing import Any, Optional, Type, List
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -8,6 +8,7 @@ from cognee.modules.retrieval.utils.session_cache import (
     save_conversation_history,
     get_conversation_history,
 )
+from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
@@ -65,7 +66,7 @@ class CompletionRetriever(BaseRetriever):
 
             if len(found_chunks) == 0:
                 return ""
-
+            await update_node_access_timestamps(found_chunks)
             # Combine all chunks text returned from vector search (number of chunks is determined by top_k
             chunks_payload = [found_chunk.payload["text"] for found_chunk in found_chunks]
             combined_context = "\n".join(chunks_payload)
@@ -75,8 +76,12 @@ class CompletionRetriever(BaseRetriever):
             raise NoDataError("No data found in the system, please add data first.") from error
 
     async def get_completion(
-        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
-    ) -> str:
+        self,
+        query: str,
+        context: Optional[Any] = None,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
+    ) -> List[Any]:
         """
         Generates an LLM completion using the context.
 
@@ -91,6 +96,7 @@ class CompletionRetriever(BaseRetriever):
               completion; if None, it retrieves the context for the query. (default None)
             - session_id (Optional[str]): Optional session identifier for caching. If None,
               defaults to 'default_session'. (default None)
+            - response_model (Type): The Pydantic model type for structured output. (default str)
 
         Returns:
         --------
@@ -118,6 +124,7 @@ class CompletionRetriever(BaseRetriever):
                     system_prompt_path=self.system_prompt_path,
                     system_prompt=self.system_prompt,
                     conversation_history=conversation_history,
+                    response_model=response_model,
                 ),
             )
         else:
@@ -127,6 +134,7 @@ class CompletionRetriever(BaseRetriever):
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
+                response_model=response_model,
             )
 
         if session_save:
@@ -137,4 +145,4 @@ class CompletionRetriever(BaseRetriever):
                 session_id=session_id,
             )
 
-        return completion
+        return [completion]

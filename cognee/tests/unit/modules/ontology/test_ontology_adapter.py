@@ -489,3 +489,154 @@ def test_get_ontology_resolver_from_env_resolver_functionality():
     assert nodes == []
     assert relationships == []
     assert start_node is None
+
+
+def test_multifile_ontology_loading_success():
+    """Test successful loading of multiple ontology files."""
+    ns1 = Namespace("http://example.org/cars#")
+    ns2 = Namespace("http://example.org/tech#")
+
+    g1 = Graph()
+    g1.add((ns1.Vehicle, RDF.type, OWL.Class))
+    g1.add((ns1.Car, RDF.type, OWL.Class))
+    g1.add((ns1.Car, RDFS.subClassOf, ns1.Vehicle))
+    g1.add((ns1.Audi, RDF.type, ns1.Car))
+    g1.add((ns1.BMW, RDF.type, ns1.Car))
+
+    g2 = Graph()
+    g2.add((ns2.Company, RDF.type, OWL.Class))
+    g2.add((ns2.TechCompany, RDF.type, OWL.Class))
+    g2.add((ns2.TechCompany, RDFS.subClassOf, ns2.Company))
+    g2.add((ns2.Apple, RDF.type, ns2.TechCompany))
+    g2.add((ns2.Google, RDF.type, ns2.TechCompany))
+
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".owl", delete=False) as f1:
+        g1.serialize(f1.name, format="xml")
+        file1_path = f1.name
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".owl", delete=False) as f2:
+        g2.serialize(f2.name, format="xml")
+        file2_path = f2.name
+
+    try:
+        resolver = RDFLibOntologyResolver(ontology_file=[file1_path, file2_path])
+
+        assert resolver.graph is not None
+
+        assert "car" in resolver.lookup["classes"]
+        assert "vehicle" in resolver.lookup["classes"]
+        assert "company" in resolver.lookup["classes"]
+        assert "techcompany" in resolver.lookup["classes"]
+
+        assert "audi" in resolver.lookup["individuals"]
+        assert "bmw" in resolver.lookup["individuals"]
+        assert "apple" in resolver.lookup["individuals"]
+        assert "google" in resolver.lookup["individuals"]
+
+        car_match = resolver.find_closest_match("Audi", "individuals")
+        assert car_match == "audi"
+
+        tech_match = resolver.find_closest_match("Google", "individuals")
+        assert tech_match == "google"
+
+    finally:
+        import os
+
+        os.unlink(file1_path)
+        os.unlink(file2_path)
+
+
+def test_multifile_ontology_with_missing_files():
+    """Test loading multiple ontology files where some don't exist."""
+    ns = Namespace("http://example.org/test#")
+    g = Graph()
+    g.add((ns.Car, RDF.type, OWL.Class))
+    g.add((ns.Audi, RDF.type, ns.Car))
+
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".owl", delete=False) as f:
+        g.serialize(f.name, format="xml")
+        valid_file = f.name
+
+    try:
+        resolver = RDFLibOntologyResolver(
+            ontology_file=["nonexistent_file_1.owl", valid_file, "nonexistent_file_2.owl"]
+        )
+
+        assert resolver.graph is not None
+
+        assert "car" in resolver.lookup["classes"]
+        assert "audi" in resolver.lookup["individuals"]
+
+        match = resolver.find_closest_match("Audi", "individuals")
+        assert match == "audi"
+
+    finally:
+        import os
+
+        os.unlink(valid_file)
+
+
+def test_multifile_ontology_all_files_missing():
+    """Test loading multiple ontology files where all files are missing."""
+    resolver = RDFLibOntologyResolver(
+        ontology_file=["nonexistent_file_1.owl", "nonexistent_file_2.owl", "nonexistent_file_3.owl"]
+    )
+
+    assert resolver.graph is None
+
+    assert resolver.lookup["classes"] == {}
+    assert resolver.lookup["individuals"] == {}
+
+
+def test_multifile_ontology_with_overlapping_entities():
+    """Test loading multiple ontology files with overlapping/related entities."""
+    ns = Namespace("http://example.org/automotive#")
+
+    g1 = Graph()
+    g1.add((ns.Vehicle, RDF.type, OWL.Class))
+    g1.add((ns.Car, RDF.type, OWL.Class))
+    g1.add((ns.Car, RDFS.subClassOf, ns.Vehicle))
+
+    g2 = Graph()
+    g2.add((ns.LuxuryCar, RDF.type, OWL.Class))
+    g2.add((ns.LuxuryCar, RDFS.subClassOf, ns.Car))
+    g2.add((ns.Mercedes, RDF.type, ns.LuxuryCar))
+    g2.add((ns.BMW, RDF.type, ns.LuxuryCar))
+
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".owl", delete=False) as f1:
+        g1.serialize(f1.name, format="xml")
+        file1_path = f1.name
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".owl", delete=False) as f2:
+        g2.serialize(f2.name, format="xml")
+        file2_path = f2.name
+
+    try:
+        resolver = RDFLibOntologyResolver(ontology_file=[file1_path, file2_path])
+
+        assert "vehicle" in resolver.lookup["classes"]
+        assert "car" in resolver.lookup["classes"]
+        assert "luxurycar" in resolver.lookup["classes"]
+
+        assert "mercedes" in resolver.lookup["individuals"]
+        assert "bmw" in resolver.lookup["individuals"]
+
+        nodes, relationships, start_node = resolver.get_subgraph("Mercedes", "individuals")
+
+        uri_labels = {resolver._uri_to_key(n.uri) for n in nodes}
+        assert "mercedes" in uri_labels
+        assert "luxurycar" in uri_labels
+        assert "car" in uri_labels
+        assert "vehicle" in uri_labels
+
+    finally:
+        import os
+
+        os.unlink(file1_path)
+        os.unlink(file2_path)

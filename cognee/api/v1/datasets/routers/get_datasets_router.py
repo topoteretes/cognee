@@ -7,7 +7,9 @@ from fastapi import status
 from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
 from fastapi import HTTPException, Query, Depends
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from urllib.parse import urlparse
+from pathlib import Path
 
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.infrastructure.databases.relational import get_relational_engine
@@ -44,6 +46,7 @@ class DatasetDTO(OutDTO):
 class DataDTO(OutDTO):
     id: UUID
     name: str
+    label: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     extension: str
@@ -209,14 +212,14 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.data.methods import get_dataset, delete_dataset
+        from cognee.modules.data.methods import delete_dataset
 
-        dataset = await get_dataset(user.id, dataset_id)
+        dataset = await get_authorized_existing_datasets([dataset_id], "delete", user)
 
         if dataset is None:
             raise DatasetNotFoundError(message=f"Dataset ({str(dataset_id)}) not found.")
 
-        await delete_dataset(dataset)
+        await delete_dataset(dataset[0])
 
     @router.delete(
         "/{dataset_id}/data/{data_id}",
@@ -476,6 +479,40 @@ def get_datasets_router() -> APIRouter:
                 message=f"Data ({data_id}) not found in dataset ({dataset_id})."
             )
 
-        return data.raw_data_location
+        raw_location = data.raw_data_location
+
+        if raw_location.startswith("file://"):
+            from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
+
+            raw_location = get_data_file_path(raw_location)
+
+        if raw_location.startswith("s3://"):
+            from cognee.infrastructure.files.utils.open_data_file import open_data_file
+            from cognee.infrastructure.utils.run_async import run_async
+
+            parsed = urlparse(raw_location)
+            download_name = Path(parsed.path).name or data.name
+            media_type = data.mime_type or "application/octet-stream"
+
+            async def file_iterator(chunk_size: int = 1024 * 1024):
+                async with open_data_file(raw_location, mode="rb") as file:
+                    while True:
+                        chunk = await run_async(file.read, chunk_size)
+                        if not chunk:
+                            break
+                        yield chunk
+
+            return StreamingResponse(
+                file_iterator(),
+                media_type=media_type,
+                headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+            )
+
+        path = Path(raw_location)
+
+        if not path.is_file():
+            raise DataNotFoundError(message=f"Raw file not found on disk for data ({data_id}).")
+
+        return FileResponse(path=path)
 
     return router

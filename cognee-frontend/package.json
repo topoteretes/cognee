@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@auth0/nextjs-auth0": "^4.6.0",
+    "@auth0/nextjs-auth0": "^4.14.0",
     "classnames": "^2.5.1",
     "culori": "^4.0.1",
     "d3-force-3d": "^3.0.6",
@@ -33,7 +33,7 @@
     "@types/three": "^0.175.0",
     "@types/uuid": "^9.0.8",
     "eslint": "^9",
-    "eslint-config-next": "^15.3.3",
+    "eslint-config-next": "^16.0.4",
     "eslint-config-prettier": "^10.1.5",
     "tailwindcss": "^4.1.7",
     "typescript": "^5"

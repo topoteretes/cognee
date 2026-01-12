@@ -6,9 +6,6 @@ import logging
 from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
-from cognee.infrastructure.databases.vector.embeddings.embedding_rate_limiter import (
-    EmbeddingRateLimiter,
-)
 from cognee.tests.unit.infrastructure.mock_embedding_engine import MockEmbeddingEngine
 
 # Configure logging
@@ -33,7 +30,6 @@ async def test_embedding_rate_limiting_realistic():
 
     # Clear the config and rate limiter caches to ensure our settings are applied
     get_llm_config.cache_clear()
-    EmbeddingRateLimiter.reset_instance()
 
     # Create a fresh config instance and verify settings
     config = get_llm_config()
@@ -170,7 +166,6 @@ async def test_with_mock_failures():
 
     # Clear caches
     get_llm_config.cache_clear()
-    EmbeddingRateLimiter.reset_instance()
 
     # Create a mock engine configured to fail every 3rd request
     engine = MockEmbeddingEngine()

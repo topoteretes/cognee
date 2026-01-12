@@ -11,12 +11,21 @@ on:
         type: string
         default: "all"
         description: "Which vector databases to test (comma-separated list or 'all')"
+      python-versions:
+        required: false
+        type: string
+        default: '["3.10", "3.11", "3.12", "3.13"]'
+        description: "Python versions to test (JSON array)"
 
 jobs:
   run-kuzu-lance-sqlite-search-tests:
-    name: Search test for Kuzu/LanceDB/Sqlite
+    name: Search test for Kuzu/LanceDB/Sqlite (Python ${{ matrix.python-version }})
     runs-on: ubuntu-22.04
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu/lance/sqlite') }}
+    strategy:
+      matrix:
+        python-version: ${{ fromJSON(inputs.python-versions) }}
+      fail-fast: false
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -26,7 +35,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: ${{ inputs.python-version }}
+          python-version: ${{ matrix.python-version }}
 
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
@@ -45,13 +54,16 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           VECTOR_DB_PROVIDER: 'lancedb'
           DB_PROVIDER: 'sqlite'
-        run: uv run python ./cognee/tests/test_search_db.py
+        run: uv run pytest cognee/tests/test_search_db.py -v --log-level=INFO
 
   run-neo4j-lance-sqlite-search-tests:
-    name: Search test for Neo4j/LanceDB/Sqlite
+    name: Search test for Neo4j/LanceDB/Sqlite (Python ${{ matrix.python-version }})
     runs-on: ubuntu-22.04
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'neo4j/lance/sqlite') }}
-
+    strategy:
+      matrix:
+        python-version: ${{ fromJSON(inputs.python-versions) }}
+      fail-fast: false
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -61,7 +73,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: ${{ inputs.python-version }}
+          python-version: ${{ matrix.python-version }}
 
       - name: Setup Neo4j with GDS
         uses: ./.github/actions/setup_neo4j
@@ -84,15 +96,20 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'neo4j'
           VECTOR_DB_PROVIDER: 'lancedb'
           DB_PROVIDER: 'sqlite'
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
           GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
-        run: uv run python ./cognee/tests/test_search_db.py
+        run: uv run pytest cognee/tests/test_search_db.py -v --log-level=INFO
 
   run-kuzu-pgvector-postgres-search-tests:
-      name: Search test for Kuzu/PGVector/Postgres
+      name: Search test for Kuzu/PGVector/Postgres (Python ${{ matrix.python-version }})
       runs-on: ubuntu-22.04
       if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu/pgvector/postgres') }}
+      strategy:
+        matrix:
+          python-version: ${{ fromJSON(inputs.python-versions) }}
+        fail-fast: false
       services:
         postgres:
           image: pgvector/pgvector:pg17
@@ -116,7 +133,7 @@ jobs:
         - name: Cognee Setup
           uses: ./.github/actions/cognee_setup
           with:
-            python-version: ${{ inputs.python-version }}
+            python-version: ${{ matrix.python-version }}
             extra-dependencies: "postgres"
 
         - name: Dependencies already installed
@@ -135,18 +152,23 @@ jobs:
             EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
             GRAPH_DATABASE_PROVIDER: 'kuzu'
             VECTOR_DB_PROVIDER: 'pgvector'
+            ENABLE_BACKEND_ACCESS_CONTROL: 'false'
             DB_PROVIDER: 'postgres'
             DB_NAME: 'cognee_db'
             DB_HOST: '127.0.0.1'
             DB_PORT: 5432
             DB_USERNAME: cognee
             DB_PASSWORD: cognee
-          run: uv run python ./cognee/tests/test_search_db.py
+          run: uv run pytest cognee/tests/test_search_db.py -v --log-level=INFO
 
   run-neo4j-pgvector-postgres-search-tests:
-    name: Search test for Neo4j/PGVector/Postgres
+    name: Search test for Neo4j/PGVector/Postgres (Python ${{ matrix.python-version }})
     runs-on: ubuntu-22.04
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'neo4j/pgvector/postgres') }}
+    strategy:
+      matrix:
+        python-version: ${{ fromJSON(inputs.python-versions) }}
+      fail-fast: false
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -170,7 +192,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: ${{ inputs.python-version }}
+          python-version: ${{ matrix.python-version }}
           extra-dependencies: "postgres"
 
       - name: Setup Neo4j with GDS
@@ -197,9 +219,10 @@ jobs:
           GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
           GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
           GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
           DB_NAME: cognee_db
           DB_HOST: 127.0.0.1
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
-        run: uv run python ./cognee/tests/test_search_db.py
+        run: uv run pytest cognee/tests/test_search_db.py -v --log-level=INFO

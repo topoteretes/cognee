@@ -290,7 +290,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         query_string = f"""
         CALL neptune.algo.vectors.topKByEmbeddingWithFiltering({{
                 topK: {limit},
-                embedding: {embedding}, 
+                embedding: {embedding},
                 nodeFilter: {{ equals: {{property: '{self._COLLECTION_PREFIX}', value: '{collection_name}'}} }}
               }}
             )
@@ -299,7 +299,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
 
         if with_vector:
             query_string += """
-        WITH node, score, id(node) as node_id 
+        WITH node, score, id(node) as node_id
         MATCH (n)
         WHERE id(n) = id(node)
         CALL neptune.algo.vectors.get(n)
@@ -415,6 +415,15 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         # Run actual truncate
         self._client.query(f"MATCH (n :{self._VECTOR_NODE_LABEL}) DETACH DELETE n")
         pass
+
+    async def is_empty(self) -> bool:
+        query = """
+        MATCH (n)
+        RETURN true
+        LIMIT 1;
+        """
+        query_result = await self._client.query(query)
+        return len(query_result) == 0
 
     @staticmethod
     def _get_scored_result(

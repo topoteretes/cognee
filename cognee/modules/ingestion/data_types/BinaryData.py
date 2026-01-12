@@ -30,7 +30,7 @@ class BinaryData(IngestionData):
 
     async def ensure_metadata(self):
         if self.metadata is None:
-            self.metadata = await get_file_metadata(self.data)
+            self.metadata = await get_file_metadata(self.data, name=self.name)
 
             if self.metadata["name"] is None:
                 self.metadata["name"] = self.name

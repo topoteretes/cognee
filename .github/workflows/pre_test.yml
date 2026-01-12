@@ -1,0 +1,25 @@
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+jobs:
+  check-uv-lock:
+    name: Lockfile and Pre-commit Hooks
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Validate uv lockfile and project metadata
+        run: uv lock --check || { echo "'uv lock --check' failed."; echo "Run 'uv lock' and push your changes."; exit 1; }
+
+      - name: Run pre-commit hooks
+        uses: pre-commit/action@v3.0.1

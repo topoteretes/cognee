@@ -1,201 +1,183 @@
-import os
 import pytest
-import pathlib
-from typing import List
-import cognee
-from cognee.low_level import setup
-from cognee.tasks.storage import add_data_points
-from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.chunking.models import DocumentChunk
-from cognee.modules.data.processing.document_types import TextDocument
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from unittest.mock import AsyncMock, patch, MagicMock
+
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
-from cognee.infrastructure.engine import DataPoint
-from cognee.modules.data.processing.document_types import Document
-from cognee.modules.engine.models import Entity
+from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
 
-class DocumentChunkWithEntities(DataPoint):
-    text: str
-    chunk_size: int
-    chunk_index: int
-    cut_type: str
-    is_part_of: Document
-    contains: List[Entity] = None
-
-    metadata: dict = {"index_fields": ["text"]}
+@pytest.fixture
+def mock_vector_engine():
+    """Create a mock vector engine."""
+    engine = AsyncMock()
+    engine.search = AsyncMock()
+    return engine
 
 
-class TestChunksRetriever:
-    @pytest.mark.asyncio
-    async def test_chunk_context_simple(self):
-        system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_chunk_context_simple"
-        )
-        cognee.config.system_root_directory(system_directory_path)
-        data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_chunk_context_simple"
-        )
-        cognee.config.data_root_directory(data_directory_path)
+@pytest.mark.asyncio
+async def test_get_context_success(mock_vector_engine):
+    """Test successful retrieval of chunk context."""
+    mock_result1 = MagicMock()
+    mock_result1.payload = {"text": "Steve Rodger", "chunk_index": 0}
+    mock_result2 = MagicMock()
+    mock_result2.payload = {"text": "Mike Broski", "chunk_index": 1}
 
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
-        await setup()
+    mock_vector_engine.search.return_value = [mock_result1, mock_result2]
 
-        document = TextDocument(
-            name="Steve Rodger's career",
-            raw_data_location="somewhere",
-            external_metadata="",
-            mime_type="text/plain",
-        )
+    retriever = ChunksRetriever(top_k=5)
 
-        chunk1 = DocumentChunk(
-            text="Steve Rodger",
-            chunk_size=2,
-            chunk_index=0,
-            cut_type="sentence_end",
-            is_part_of=document,
-            contains=[],
-        )
-        chunk2 = DocumentChunk(
-            text="Mike Broski",
-            chunk_size=2,
-            chunk_index=1,
-            cut_type="sentence_end",
-            is_part_of=document,
-            contains=[],
-        )
-        chunk3 = DocumentChunk(
-            text="Christina Mayer",
-            chunk_size=2,
-            chunk_index=2,
-            cut_type="sentence_end",
-            is_part_of=document,
-            contains=[],
-        )
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
+        return_value=mock_vector_engine,
+    ):
+        context = await retriever.get_context("test query")
 
-        entities = [chunk1, chunk2, chunk3]
+    assert len(context) == 2
+    assert context[0]["text"] == "Steve Rodger"
+    assert context[1]["text"] == "Mike Broski"
+    mock_vector_engine.search.assert_awaited_once_with("DocumentChunk_text", "test query", limit=5)
 
-        await add_data_points(entities)
 
-        retriever = ChunksRetriever()
+@pytest.mark.asyncio
+async def test_get_context_collection_not_found_error(mock_vector_engine):
+    """Test that CollectionNotFoundError is converted to NoDataError."""
+    mock_vector_engine.search.side_effect = CollectionNotFoundError("Collection not found")
 
-        context = await retriever.get_context("Mike")
+    retriever = ChunksRetriever()
 
-        assert context[0]["text"] == "Mike Broski", "Failed to get Mike Broski"
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
+        return_value=mock_vector_engine,
+    ):
+        with pytest.raises(NoDataError, match="No data found"):
+            await retriever.get_context("test query")
 
-    @pytest.mark.asyncio
-    async def test_chunk_context_complex(self):
-        system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_chunk_context_complex"
-        )
-        cognee.config.system_root_directory(system_directory_path)
-        data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_chunk_context_complex"
-        )
-        cognee.config.data_root_directory(data_directory_path)
 
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
-        await setup()
+@pytest.mark.asyncio
+async def test_get_context_empty_results(mock_vector_engine):
+    """Test that empty list is returned when no chunks are found."""
+    mock_vector_engine.search.return_value = []
 
-        document1 = TextDocument(
-            name="Employee List",
-            raw_data_location="somewhere",
-            external_metadata="",
-            mime_type="text/plain",
-        )
+    retriever = ChunksRetriever()
 
-        document2 = TextDocument(
-            name="Car List",
-            raw_data_location="somewhere",
-            external_metadata="",
-            mime_type="text/plain",
-        )
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
+        return_value=mock_vector_engine,
+    ):
+        context = await retriever.get_context("test query")
 
-        chunk1 = DocumentChunk(
-            text="Steve Rodger",
-            chunk_size=2,
-            chunk_index=0,
-            cut_type="sentence_end",
-            is_part_of=document1,
-            contains=[],
-        )
-        chunk2 = DocumentChunk(
-            text="Mike Broski",
-            chunk_size=2,
-            chunk_index=1,
-            cut_type="sentence_end",
-            is_part_of=document1,
-            contains=[],
-        )
-        chunk3 = DocumentChunk(
-            text="Christina Mayer",
-            chunk_size=2,
-            chunk_index=2,
-            cut_type="sentence_end",
-            is_part_of=document1,
-            contains=[],
-        )
+    assert context == []
 
-        chunk4 = DocumentChunk(
-            text="Range Rover",
-            chunk_size=2,
-            chunk_index=0,
-            cut_type="sentence_end",
-            is_part_of=document2,
-            contains=[],
-        )
-        chunk5 = DocumentChunk(
-            text="Hyundai",
-            chunk_size=2,
-            chunk_index=1,
-            cut_type="sentence_end",
-            is_part_of=document2,
-            contains=[],
-        )
-        chunk6 = DocumentChunk(
-            text="Chrysler",
-            chunk_size=2,
-            chunk_index=2,
-            cut_type="sentence_end",
-            is_part_of=document2,
-            contains=[],
-        )
 
-        entities = [chunk1, chunk2, chunk3, chunk4, chunk5, chunk6]
+@pytest.mark.asyncio
+async def test_get_context_top_k_limit(mock_vector_engine):
+    """Test that top_k parameter limits the number of results."""
+    mock_results = [MagicMock() for _ in range(3)]
+    for i, result in enumerate(mock_results):
+        result.payload = {"text": f"Chunk {i}"}
 
-        await add_data_points(entities)
+    mock_vector_engine.search.return_value = mock_results
 
-        retriever = ChunksRetriever(top_k=20)
+    retriever = ChunksRetriever(top_k=3)
 
-        context = await retriever.get_context("Christina")
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
+        return_value=mock_vector_engine,
+    ):
+        context = await retriever.get_context("test query")
 
-        assert context[0]["text"] == "Christina Mayer", "Failed to get Christina Mayer"
+    assert len(context) == 3
+    mock_vector_engine.search.assert_awaited_once_with("DocumentChunk_text", "test query", limit=3)
 
-    @pytest.mark.asyncio
-    async def test_chunk_context_on_empty_graph(self):
-        system_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".cognee_system/test_chunk_context_on_empty_graph"
-        )
-        cognee.config.system_root_directory(system_directory_path)
-        data_directory_path = os.path.join(
-            pathlib.Path(__file__).parent, ".data_storage/test_chunk_context_on_empty_graph"
-        )
-        cognee.config.data_root_directory(data_directory_path)
 
-        await cognee.prune.prune_data()
-        await cognee.prune.prune_system(metadata=True)
+@pytest.mark.asyncio
+async def test_get_completion_with_context(mock_vector_engine):
+    """Test get_completion returns provided context."""
+    retriever = ChunksRetriever()
 
-        retriever = ChunksRetriever()
+    provided_context = [{"text": "Steve Rodger"}, {"text": "Mike Broski"}]
+    completion = await retriever.get_completion("test query", context=provided_context)
 
-        with pytest.raises(NoDataError):
-            await retriever.get_context("Christina Mayer")
+    assert completion == provided_context
 
-        vector_engine = get_vector_engine()
-        await vector_engine.create_collection(
-            "DocumentChunk_text", payload_schema=DocumentChunkWithEntities
-        )
 
-        context = await retriever.get_context("Christina Mayer")
-        assert len(context) == 0, "Found chunks when none should exist"
+@pytest.mark.asyncio
+async def test_get_completion_without_context(mock_vector_engine):
+    """Test get_completion retrieves context when not provided."""
+    mock_result = MagicMock()
+    mock_result.payload = {"text": "Steve Rodger"}
+    mock_vector_engine.search.return_value = [mock_result]
+
+    retriever = ChunksRetriever()
+
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
+        return_value=mock_vector_engine,
+    ):
+        completion = await retriever.get_completion("test query")
+
+    assert len(completion) == 1
+    assert completion[0]["text"] == "Steve Rodger"
+
+
+@pytest.mark.asyncio
+async def test_init_defaults():
+    """Test ChunksRetriever initialization with defaults."""
+    retriever = ChunksRetriever()
+
+    assert retriever.top_k == 5
+
+
+@pytest.mark.asyncio
+async def test_init_custom_top_k():
+    """Test ChunksRetriever initialization with custom top_k."""
+    retriever = ChunksRetriever(top_k=10)
+
+    assert retriever.top_k == 10
+
+
+@pytest.mark.asyncio
+async def test_init_none_top_k():
+    """Test ChunksRetriever initialization with None top_k."""
+    retriever = ChunksRetriever(top_k=None)
+
+    assert retriever.top_k is None
+
+
+@pytest.mark.asyncio
+async def test_get_context_empty_payload(mock_vector_engine):
+    """Test get_context handles empty payload."""
+    mock_result = MagicMock()
+    mock_result.payload = {}
+
+    mock_vector_engine.search.return_value = [mock_result]
+
+    retriever = ChunksRetriever()
+
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
+        return_value=mock_vector_engine,
+    ):
+        context = await retriever.get_context("test query")
+
+    assert len(context) == 1
+    assert context[0] == {}
+
+
+@pytest.mark.asyncio
+async def test_get_completion_with_session_id(mock_vector_engine):
+    """Test get_completion with session_id parameter."""
+    mock_result = MagicMock()
+    mock_result.payload = {"text": "Steve Rodger"}
+    mock_vector_engine.search.return_value = [mock_result]
+
+    retriever = ChunksRetriever()
+
+    with patch(
+        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
+        return_value=mock_vector_engine,
+    ):
+        completion = await retriever.get_completion("test query", session_id="test_session")
+
+    assert len(completion) == 1
+    assert completion[0]["text"] == "Steve Rodger"

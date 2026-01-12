@@ -239,7 +239,7 @@ async def complete_database_ingestion(schema, migrate_column_data):
                             id=uuid5(NAMESPACE_OID, name=column_node_id),
                             name=column_node_id,
                             properties=f"{key} {value} {table_name}",
-                            description=f"column from relational database table={table_name}. Column name={key} and value={value}. The value of the column is related to the following row with this id: {row_node.id}. This column has the following ID: {column_node_id}",
+                            description=f"column from relational database table={table_name}. Column name={key} and value={value}. This column has the following ID: {column_node_id}",
                         )
                         node_mapping[column_node_id] = column_node
 

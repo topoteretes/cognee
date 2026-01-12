@@ -105,11 +105,52 @@ If you'd rather run cognee-mcp in a container, you have two options:
       ```bash
       # For HTTP transport (recommended for web deployments)
       docker run -e TRANSPORT_MODE=http --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
-      # For SSE transport  
+      # For SSE transport
       docker run -e TRANSPORT_MODE=sse --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
       # For stdio transport (default)
       docker run -e TRANSPORT_MODE=stdio --env-file ./.env --rm -it cognee/cognee-mcp:main
       ```
+
+      **Installing optional dependencies at runtime:**
+
+      You can install optional dependencies when running the container by setting the `EXTRAS` environment variable:
+      ```bash
+      # Install a single optional dependency group at runtime
+      docker run \
+        -e TRANSPORT_MODE=http \
+        -e EXTRAS=aws \
+        --env-file ./.env \
+        -p 8000:8000 \
+        --rm -it cognee/cognee-mcp:main
+
+      # Install multiple optional dependency groups at runtime (comma-separated)
+      docker run \
+        -e TRANSPORT_MODE=sse \
+        -e EXTRAS=aws,postgres,neo4j \
+        --env-file ./.env \
+        -p 8000:8000 \
+        --rm -it cognee/cognee-mcp:main
+      ```
+
+      **Available optional dependency groups:**
+      - `aws` - S3 storage support
+      - `postgres` / `postgres-binary` - PostgreSQL database support
+      - `neo4j` - Neo4j graph database support
+      - `neptune` - AWS Neptune support
+      - `chromadb` - ChromaDB vector store support
+      - `scraping` - Web scraping capabilities
+      - `distributed` - Modal distributed execution
+      - `langchain` - LangChain integration
+      - `llama-index` - LlamaIndex integration
+      - `anthropic` - Anthropic models
+      - `groq` - Groq models
+      - `mistral` - Mistral models
+      - `ollama` / `huggingface` - Local model support
+      - `docs` - Document processing
+      - `codegraph` - Code analysis
+      - `monitoring` - Sentry & Langfuse monitoring
+      - `redis` - Redis support
+      - And more (see [pyproject.toml](https://github.com/topoteretes/cognee/blob/main/pyproject.toml) for full list)
 2. **Pull from Docker Hub** (no build required):
    ```bash
    # With HTTP transport (recommended for web deployments)
@@ -118,6 +159,17 @@ If you'd rather run cognee-mcp in a container, you have two options:
    docker run -e TRANSPORT_MODE=sse --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
    # With stdio transport (default)
    docker run -e TRANSPORT_MODE=stdio --env-file ./.env --rm -it cognee/cognee-mcp:main
+   ```
+
+   **With runtime installation of optional dependencies:**
+   ```bash
+   # Install optional dependencies from Docker Hub image
+   docker run \
+     -e TRANSPORT_MODE=http \
+     -e EXTRAS=aws,postgres \
+     --env-file ./.env \
+     -p 8000:8000 \
+     --rm -it cognee/cognee-mcp:main
    ```
 
 ### **Important: Docker vs Direct Usage**
@@ -305,7 +357,7 @@ You can configure both transports simultaneously for testing:
       "url": "http://localhost:8000/sse"
     },
     "cognee-http": {
-      "type": "http", 
+      "type": "http",
       "url": "http://localhost:8000/mcp"
     }
   }
@@ -393,15 +445,21 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 - **cognify**: Turns your data into a structured knowledge graph and stores it in memory
 
+- **cognee_add_developer_rules**: Ingest core developer rule files into memory
+
 - **codify**: Analyse a code repository, build a code graph, stores it in memory
-
-- **search**: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS
-
-- **list_data**: List all datasets and their data items with IDs for deletion operations
 
 - **delete**: Delete specific data from a dataset (supports soft/hard deletion modes)
 
+- **get_developer_rules**: Retrieve all developer rules that were generated based on previous interactions
+
+- **list_data**: List all datasets and their data items with IDs for deletion operations
+
+- **save_interaction**: Logs user-agent interactions and query-answer pairs
+
 - **prune**: Reset cognee for a fresh start (removes all data)
+
+- **search**: Query memory – supports GRAPH_COMPLETION, RAG_COMPLETION, CODE, CHUNKS, SUMMARIES, CYPHER, and FEELING_LUCKY
 
 - **cognify_status / codify_status**: Track pipeline progress
 

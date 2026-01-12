@@ -39,6 +39,7 @@ jobs:
     name: CLI Unit Tests
     runs-on: ubuntu-22.04
     env:
+      ENV: 'dev'
       LLM_PROVIDER: openai
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
       LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -66,6 +67,7 @@ jobs:
     name: CLI Integration Tests
     runs-on: ubuntu-22.04
     env:
+      ENV: 'dev'
       LLM_PROVIDER: openai
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
       LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
@@ -93,6 +95,7 @@ jobs:
     name: CLI Functionality Tests
     runs-on: ubuntu-22.04
     env:
+      ENV: 'dev'
       LLM_PROVIDER: openai
       LLM_MODEL: ${{ secrets.LLM_MODEL }}
       LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}

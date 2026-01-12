@@ -1,9 +1,12 @@
+"use client";
+
 import { useState } from "react";
 import classNames from "classnames";
 
 import { isCloudEnvironment, useBoolean } from "@/utils";
 import { PlayIcon } from "@/ui/Icons";
-import { PopupMenu, IconButton } from "@/ui/elements";
+import PopupMenu from "@/ui/elements/PopupMenu";
+import { IconButton } from "@/ui/elements";
 import { LoadingIndicator } from "@/ui/App";
 
 import { Cell } from "./types";
@@ -33,13 +36,13 @@ export default function NotebookCellHeader({
     setFalse: setIsNotRunningCell,
   } = useBoolean(false);
 
-  const [runInstance, setRunInstance] = useState<string>(isCloudEnvironment() ? "cloud" : "local");
+  const [runInstance] = useState<string>(isCloudEnvironment() ? "cloud" : "local");
 
   const handleCellRun = () => {
     if (runCell) {
       setIsRunningCell();
       runCell(cell, runInstance)
-        .then(() => {
+        .finally(() => {
           setIsNotRunningCell();
         });
     }
@@ -53,7 +56,7 @@ export default function NotebookCellHeader({
             {isRunningCell ? <LoadingIndicator /> : <IconButton onClick={handleCellRun}><PlayIcon /></IconButton>}
           </>
         )}
-        <span className="ml-4">{cell.name}</span>
+        <span className="ml-4">{cell.type === "markdown" ? "Markdown Cell" : cell.name}</span>
       </div>
       <div className="pr-4 flex flex-row items-center gap-8">
           {runCell && (

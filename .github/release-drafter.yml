@@ -1,0 +1,20 @@
+name-template: 'v$NEXT_PATCH_VERSION'
+tag-template: 'v$NEXT_PATCH_VERSION'
+
+categories:
+  - title: 'Features'
+    labels: ['feature', 'enhancement']
+  - title: 'Bug Fixes'
+    labels: ['bug', 'fix']
+  - title: 'Maintenance'
+    labels: ['chore', 'refactor', 'ci']
+
+change-template: '- $TITLE (#$NUMBER) @$AUTHOR'
+template: |
+  ## What’s Changed
+
+  $CHANGES
+
+  ## Contributors
+
+  $CONTRIBUTORS

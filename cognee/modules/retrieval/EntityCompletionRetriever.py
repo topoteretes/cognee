@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Optional, List
+from typing import Any, Optional, List, Type
 from cognee.shared.logging_utils import get_logger
 
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
@@ -85,8 +85,12 @@ class EntityCompletionRetriever(BaseRetriever):
             return None
 
     async def get_completion(
-        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
-    ) -> List[str]:
+        self,
+        query: str,
+        context: Optional[Any] = None,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
+    ) -> List[Any]:
         """
         Generate completion using provided context or fetch new context.
 
@@ -102,6 +106,7 @@ class EntityCompletionRetriever(BaseRetriever):
               fetched if not provided. (default None)
             - session_id (Optional[str]): Optional session identifier for caching. If None,
               defaults to 'default_session'. (default None)
+            - response_model (Type): The Pydantic model type for structured output. (default str)
 
         Returns:
         --------
@@ -133,6 +138,7 @@ class EntityCompletionRetriever(BaseRetriever):
                         user_prompt_path=self.user_prompt_path,
                         system_prompt_path=self.system_prompt_path,
                         conversation_history=conversation_history,
+                        response_model=response_model,
                     ),
                 )
             else:
@@ -141,6 +147,7 @@ class EntityCompletionRetriever(BaseRetriever):
                     context=context,
                     user_prompt_path=self.user_prompt_path,
                     system_prompt_path=self.system_prompt_path,
+                    response_model=response_model,
                 )
 
             if session_save:

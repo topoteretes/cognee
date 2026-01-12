@@ -7,13 +7,8 @@ jobs:
 
   run_ollama_test:
 
-    # needs 16 Gb RAM for phi4
-    runs-on: buildjet-4vcpu-ubuntu-2204
-#    services:
-#      ollama:
-#        image: ollama/ollama
-#        ports:
-#          - 11434:11434
+    # needs 32 Gb RAM for phi4 in a container
+    runs-on: buildjet-8vcpu-ubuntu-2204
 
     steps:
       - name: Checkout repository
@@ -27,14 +22,6 @@ jobs:
       - name: Install torch dependency
         run: |
           uv add torch
-
-#      - name: Install ollama
-#        run: curl -fsSL https://ollama.com/install.sh | sh
-#      - name: Run ollama
-#        run: |
-#          ollama serve --openai &
-#          ollama pull llama3.2 &
-#          ollama pull avr/sfr-embedding-mistral:latest
 
       - name: Start Ollama container
         run: |
@@ -75,7 +62,7 @@ jobs:
                 { "role": "user", "content": "Whatever I say, answer with Yes." }
               ]
             }'
-          curl -X POST http://127.0.0.1:11434/v1/embeddings \
+          curl -X POST http://127.0.0.1:11434/api/embed \
             -H "Content-Type: application/json" \
              -d '{
               "model": "avr/sfr-embedding-mistral:latest",
@@ -98,7 +85,7 @@ jobs:
           LLM_MODEL: "phi4"
           EMBEDDING_PROVIDER: "ollama"
           EMBEDDING_MODEL: "avr/sfr-embedding-mistral:latest"
-          EMBEDDING_ENDPOINT: "http://localhost:11434/api/embeddings"
+          EMBEDDING_ENDPOINT: "http://localhost:11434/api/embed"
           EMBEDDING_DIMENSIONS: "4096"
           HUGGINGFACE_TOKENIZER: "Salesforce/SFR-Embedding-Mistral"
         run: uv run python ./examples/python/simple_example.py

@@ -135,7 +135,7 @@ export default function DatasetsAccordion({
   } = useBoolean(false);
 
   const [datasetToRemove, setDatasetToRemove] = useState<Dataset | null>(null);
-  
+
   const handleDatasetRemove = (dataset: Dataset) => {
     setDatasetToRemove(dataset);
     openRemoveDatasetModal();

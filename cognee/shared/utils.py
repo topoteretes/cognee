@@ -8,11 +8,14 @@ import http.server
 import socketserver
 from threading import Thread
 import pathlib
-from uuid import uuid4, uuid5, NAMESPACE_OID
+from typing import Union, Any, Dict, List
+from uuid import uuid4, uuid5, NAMESPACE_OID, UUID
 
 from cognee.base_config import get_base_config
+from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
 
+logger = get_logger()
 
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
@@ -38,20 +41,25 @@ def get_anonymous_id():
 
     home_dir = str(pathlib.Path(pathlib.Path(__file__).parent.parent.parent.resolve()))
 
-    if not os.path.isdir(home_dir):
-        os.makedirs(home_dir, exist_ok=True)
-    anonymous_id_file = os.path.join(home_dir, ".anon_id")
-    if not os.path.isfile(anonymous_id_file):
-        anonymous_id = str(uuid4())
-        with open(anonymous_id_file, "w", encoding="utf-8") as f:
-            f.write(anonymous_id)
-    else:
-        with open(anonymous_id_file, "r", encoding="utf-8") as f:
-            anonymous_id = f.read()
+    try:
+        if not os.path.isdir(home_dir):
+            os.makedirs(home_dir, exist_ok=True)
+        anonymous_id_file = os.path.join(home_dir, ".anon_id")
+        if not os.path.isfile(anonymous_id_file):
+            anonymous_id = str(uuid4())
+            with open(anonymous_id_file, "w", encoding="utf-8") as f:
+                f.write(anonymous_id)
+        else:
+            with open(anonymous_id_file, "r", encoding="utf-8") as f:
+                anonymous_id = f.read()
+    except Exception as e:
+        # In case of read-only filesystem or other issues
+        logger.warning("Could not create or read anonymous id file: %s", e)
+        return "unknown-anonymous-id"
     return anonymous_id
 
 
-def _sanitize_nested_properties(obj, property_names: list[str]):
+def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
     """
     Recursively replaces any property whose key matches one of `property_names`
     (e.g., ['url', 'path']) in a nested dict or list with a uuid5 hash
@@ -71,7 +79,9 @@ def _sanitize_nested_properties(obj, property_names: list[str]):
         return obj
 
 
-def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
+def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_properties: dict = {}):
+    if additional_properties is None:
+        additional_properties = {}
     if os.getenv("TELEMETRY_DISABLED"):
         return
 
@@ -101,7 +111,7 @@ def send_telemetry(event_name: str, user_id, additional_properties: dict = {}):
         print(f"Error sending telemetry through proxy: {response.status_code}")
 
 
-def embed_logo(p, layout_scale, logo_alpha, position):
+def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):
     """
     Embed a logo into the graph visualization as a watermark.
     """
@@ -131,7 +141,11 @@ def embed_logo(p, layout_scale, logo_alpha, position):
 
 
 def start_visualization_server(
-    host="0.0.0.0", port=8001, handler_class=http.server.SimpleHTTPRequestHandler
+    host: str = "0.0.0.0",
+    port: int = 8001,
+    handler_class: type[
+        http.server.SimpleHTTPRequestHandler
+    ] = http.server.SimpleHTTPRequestHandler,
 ):
     """
     Spin up a simple HTTP server in a background thread to serve files.

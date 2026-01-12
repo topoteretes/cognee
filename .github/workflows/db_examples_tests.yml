@@ -60,7 +60,8 @@ jobs:
 
       - name: Run Neo4j Example
         env:
-          ENV: dev
+          ENV: 'dev'
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -95,7 +96,7 @@ jobs:
 
       - name: Run Kuzu Example
         env:
-          ENV: dev
+          ENV: 'dev'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -141,7 +142,8 @@ jobs:
 
       - name: Run PGVector Example
         env:
-          ENV: dev
+          ENV: 'dev'
+          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}

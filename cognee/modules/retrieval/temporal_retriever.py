@@ -1,7 +1,7 @@
 import os
 import asyncio
 from typing import Any, Optional, List, Type
-
+from datetime import datetime
 
 from operator import itemgetter
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -47,6 +47,8 @@ class TemporalRetriever(GraphCompletionRetriever):
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
+        wide_search_top_k: Optional[int] = 100,
+        triplet_distance_penalty: Optional[float] = 3.5,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -54,6 +56,8 @@ class TemporalRetriever(GraphCompletionRetriever):
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
+            wide_search_top_k=wide_search_top_k,
+            triplet_distance_penalty=triplet_distance_penalty,
         )
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
@@ -79,7 +83,11 @@ class TemporalRetriever(GraphCompletionRetriever):
         else:
             base_directory = None
 
-        system_prompt = render_prompt(prompt_path, {}, base_directory=base_directory)
+        time_now = datetime.now().strftime("%d-%m-%Y")
+
+        system_prompt = render_prompt(
+            prompt_path, {"time_now": time_now}, base_directory=base_directory
+        )
 
         interval = await LLMGateway.acreate_structured_output(query, system_prompt, QueryInterval)
 
@@ -107,8 +115,6 @@ class TemporalRetriever(GraphCompletionRetriever):
         time_from, time_to = await self.extract_time_from_query(query)
 
         graph_engine = await get_graph_engine()
-
-        triplets = []
 
         if time_from and time_to:
             ids = await graph_engine.collect_time_ids(time_from=time_from, time_to=time_to)
@@ -144,8 +150,12 @@ class TemporalRetriever(GraphCompletionRetriever):
         return self.descriptions_to_string(top_k_events)
 
     async def get_completion(
-        self, query: str, context: Optional[str] = None, session_id: Optional[str] = None
-    ) -> List[str]:
+        self,
+        query: str,
+        context: Optional[str] = None,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
+    ) -> List[Any]:
         """
         Generates a response using the query and optional context.
 
@@ -157,6 +167,7 @@ class TemporalRetriever(GraphCompletionRetriever):
               retrieved based on the query. (default None)
             - session_id (Optional[str]): Optional session identifier for caching. If None,
               defaults to 'default_session'. (default None)
+            - response_model (Type): The Pydantic model type for structured output. (default str)
 
         Returns:
         --------
@@ -184,6 +195,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                         user_prompt_path=self.user_prompt_path,
                         system_prompt_path=self.system_prompt_path,
                         conversation_history=conversation_history,
+                        response_model=response_model,
                     ),
                 )
             else:
@@ -192,6 +204,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                     context=context,
                     user_prompt_path=self.user_prompt_path,
                     system_prompt_path=self.system_prompt_path,
+                    response_model=response_model,
                 )
 
             if session_save:

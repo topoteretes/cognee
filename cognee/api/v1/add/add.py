@@ -10,13 +10,14 @@ from cognee.modules.pipelines.layers.reset_dataset_pipeline_run_status import (
 )
 from cognee.modules.engine.operations.setup import setup
 from cognee.tasks.ingestion import ingest_data, resolve_data_directories
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 
 async def add(
-    data: Union[BinaryIO, list[BinaryIO], str, list[str]],
+    data: Union[BinaryIO, list[BinaryIO], str, list[str], DataItem, list[DataItem]],
     dataset_name: str = "main_dataset",
     user: User = None,
     node_set: Optional[List[str]] = None,
@@ -155,7 +156,7 @@ async def add(
         - LLM_API_KEY: API key for your LLM provider (OpenAI, Anthropic, etc.)
 
         Optional:
-        - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama", "mistral"
+        - LLM_PROVIDER: "openai" (default), "anthropic", "gemini", "ollama", "mistral", "bedrock"
         - LLM_MODEL: Model name (default: "gpt-5-mini")
         - DEFAULT_USER_EMAIL: Custom default user email
         - DEFAULT_USER_PASSWORD: Custom default user password
@@ -205,6 +206,7 @@ async def add(
         pipeline_name="add_pipeline",
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,
+        use_pipeline_cache=True,
         incremental_loading=incremental_loading,
         data_per_batch=data_per_batch,
     ):

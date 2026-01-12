@@ -1,6 +1,7 @@
 import filetype
 from typing import Dict, List, Optional, Any
 from .LoaderInterface import LoaderInterface
+from cognee.infrastructure.files.utils.guess_file_type import guess_file_type
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -30,6 +31,7 @@ class LoaderEngine:
             "pypdf_loader",
             "image_loader",
             "audio_loader",
+            "csv_loader",
             "unstructured_loader",
             "advanced_pdf_loader",
         ]
@@ -80,7 +82,7 @@ class LoaderEngine:
         """
         from pathlib import Path
 
-        file_info = filetype.guess(file_path)
+        file_info = guess_file_type(file_path)
 
         path_extension = Path(file_path).suffix.lstrip(".")
 

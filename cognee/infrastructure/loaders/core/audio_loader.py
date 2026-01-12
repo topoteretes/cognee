@@ -42,6 +42,7 @@ class AudioLoader(LoaderInterface):
             "audio/wav",
             "audio/amr",
             "audio/aiff",
+            "audio/x-wav",
         ]
 
     @property
