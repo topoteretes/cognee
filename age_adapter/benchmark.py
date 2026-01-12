@@ -227,6 +227,153 @@ async def main():
     
     print(f"Edge Ingestion Batch (Merge - {half_edges} existing, {len(new_edge_ids)} new): AGE={age_time_edge_batch_merge:.4f}s, Neo4j={neo4j_time_edge_batch_merge:.4f}s")
     
+    query_node_ids = [f"node_{i}" for i in range(0, batch_size, 10)]
+    
+    start = time.perf_counter()
+    for node_id in query_node_ids:
+        await age_adapter.get_node(node_id)
+    age_time_get_node = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    for node_id in query_node_ids:
+        try:
+            node_uuid = UUID(node_id) if '-' in node_id else UUID(int=hash(node_id) & ((1 << 128) - 1))
+        except:
+            node_uuid = UUID(int=hash(node_id) & ((1 << 128) - 1))
+        await neo4j_adapter.get_node(str(node_uuid))
+    neo4j_time_get_node = time.perf_counter() - start
+    
+    print(f"Get Node by ID ({len(query_node_ids)} queries): AGE={age_time_get_node:.4f}s, Neo4j={neo4j_time_get_node:.4f}s")
+    
+    start = time.perf_counter()
+    for node_id in query_node_ids[:10]:
+        await age_adapter.get_neighbors(node_id)
+    age_time_get_neighbors = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    for node_id in query_node_ids[:10]:
+        try:
+            node_uuid = UUID(node_id) if '-' in node_id else UUID(int=hash(node_id) & ((1 << 128) - 1))
+        except:
+            node_uuid = UUID(int=hash(node_id) & ((1 << 128) - 1))
+        query = f"""
+        MATCH (n:`__Node__`{{id: $node_id}})-[]-(neighbor:`__Node__`)
+        RETURN DISTINCT neighbor
+        """
+        await neo4j_adapter.query(query, {"node_id": str(node_uuid)})
+    neo4j_time_get_neighbors = time.perf_counter() - start
+    
+    print(f"Get Neighbors ({len(query_node_ids[:10])} queries): AGE={age_time_get_neighbors:.4f}s, Neo4j={neo4j_time_get_neighbors:.4f}s")
+    
+    start = time.perf_counter()
+    for node_id in query_node_ids[:10]:
+        await age_adapter.get_edges(node_id)
+    age_time_get_edges = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    for node_id in query_node_ids[:10]:
+        try:
+            node_uuid = UUID(node_id) if '-' in node_id else UUID(int=hash(node_id) & ((1 << 128) - 1))
+        except:
+            node_uuid = UUID(int=hash(node_id) & ((1 << 128) - 1))
+        query = f"""
+        MATCH (a:`__Node__`{{id: $node_id}})-[r]-(b)
+        RETURN {{source: a.id, target: b.id, rel_type: type(r), props: properties(r)}}
+        """
+        await neo4j_adapter.query(query, {"node_id": str(node_uuid)})
+    neo4j_time_get_edges = time.perf_counter() - start
+    
+    print(f"Get Edges ({len(query_node_ids[:10])} queries): AGE={age_time_get_edges:.4f}s, Neo4j={neo4j_time_get_edges:.4f}s")
+    
+    start = time.perf_counter()
+    query = "MATCH (n) WHERE n.value > 1000 RETURN n LIMIT 100"
+    await age_adapter.execute_cypher(query)
+    age_time_prop_filter = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    query = f"""
+    MATCH (n:`__Node__`)
+    WHERE n.value > 1000
+    RETURN n
+    LIMIT 100
+    """
+    await neo4j_adapter.query(query)
+    neo4j_time_prop_filter = time.perf_counter() - start
+    
+    print(f"Property Filter (value > 1000, limit 100): AGE={age_time_prop_filter:.4f}s, Neo4j={neo4j_time_prop_filter:.4f}s")
+    
+    start = time.perf_counter()
+    query = "MATCH (n) WHERE n.name CONTAINS 'Node 1' RETURN n LIMIT 100"
+    await age_adapter.execute_cypher(query)
+    age_time_text_search = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    query = f"""
+    MATCH (n:`__Node__`)
+    WHERE n.name CONTAINS 'Node 1'
+    RETURN n
+    LIMIT 100
+    """
+    await neo4j_adapter.query(query)
+    neo4j_time_text_search = time.perf_counter() - start
+    
+    print(f"Text Search (name CONTAINS 'Node 1', limit 100): AGE={age_time_text_search:.4f}s, Neo4j={neo4j_time_text_search:.4f}s")
+    
+    start = time.perf_counter()
+    query = "MATCH (n) RETURN {count: count(n)}"
+    await age_adapter.execute_cypher(query)
+    age_time_count = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    query = f"MATCH (n:`__Node__`) RETURN count(n) as count"
+    await neo4j_adapter.query(query)
+    neo4j_time_count = time.perf_counter() - start
+    
+    print(f"Count Nodes: AGE={age_time_count:.4f}s, Neo4j={neo4j_time_count:.4f}s")
+    
+    start = time.perf_counter()
+    query = "MATCH ()-[r]->() RETURN {count: count(r)}"
+    await age_adapter.execute_cypher(query)
+    age_time_count_edges = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    query = "MATCH ()-[r]->() RETURN count(r) as count"
+    await neo4j_adapter.query(query)
+    neo4j_time_count_edges = time.perf_counter() - start
+    
+    print(f"Count Edges: AGE={age_time_count_edges:.4f}s, Neo4j={neo4j_time_count_edges:.4f}s")
+    
+    start = time.perf_counter()
+    query = f"""
+    MATCH (a {{id: '{query_node_ids[0]}'}})-[*1..3]-(b {{id: '{query_node_ids[5]}'}})
+    RETURN a, b
+    LIMIT 1
+    """
+    try:
+        await age_adapter.execute_cypher(query)
+        age_time_path_query = time.perf_counter() - start
+    except Exception as e:
+        age_time_path_query = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    try:
+        src_uuid = UUID(query_node_ids[0]) if '-' in query_node_ids[0] else UUID(int=hash(query_node_ids[0]) & ((1 << 128) - 1))
+    except:
+        src_uuid = UUID(int=hash(query_node_ids[0]) & ((1 << 128) - 1))
+    try:
+        tgt_uuid = UUID(query_node_ids[5]) if '-' in query_node_ids[5] else UUID(int=hash(query_node_ids[5]) & ((1 << 128) - 1))
+    except:
+        tgt_uuid = UUID(int=hash(query_node_ids[5]) & ((1 << 128) - 1))
+    query = f"""
+    MATCH (a:`__Node__`{{id: $src_id}})-[*1..3]-(b:`__Node__`{{id: $tgt_id}})
+    RETURN a, b
+    LIMIT 1
+    """
+    await neo4j_adapter.query(query, {"src_id": str(src_uuid), "tgt_id": str(tgt_uuid)})
+    neo4j_time_path_query = time.perf_counter() - start
+    
+    print(f"Path Query (1-3 hops): AGE={age_time_path_query:.4f}s, Neo4j={neo4j_time_path_query:.4f}s")
+    
     await age_adapter.close()
     await neo4j_adapter.driver.close()
 
