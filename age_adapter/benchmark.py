@@ -43,7 +43,7 @@ async def main():
     await age_adapter.connect()
     await neo4j_adapter.initialize()
     
-    batch_size = 3000
+    batch_size = 500
     node_ids = [f"node_{i}" for i in range(batch_size)]
     nodes = [(nid, ["TestNode"], {"name": f"Node {i}", "value": i}) 
             for i, nid in enumerate(node_ids)]
@@ -339,36 +339,6 @@ async def main():
     
     print(f"Count Edges: AGE={age_time_count_edges:.4f}s, Neo4j={neo4j_time_count_edges:.4f}s")
     
-    start = time.perf_counter()
-    query = f"""
-    MATCH (a {{id: '{query_node_ids[0]}'}})-[*1..3]-(b {{id: '{query_node_ids[5]}'}})
-    RETURN a, b
-    LIMIT 1
-    """
-    try:
-        await age_adapter.execute_cypher(query)
-        age_time_path_query = time.perf_counter() - start
-    except Exception as e:
-        age_time_path_query = time.perf_counter() - start
-    
-    start = time.perf_counter()
-    try:
-        src_uuid = UUID(query_node_ids[0]) if '-' in query_node_ids[0] else UUID(int=hash(query_node_ids[0]) & ((1 << 128) - 1))
-    except:
-        src_uuid = UUID(int=hash(query_node_ids[0]) & ((1 << 128) - 1))
-    try:
-        tgt_uuid = UUID(query_node_ids[5]) if '-' in query_node_ids[5] else UUID(int=hash(query_node_ids[5]) & ((1 << 128) - 1))
-    except:
-        tgt_uuid = UUID(int=hash(query_node_ids[5]) & ((1 << 128) - 1))
-    query = f"""
-    MATCH (a:`__Node__`{{id: $src_id}})-[*1..3]-(b:`__Node__`{{id: $tgt_id}})
-    RETURN a, b
-    LIMIT 1
-    """
-    await neo4j_adapter.query(query, {"src_id": str(src_uuid), "tgt_id": str(tgt_uuid)})
-    neo4j_time_path_query = time.perf_counter() - start
-    
-    print(f"Path Query (1-3 hops): AGE={age_time_path_query:.4f}s, Neo4j={neo4j_time_path_query:.4f}s")
     
     await age_adapter.close()
     await neo4j_adapter.driver.close()
