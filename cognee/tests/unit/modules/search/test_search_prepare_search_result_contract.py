@@ -180,29 +180,6 @@ async def test_search_access_control_results_edges_become_graph_result(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_search_use_combined_context_defaults_empty_datasets(monkeypatch, search_mod):
-    user = types.SimpleNamespace(id="u1", tenant_id=None)
-
-    async def dummy_authorized_search(**_kwargs):
-        return ("answer", "ctx", [])
-
-    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
-    monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
-
-    out = await search_mod.search(
-        query_text="q",
-        query_type=SearchType.CHUNKS,
-        dataset_ids=None,
-        user=user,
-        use_combined_context=True,
-    )
-
-    assert out.result == "answer"
-    assert out.context == {"all available datasets": "ctx"}
-    assert out.datasets[0].name == "all available datasets"
-
-
-@pytest.mark.asyncio
 async def test_search_access_control_context_str_branch(monkeypatch, search_mod):
     """Covers prepare_search_result(context is str) through search()."""
     user = types.SimpleNamespace(id="u1", tenant_id=None)

@@ -180,35 +180,7 @@ async def test_search_access_control_only_context_returns_dataset_shaped_dicts(
 
 
 @pytest.mark.asyncio
-async def test_search_access_control_use_combined_context_returns_combined_model(
-    monkeypatch, search_mod
-):
-    user = _make_user()
-    ds1 = _make_dataset(name="ds1", tenant_id="t1")
-    ds2 = _make_dataset(name="ds2", tenant_id="t1")
-
-    async def dummy_authorized_search(**_kwargs):
-        return ("answer", {"k": "v"}, [ds1, ds2])
-
-    monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
-    monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
-
-    out = await search_mod.search(
-        query_text="q",
-        query_type=SearchType.CHUNKS,
-        dataset_ids=[ds1.id, ds2.id],
-        user=user,
-        use_combined_context=True,
-    )
-
-    assert out.result == "answer"
-    assert out.context == {"k": "v"}
-    assert out.graphs == {}
-    assert [d.id for d in out.datasets] == [ds1.id, ds2.id]
-
-
-@pytest.mark.asyncio
-async def test_authorized_search_non_combined_delegates(monkeypatch, search_mod):
+async def test_authorized_search_delegates_to_search_in_datasets_context(monkeypatch, search_mod):
     user = _make_user()
     ds = _make_dataset(name="ds1")
 
@@ -218,7 +190,6 @@ async def test_authorized_search_non_combined_delegates(monkeypatch, search_mod)
     expected = [("r", ["ctx"], [ds])]
 
     async def dummy_search_in_datasets_context(**kwargs):
-        assert kwargs["use_combined_context"] is False if "use_combined_context" in kwargs else True
         return expected
 
     monkeypatch.setattr(
@@ -231,102 +202,10 @@ async def test_authorized_search_non_combined_delegates(monkeypatch, search_mod)
         query_text="q",
         user=user,
         dataset_ids=[ds.id],
-        use_combined_context=False,
         only_context=False,
     )
 
     assert out == expected
-
-
-@pytest.mark.asyncio
-async def test_authorized_search_use_combined_context_joins_string_context(monkeypatch, search_mod):
-    user = _make_user()
-    ds1 = _make_dataset(name="ds1")
-    ds2 = _make_dataset(name="ds2")
-
-    async def dummy_get_authorized_existing_datasets(*_args, **_kwargs):
-        return [ds1, ds2]
-
-    async def dummy_search_in_datasets_context(**kwargs):
-        assert kwargs["only_context"] is True
-        return [(None, ["a"], [ds1]), (None, ["b"], [ds2])]
-
-    seen = {}
-
-    async def dummy_get_completion(query_text, context, session_id=None):
-        seen["query_text"] = query_text
-        seen["context"] = context
-        seen["session_id"] = session_id
-        return ["answer"]
-
-    async def dummy_get_search_type_tools(**_kwargs):
-        return [dummy_get_completion, lambda *_a, **_k: None]
-
-    monkeypatch.setattr(
-        search_mod, "get_authorized_existing_datasets", dummy_get_authorized_existing_datasets
-    )
-    monkeypatch.setattr(search_mod, "search_in_datasets_context", dummy_search_in_datasets_context)
-    monkeypatch.setattr(search_mod, "get_search_type_tools", dummy_get_search_type_tools)
-
-    completion, combined_context, datasets = await search_mod.authorized_search(
-        query_type=SearchType.CHUNKS,
-        query_text="q",
-        user=user,
-        dataset_ids=[ds1.id, ds2.id],
-        use_combined_context=True,
-        session_id="s1",
-    )
-
-    assert combined_context == "a\nb"
-    assert completion == ["answer"]
-    assert datasets == [ds1, ds2]
-    assert seen == {"query_text": "q", "context": "a\nb", "session_id": "s1"}
-
-
-@pytest.mark.asyncio
-async def test_authorized_search_use_combined_context_keeps_non_string_context(
-    monkeypatch, search_mod
-):
-    user = _make_user()
-    ds1 = _make_dataset(name="ds1")
-    ds2 = _make_dataset(name="ds2")
-
-    class DummyEdge:
-        pass
-
-    e1, e2 = DummyEdge(), DummyEdge()
-
-    async def dummy_get_authorized_existing_datasets(*_args, **_kwargs):
-        return [ds1, ds2]
-
-    async def dummy_search_in_datasets_context(**_kwargs):
-        return [(None, [e1], [ds1]), (None, [e2], [ds2])]
-
-    async def dummy_get_completion(query_text, context, session_id=None):
-        assert query_text == "q"
-        assert context == [e1, e2]
-        return ["answer"]
-
-    async def dummy_get_search_type_tools(**_kwargs):
-        return [dummy_get_completion]
-
-    monkeypatch.setattr(
-        search_mod, "get_authorized_existing_datasets", dummy_get_authorized_existing_datasets
-    )
-    monkeypatch.setattr(search_mod, "search_in_datasets_context", dummy_search_in_datasets_context)
-    monkeypatch.setattr(search_mod, "get_search_type_tools", dummy_get_search_type_tools)
-
-    completion, combined_context, datasets = await search_mod.authorized_search(
-        query_type=SearchType.CHUNKS,
-        query_text="q",
-        user=user,
-        dataset_ids=[ds1.id, ds2.id],
-        use_combined_context=True,
-    )
-
-    assert combined_context == [e1, e2]
-    assert completion == ["answer"]
-    assert datasets == [ds1, ds2]
 
 
 @pytest.mark.asyncio
