@@ -147,7 +147,9 @@ async def brute_force_triplet_search(
     try:
         vector_search = NodeEdgeVectorSearch()
 
-        await vector_search.embed_and_retrieve_distances(query, collections, wide_search_limit)
+        await vector_search.embed_and_retrieve_distances(
+            query=query, collections=collections, wide_search_limit=wide_search_limit
+        )
 
         if not vector_search.has_results():
             return []
