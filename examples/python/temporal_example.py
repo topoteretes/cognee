@@ -35,16 +35,16 @@ biography_1 = """
 
 biography_2 = """
     Arnulf Øverland Ole Peter Arnulf Øverland ( 27 April 1889 – 25 March 1968 ) was a Norwegian poet and artist . He is principally known for his poetry which served to inspire the Norwegian resistance movement during the German occupation of Norway during World War II .
-    
+
     Biography .
     Øverland was born in Kristiansund and raised in Bergen . His parents were Peter Anton Øverland ( 1852–1906 ) and Hanna Hage ( 1854–1939 ) . The early death of his father , left the family economically stressed . He was able to attend Bergen Cathedral School and in 1904 Kristiania Cathedral School . He graduated in 1907 and for a time studied philology at University of Kristiania . Øverland published his first collection of poems ( 1911 ) .
-    
+
     Øverland became a communist sympathizer from the early 1920s and became a member of Mot Dag . He also served as chairman of the Norwegian Students Society 1923–28 . He changed his stand in 1937 , partly as an expression of dissent against the ongoing Moscow Trials . He was an avid opponent of Nazism and in 1936 he wrote the poem Du må ikke sove which was printed in the journal Samtiden . It ends with . ( I thought: : Something is imminent . Our era is over – Europe’s on fire! ) . Probably the most famous line of the poem is ( You mustnt endure so well the injustice that doesnt affect you yourself! )
-    
+
     During the German occupation of Norway from 1940 in World War II , he wrote to inspire the Norwegian resistance movement . He wrote a series of poems which were clandestinely distributed , leading to the arrest of both him and his future wife Margrete Aamot Øverland in 1941 . Arnulf Øverland was held first in the prison camp of Grini before being transferred to Sachsenhausen concentration camp in Germany . He spent a four-year imprisonment until the liberation of Norway in 1945 . His poems were later collected in Vi overlever alt and published in 1945 .
-    
+
     Øverland played an important role in the Norwegian language struggle in the post-war era . He became a noted supporter for the conservative written form of Norwegian called Riksmål , he was president of Riksmålsforbundet ( an organization in support of Riksmål ) from 1947 to 1956 . In addition , Øverland adhered to the traditionalist style of writing , criticising modernist poetry on several occasions . His speech Tungetale fra parnasset , published in Arbeiderbladet in 1954 , initiated the so-called Glossolalia debate .
-    
+
     Personal life .
     In 1918 he had married the singer Hildur Arntzen ( 1888–1957 ) . Their marriage was dissolved in 1939 . In 1940 , he married Bartholine Eufemia Leganger ( 1903–1995 ) . They separated shortly after , and were officially divorced in 1945 . Øverland was married to journalist Margrete Aamot Øverland ( 1913–1978 ) during June 1945 . In 1946 , the Norwegian Parliament arranged for Arnulf and Margrete Aamot Øverland to reside at the Grotten . He lived there until his death in 1968 and she lived there for another ten years until her death in 1978 . Arnulf Øverland was buried at Vår Frelsers Gravlund in Oslo . Joseph Grimeland designed the bust of Arnulf Øverland ( bronze , 1970 ) at his grave site .
 
@@ -56,7 +56,7 @@ biography_2 = """
     - Vi overlever alt ( 1945 )
     - Sverdet bak døren ( 1956 )
     - Livets minutter ( 1965 )
-    
+
     Awards .
     - Gyldendals Endowment ( 1935 )
     - Dobloug Prize ( 1951 )
