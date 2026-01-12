@@ -16,8 +16,8 @@ class NodeEdgeVectorSearch:
         self.edge_collection = edge_collection
         self.vector_engine = vector_engine or self._init_vector_engine()
         self.query_vector: Optional[Any] = None
-        self.node_distances: dict[str, list[list[Any]]] = {}
-        self.edge_distances: list[list[Any]] = []
+        self.node_distances: dict[str, list[Any]] = {}
+        self.edge_distances: list[Any] = []
         self.query_list_length: Optional[int] = None
 
     def _init_vector_engine(self):
@@ -109,7 +109,11 @@ class NodeEdgeVectorSearch:
     async def _run_single_search(
         self, collections: List[str], query: str, wide_search_limit: Optional[int]
     ) -> List[List[Any]]:
-        """Runs single query search and returns list-of-lists per collection."""
+        """Runs single query search and returns flat lists per collection.
+
+        Returns a list where each element is a collection's results (flat list).
+        These are stored as flat lists in node_distances/edge_distances for single-query mode.
+        """
         await self._embed_query(query)
         search_tasks = [
             self._search_single_collection(self.vector_engine, wide_search_limit, collection)
