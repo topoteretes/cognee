@@ -20,8 +20,12 @@ export default function createNodeSwarmMaterial(
       uniform float camDist;
       uniform vec2 mousePos;
       attribute vec3 nodeColor;
+      attribute float nodeSize; // Hierarchy-based size multiplier
+      attribute float nodeHighlight; // Selection-based highlight (1.0 = selected, 0.3 = dimmed)
       varying vec3 vColor;
       varying float vHighlight;
+      varying float vSelectionHighlight;
+      varying vec2 vUv; // IMPROVEMENT #4: For radial halo effect
 
       vec3 getNodePos(float idx) {
         float size = textureSize;
@@ -33,7 +37,11 @@ export default function createNodeSwarmMaterial(
 
       void main() {
         vColor = nodeColor;
+        vSelectionHighlight = nodeHighlight;
         vec3 nodePos = getNodePos(float(gl_InstanceID));
+
+        // IMPROVEMENT #4: Pass UV coordinates for halo effect
+        vUv = position.xy * 0.5 + 0.5; // Convert from [-1,1] to [0,1]
 
         // Project world-space position to clip-space
         vec4 clipPos = projectionMatrix * modelViewMatrix * vec4(nodePos, 1.0);
@@ -42,13 +50,14 @@ export default function createNodeSwarmMaterial(
         float distanceFromMouse = length(ndc.xy - mousePos);
         vHighlight = smoothstep(0.2, 0.0, distanceFromMouse);
 
-        float baseNodeSize = 8.0;
+        // Hierarchy-based sizing: base size * type size multiplier
+        float baseNodeSize = 7.0;
 
         // Normalize camera distance into [0,1]
         float t = clamp((camDist - 500.0) / (2000.0 - 500.0), 0.0, 1.0);
-        float nodeSize = baseNodeSize * mix(1.1, 1.3, t);
+        float finalSize = baseNodeSize * nodeSize * mix(1.0, 1.2, t); // Apply hierarchy multiplier
 
-        vec3 transformed = nodePos + position * nodeSize;
+        vec3 transformed = nodePos + position * finalSize;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);
       }
     `,
@@ -57,11 +66,36 @@ export default function createNodeSwarmMaterial(
 
       varying vec3 vColor;
       varying float vHighlight;
+      varying float vSelectionHighlight;
+      varying vec2 vUv; // IMPROVEMENT #4: For radial halo effect
 
       void main() {
-        vec3 finalColor = mix(vColor, vec3(1.0), vHighlight * 0.3);
-        gl_FragColor = vec4(finalColor, 1.0);
-        // gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+        // Apple embedding atlas style: subtle radial glow
+        vec2 center = vec2(0.5, 0.5);
+        float distFromCenter = length(vUv - center) * 2.0;
+
+        // Create sharp node with very subtle glow
+        float coreRadius = 0.75; // Slightly larger core
+        float haloRadius = 1.0;
+
+        // Core node (solid)
+        float core = 1.0 - smoothstep(0.0, coreRadius, distFromCenter);
+
+        // Very subtle outer glow (Apple aesthetic)
+        float halo = smoothstep(haloRadius, coreRadius, distFromCenter);
+
+        // Subtle color mixing
+        vec3 haloColor = vColor * 1.15; // Subtle brightness increase
+        vec3 baseColor = mix(vColor, vec3(1.0), vHighlight * 0.4);
+        vec3 finalColor = mix(haloColor, baseColor, core);
+
+        // Alpha with subtle glow
+        float alpha = mix(halo * 0.4, 1.0, core); // Reduced halo opacity
+
+        // Apply selection-based dimming (neutral-by-default)
+        alpha *= vSelectionHighlight;
+
+        gl_FragColor = vec4(finalColor, alpha);
       }
     `,
   });

@@ -13,7 +13,8 @@ export default function createEdgeMaterial(
       textureSize: { value: texture.image.width },
       camDist: { value: initialCameraDistance },
       mousePos: { value: new three.Vector2(9999, 9999) }, // start offscreen
-      color: { value: new three.Color(0xffffff) },
+      // Apple embedding atlas style: soft pastel edges
+      color: { value: new three.Color("#FCD34D") }, // Soft amber for minimalist aesthetic
     },
     vertexShader: `
       attribute vec2 edgeIndices;
@@ -24,6 +25,7 @@ export default function createEdgeMaterial(
 
       varying float vFade;
       varying float vHighlight;
+      varying float vEdgePosition; // IMPROVEMENT #2: For directional gradient
 
       vec3 getNodePos(float idx) {
         float x = mod(idx, textureSize);
@@ -37,6 +39,9 @@ export default function createEdgeMaterial(
         vec3 end = getNodePos(edgeIndices.y);
         vec3 nodePos = mix(start, end, position.x);
 
+        // IMPROVEMENT #2: Pass edge position for gradient
+        vEdgePosition = position.x;
+
         // Project world-space position to clip-space
         vec4 clipPos = projectionMatrix * modelViewMatrix * vec4(nodePos, 1.0);
         vec3 ndc = clipPos.xyz / clipPos.w; // normalized device coordinates [-1,1]
@@ -44,8 +49,9 @@ export default function createEdgeMaterial(
         float distanceFromMouse = length(ndc.xy - mousePos);
         vHighlight = smoothstep(0.2, 0.0, distanceFromMouse);
 
+        // Apple embedding atlas style: subtle edge opacity
         vFade = smoothstep(500.0, 1500.0, camDist);
-        vFade = 0.2 * clamp(vFade, 0.0, 1.0);
+        vFade = 0.25 * clamp(vFade, 0.0, 1.0); // Subtle for clean aesthetic
 
         gl_Position = projectionMatrix * modelViewMatrix * vec4(nodePos, 1.0);
       }
@@ -54,13 +60,24 @@ export default function createEdgeMaterial(
       precision highp float;
 
       uniform vec3 color;
-      varying vec3 vColor;
       varying float vFade;
       varying float vHighlight;
+      varying float vEdgePosition; // IMPROVEMENT #2: For directional gradient
 
       void main() {
-        vec3 finalColor = mix(color, vec3(1.0), vHighlight * 0.8);
-        float alpha = mix(vFade, 0.8, vHighlight);
+        // IMPROVEMENT #2: Directional gradient from start to end
+        // Brighter at start, slightly darker at end for flow direction
+        float gradientFactor = 1.0 - (vEdgePosition * 0.3); // 30% dimming from start to end
+
+        // IMPROVEMENT #2: Add subtle glow effect
+        vec3 glowColor = vec3(1.0, 0.9, 0.7); // Warm white glow
+        vec3 baseColor = color * gradientFactor;
+        vec3 finalColor = mix(baseColor, glowColor, vHighlight * 0.9);
+
+        // IMPROVEMENT #2: Increased visibility and glow
+        float baseAlpha = vFade * 1.5; // Increased visibility
+        float alpha = mix(baseAlpha, 0.95, vHighlight); // Stronger highlight
+
         gl_FragColor = vec4(finalColor, alpha);
       }
     `,

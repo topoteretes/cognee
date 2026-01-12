@@ -35,9 +35,9 @@ export function createMetaballMaterial(fieldTexture: Texture) {
             finalColor = accumulatedColor / totalInfluence;
         }
 
-        // Smooth transition around threshold
+        // Apple embedding atlas style: very subtle density clouds
         float alphaEdge = smoothstep(threshold - smoothing, threshold + smoothing, totalInfluence);
-        float alpha = alphaEdge * 0.3;
+        float alpha = alphaEdge * 0.08; // Very subtle for clean Apple aesthetic
 
         if (alpha < 0.01) {
           discard;
