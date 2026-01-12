@@ -89,6 +89,55 @@ async def main():
     
     print(f"Node Ingestion Single (Merge - {half} existing, {len(new_nodes)} new): AGE={age_time_single_merge:.4f}s, Neo4j={neo4j_time_single_merge:.4f}s")
     
+    edges = [(f"node_{i}", f"node_{(i+1) % batch_size}", "CONNECTS", {"weight": 1.0})
+            for i in range(batch_size)]
+    
+    start = time.perf_counter()
+    for source_id, target_id, rel_type, props in edges:
+        await age_adapter.add_edge(source_id, target_id, rel_type, props)
+    age_time_edge_single_new = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    for source_id, target_id, rel_type, props in edges:
+        try:
+            src_uuid = UUID(source_id) if '-' in source_id else UUID(int=hash(source_id) & ((1 << 128) - 1))
+        except:
+            src_uuid = UUID(int=hash(source_id) & ((1 << 128) - 1))
+        try:
+            tgt_uuid = UUID(target_id) if '-' in target_id else UUID(int=hash(target_id) & ((1 << 128) - 1))
+        except:
+            tgt_uuid = UUID(int=hash(target_id) & ((1 << 128) - 1))
+        await neo4j_adapter.add_edge(src_uuid, tgt_uuid, rel_type, props)
+    neo4j_time_edge_single_new = time.perf_counter() - start
+    
+    print(f"Edge Ingestion Single (New): AGE={age_time_edge_single_new:.4f}s, Neo4j={neo4j_time_edge_single_new:.4f}s")
+    
+    half_edges = batch_size // 2
+    existing_edges = edges[:half_edges]
+    new_edge_ids = [(f"node_{i}", f"node_{(i+1) % batch_size}", "CONNECTS", {"weight": 1.0})
+                    for i in range(batch_size, batch_size + half_edges)]
+    merge_edges = existing_edges + new_edge_ids
+    
+    start = time.perf_counter()
+    for source_id, target_id, rel_type, props in merge_edges:
+        await age_adapter.add_edge(source_id, target_id, rel_type, props)
+    age_time_edge_single_merge = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    for source_id, target_id, rel_type, props in merge_edges:
+        try:
+            src_uuid = UUID(source_id) if '-' in source_id else UUID(int=hash(source_id) & ((1 << 128) - 1))
+        except:
+            src_uuid = UUID(int=hash(source_id) & ((1 << 128) - 1))
+        try:
+            tgt_uuid = UUID(target_id) if '-' in target_id else UUID(int=hash(target_id) & ((1 << 128) - 1))
+        except:
+            tgt_uuid = UUID(int=hash(target_id) & ((1 << 128) - 1))
+        await neo4j_adapter.add_edge(src_uuid, tgt_uuid, rel_type, props)
+    neo4j_time_edge_single_merge = time.perf_counter() - start
+    
+    print(f"Edge Ingestion Single (Merge - {half_edges} existing, {len(new_edge_ids)} new): AGE={age_time_edge_single_merge:.4f}s, Neo4j={neo4j_time_edge_single_merge:.4f}s")
+    
     await age_adapter.drop_graph(recreate=True)
     await neo4j_adapter.delete_graph()
     
@@ -125,6 +174,58 @@ async def main():
     neo4j_time_batch_merge = time.perf_counter() - start
     
     print(f"Node Ingestion Batch (Merge - {half} existing, {len(new_nodes)} new): AGE={age_time_batch_merge:.4f}s, Neo4j={neo4j_time_batch_merge:.4f}s")
+    
+    start = time.perf_counter()
+    for i in range(0, len(edges), 100):
+        await age_adapter.add_edges(edges[i:i+100])
+    age_time_edge_batch_new = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    for i in range(0, len(edges), 100):
+        batch = edges[i:i+100]
+        def to_uuid(s):
+            try:
+                return UUID(s) if '-' in s else UUID(int=hash(s) & ((1 << 128) - 1))
+            except:
+                return UUID(int=hash(s) & ((1 << 128) - 1))
+        edge_tuples = [(to_uuid(src), to_uuid(tgt), rel_type, props) 
+                       for src, tgt, rel_type, props in batch]
+        await neo4j_adapter.add_edges(edge_tuples)
+    neo4j_time_edge_batch_new = time.perf_counter() - start
+    
+    print(f"Edge Ingestion Batch (New): AGE={age_time_edge_batch_new:.4f}s, Neo4j={neo4j_time_edge_batch_new:.4f}s")
+    
+    for i in range(0, len(existing_edges), 100):
+        await age_adapter.add_edges(existing_edges[i:i+100])
+        batch = existing_edges[i:i+100]
+        def to_uuid(s):
+            try:
+                return UUID(s) if '-' in s else UUID(int=hash(s) & ((1 << 128) - 1))
+            except:
+                return UUID(int=hash(s) & ((1 << 128) - 1))
+        edge_tuples = [(to_uuid(src), to_uuid(tgt), rel_type, props) 
+                       for src, tgt, rel_type, props in batch]
+        await neo4j_adapter.add_edges(edge_tuples)
+    
+    start = time.perf_counter()
+    for i in range(0, len(merge_edges), 100):
+        await age_adapter.add_edges(merge_edges[i:i+100])
+    age_time_edge_batch_merge = time.perf_counter() - start
+    
+    start = time.perf_counter()
+    for i in range(0, len(merge_edges), 100):
+        batch = merge_edges[i:i+100]
+        def to_uuid(s):
+            try:
+                return UUID(s) if '-' in s else UUID(int=hash(s) & ((1 << 128) - 1))
+            except:
+                return UUID(int=hash(s) & ((1 << 128) - 1))
+        edge_tuples = [(to_uuid(src), to_uuid(tgt), rel_type, props) 
+                       for src, tgt, rel_type, props in batch]
+        await neo4j_adapter.add_edges(edge_tuples)
+    neo4j_time_edge_batch_merge = time.perf_counter() - start
+    
+    print(f"Edge Ingestion Batch (Merge - {half_edges} existing, {len(new_edge_ids)} new): AGE={age_time_edge_batch_merge:.4f}s, Neo4j={neo4j_time_edge_batch_merge:.4f}s")
     
     await age_adapter.close()
     await neo4j_adapter.driver.close()

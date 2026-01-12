@@ -272,48 +272,55 @@ class ApacheAGEAdapter:
         if not nodes:
             return
         
-        # Process in batches of 100
+        # Group nodes by label for efficient batch processing
+        nodes_by_label = {}
+        for node_id, labels, properties in nodes:
+            label_key = ':'.join(labels) if labels else "Node"
+            if label_key not in nodes_by_label:
+                nodes_by_label[label_key] = []
+            nodes_by_label[label_key].append((node_id, labels, properties))
+        
+        # Process each label group in batches
         BATCH_SIZE = 100
         
-        for i in range(0, len(nodes), BATCH_SIZE):
-            batch = nodes[i:i + BATCH_SIZE]
-            
-            node_data_list = []
-            for node_id, labels, properties in batch:
-                props = {"id": node_id, **properties}
-                props_parts = []
-                for k, v in props.items():
-                    if isinstance(v, str):
-                        props_parts.append(f'{k}: "{v}"')
-                    elif isinstance(v, bool):
-                        props_parts.append(f'{k}: {str(v).lower()}')
-                    elif isinstance(v, (int, float)):
-                        props_parts.append(f'{k}: {v}')
-                    elif v is None:
-                        props_parts.append(f'{k}: null')
-                    else:
-                        props_parts.append(f'{k}: "{json.dumps(v)}"')
-                props_str = '{' + ', '.join(props_parts) + '}'
-                label_str = ':'.join(labels) if labels else "Node"
-                node_data_list.append(f'{{id: "{node_id}", props: {props_str}, label: "{label_str}"}}')
-            
-            unwind_data = '[' + ', '.join(node_data_list) + ']'
-            
-            all_prop_keys = set()
-            for node_id, labels, properties in batch:
-                all_prop_keys.update(properties.keys())
-            all_prop_keys.add('id')
-            
-            set_clauses = [f"n.{key} = node_data.props.{key}" for key in sorted(all_prop_keys)]
-            set_clause = "SET " + ", ".join(set_clauses)
-            
-            common_label = batch[0][1][0] if batch[0][1] else "Node"
-            query = f"""
-            UNWIND {unwind_data} AS node_data
-            MERGE (n {{id: node_data.id}})
-            {set_clause}
-            """
-            await self.execute_cypher(query)
+        for label_key, label_nodes in nodes_by_label.items():
+            for i in range(0, len(label_nodes), BATCH_SIZE):
+                batch = label_nodes[i:i + BATCH_SIZE]
+                
+                node_data_list = []
+                for node_id, labels, properties in batch:
+                    props = {"id": node_id, **properties}
+                    props_parts = []
+                    for k, v in props.items():
+                        if isinstance(v, str):
+                            props_parts.append(f'{k}: "{v}"')
+                        elif isinstance(v, bool):
+                            props_parts.append(f'{k}: {str(v).lower()}')
+                        elif isinstance(v, (int, float)):
+                            props_parts.append(f'{k}: {v}')
+                        elif v is None:
+                            props_parts.append(f'{k}: null')
+                        else:
+                            props_parts.append(f'{k}: "{json.dumps(v)}"')
+                    props_str = '{' + ', '.join(props_parts) + '}'
+                    node_data_list.append(f'{{id: "{node_id}", props: {props_str}}}')
+                
+                unwind_data = '[' + ', '.join(node_data_list) + ']'
+                
+                all_prop_keys = set()
+                for node_id, labels, properties in batch:
+                    all_prop_keys.update(properties.keys())
+                all_prop_keys.add('id')
+                
+                set_clauses = [f"n.{key} = node_data.props.{key}" for key in sorted(all_prop_keys)]
+                set_clause = "SET " + ", ".join(set_clauses) if set_clauses else ""
+                
+                query = f"""
+                UNWIND {unwind_data} AS node_data
+                MERGE (n:{label_key} {{id: node_data.id}})
+                {set_clause}
+                """
+                await self.execute_cypher(query)
 
     async def get_node(self, node_id: str) -> Optional[NodeData]:
         """
@@ -398,16 +405,14 @@ class ApacheAGEAdapter:
             
             # Use MERGE to avoid duplicate edges
             query = f"""
-            MATCH (a {{id: '{source_id}'}}), (b {{id: '{target_id}'}})
-            MERGE (a)-[r:{relationship_type}]->(b)
+            MERGE (a {{id: '{source_id}'}})-[r:{relationship_type}]->(b {{id: '{target_id}'}})
             SET r = {{{props_str}}}
             RETURN r
             """
         else:
             # Use MERGE without properties
             query = f"""
-            MATCH (a {{id: '{source_id}'}}), (b {{id: '{target_id}'}})
-            MERGE (a)-[r:{relationship_type}]->(b)
+            MERGE (a {{id: '{source_id}'}})-[r:{relationship_type}]->(b {{id: '{target_id}'}})
             RETURN r
             """
         
@@ -497,8 +502,7 @@ class ApacheAGEAdapter:
                 
                 query = f"""
                 UNWIND {values_list} AS edge
-                MATCH (a {{id: edge.src}}), (b {{id: edge.tgt}})
-                MERGE (a)-[r:{rel_type}]->(b)
+                MERGE (a {{id: edge.src}})-[r:{rel_type}]->(b {{id: edge.tgt}})
                 {set_clause}
                 """
                 
