@@ -72,4 +72,3 @@ Use modules/packages to separate concerns; avoid wildcard imports.
 - Is this the simplest working solution?
 - Are errors explicit and logged?
 - Are modules/namespaces used appropriately?
-
