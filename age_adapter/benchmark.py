@@ -258,7 +258,7 @@ async def main():
             node_uuid = UUID(int=hash(node_id) & ((1 << 128) - 1))
         query = f"""
         MATCH (n:`__Node__`{{id: $node_id}})-[]-(neighbor:`__Node__`)
-        RETURN DISTINCT neighbor
+        RETURN DISTINCT neighbor.id as id, properties(neighbor) as properties
         """
         await neo4j_adapter.query(query, {"node_id": str(node_uuid)})
     neo4j_time_get_neighbors = time.perf_counter() - start
@@ -276,17 +276,13 @@ async def main():
             node_uuid = UUID(node_id) if '-' in node_id else UUID(int=hash(node_id) & ((1 << 128) - 1))
         except:
             node_uuid = UUID(int=hash(node_id) & ((1 << 128) - 1))
-        query = f"""
-        MATCH (a:`__Node__`{{id: $node_id}})-[r]-(b)
-        RETURN {{source: a.id, target: b.id, rel_type: type(r), props: properties(r)}}
-        """
-        await neo4j_adapter.query(query, {"node_id": str(node_uuid)})
+        await neo4j_adapter.get_edges(str(node_uuid))
     neo4j_time_get_edges = time.perf_counter() - start
     
     print(f"Get Edges ({len(query_node_ids[:10])} queries): AGE={age_time_get_edges:.4f}s, Neo4j={neo4j_time_get_edges:.4f}s")
     
     start = time.perf_counter()
-    query = "MATCH (n) WHERE n.value > 1000 RETURN n LIMIT 100"
+    query = "MATCH (n:TestNode) WHERE n.value > 1000 RETURN n LIMIT 100"
     await age_adapter.execute_cypher(query)
     age_time_prop_filter = time.perf_counter() - start
     
