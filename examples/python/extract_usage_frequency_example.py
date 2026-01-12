@@ -1,324 +1,473 @@
-# cognee/examples/usage_frequency_example.py
+#!/usr/bin/env python3
 """
-End-to-end example demonstrating usage frequency tracking in Cognee.
+End-to-End Example: Usage Frequency Tracking in Cognee
 
-This example shows how to:
-1. Add data and build a knowledge graph
-2. Run searches with save_interaction=True to track usage
-3. Extract and apply frequency weights using the memify pipeline
-4. Query and analyze the frequency data
+This example demonstrates the complete workflow for tracking and analyzing
+how frequently different graph elements are accessed through user searches.
 
-The frequency weights can be used to:
-- Rank frequently referenced entities higher during retrieval
-- Adjust scoring for completion strategies
-- Expose usage metrics in dashboards or audits
+Features demonstrated:
+- Setting up a knowledge base
+- Running searches with interaction tracking (save_interaction=True)
+- Extracting usage frequencies from interaction data
+- Applying frequency weights to graph nodes
+- Analyzing and visualizing the results
+
+Use cases:
+- Ranking search results by popularity
+- Identifying "hot topics" in your knowledge base
+- Understanding user behavior and interests
+- Improving retrieval based on usage patterns
 """
+
 import asyncio
+import os
 from datetime import timedelta
-from typing import List
+from typing import List, Dict, Any
+from dotenv import load_dotenv
 
 import cognee
 from cognee.api.v1.search import SearchType
-from cognee.tasks.memify.extract_usage_frequency import (
-    create_usage_frequency_pipeline,
-    run_usage_frequency_update,
-)
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
-from cognee.shared.logging_utils import get_logger
+from cognee.tasks.memify.extract_usage_frequency import run_usage_frequency_update
 
-logger = get_logger("usage_frequency_example")
+# Load environment variables
+load_dotenv()
 
+
+# ============================================================================
+# STEP 1: Setup and Configuration
+# ============================================================================
 
 async def setup_knowledge_base():
-    """Set up a fresh knowledge base with sample data."""
-    logger.info("Setting up knowledge base...")
+    """
+    Create a fresh knowledge base with sample content.
     
-    # Reset cognee state for clean slate
+    In a real application, you would:
+    - Load documents from files, databases, or APIs
+    - Process larger datasets
+    - Organize content by datasets/categories
+    """
+    print("=" * 80)
+    print("STEP 1: Setting up knowledge base")
+    print("=" * 80)
+    
+    # Reset state for clean demo (optional in production)
+    print("\nResetting Cognee state...")
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
-
-    # Sample conversation about AI/ML topics
-    conversation = [
-        "Alice discusses machine learning algorithms and their applications in computer vision.",
-        "Bob asks about neural networks and how they differ from traditional algorithms.",
-        "Alice explains deep learning concepts including CNNs and transformers.",
-        "Bob wants more details about neural networks and backpropagation.",
-        "Alice describes reinforcement learning and its use in robotics.",
-        "Bob inquires about natural language processing and transformers.",
-    ]
-
-    # Add conversation data and build knowledge graph
-    logger.info("Adding conversation data...")
-    await cognee.add(conversation, dataset_name="ai_ml_conversation")
+    print("✓ Reset complete")
     
-    logger.info("Building knowledge graph (cognify)...")
+    # Sample content: AI/ML educational material
+    documents = [
+        """
+        Machine Learning Fundamentals:
+        Machine learning is a subset of artificial intelligence that enables systems
+        to learn and improve from experience without being explicitly programmed.
+        The three main types are supervised learning, unsupervised learning, and
+        reinforcement learning.
+        """,
+        """
+        Neural Networks Explained:
+        Neural networks are computing systems inspired by biological neural networks.
+        They consist of layers of interconnected nodes (neurons) that process information
+        through weighted connections. Deep learning uses neural networks with many layers
+        to automatically learn hierarchical representations of data.
+        """,
+        """
+        Natural Language Processing:
+        NLP enables computers to understand, interpret, and generate human language.
+        Modern NLP uses transformer architectures like BERT and GPT, which have
+        revolutionized tasks such as translation, summarization, and question answering.
+        """,
+        """
+        Computer Vision Applications:
+        Computer vision allows machines to interpret visual information from the world.
+        Convolutional neural networks (CNNs) are particularly effective for image
+        recognition, object detection, and image segmentation tasks.
+        """,
+    ]
+    
+    print(f"\nAdding {len(documents)} documents to knowledge base...")
+    await cognee.add(documents, dataset_name="ai_ml_fundamentals")
+    print("✓ Documents added")
+    
+    # Build knowledge graph
+    print("\nBuilding knowledge graph (cognify)...")
     await cognee.cognify()
+    print("✓ Knowledge graph built")
     
-    logger.info("Knowledge base setup complete")
+    print("\n" + "=" * 80)
 
 
-async def simulate_user_searches():
-    """Simulate multiple user searches to generate interaction data."""
-    logger.info("Simulating user searches with save_interaction=True...")
+# ============================================================================
+# STEP 2: Simulate User Searches with Interaction Tracking
+# ============================================================================
+
+async def simulate_user_searches(queries: List[str]):
+    """
+    Simulate users searching the knowledge base.
     
-    # Different queries that will create CogneeUserInteraction nodes
-    queries = [
-        "What is machine learning?",
-        "Explain neural networks",
-        "Tell me about deep learning",
-        "What are neural networks?",  # Repeat to increase frequency
-        "How does machine learning work?",
-        "Describe transformers in NLP",
-        "What is reinforcement learning?",
-        "Explain neural networks again",  # Another repeat
-    ]
-
-    search_count = 0
-    for query in queries:
+    The key parameter is save_interaction=True, which creates:
+    - CogneeUserInteraction nodes (one per search)
+    - used_graph_element_to_answer edges (connecting queries to relevant nodes)
+    
+    Args:
+        queries: List of search queries to simulate
+        
+    Returns:
+        Number of successful searches
+    """
+    print("=" * 80)
+    print("STEP 2: Simulating user searches with interaction tracking")
+    print("=" * 80)
+    
+    successful_searches = 0
+    
+    for i, query in enumerate(queries, 1):
+        print(f"\nSearch {i}/{len(queries)}: '{query}'")
         try:
-            logger.info(f"Searching: '{query}'")
             results = await cognee.search(
                 query_type=SearchType.GRAPH_COMPLETION,
                 query_text=query,
-                save_interaction=True,  # Critical: saves interaction to graph
+                save_interaction=True,  # ← THIS IS CRITICAL!
                 top_k=5
             )
-            search_count += 1
-            logger.debug(f"Search completed, got {len(results) if results else 0} results")
+            successful_searches += 1
+            
+            # Show snippet of results
+            result_preview = str(results)[:100] if results else "No results"
+            print(f"  ✓ Completed ({result_preview}...)")
+            
         except Exception as e:
-            logger.warning(f"Search failed for '{query}': {e}")
-
-    logger.info(f"Completed {search_count} searches with interactions saved")
-    return search_count
-
-
-async def retrieve_interaction_graph() -> List[CogneeGraph]:
-    """Retrieve the graph containing interaction nodes."""
-    logger.info("Retrieving graph with interaction data...")
+            print(f"  ✗ Failed: {e}")
     
+    print(f"\n✓ Completed {successful_searches}/{len(queries)} searches")
+    print("=" * 80)
+    
+    return successful_searches
+
+
+# ============================================================================
+# STEP 3: Extract and Apply Usage Frequencies
+# ============================================================================
+
+async def extract_and_apply_frequencies(
+    time_window_days: int = 7,
+    min_threshold: int = 1
+) -> Dict[str, Any]:
+    """
+    Extract usage frequencies from interactions and apply them to the graph.
+    
+    This function:
+    1. Retrieves the graph with interaction data
+    2. Counts how often each node was accessed
+    3. Writes frequency_weight property back to nodes
+    
+    Args:
+        time_window_days: Only count interactions from last N days
+        min_threshold: Minimum accesses to track (filter out rarely used nodes)
+        
+    Returns:
+        Dictionary with statistics about the frequency update
+    """
+    print("=" * 80)
+    print("STEP 3: Extracting and applying usage frequencies")
+    print("=" * 80)
+    
+    # Get graph adapter
     graph_engine = await get_graph_engine()
-    graph = CogneeGraph()
     
-    # Project the full graph including CogneeUserInteraction nodes
+    # Retrieve graph with interactions
+    print("\nRetrieving graph from database...")
+    graph = CogneeGraph()
     await graph.project_graph_from_db(
         adapter=graph_engine,
-        node_properties_to_project=["type", "node_type", "timestamp", "created_at", "text", "name"],
-        edge_properties_to_project=["relationship_type", "timestamp", "created_at"],
+        node_properties_to_project=[
+            "type", "node_type", "timestamp", "created_at",
+            "text", "name", "query_text", "frequency_weight"
+        ],
+        edge_properties_to_project=["relationship_type", "timestamp"],
         directed=True,
     )
     
-    logger.info(f"Retrieved graph: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
+    print(f"✓ Retrieved: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
     
-    # Count interaction nodes for verification
-    interaction_count = sum(
-        1 for node in graph.nodes.values()
-        if node.attributes.get('type') == 'CogneeUserInteraction' or 
-           node.attributes.get('node_type') == 'CogneeUserInteraction'
-    )
-    logger.info(f"Found {interaction_count} CogneeUserInteraction nodes in graph")
+    # Count interaction nodes
+    interaction_nodes = [
+        n for n in graph.nodes.values()
+        if n.attributes.get('type') == 'CogneeUserInteraction' or
+           n.attributes.get('node_type') == 'CogneeUserInteraction'
+    ]
+    print(f"✓ Found {len(interaction_nodes)} interaction nodes")
     
-    return [graph]
-
-
-async def run_frequency_pipeline_method1():
-    """Method 1: Using the pipeline creation function."""
-    logger.info("\n=== Method 1: Using create_usage_frequency_pipeline ===")
-    
-    graph_engine = await get_graph_engine()
-    subgraphs = await retrieve_interaction_graph()
-    
-    # Create the pipeline tasks
-    extraction_tasks, enrichment_tasks = await create_usage_frequency_pipeline(
-        graph_adapter=graph_engine,
-        time_window=timedelta(days=30),  # Last 30 days
-        min_interaction_threshold=1,     # Count all interactions
-        batch_size=100
-    )
-    
-    logger.info("Running extraction tasks...")
-    # Note: In real memify pipeline, these would be executed by the pipeline runner
-    # For this example, we'll execute them manually
-    for task in extraction_tasks:
-        if hasattr(task, 'function'):
-            result = await task.function(
-                subgraphs=subgraphs,
-                time_window=timedelta(days=30),
-                min_interaction_threshold=1
-            )
-            logger.info(f"Extraction result: {result.get('interactions_in_window')} interactions processed")
-    
-    logger.info("Running enrichment tasks...")
-    for task in enrichment_tasks:
-        if hasattr(task, 'function'):
-            await task.function(
-                graph_adapter=graph_engine,
-                usage_frequencies=result
-            )
-    
-    return result
-
-
-async def run_frequency_pipeline_method2():
-    """Method 2: Using the convenience function."""
-    logger.info("\n=== Method 2: Using run_usage_frequency_update ===")
-    
-    graph_engine = await get_graph_engine()
-    subgraphs = await retrieve_interaction_graph()
-    
-    # Run the complete pipeline in one call
+    # Run frequency extraction and update
+    print(f"\nExtracting frequencies (time window: {time_window_days} days)...")
     stats = await run_usage_frequency_update(
         graph_adapter=graph_engine,
-        subgraphs=subgraphs,
-        time_window=timedelta(days=30),
-        min_interaction_threshold=1
+        subgraphs=[graph],
+        time_window=timedelta(days=time_window_days),
+        min_interaction_threshold=min_threshold
     )
     
-    logger.info("Frequency update statistics:")
-    logger.info(f"  Total interactions: {stats['total_interactions']}")
-    logger.info(f"  Interactions in window: {stats['interactions_in_window']}")
-    logger.info(f"  Nodes with frequency weights: {len(stats['node_frequencies'])}")
-    logger.info(f"  Element types: {stats.get('element_type_frequencies', {})}")
+    print(f"\n✓ Frequency extraction complete!")
+    print(f"  - Interactions processed: {stats['interactions_in_window']}/{stats['total_interactions']}")
+    print(f"  - Nodes weighted: {len(stats['node_frequencies'])}")
+    print(f"  - Element types tracked: {stats.get('element_type_frequencies', {})}")
+    
+    print("=" * 80)
     
     return stats
 
 
-async def analyze_frequency_weights():
-    """Analyze and display the frequency weights that were added."""
-    logger.info("\n=== Analyzing Frequency Weights ===")
-    
-    graph_engine = await get_graph_engine()
-    graph = CogneeGraph()
-    
-    # Project graph with frequency weights
-    await graph.project_graph_from_db(
-        adapter=graph_engine,
-        node_properties_to_project=[
-            "type", 
-            "node_type", 
-            "text", 
-            "name",
-            "frequency_weight",  # Our added property
-            "frequency_updated_at"
-        ],
-        edge_properties_to_project=["relationship_type"],
-        directed=True,
-    )
-    
-    # Find nodes with frequency weights
-    weighted_nodes = []
-    for node_id, node in graph.nodes.items():
-        freq_weight = node.attributes.get('frequency_weight')
-        if freq_weight is not None:
-            weighted_nodes.append({
-                'id': node_id,
-                'type': node.attributes.get('type') or node.attributes.get('node_type'),
-                'text': node.attributes.get('text', '')[:100],  # First 100 chars
-                'name': node.attributes.get('name', ''),
-                'frequency_weight': freq_weight,
-                'updated_at': node.attributes.get('frequency_updated_at')
-            })
-    
-    # Sort by frequency (descending)
-    weighted_nodes.sort(key=lambda x: x['frequency_weight'], reverse=True)
-    
-    logger.info(f"\nFound {len(weighted_nodes)} nodes with frequency weights:")
-    logger.info("\nTop 10 Most Frequently Referenced Elements:")
-    logger.info("-" * 80)
-    
-    for i, node in enumerate(weighted_nodes[:10], 1):
-        logger.info(f"\n{i}. Frequency: {node['frequency_weight']}")
-        logger.info(f"   Type: {node['type']}")
-        logger.info(f"   Name: {node['name']}")
-        logger.info(f"   Text: {node['text']}")
-        logger.info(f"   ID: {node['id'][:50]}...")
-    
-    return weighted_nodes
+# ============================================================================
+# STEP 4: Analyze and Display Results
+# ============================================================================
 
-
-async def demonstrate_retrieval_with_frequencies():
-    """Demonstrate how frequency weights can be used in retrieval."""
-    logger.info("\n=== Demonstrating Retrieval with Frequency Weights ===")
+async def analyze_results(stats: Dict[str, Any]):
+    """
+    Analyze and display the frequency tracking results.
     
-    # This is a conceptual demonstration of how frequency weights
-    # could be used to boost search results
+    Shows:
+    - Top most frequently accessed nodes
+    - Element type distribution
+    - Verification that weights were written to database
     
-    query = "neural networks"
-    logger.info(f"Searching for: '{query}'")
+    Args:
+        stats: Statistics from frequency extraction
+    """
+    print("=" * 80)
+    print("STEP 4: Analyzing usage frequency results")
+    print("=" * 80)
     
-    try:
-        # Standard search
-        standard_results = await cognee.search(
-            query_type=SearchType.GRAPH_COMPLETION,
-            query_text=query,
-            save_interaction=False,  # Don't add more interactions
-            top_k=5
+    # Display top nodes by frequency
+    if stats['node_frequencies']:
+        print("\n📊 Top 10 Most Frequently Accessed Elements:")
+        print("-" * 80)
+        
+        sorted_nodes = sorted(
+            stats['node_frequencies'].items(),
+            key=lambda x: x[1],
+            reverse=True
         )
         
-        logger.info(f"Standard search returned {len(standard_results) if standard_results else 0} results")
+        # Get graph to display node details
+        graph_engine = await get_graph_engine()
+        graph = CogneeGraph()
+        await graph.project_graph_from_db(
+            adapter=graph_engine,
+            node_properties_to_project=["type", "text", "name"],
+            edge_properties_to_project=[],
+            directed=True,
+        )
         
-        # Note: To actually use frequency_weight in scoring, you would need to:
-        # 1. Modify the retrieval/ranking logic to consider frequency_weight
-        # 2. Add frequency_weight as a scoring factor in the completion strategy
-        # 3. Use it in analytics dashboards to show popular topics
-        
-        logger.info("\nFrequency weights can now be used for:")
-        logger.info("  - Boosting frequently-accessed nodes in search rankings")
-        logger.info("  - Adjusting triplet importance scores")
-        logger.info("  - Building usage analytics dashboards")
-        logger.info("  - Identifying 'hot' topics in the knowledge graph")
-        
-    except Exception as e:
-        logger.warning(f"Demonstration search failed: {e}")
+        for i, (node_id, frequency) in enumerate(sorted_nodes[:10], 1):
+            node = graph.get_node(node_id)
+            if node:
+                node_type = node.attributes.get('type', 'Unknown')
+                text = node.attributes.get('text') or node.attributes.get('name') or ''
+                text_preview = text[:60] + "..." if len(text) > 60 else text
+                
+                print(f"\n{i}. Frequency: {frequency} accesses")
+                print(f"   Type: {node_type}")
+                print(f"   Content: {text_preview}")
+            else:
+                print(f"\n{i}. Frequency: {frequency} accesses")
+                print(f"   Node ID: {node_id[:50]}...")
+    
+    # Display element type distribution
+    if stats.get('element_type_frequencies'):
+        print("\n\n📈 Element Type Distribution:")
+        print("-" * 80)
+        type_dist = stats['element_type_frequencies']
+        for elem_type, count in sorted(type_dist.items(), key=lambda x: x[1], reverse=True):
+            print(f"  {elem_type}: {count} accesses")
+    
+    # Verify weights in database (Neo4j only)
+    print("\n\n🔍 Verifying weights in database...")
+    print("-" * 80)
+    
+    graph_engine = await get_graph_engine()
+    adapter_type = type(graph_engine).__name__
+    
+    if adapter_type == 'Neo4jAdapter':
+        try:
+            result = await graph_engine.query("""
+                MATCH (n)
+                WHERE n.frequency_weight IS NOT NULL
+                RETURN count(n) as weighted_count
+            """)
+            
+            count = result[0]['weighted_count'] if result else 0
+            if count > 0:
+                print(f"✓ {count} nodes have frequency_weight in Neo4j database")
+                
+                # Show sample
+                sample = await graph_engine.query("""
+                    MATCH (n)
+                    WHERE n.frequency_weight IS NOT NULL
+                    RETURN n.frequency_weight as weight, labels(n) as labels
+                    ORDER BY n.frequency_weight DESC
+                    LIMIT 3
+                """)
+                
+                print("\nSample weighted nodes:")
+                for row in sample:
+                    print(f"  - Weight: {row['weight']}, Type: {row['labels']}")
+            else:
+                print("⚠ No nodes with frequency_weight found in database")
+        except Exception as e:
+            print(f"Could not verify in Neo4j: {e}")
+    else:
+        print(f"Database verification not implemented for {adapter_type}")
+    
+    print("\n" + "=" * 80)
 
+
+# ============================================================================
+# STEP 5: Demonstrate Usage in Retrieval
+# ============================================================================
+
+async def demonstrate_retrieval_usage():
+    """
+    Demonstrate how frequency weights can be used in retrieval.
+    
+    Note: This is a conceptual demonstration. To actually use frequency
+    weights in ranking, you would need to modify the retrieval/completion
+    strategies to incorporate the frequency_weight property.
+    """
+    print("=" * 80)
+    print("STEP 5: How to use frequency weights in retrieval")
+    print("=" * 80)
+    
+    print("""
+    Frequency weights can be used to improve search results:
+    
+    1. RANKING BOOST:
+       - Multiply relevance scores by frequency_weight
+       - Prioritize frequently accessed nodes in results
+       
+    2. COMPLETION STRATEGIES:
+       - Adjust triplet importance based on usage
+       - Filter out rarely accessed information
+       
+    3. ANALYTICS:
+       - Track trending topics over time
+       - Understand user interests and behavior
+       - Identify knowledge gaps (low-frequency nodes)
+       
+    4. ADAPTIVE RETRIEVAL:
+       - Personalize results based on team usage patterns
+       - Surface popular answers faster
+       
+    Example Cypher query with frequency boost (Neo4j):
+    
+        MATCH (n)
+        WHERE n.text CONTAINS $search_term
+        RETURN n, n.frequency_weight as boost
+        ORDER BY (n.relevance_score * COALESCE(n.frequency_weight, 1)) DESC
+        LIMIT 10
+    
+    To integrate this into Cognee, you would modify the completion
+    strategy to include frequency_weight in the scoring function.
+    """)
+    
+    print("=" * 80)
+
+
+# ============================================================================
+# MAIN: Run Complete Example
+# ============================================================================
 
 async def main():
-    """Main execution flow."""
-    logger.info("=" * 80)
-    logger.info("Usage Frequency Tracking Example")
-    logger.info("=" * 80)
+    """
+    Run the complete end-to-end usage frequency tracking example.
+    """
+    print("\n")
+    print("╔" + "=" * 78 + "╗")
+    print("║" + " " * 78 + "║")
+    print("║" + "  Usage Frequency Tracking - End-to-End Example".center(78) + "║")
+    print("║" + " " * 78 + "║")
+    print("╚" + "=" * 78 + "╝")
+    print("\n")
+    
+    # Configuration check
+    print("Configuration:")
+    print(f"  Graph Provider: {os.getenv('GRAPH_DATABASE_PROVIDER')}")
+    print(f"  Graph Handler: {os.getenv('GRAPH_DATASET_HANDLER')}")
+    print(f"  LLM Provider: {os.getenv('LLM_PROVIDER')}")
+    
+    # Verify LLM key is set
+    if not os.getenv('LLM_API_KEY') or os.getenv('LLM_API_KEY') == 'sk-your-key-here':
+        print("\n⚠ WARNING: LLM_API_KEY not set in .env file")
+        print("   Set your API key to run searches")
+        return
+    
+    print("\n")
     
     try:
-        # Step 1: Setup knowledge base
+        # Step 1: Setup
         await setup_knowledge_base()
         
-        # Step 2: Simulate user searches with save_interaction=True
-        search_count = await simulate_user_searches()
+        # Step 2: Simulate searches
+        # Note: Repeat queries increase frequency for those topics
+        queries = [
+            "What is machine learning?",
+            "Explain neural networks",
+            "How does deep learning work?",
+            "Tell me about neural networks",  # Repeat - increases frequency
+            "What are transformers in NLP?",
+            "Explain neural networks again",  # Another repeat
+            "How does computer vision work?",
+            "What is reinforcement learning?",
+            "Tell me more about neural networks",  # Third repeat
+        ]
         
-        if search_count == 0:
-            logger.warning("No searches completed - cannot demonstrate frequency tracking")
+        successful_searches = await simulate_user_searches(queries)
+        
+        if successful_searches == 0:
+            print("⚠ No searches completed - cannot demonstrate frequency tracking")
             return
         
-        # Step 3: Run frequency extraction and enrichment
-        # You can use either method - both accomplish the same thing
+        # Step 3: Extract frequencies
+        stats = await extract_and_apply_frequencies(
+            time_window_days=7,
+            min_threshold=1
+        )
         
-        # Option A: Using the convenience function (recommended)
-        stats = await run_frequency_pipeline_method2()
+        # Step 4: Analyze results
+        await analyze_results(stats)
         
-        # Option B: Using the pipeline creation function (for custom pipelines)
-        # stats = await run_frequency_pipeline_method1()
-        
-        # Step 4: Analyze the results
-        weighted_nodes = await analyze_frequency_weights()
-        
-        # Step 5: Demonstrate retrieval usage
-        await demonstrate_retrieval_with_frequencies()
+        # Step 5: Show usage examples
+        await demonstrate_retrieval_usage()
         
         # Summary
-        logger.info("\n" + "=" * 80)
-        logger.info("SUMMARY")
-        logger.info("=" * 80)
-        logger.info(f"Searches performed: {search_count}")
-        logger.info(f"Interactions tracked: {stats.get('interactions_in_window', 0)}")
-        logger.info(f"Nodes weighted: {len(weighted_nodes)}")
-        logger.info(f"Time window: {stats.get('time_window_days', 0)} days")
-        logger.info("\nFrequency weights have been added to the graph!")
-        logger.info("These can now be used in retrieval, ranking, and analytics.")
-        logger.info("=" * 80)
+        print("\n")
+        print("╔" + "=" * 78 + "╗")
+        print("║" + " " * 78 + "║")
+        print("║" + "  Example Complete!".center(78) + "║")
+        print("║" + " " * 78 + "║")
+        print("╚" + "=" * 78 + "╝")
+        print("\n")
+        
+        print("Summary:")
+        print(f"  ✓ Documents added: 4")
+        print(f"  ✓ Searches performed: {successful_searches}")
+        print(f"  ✓ Interactions tracked: {stats['interactions_in_window']}")
+        print(f"  ✓ Nodes weighted: {len(stats['node_frequencies'])}")
+        
+        print("\nNext steps:")
+        print("  1. Open Neo4j Browser (http://localhost:7474) to explore the graph")
+        print("  2. Modify retrieval strategies to use frequency_weight")
+        print("  3. Build analytics dashboards using element_type_frequencies")
+        print("  4. Run periodic frequency updates to track trends over time")
+        
+        print("\n")
         
     except Exception as e:
-        logger.error(f"Example failed: {e}", exc_info=True)
-        raise
+        print(f"\n✗ Example failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

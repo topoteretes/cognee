@@ -1,3 +1,4 @@
+# cognee/tasks/memify/extract_usage_frequency.py
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from cognee.shared.logging_utils import get_logger
@@ -51,10 +52,72 @@ async def extract_usage_frequency(
             
             if node_type == 'CogneeUserInteraction':
                 # Parse and validate timestamp
-                timestamp_str = node.attributes.get('timestamp') or node.attributes.get('created_at')
-                if timestamp_str:
+                timestamp_value = node.attributes.get('timestamp') or node.attributes.get('created_at')
+                if timestamp_value is not None:
                     try:
-                        interaction_time = datetime.fromisoformat(timestamp_str)
+                        # Handle various timestamp formats
+                        interaction_time = None
+                        
+                        if isinstance(timestamp_value, datetime):
+                            # Already a Python datetime
+                            interaction_time = timestamp_value
+                        elif isinstance(timestamp_value, (int, float)):
+                            # Unix timestamp (assume milliseconds if > 10 digits)
+                            if timestamp_value > 10000000000:
+                                # Milliseconds since epoch
+                                interaction_time = datetime.fromtimestamp(timestamp_value / 1000.0)
+                            else:
+                                # Seconds since epoch
+                                interaction_time = datetime.fromtimestamp(timestamp_value)
+                        elif isinstance(timestamp_value, str):
+                            # Try different string formats
+                            if timestamp_value.isdigit():
+                                # Numeric string - treat as Unix timestamp
+                                ts_int = int(timestamp_value)
+                                if ts_int > 10000000000:
+                                    interaction_time = datetime.fromtimestamp(ts_int / 1000.0)
+                                else:
+                                    interaction_time = datetime.fromtimestamp(ts_int)
+                            else:
+                                # ISO format string
+                                interaction_time = datetime.fromisoformat(timestamp_value)
+                        elif hasattr(timestamp_value, 'to_native'):
+                            # Neo4j datetime object - convert to Python datetime
+                            interaction_time = timestamp_value.to_native()
+                        elif hasattr(timestamp_value, 'year') and hasattr(timestamp_value, 'month'):
+                            # Datetime-like object - extract components
+                            try:
+                                interaction_time = datetime(
+                                    year=timestamp_value.year,
+                                    month=timestamp_value.month,
+                                    day=timestamp_value.day,
+                                    hour=getattr(timestamp_value, 'hour', 0),
+                                    minute=getattr(timestamp_value, 'minute', 0),
+                                    second=getattr(timestamp_value, 'second', 0),
+                                    microsecond=getattr(timestamp_value, 'microsecond', 0)
+                                )
+                            except (AttributeError, ValueError):
+                                pass
+                        
+                        if interaction_time is None:
+                            # Last resort: try converting to string and parsing
+                            str_value = str(timestamp_value)
+                            if str_value.isdigit():
+                                ts_int = int(str_value)
+                                if ts_int > 10000000000:
+                                    interaction_time = datetime.fromtimestamp(ts_int / 1000.0)
+                                else:
+                                    interaction_time = datetime.fromtimestamp(ts_int)
+                            else:
+                                interaction_time = datetime.fromisoformat(str_value)
+                        
+                        if interaction_time is None:
+                            raise ValueError(f"Could not parse timestamp: {timestamp_value}")
+                        
+                        # Make sure it's timezone-naive for comparison
+                        if interaction_time.tzinfo is not None:
+                            interaction_time = interaction_time.replace(tzinfo=None)
+                        
                         interaction_nodes[node_id] = {
                             'node': node,
                             'timestamp': interaction_time,
@@ -63,8 +126,9 @@ async def extract_usage_frequency(
                         interaction_count += 1
                         if interaction_time >= cutoff_time:
                             interactions_in_window += 1
-                    except (ValueError, TypeError) as e:
+                    except (ValueError, TypeError, AttributeError, OSError) as e:
                         logger.warning(f"Failed to parse timestamp for interaction node {node_id}: {e}")
+                        logger.debug(f"Timestamp value type: {type(timestamp_value)}, value: {timestamp_value}")
         
         # Process edges to find graph elements used in interactions
         for edge in subgraph.edges:
@@ -141,7 +205,7 @@ async def add_frequency_weights(
     """
     Add frequency weights to graph nodes and edges using the graph adapter.
     
-    Uses the "get → tweak dict → update" contract consistent with graph adapters.
+    Uses direct Cypher queries for Neo4j adapter compatibility.
     Writes frequency_weight properties back to the graph for use in:
     - Ranking frequently referenced entities higher during retrieval
     - Adjusting scoring for completion strategies
@@ -155,43 +219,174 @@ async def add_frequency_weights(
     
     logger.info(f"Adding frequency weights to {len(node_frequencies)} nodes")
     
-    # Update node frequencies using get → tweak → update pattern
+    # Check adapter type and use appropriate method
+    adapter_type = type(graph_adapter).__name__
+    logger.info(f"Using adapter: {adapter_type}")
+    
     nodes_updated = 0
     nodes_failed = 0
     
-    for node_id, frequency in node_frequencies.items():
+    # Determine which method to use based on adapter type
+    use_neo4j_cypher = adapter_type == 'Neo4jAdapter' and hasattr(graph_adapter, 'query')
+    use_kuzu_query = adapter_type == 'KuzuAdapter' and hasattr(graph_adapter, 'query')
+    use_get_update = hasattr(graph_adapter, 'get_node_by_id') and hasattr(graph_adapter, 'update_node_properties')
+    
+    # Method 1: Neo4j Cypher with SET (creates properties on the fly)
+    if use_neo4j_cypher:
         try:
-            # Get current node data
-            node_data = await graph_adapter.get_node_by_id(node_id)
+            logger.info("Using Neo4j Cypher SET method")
+            last_updated = usage_frequencies.get('last_processed_timestamp')
             
-            if node_data:
-                # Tweak the properties dict - add frequency_weight
-                if isinstance(node_data, dict):
-                    properties = node_data.get('properties', {})
+            for node_id, frequency in node_frequencies.items():
+                try:
+                    query = """
+                    MATCH (n)
+                    WHERE n.id = $node_id
+                    SET n.frequency_weight = $frequency,
+                        n.frequency_updated_at = $updated_at
+                    RETURN n.id as id
+                    """
+                    
+                    result = await graph_adapter.query(
+                        query,
+                        params={
+                            'node_id': node_id,
+                            'frequency': frequency,
+                            'updated_at': last_updated
+                        }
+                    )
+                    
+                    if result and len(result) > 0:
+                        nodes_updated += 1
+                    else:
+                        logger.warning(f"Node {node_id} not found or not updated")
+                        nodes_failed += 1
+                        
+                except Exception as e:
+                    logger.error(f"Error updating node {node_id}: {e}")
+                    nodes_failed += 1
+            
+            logger.info(f"Node update complete: {nodes_updated} succeeded, {nodes_failed} failed")
+            
+        except Exception as e:
+            logger.error(f"Neo4j Cypher update failed: {e}")
+            use_neo4j_cypher = False
+    
+    # Method 2: Kuzu - use get_node + add_node (updates via re-adding with same ID)
+    elif use_kuzu_query and hasattr(graph_adapter, 'get_node') and hasattr(graph_adapter, 'add_node'):
+        logger.info("Using Kuzu get_node + add_node method")
+        last_updated = usage_frequencies.get('last_processed_timestamp')
+        
+        for node_id, frequency in node_frequencies.items():
+            try:
+                # Get the existing node (returns a dict)
+                existing_node_dict = await graph_adapter.get_node(node_id)
+                
+                if existing_node_dict:
+                    # Update the dict with new properties
+                    existing_node_dict['frequency_weight'] = frequency
+                    existing_node_dict['frequency_updated_at'] = last_updated
+                    
+                    # Kuzu's add_node likely just takes the dict directly, not a Node object
+                    # Try passing the dict directly first
+                    try:
+                        await graph_adapter.add_node(existing_node_dict)
+                        nodes_updated += 1
+                    except Exception as dict_error:
+                        # If dict doesn't work, try creating a Node object
+                        logger.debug(f"Dict add failed, trying Node object: {dict_error}")
+                        
+                        try:
+                            from cognee.infrastructure.engine import Node
+                            # Try different Node constructor patterns
+                            try:
+                                # Pattern 1: Just properties
+                                node_obj = Node(existing_node_dict)
+                            except:
+                                # Pattern 2: Type and properties
+                                node_obj = Node(
+                                    type=existing_node_dict.get('type', 'Unknown'),
+                                    **existing_node_dict
+                                )
+                            
+                            await graph_adapter.add_node(node_obj)
+                            nodes_updated += 1
+                        except Exception as node_error:
+                            logger.error(f"Both dict and Node object failed: {node_error}")
+                            nodes_failed += 1
                 else:
-                    # Handle case where node_data might be a node object
-                    properties = getattr(node_data, 'properties', {}) or {}
-                
-                # Update with frequency weight
-                properties['frequency_weight'] = frequency
-                
-                # Also store when this was last updated
-                properties['frequency_updated_at'] = usage_frequencies.get('last_processed_timestamp')
-                
-                # Write back via adapter
-                await graph_adapter.update_node_properties(node_id, properties)
-                nodes_updated += 1
-            else:
-                logger.warning(f"Node {node_id} not found in graph")
+                    logger.warning(f"Node {node_id} not found in graph")
+                    nodes_failed += 1
+                    
+            except Exception as e:
+                logger.error(f"Error updating node {node_id}: {e}")
                 nodes_failed += 1
         
-        except Exception as e:
-            logger.error(f"Error updating node {node_id}: {e}")
-            nodes_failed += 1
+        logger.info(f"Node update complete: {nodes_updated} succeeded, {nodes_failed} failed")
     
-    logger.info(
-        f"Node update complete: {nodes_updated} succeeded, {nodes_failed} failed"
-    )
+    # Method 3: Generic get_node_by_id + update_node_properties
+    elif use_get_update:
+        logger.info("Using get/update method for adapter")
+        for node_id, frequency in node_frequencies.items():
+            try:
+                # Get current node data
+                node_data = await graph_adapter.get_node_by_id(node_id)
+                
+                if node_data:
+                    # Tweak the properties dict - add frequency_weight
+                    if isinstance(node_data, dict):
+                        properties = node_data.get('properties', {})
+                    else:
+                        properties = getattr(node_data, 'properties', {}) or {}
+                    
+                    # Update with frequency weight
+                    properties['frequency_weight'] = frequency
+                    properties['frequency_updated_at'] = usage_frequencies.get('last_processed_timestamp')
+                    
+                    # Write back via adapter
+                    await graph_adapter.update_node_properties(node_id, properties)
+                    nodes_updated += 1
+                else:
+                    logger.warning(f"Node {node_id} not found in graph")
+                    nodes_failed += 1
+            
+            except Exception as e:
+                logger.error(f"Error updating node {node_id}: {e}")
+                nodes_failed += 1
+        
+        logger.info(f"Node update complete: {nodes_updated} succeeded, {nodes_failed} failed")
+        for node_id, frequency in node_frequencies.items():
+            try:
+                # Get current node data
+                node_data = await graph_adapter.get_node_by_id(node_id)
+                
+                if node_data:
+                    # Tweak the properties dict - add frequency_weight
+                    if isinstance(node_data, dict):
+                        properties = node_data.get('properties', {})
+                    else:
+                        properties = getattr(node_data, 'properties', {}) or {}
+                    
+                    # Update with frequency weight
+                    properties['frequency_weight'] = frequency
+                    properties['frequency_updated_at'] = usage_frequencies.get('last_processed_timestamp')
+                    
+                    # Write back via adapter
+                    await graph_adapter.update_node_properties(node_id, properties)
+                    nodes_updated += 1
+                else:
+                    logger.warning(f"Node {node_id} not found in graph")
+                    nodes_failed += 1
+            
+            except Exception as e:
+                logger.error(f"Error updating node {node_id}: {e}")
+                nodes_failed += 1
+    
+    # If no method is available
+    if not use_neo4j_cypher and not use_kuzu_query and not use_get_update:
+        logger.error(f"Adapter {adapter_type} does not support required update methods")
+        logger.error("Required: either 'query' method or both 'get_node_by_id' and 'update_node_properties'")
+        return
     
     # Update edge frequencies
     # Note: Edge property updates are backend-specific
