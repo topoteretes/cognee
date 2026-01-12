@@ -212,3 +212,29 @@ async def test_node_edge_vector_search_single_query_collection_not_found():
     )
 
     assert vector_search.node_distances["MissingCollection"] == []
+
+
+@pytest.mark.asyncio
+async def test_node_edge_vector_search_has_results_batch_nodes_only():
+    """Test has_results returns True when only node distances are populated in batch mode."""
+    mock_vector_engine = AsyncMock()
+    vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
+    vector_search.query_list_length = 2
+    vector_search.edge_distances = [[], []]
+    vector_search.node_distances = {
+        "Entity_name": [[MockScoredResult("node1", 0.95)], []],
+    }
+
+    assert vector_search.has_results() is True
+
+
+@pytest.mark.asyncio
+async def test_node_edge_vector_search_has_results_batch_edges_only():
+    """Test has_results returns True when only edge distances are populated in batch mode."""
+    mock_vector_engine = AsyncMock()
+    vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
+    vector_search.query_list_length = 2
+    vector_search.edge_distances = [[MockScoredResult("edge1", 0.92)], []]
+    vector_search.node_distances = {}
+
+    assert vector_search.has_results() is True
