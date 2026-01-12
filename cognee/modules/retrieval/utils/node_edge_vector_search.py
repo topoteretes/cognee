@@ -49,7 +49,12 @@ class NodeEdgeVectorSearch:
         search_results: List[List[Any]],
         query_list_length: Optional[int] = None,
     ):
-        """Separates search results into node and edge distances with stable shapes."""
+        """Separates search results into node and edge distances with stable shapes.
+
+        Ensures all collections are present in the output, even if empty:
+        - Batch mode: missing/empty collections become [[]] * query_list_length
+        - Single mode: missing/empty collections become []
+        """
         self.node_distances = {}
         self.edge_distances = (
             [] if query_list_length is None else [[] for _ in range(query_list_length)]

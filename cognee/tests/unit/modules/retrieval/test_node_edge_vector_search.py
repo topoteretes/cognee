@@ -215,6 +215,39 @@ async def test_node_edge_vector_search_single_query_collection_not_found():
 
 
 @pytest.mark.asyncio
+async def test_node_edge_vector_search_missing_collections_single_query():
+    """Test that missing collections in single-query mode are handled gracefully with empty lists."""
+    mock_vector_engine = AsyncMock()
+    mock_vector_engine.embedding_engine = AsyncMock()
+    mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+
+    node_result = MockScoredResult("node1", 0.95)
+
+    def search_side_effect(*args, **kwargs):
+        collection_name = kwargs.get("collection_name")
+        if collection_name == "Entity_name":
+            return [node_result]
+        elif collection_name == "MissingCollection":
+            raise CollectionNotFoundError("Collection not found")
+        return []
+
+    mock_vector_engine.search = AsyncMock(side_effect=search_side_effect)
+
+    vector_search = NodeEdgeVectorSearch(vector_engine=mock_vector_engine)
+    collections = ["Entity_name", "MissingCollection", "EmptyCollection"]
+
+    await vector_search.embed_and_retrieve_distances(
+        query="test query", query_batch=None, collections=collections, wide_search_limit=10
+    )
+
+    assert len(vector_search.node_distances["Entity_name"]) == 1
+    assert vector_search.node_distances["Entity_name"][0].id == "node1"
+    assert vector_search.node_distances["Entity_name"][0].score == 0.95
+    assert vector_search.node_distances["MissingCollection"] == []
+    assert vector_search.node_distances["EmptyCollection"] == []
+
+
+@pytest.mark.asyncio
 async def test_node_edge_vector_search_has_results_batch_nodes_only():
     """Test has_results returns True when only node distances are populated in batch mode."""
     mock_vector_engine = AsyncMock()
