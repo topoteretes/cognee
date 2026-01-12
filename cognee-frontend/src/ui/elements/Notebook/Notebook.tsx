@@ -534,7 +534,7 @@ function transformInsightsGraphData(triplets: Triplet[]) {
       target: string,
       label: string,
     }
-  } = {};          
+  } = {};
 
   for (const triplet of triplets) {
     nodes[triplet[0].id] = {

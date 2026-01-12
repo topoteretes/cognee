@@ -16,9 +16,6 @@ ARG DEBUG
 # Set environment variable based on the build argument
 ENV DEBUG=${DEBUG}
 
-# if you located in China, you can use aliyun mirror to speed up
-#RUN sed -i 's@deb.debian.org@mirrors.ustc.edu.cn@g' /etc/apt/sources.list.d/debian.sources
-
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
