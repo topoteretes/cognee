@@ -36,7 +36,7 @@ class NodeEdgeVectorSearch:
                 bool(collection_results) for collection_results in self.node_distances.values()
             )
 
-        if self.edge_distances and any(self.edge_distances):
+        if self.edge_distances and any(inner_list for inner_list in self.edge_distances):
             return True
         return any(
             any(results_per_query for results_per_query in collection_results)
@@ -109,7 +109,7 @@ class NodeEdgeVectorSearch:
     async def _run_single_search(
         self, collections: List[str], query: str, wide_search_limit: Optional[int]
     ) -> List[List[Any]]:
-        """Runs single query search and wraps results in list-of-lists for shape consistency."""
+        """Runs single query search and returns list-of-lists per collection."""
         await self._embed_query(query)
         search_tasks = [
             self._search_single_collection(self.vector_engine, wide_search_limit, collection)
