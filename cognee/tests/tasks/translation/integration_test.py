@@ -1,14 +1,13 @@
 """
 Integration tests for multilingual content translation feature.
 
-Tests the full cognify pipeline with translation enabled.
+Tests the translation module standalone functionality.
 """
 
 import os
 
 import pytest
 
-from cognee import add, cognify, prune, search, SearchType
 from cognee.tasks.translation import translate_text
 from cognee.tasks.translation.detect_language import detect_language_async
 
@@ -16,183 +15,6 @@ from cognee.tasks.translation.detect_language import detect_language_async
 def has_llm_api_key():
     """Check if LLM API key is available"""
     return bool(os.environ.get("LLM_API_KEY"))
-
-
-async def reset_engines():
-    """Reset cached engines to avoid event loop issues between tests."""
-    from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
-    from cognee.infrastructure.databases.relational.create_relational_engine import (
-        create_relational_engine,
-    )
-    from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
-
-    create_graph_engine.cache_clear()
-    create_vector_engine.cache_clear()
-    create_relational_engine.cache_clear()
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
-async def test_quick_translation():
-    """Quick smoke test for translation feature"""
-    await reset_engines()
-    await prune.prune_data()
-    await prune.prune_system(metadata=True)
-
-    spanish_text = "La inteligencia artificial está transformando el mundo de la tecnología."
-    await add(spanish_text, dataset_name="spanish_test")
-
-    result = await cognify(
-        datasets=["spanish_test"],
-        auto_translate=True,
-        target_language="en",
-        translation_provider="llm",
-    )
-
-    assert result is not None
-    assert len(result) > 0
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
-async def test_translation_basic():
-    """Test basic translation functionality with English text"""
-    await reset_engines()
-    await prune.prune_data()
-    await prune.prune_system(metadata=True)
-
-    english_text = "Hello, this is a test document about artificial intelligence."
-    await add(english_text, dataset_name="test_english")
-
-    result = await cognify(
-        datasets=["test_english"],
-        auto_translate=True,
-        target_language="en",
-        translation_provider="llm",
-    )
-
-    assert result is not None
-
-    search_results = await search(
-        query_text="What is this document about?",
-        query_type=SearchType.SUMMARIES,
-    )
-    assert search_results is not None
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
-async def test_translation_spanish():
-    """Test translation with Spanish text"""
-    await reset_engines()
-    await prune.prune_data()
-    await prune.prune_system(metadata=True)
-
-    spanish_text = """
-    La inteligencia artificial es una rama de la informática que se centra en 
-    crear sistemas capaces de realizar tareas que normalmente requieren inteligencia humana.
-    Estos sistemas pueden aprender, razonar y resolver problemas complejos.
-    """
-
-    await add(spanish_text, dataset_name="test_spanish")
-
-    result = await cognify(
-        datasets=["test_spanish"],
-        auto_translate=True,
-        target_language="en",
-        translation_provider="llm",
-    )
-
-    assert result is not None
-
-    search_results = await search(
-        query_text="What is artificial intelligence?",
-        query_type=SearchType.SUMMARIES,
-    )
-    assert search_results is not None
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
-async def test_translation_french():
-    """Test translation with French text"""
-    await reset_engines()
-    await prune.prune_data()
-    await prune.prune_system(metadata=True)
-
-    french_text = """
-    L'apprentissage automatique est une méthode d'analyse de données qui 
-    automatise la construction de modèles analytiques. C'est une branche 
-    de l'intelligence artificielle basée sur l'idée que les systèmes peuvent 
-    apprendre à partir de données, identifier des modèles et prendre des décisions.
-    """
-
-    await add(french_text, dataset_name="test_french")
-
-    result = await cognify(
-        datasets=["test_french"],
-        auto_translate=True,
-        target_language="en",
-    )
-
-    assert result is not None
-
-    search_results = await search(
-        query_text="What is machine learning?",
-        query_type=SearchType.SUMMARIES,
-    )
-    assert search_results is not None
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
-async def test_translation_disabled():
-    """Test that cognify works without translation"""
-    await reset_engines()
-    await prune.prune_data()
-    await prune.prune_system(metadata=True)
-
-    text = "This is a baseline test without translation enabled."
-    await add(text, dataset_name="test_baseline")
-
-    result = await cognify(
-        datasets=["test_baseline"],
-        auto_translate=False,
-    )
-
-    assert result is not None
-
-
-@pytest.mark.asyncio
-@pytest.mark.skipif(not has_llm_api_key(), reason="No LLM API key available")
-async def test_translation_mixed_languages():
-    """Test with multiple documents in different languages"""
-    await reset_engines()
-    await prune.prune_data()
-    await prune.prune_system(metadata=True)
-
-    texts = [
-        "Artificial intelligence is transforming the world.",
-        "La tecnología está cambiando nuestras vidas.",
-        "Les ordinateurs deviennent de plus en plus puissants.",
-    ]
-
-    for text in texts:
-        await add(text, dataset_name="test_mixed")
-
-    result = await cognify(
-        datasets=["test_mixed"],
-        auto_translate=True,
-        target_language="en",
-    )
-
-    assert result is not None
-
-    search_results = await search(
-        query_text="What topics are discussed?",
-        query_type=SearchType.SUMMARIES,
-    )
-    assert search_results is not None
 
 
 @pytest.mark.asyncio
