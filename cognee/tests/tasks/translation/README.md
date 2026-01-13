@@ -30,10 +30,6 @@ Unit and integration tests for the multilingual content translation feature.
   - Skip translation for target language
   - Confidence threshold customization
 
-- **integration_test.py** - Standalone translation module tests
-  - Direct translate_text function
-  - Language detection functionality
-
 ## Running Tests
 
 ### Run all translation tests
