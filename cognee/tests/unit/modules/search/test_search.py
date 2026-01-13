@@ -184,6 +184,7 @@ async def test_search_access_control_only_context_returns_dataset_shaped_dicts(
         dataset_ids=[ds.id],
         user=user,
         only_context=True,
+        verbose=True,
     )
 
     assert out == [
