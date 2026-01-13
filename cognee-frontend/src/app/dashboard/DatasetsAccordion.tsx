@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ChangeEvent, useCallback, useEffect, useState } from "react";
 import { useBoolean } from "@/utils";
 import { Accordion, CTAButton, GhostButton, IconButton, Input, Modal, PopupMenu } from "@/ui/elements";
@@ -258,15 +259,12 @@ export default function DatasetsAccordion({
                 tools={(
                   <IconButton className="relative">
                     <PopupMenu>
-                      <div className="flex flex-col gap-0.5">
-                        <div className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer relative">
-                          <input tabIndex={-1} type="file" multiple onChange={handleAddFiles.bind(null, dataset)} className="absolute w-full h-full cursor-pointer opacity-0" />
-                          <span>add data</span>
-                        </div>
+                      <div className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer relative">
+                        <input tabIndex={-1} type="file" multiple onChange={handleAddFiles.bind(null, dataset)} className="absolute w-full h-full cursor-pointer opacity-0" />
+                        <span>add data</span>
                       </div>
-                      <div className="flex flex-col gap-0.5 items-start">
-                        <div onClick={() => handleDatasetRemove(dataset)} className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer">delete</div>
-                      </div>
+                      <Link target="_blank" href={`/visualize/${dataset.id}`}>visualize</Link>
+                      <div onClick={() => handleDatasetRemove(dataset)} className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer">delete</div>
                     </PopupMenu>
                   </IconButton>
                 )}
