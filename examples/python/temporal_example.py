@@ -1,4 +1,5 @@
 import asyncio
+from pprint import pprint
 import cognee
 from cognee.shared.logging_utils import setup_logging, INFO
 from cognee.api.v1.search import SearchType
@@ -87,7 +88,8 @@ async def main():
             top_k=15,
         )
         print(f"Query: {query_text}")
-        print(f"Results: {search_results}\n")
+        print("Results:")
+        pprint(search_results)
 
 
 if __name__ == "__main__":

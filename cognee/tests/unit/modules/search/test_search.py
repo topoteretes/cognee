@@ -129,14 +129,32 @@ async def test_search_access_control_returns_dataset_shaped_dicts(monkeypatch, s
     monkeypatch.setattr(search_mod, "backend_access_control_enabled", lambda: True)
     monkeypatch.setattr(search_mod, "authorized_search", dummy_authorized_search)
 
-    out = await search_mod.search(
+    out_non_verbose = await search_mod.search(
         query_text="q",
         query_type=SearchType.CHUNKS,
         dataset_ids=[ds.id],
         user=user,
+        verbose=False,
     )
 
-    assert out == [
+    assert out_non_verbose == [
+        {
+            "search_result": ["r"],
+            "dataset_id": ds.id,
+            "dataset_name": "ds1",
+            "dataset_tenant_id": "t1",
+        }
+    ]
+
+    out_verbose = await search_mod.search(
+        query_text="q",
+        query_type=SearchType.CHUNKS,
+        dataset_ids=[ds.id],
+        user=user,
+        verbose=True,
+    )
+
+    assert out_verbose == [
         {
             "search_result": ["r"],
             "dataset_id": ds.id,
@@ -166,6 +184,7 @@ async def test_search_access_control_only_context_returns_dataset_shaped_dicts(
         dataset_ids=[ds.id],
         user=user,
         only_context=True,
+        verbose=True,
     )
 
     assert out == [
