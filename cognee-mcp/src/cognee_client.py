@@ -151,7 +151,7 @@ class CogneeClient:
         query_type: str,
         datasets: Optional[List[str]] = None,
         system_prompt: Optional[str] = None,
-        top_k: int = 5,
+        top_k: int = 10,
     ) -> Any:
         """
         Search the knowledge graph.
