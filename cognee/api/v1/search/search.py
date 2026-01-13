@@ -218,7 +218,6 @@ async def search(
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
-        verbose=verbose,
     )
 
     return filtered_search_results
