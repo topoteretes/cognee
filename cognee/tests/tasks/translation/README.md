@@ -30,12 +30,9 @@ Unit and integration tests for the multilingual content translation feature.
   - Skip translation for target language
   - Confidence threshold customization
 
-- **integration_test.py** - End-to-end integration tests
-  - Full cognify pipeline with translation
-  - Spanish/French to English translation
-  - Mixed language datasets
-  - Search functionality after translation
-  - Translation disabled mode
+- **integration_test.py** - Standalone translation module tests
+  - Direct translate_text function
+  - Language detection functionality
 
 ## Running Tests
 
@@ -94,13 +91,6 @@ result = await translate_text(
     target_language="en"
 )
 print(result.translated_text)  # "Hello world"
-
-# Or use auto-translation in the cognify pipeline
-await cognee.add("Hola, ¿cómo estás?")
-await cognee.cognify(auto_translate=True)
-
-# Search works on translated content
-results = await cognee.search("how are you")
 ```
 
 ### Alternative Translation Providers
@@ -121,8 +111,8 @@ cognee.config.set_translation_provider("azure")
 | detect_language_test.py | 10 | Language detection |
 | providers_test.py | 9 | Translation providers |
 | translate_content_test.py | 9 | Content translation task |
-| integration_test.py | 8 | End-to-end pipeline |
-| **Total** | **40** | |
+| integration_test.py | 2 | Standalone translation tests |
+| **Total** | **34** | |
 
 ## Test Categories
 
@@ -156,11 +146,6 @@ cognee.config.set_translation_provider("azure")
 - ✅ Empty text/list handling
 - ✅ Confidence threshold customization
 
-### Integration (8 tests)
-- ✅ Full cognify pipeline with auto_translate=True
-- ✅ Spanish to English translation
-- ✅ French to English translation
-- ✅ Mixed language datasets
-- ✅ Translation disabled mode
+### Integration (2 tests)
 - ✅ Direct translate_text function
-- ✅ Search after translation
+- ✅ Language detection functionality
