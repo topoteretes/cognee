@@ -90,6 +90,7 @@ async def test_search_access_control_edges_context_produces_graphs_and_context_m
         query_type=SearchType.CHUNKS,
         dataset_ids=[ds.id],
         user=user,
+        verbose=True,
     )
 
     assert out[0]["dataset_name"] == "ds1"
@@ -126,6 +127,7 @@ async def test_search_access_control_insights_context_produces_graphs_and_null_r
         query_type=SearchType.CHUNKS,
         dataset_ids=[ds.id],
         user=user,
+        verbose=True,
     )
 
     assert out[0]["graphs"] is not None
@@ -150,6 +152,7 @@ async def test_search_access_control_only_context_returns_context_text_map(monke
         dataset_ids=[ds.id],
         user=user,
         only_context=True,
+        verbose=True,
     )
 
     assert out[0]["search_result"] == [{"ds1": "a\nb"}]
@@ -172,6 +175,7 @@ async def test_search_access_control_results_edges_become_graph_result(monkeypat
         query_type=SearchType.CHUNKS,
         dataset_ids=[ds.id],
         user=user,
+        verbose=True,
     )
 
     assert isinstance(out[0]["search_result"][0], dict)
@@ -196,6 +200,7 @@ async def test_search_access_control_context_str_branch(monkeypatch, search_mod)
         query_type=SearchType.CHUNKS,
         dataset_ids=[ds.id],
         user=user,
+        verbose=True,
     )
 
     assert out[0]["graphs"] is None
@@ -219,6 +224,7 @@ async def test_search_access_control_context_empty_list_branch(monkeypatch, sear
         query_type=SearchType.CHUNKS,
         dataset_ids=[ds.id],
         user=user,
+        verbose=True,
     )
 
     assert out[0]["graphs"] is None
@@ -242,6 +248,7 @@ async def test_search_access_control_multiple_results_list_branch(monkeypatch, s
         query_type=SearchType.CHUNKS,
         dataset_ids=[ds.id],
         user=user,
+        verbose=True,
     )
 
     assert out[0]["search_result"] == [["r1", "r2"]]
@@ -270,4 +277,5 @@ async def test_search_access_control_defaults_empty_datasets(monkeypatch, search
             query_type=SearchType.CHUNKS,
             dataset_ids=None,
             user=user,
+            verbose=True,
         )

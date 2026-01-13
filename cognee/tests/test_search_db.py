@@ -149,7 +149,9 @@ async def e2e_state():
 
     vector_engine = get_vector_engine()
     collection = await vector_engine.search(
-        collection_name="Triplet_text", query_text="Test", limit=None
+        collection_name="Triplet_text",
+        query_text="Test",
+        limit=None,
     )
 
     # --- Retriever contexts ---
@@ -188,57 +190,70 @@ async def e2e_state():
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="Where is germany located, next to which country?",
         save_interaction=True,
+        verbose=True,
     )
     completion_cot = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION_COT,
         query_text="What is the country next to germany??",
         save_interaction=True,
+        verbose=True,
     )
     completion_ext = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
         query_text="What is the name of the country next to germany",
         save_interaction=True,
+        verbose=True,
     )
 
     await cognee.search(
-        query_type=SearchType.FEEDBACK, query_text="This was not the best answer", last_k=1
+        query_type=SearchType.FEEDBACK,
+        query_text="This was not the best answer",
+        last_k=1,
+        verbose=True,
     )
 
     completion_sum = await cognee.search(
         query_type=SearchType.GRAPH_SUMMARY_COMPLETION,
         query_text="Next to which country is Germany located?",
         save_interaction=True,
+        verbose=True,
     )
     completion_triplet = await cognee.search(
         query_type=SearchType.TRIPLET_COMPLETION,
         query_text="Next to which country is Germany located?",
         save_interaction=True,
+        verbose=True,
     )
     completion_chunks = await cognee.search(
         query_type=SearchType.CHUNKS,
         query_text="Germany",
         save_interaction=False,
+        verbose=True,
     )
     completion_summaries = await cognee.search(
         query_type=SearchType.SUMMARIES,
         query_text="Germany",
         save_interaction=False,
+        verbose=True,
     )
     completion_rag = await cognee.search(
         query_type=SearchType.RAG_COMPLETION,
         query_text="Next to which country is Germany located?",
         save_interaction=False,
+        verbose=True,
     )
     completion_temporal = await cognee.search(
         query_type=SearchType.TEMPORAL,
         query_text="Next to which country is Germany located?",
         save_interaction=False,
+        verbose=True,
     )
 
     await cognee.search(
         query_type=SearchType.FEEDBACK,
         query_text="This answer was great",
         last_k=1,
+        verbose=True,
     )
 
     # Snapshot after all E2E operations above (used by assertion-only tests).
