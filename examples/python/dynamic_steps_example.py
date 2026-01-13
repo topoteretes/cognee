@@ -1,4 +1,5 @@
 import asyncio
+from pprint import pprint
 
 import cognee
 from cognee.api.v1.search import SearchType
@@ -187,7 +188,7 @@ async def main(enable_steps):
         search_results = await cognee.search(
             query_type=SearchType.GRAPH_COMPLETION, query_text="Who has experience in design tools?"
         )
-        print(search_results)
+        pprint(search_results)
 
 
 if __name__ == "__main__":
