@@ -28,6 +28,7 @@ from cognee import __version__ as cognee_version
 from .get_search_type_tools import get_search_type_tools
 from .no_access_control_search import no_access_control_search
 from ..utils.prepare_search_result import prepare_search_result
+from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps # Import your function
 
 logger = get_logger()
 
@@ -76,9 +77,11 @@ async def search(
         },
     )
 
+    actual_accessed_items = [] # Collect all accessed items here
+
     # Use search function filtered by permissions if access control is enabled
     if backend_access_control_enabled():
-        search_results = await authorized_search(
+        raw_search_results = await authorized_search(
             query_type=query_type,
             query_text=query_text,
             user=user,
@@ -96,8 +99,19 @@ async def search(
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
         )
+        if use_combined_context:
+            # raw_search_results is (completion, context, datasets)
+            _, context_data, _ = raw_search_results
+            if isinstance(context_data, list): # Expecting a list of Edge or similar
+                actual_accessed_items.extend(context_data)
+            # If context_data is a string, it's already textual and might not map to specific nodes for timestamp updates
+        else:
+            for result_tuple in raw_search_results:
+                _, context_data, _ = result_tuple
+                if isinstance(context_data, list): # Expecting a list of Edge or similar
+                    actual_accessed_items.extend(context_data)
     else:
-        search_results = [
+        raw_search_results = [
             await no_access_control_search(
                 query_type=query_type,
                 query_text=query_text,
@@ -114,6 +128,15 @@ async def search(
                 triplet_distance_penalty=triplet_distance_penalty,
             )
         ]
+        # In this case, raw_search_results is a list containing a single tuple
+        if raw_search_results:
+            _, context_data, _ = raw_search_results[0]
+            if isinstance(context_data, list): # Expecting a list of Edge or similar
+                actual_accessed_items.extend(context_data)
+
+    # Call the update_node_access_timestamps function here
+    # Pass the collected actual_accessed_items
+    await update_node_access_timestamps(actual_accessed_items)
 
     send_telemetry(
         "cognee.search EXECUTION COMPLETED",
@@ -123,6 +146,8 @@ async def search(
             "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
         },
     )
+
+    search_results = raw_search_results
 
     await log_result(
         query.id,
@@ -326,6 +351,8 @@ async def authorized_search(
         only_context=only_context,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
+        triplet_distance_penalty=triplet_distance_penalty,
+
     )
 
     return search_results
@@ -445,3 +472,4 @@ async def search_in_datasets_context(
         )
 
     return await asyncio.gather(*tasks)
+
