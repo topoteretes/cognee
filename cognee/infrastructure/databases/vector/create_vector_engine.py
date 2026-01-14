@@ -15,6 +15,8 @@ def create_vector_engine(
     vector_db_port: str = "",
     vector_db_key: str = "",
     vector_dataset_database_handler: str = "",
+    vector_db_username: str = "",
+    vector_db_password: str = "",
 ):
     """
     Create a vector database engine based on the specified provider.
@@ -55,27 +57,43 @@ def create_vector_engine(
         )
 
     if vector_db_provider.lower() == "pgvector":
-        from cognee.infrastructure.databases.relational import get_relational_config
+        from cognee.context_global_variables import backend_access_control_enabled
 
-        # Get configuration for postgres database
-        relational_config = get_relational_config()
-        db_username = relational_config.db_username
-        db_password = relational_config.db_password
-        db_host = relational_config.db_host
-        db_port = relational_config.db_port
-        db_name = relational_config.db_name
+        if backend_access_control_enabled():
+            connection_string: str = (
+                f"postgresql+asyncpg://{vector_db_username}:{vector_db_password}"
+                f"@{vector_db_url}:{vector_db_port}/{vector_db_name}"
+            )
+        else:
+            if (
+                vector_db_port
+                and vector_db_username
+                and vector_db_password
+                and vector_db_url
+                and vector_db_name
+            ):
+                connection_string: str = (
+                    f"postgresql+asyncpg://{vector_db_username}:{vector_db_password}"
+                    f"@{vector_db_url}:{vector_db_port}/{vector_db_name}"
+                )
+            else:
+                from cognee.infrastructure.databases.relational import get_relational_config
 
-        if not (db_host and db_port and db_name and db_username and db_password):
-            raise EnvironmentError("Missing requred pgvector credentials!")
+                # Get configuration for postgres database
+                relational_config = get_relational_config()
+                db_username = relational_config.db_username
+                db_password = relational_config.db_password
+                db_host = relational_config.db_host
+                db_port = relational_config.db_port
+                db_name = relational_config.db_name
 
-        connection_string = URL.create(
-            "postgresql+asyncpg",
-            username=db_username,
-            password=db_password,
-            host=db_host,
-            port=int(db_port),
-            database=db_name,
-        )
+                if not (db_host and db_port and db_name and db_username and db_password):
+                    raise EnvironmentError("Missing required pgvector credentials!")
+
+                connection_string: str = (
+                    f"postgresql+asyncpg://{db_username}:{db_password}"
+                    f"@{db_host}:{db_port}/{db_name}"
+                )
 
         try:
             from .pgvector.PGVectorAdapter import PGVectorAdapter

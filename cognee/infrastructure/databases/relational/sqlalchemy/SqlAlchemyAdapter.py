@@ -8,7 +8,7 @@ from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import NoResultFound
-from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect
+from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect, URL
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.modules.data.models.Data import Data
@@ -86,6 +86,27 @@ class SQLAlchemyAdapter:
                 pool_timeout=280,
                 connect_args=final_connect_args,
             )
+
+            from cognee.context_global_variables import backend_access_control_enabled
+
+            if backend_access_control_enabled():
+                from cognee.infrastructure.databases.vector.config import get_vectordb_config
+
+                vector_config = get_vectordb_config()
+                if vector_config.vector_db_provider == "pgvector":
+                    # Create a maintenance engine, used when creating new postgres databases.
+                    # Database named "postgres" should always exist. We need this since the SQLAlchemy
+                    # engine cannot directly execute queries without first connecting to a database.
+                    maintenance_db_name = "postgres"
+                    maintenance_db_url = URL.create(
+                        "postgresql+asyncpg",
+                        username=vector_config.vector_db_username,
+                        password=vector_config.vector_db_password,
+                        host=vector_config.vector_db_url,
+                        port=int(vector_config.vector_db_port),
+                        database=maintenance_db_name,
+                    )
+                    self.maintenance_engine = create_async_engine(maintenance_db_url)
 
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
@@ -517,9 +538,32 @@ class SQLAlchemyAdapter:
             if not await file_storage.file_exists(db_name):
                 await file_storage.ensure_directory_exists()
 
-        async with self.engine.begin() as connection:
-            if len(Base.metadata.tables.keys()) > 0:
-                await connection.run_sync(Base.metadata.create_all)
+        from cognee.infrastructure.databases.relational.config import get_relational_config
+
+        relational_config = get_relational_config()
+
+        if self.engine.dialect.name == "sqlite" or (
+            self.engine.dialect.name == "postgresql"
+            and relational_config.db_provider == "postgres"
+            and self.engine.url.database == relational_config.db_name
+        ):
+            # In this case we already have a relational db created in sqlite or postgres, we just need to populate it
+            async with self.engine.begin() as connection:
+                if len(Base.metadata.tables.keys()) > 0:
+                    await connection.run_sync(Base.metadata.create_all)
+            return
+
+        from cognee.context_global_variables import backend_access_control_enabled
+
+        if self.engine.dialect.name == "postgresql" and backend_access_control_enabled():
+            # Connect to maintenance db in order to create new database
+            # Make sure to execute CREATE DATABASE outside of transaction block, and set AUTOCOMMIT isolation level
+            connection = await self.maintenance_engine.connect()
+            await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await connection.execute(text(f'CREATE DATABASE "{self.engine.url.database}";'))
+
+            # Clean up resources
+            await connection.close()
 
     async def delete_database(self):
         """

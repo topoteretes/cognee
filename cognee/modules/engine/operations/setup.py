@@ -4,6 +4,7 @@ from cognee.infrastructure.databases.relational import (
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
+from cognee.context_global_variables import backend_access_control_enabled
 
 
 async def setup():
@@ -14,4 +15,5 @@ async def setup():
     followed by creating a PGVector database and its tables.
     """
     await create_relational_db_and_tables()
-    await create_pgvector_db_and_tables()
+    if not backend_access_control_enabled():
+        await create_pgvector_db_and_tables()
