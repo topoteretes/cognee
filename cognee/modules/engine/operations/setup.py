@@ -17,3 +17,9 @@ async def setup():
     await create_relational_db_and_tables()
     if not backend_access_control_enabled():
         await create_pgvector_db_and_tables()
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    asyncio.run(setup())

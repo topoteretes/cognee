@@ -1,4 +1,6 @@
 import asyncio
+from pprint import pprint
+
 import cognee
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.users.methods import get_default_user
@@ -71,7 +73,7 @@ async def main():
     print("Search results:")
     # Display results
     for result_text in search_results:
-        print(result_text)
+        pprint(result_text)
 
 
 if __name__ == "__main__":

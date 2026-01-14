@@ -76,7 +76,7 @@ git clone https://github.com/<your-github-username>/cognee.git
 cd cognee
 ```
 In case you are working on Vector and Graph Adapters
-1. Fork the [**cognee**](https://github.com/topoteretes/cognee-community) repository
+1. Fork the [**cognee-community**](https://github.com/topoteretes/cognee-community) repository
 2. Clone your fork:
 ```shell
 git clone https://github.com/<your-github-username>/cognee-community.git
@@ -118,6 +118,21 @@ or
 
 ```shell
 uv run python examples/python/simple_example.py
+```
+
+### Running Simple Example
+
+Change .env.example into .env and provide your OPENAI_API_KEY as LLM_API_KEY
+
+Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
+
+```shell
+python cognee/cognee/examples/python/simple_example.py
+```
+or
+
+```shell
+uv run python cognee/cognee/examples/python/simple_example.py
 ```
 
 ## 4. 📤 Submitting Changes

@@ -27,6 +27,5 @@ await cognee.cognify(datasets=["python-development-with-cognee"], temporal_cogni
 results = await cognee.search(
     "What Python type hinting challenges did I face, and how does Guido approach similar problems in mypy?",
     datasets=["python-development-with-cognee"],
-    use_combined_context=True,  # Used to show reasoning graph visualization
 )
 print(results)
