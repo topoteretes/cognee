@@ -143,8 +143,26 @@ def create_vector_engine(
             embedding_engine=embedding_engine,
         )
 
+    elif vector_db_provider.lower() == "falkordb":
+        try:
+            from falkordb import FalkorDB  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "FalkorDB is not installed. Please install with 'pip install cognee[falkordb]'"
+            )
+
+        from .falkordb.FalkorDBVectorAdapter import FalkorDBVectorAdapter
+
+        return FalkorDBVectorAdapter(
+            url=vector_db_url,
+            port=vector_db_port or 6379,
+            api_key=vector_db_key or None,
+            embedding_engine=embedding_engine,
+            graph_name=vector_db_name or "CogneeGraph",
+        )
+
     else:
         raise EnvironmentError(
             f"Unsupported vector database provider: {vector_db_provider}. "
-            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics', 'ChromaDB'])}"
+            f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['LanceDB', 'PGVector', 'neptune_analytics', 'ChromaDB', 'falkordb'])}"
         )
