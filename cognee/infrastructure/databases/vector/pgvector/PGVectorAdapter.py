@@ -325,81 +325,54 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # NOTE: This needs to be initialized in case search doesn't return a value
         closest_items = []
 
-        if include_payload:
-            # Use async session to connect to the database
-            async with self.get_async_session() as session:
-                query = select(
-                    PGVectorDataPoint,
-                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
-                ).order_by("similarity")
+        # Note: Exclude payload from returned columns if not needed to optimize performance
+        select_columns = (
+            [PGVectorDataPoint]
+            if include_payload
+            else [PGVectorDataPoint.c.id, PGVectorDataPoint.c.vector]
+        )
+        # Use async session to connect to the database
+        async with self.get_async_session() as session:
+            query = select(
+                *select_columns,
+                PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
+            ).order_by("similarity")
 
-                if limit > 0:
-                    query = query.limit(limit)
+            if limit > 0:
+                query = query.limit(limit)
 
-                # Find closest vectors to query_vector
-                closest_items = await session.execute(query)
+            # Find closest vectors to query_vector
+            closest_items = await session.execute(query)
 
-            vector_list = []
+        vector_list = []
 
-            # Extract distances and find min/max for normalization
-            for vector in closest_items.all():
-                vector_list.append(
-                    {
-                        "id": parse_id(str(vector.id)),
-                        "payload": vector.payload,
-                        "_distance": vector.similarity,
-                    }
-                )
+        # Extract distances and find min/max for normalization
+        for vector in closest_items.all():
+            vector_list.append(
+                {
+                    "id": parse_id(str(vector.id)),
+                    "payload": vector.payload if include_payload else None,
+                    "_distance": vector.similarity,
+                }
+            )
 
-            if len(vector_list) == 0:
-                return []
+        if len(vector_list) == 0:
+            return []
 
-            # Normalize vector distance and add this as score information to vector_list
-            normalized_values = normalize_distances(vector_list)
-            for i in range(0, len(normalized_values)):
-                vector_list[i]["score"] = normalized_values[i]
+        # Normalize vector distance and add this as score information to vector_list
+        normalized_values = normalize_distances(vector_list)
+        for i in range(0, len(normalized_values)):
+            vector_list[i]["score"] = normalized_values[i]
 
-            # Create and return ScoredResult objects
-            return [
-                ScoredResult(id=row.get("id"), payload=row.get("payload"), score=row.get("score"))
-                for row in vector_list
-            ]
-        else:
-            # Use async session to connect to the database
-            async with self.get_async_session() as session:
-                query = select(
-                    PGVectorDataPoint.c.id,
-                    PGVectorDataPoint.c.vector,
-                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
-                ).order_by("similarity")
-
-                if limit > 0:
-                    query = query.limit(limit)
-
-                # Find closest vectors to query_vector
-                closest_items = await session.execute(query)
-
-            vector_list = []
-
-            # Extract distances and find min/max for normalization
-            for vector in closest_items.all():
-                vector_list.append(
-                    {
-                        "id": parse_id(str(vector.id)),
-                        "_distance": vector.similarity,
-                    }
-                )
-
-            if len(vector_list) == 0:
-                return []
-
-            # Normalize vector distance and add this as score information to vector_list
-            normalized_values = normalize_distances(vector_list)
-            for i in range(0, len(normalized_values)):
-                vector_list[i]["score"] = normalized_values[i]
-
-            # Create and return ScoredResult objects
-            return [ScoredResult(id=row.get("id"), score=row.get("score")) for row in vector_list]
+        # Create and return ScoredResult objects
+        return [
+            ScoredResult(
+                id=row.get("id"),
+                payload=row.get("payload") if include_payload else None,
+                score=row.get("score"),
+            )
+            for row in vector_list
+        ]
 
     async def batch_search(
         self,

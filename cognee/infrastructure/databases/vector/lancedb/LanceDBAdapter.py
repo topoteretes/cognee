@@ -248,40 +248,30 @@ class LanceDBAdapter(VectorDBInterface):
         if limit <= 0:
             return []
 
-        if include_payload:
-            result_values = await collection.vector_search(query_vector).limit(limit).to_list()
-            if not result_values:
-                return []
-            normalized_values = normalize_distances(result_values)
+        # Note: Exclude payload if not needed to optimize performance
+        select_columns = (
+            ["id", "vector", "payload", "_distance"]
+            if include_payload
+            else ["id", "vector", "_distance"]
+        )
+        result_values = (
+            await collection.vector_search(query_vector)
+            .select(select_columns)
+            .limit(limit)
+            .to_list()
+        )
+        if not result_values:
+            return []
+        normalized_values = normalize_distances(result_values)
 
-            return [
-                ScoredResult(
-                    id=parse_id(result["id"]),
-                    payload=result["payload"],
-                    score=normalized_values[value_index],
-                )
-                for value_index, result in enumerate(result_values)
-            ]
-
-        else:
-            result_values = await (
-                collection.vector_search(query_vector)
-                .limit(limit)
-                .select(["id", "vector", "_distance"])
-                .to_list()
+        return [
+            ScoredResult(
+                id=parse_id(result["id"]),
+                payload=result["payload"] if include_payload else None,
+                score=normalized_values[value_index],
             )
-            if not result_values:
-                return []
-
-            normalized_values = normalize_distances(result_values)
-
-            return [
-                ScoredResult(
-                    id=parse_id(result["id"]),
-                    score=normalized_values[value_index],
-                )
-                for value_index, result in enumerate(result_values)
-            ]
+            for value_index, result in enumerate(result_values)
+        ]
 
     async def batch_search(
         self,
