@@ -80,6 +80,7 @@ scraping = [
 ]
 
 neo4j = ["neo4j>=5.28.0,<6"]
+falkordb = ["falkordb>=1.0.0,<2"]
 neptune = ["langchain_aws>=0.2.22"]
 postgres = [
     "psycopg2>=2.9.10,<3",
