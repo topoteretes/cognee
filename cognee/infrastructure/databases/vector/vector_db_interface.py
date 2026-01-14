@@ -87,6 +87,7 @@ class VectorDBInterface(Protocol):
         query_vector: Optional[List[float]],
         limit: Optional[int],
         with_vector: bool = False,
+        include_payload: bool = False,
     ):
         """
         Perform a search in the specified collection using either a text query or a vector
@@ -103,6 +104,9 @@ class VectorDBInterface(Protocol):
             - limit (Optional[int]): The maximum number of results to return from the search.
             - with_vector (bool): Whether to return the vector representations with search
               results. (default False)
+            - include_payload (bool): Whether to include the payload data with search. Search is faster when set to False.
+              Payload contains metadata about the data point, useful for searches that are only based on embedding distances
+              like the RAG_COMPLETION search type, but not needed when search also contains graph data.
         """
         raise NotImplementedError
 

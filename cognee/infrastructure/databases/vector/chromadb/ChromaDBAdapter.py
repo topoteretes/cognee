@@ -355,6 +355,7 @@ class ChromaDBAdapter(VectorDBInterface):
         limit: Optional[int] = 15,
         with_vector: bool = False,
         normalized: bool = True,
+        include_payload: bool = False,  # TODO: Add support for this parameter
     ):
         """
         Search for items in a collection using either a text or a vector query.

@@ -231,6 +231,7 @@ class LanceDBAdapter(VectorDBInterface):
         limit: Optional[int] = 15,
         with_vector: bool = False,
         normalized: bool = True,
+        include_payload: bool = False,
     ):
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
@@ -247,21 +248,40 @@ class LanceDBAdapter(VectorDBInterface):
         if limit <= 0:
             return []
 
-        result_values = await collection.vector_search(query_vector).limit(limit).to_list()
+        if include_payload:
+            result_values = await collection.vector_search(query_vector).limit(limit).to_list()
+            if not result_values:
+                return []
+            normalized_values = normalize_distances(result_values)
 
-        if not result_values:
-            return []
+            return [
+                ScoredResult(
+                    id=parse_id(result["id"]),
+                    payload=result["payload"],
+                    score=normalized_values[value_index],
+                )
+                for value_index, result in enumerate(result_values)
+            ]
 
-        normalized_values = normalize_distances(result_values)
-
-        return [
-            ScoredResult(
-                id=parse_id(result["id"]),
-                payload=result["payload"],
-                score=normalized_values[value_index],
+        else:
+            result_values = await (
+                collection.vector_search(query_vector)
+                .limit(limit)
+                .select(["id", "vector", "_distance"])
+                .to_list()
             )
-            for value_index, result in enumerate(result_values)
-        ]
+            if not result_values:
+                return []
+
+            normalized_values = normalize_distances(result_values)
+
+            return [
+                ScoredResult(
+                    id=parse_id(result["id"]),
+                    score=normalized_values[value_index],
+                )
+                for value_index, result in enumerate(result_values)
+            ]
 
     async def batch_search(
         self,
