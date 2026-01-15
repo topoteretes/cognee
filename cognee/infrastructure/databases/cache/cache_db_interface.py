@@ -77,3 +77,37 @@ class CacheDBInterface(ABC):
         Gracefully close any async connections.
         """
         pass
+
+    @abstractmethod
+    async def log_usage(
+        self,
+        user_id: str,
+        log_entry: dict,
+        ttl: int | None = 604800,
+    ):
+        """
+        Log usage information (API endpoint calls, MCP tool invocations) to cache.
+
+        Args:
+            user_id: The user ID.
+            log_entry: Dictionary containing usage log information.
+            ttl: Optional time-to-live (seconds). If provided, the log list expires after this time.
+
+        Raises:
+            CacheConnectionError: If cache connection fails or times out.
+        """
+        pass
+
+    @abstractmethod
+    async def get_usage_logs(self, user_id: str, limit: int = 100):
+        """
+        Retrieve usage logs for a given user.
+
+        Args:
+            user_id: The user ID.
+            limit: Maximum number of logs to retrieve (default: 100).
+
+        Returns:
+            List of usage log entries, most recent first.
+        """
+        pass
