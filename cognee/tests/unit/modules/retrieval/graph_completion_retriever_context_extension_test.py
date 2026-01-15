@@ -81,7 +81,7 @@ async def test_get_completion_without_context(mock_edge):
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
-            return_value=[mock_edge],
+            return_value=[[mock_edge]],
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
@@ -157,7 +157,7 @@ async def test_get_completion_context_extension_rounds(mock_edge):
             retriever,
             "get_context",
             new_callable=AsyncMock,
-            side_effect=[[mock_edge], [mock_edge2]],
+            side_effect=[[[mock_edge]], [[mock_edge2]]],
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
@@ -194,7 +194,7 @@ async def test_get_completion_context_extension_stops_early(mock_edge):
     retriever = GraphCompletionContextExtensionRetriever()
 
     with (
-        patch.object(retriever, "get_context", new_callable=AsyncMock, return_value=[mock_edge]),
+        patch.object(retriever, "get_context", new_callable=AsyncMock, return_value=[[mock_edge]]),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
             return_value="Resolved context",
@@ -240,7 +240,7 @@ async def test_get_completion_with_session(mock_edge):
             "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
             return_value=mock_graph_engine,
         ),
-        patch.object(retriever, "get_context", new_callable=AsyncMock, return_value=[mock_edge]),
+        patch.object(retriever, "get_context", new_callable=AsyncMock, return_value=[[mock_edge]]),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
             return_value="Resolved context",
@@ -304,7 +304,7 @@ async def test_get_completion_with_save_interaction(mock_edge):
             "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
             return_value=mock_graph_engine,
         ),
-        patch.object(retriever, "get_context", new_callable=AsyncMock, return_value=[mock_edge]),
+        patch.object(retriever, "get_context", new_callable=AsyncMock, return_value=[[mock_edge]]),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
             return_value="Resolved context",
@@ -361,7 +361,7 @@ async def test_get_completion_with_response_model(mock_edge):
             "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
             return_value=mock_graph_engine,
         ),
-        patch.object(retriever, "get_context", new_callable=AsyncMock, return_value=[mock_edge]),
+        patch.object(retriever, "get_context", new_callable=AsyncMock, return_value=[[mock_edge]]),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
             return_value="Resolved context",
@@ -403,7 +403,7 @@ async def test_get_completion_with_session_no_user_id(mock_edge):
             "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
             return_value=mock_graph_engine,
         ),
-        patch.object(retriever, "get_context", new_callable=AsyncMock, return_value=[mock_edge]),
+        patch.object(retriever, "get_context", new_callable=AsyncMock, return_value=[[mock_edge]]),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
             return_value="Resolved context",
@@ -446,7 +446,7 @@ async def test_get_completion_zero_extension_rounds(mock_edge):
             "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
             return_value=mock_graph_engine,
         ),
-        patch.object(retriever, "get_context", new_callable=AsyncMock, return_value=[mock_edge]),
+        patch.object(retriever, "get_context", new_callable=AsyncMock, return_value=[[mock_edge]]),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
             return_value="Resolved context",

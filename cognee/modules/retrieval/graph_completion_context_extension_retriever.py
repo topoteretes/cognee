@@ -95,16 +95,15 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         if query:
             # This is done mostly to avoid duplicating a lot of code unnecessarily
             query_batch = [query]
-            query = None
             if triplets:
                 triplets = [triplets]
 
         if triplets is None:
-            triplets = await self.get_context(query, query_batch)
+            triplets = await self.get_context(query_batch=query_batch)
 
         context_text = ""
         context_texts = ""
-        if isinstance(triplets[0], list):
+        if triplets and isinstance(triplets[0], list):
             context_texts = await asyncio.gather(
                 *[self.resolve_edges_to_text(triplets_element) for triplets_element in triplets]
             )
@@ -123,6 +122,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 f"Context extension: round {round_idx} - generating next graph locational query."
             )
 
+            # Filter out the queries that cannot be extended further, and their associated contexts
             query_batch = [query for query in query_batch if query]
             triplets = [triplet_element for triplet_element in triplets if triplet_element]
             context_texts = [context_text for context_text in context_texts if context_text]
@@ -181,8 +181,12 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         # Reset variables for the final generations. They contain the final state
         # of triplets and contexts for each query, after all extension iterations.
         query_batch = original_query_batch
-        context_texts = saved_context_texts
-        triplets = saved_triplets
+        context_texts = saved_context_texts if len(saved_context_texts) > 0 else context_texts
+        triplets = saved_triplets if len(saved_triplets) > 0 else triplets
+
+        if len(query_batch) == 1:
+            triplets = [] if not triplets else triplets[0]
+            context_text = "" if not context_texts else context_texts[0]
 
         # Check if we need to generate context summary for caching
         cache_config = CacheConfig()
@@ -221,8 +225,10 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             )
 
         if self.save_interaction and context_text and triplets and completion:
+            if isinstance(completion, list):
+                completion = completion[0]
             await self.save_qa(
-                question=query, answer=completion, context=context_text, triplets=triplets
+                question=query, answer=completion[0], context=context_text, triplets=triplets
             )
 
         if session_save:
@@ -233,4 +239,4 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 session_id=session_id,
             )
 
-        return [completion]
+        return completion if isinstance(completion, list) else [completion]

@@ -197,7 +197,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
         context_text = ""
         context_texts = ""
-        if isinstance(triplets[0], list):
+        if triplets and isinstance(triplets[0], list):
             context_texts = await asyncio.gather(
                 *[resolve_edges_to_text(triplets_element) for triplets_element in triplets]
             )
