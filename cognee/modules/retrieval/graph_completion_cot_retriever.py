@@ -171,11 +171,11 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
     async def get_completion(
         self,
         query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
         context: Optional[List[Edge]] = None,
         session_id: Optional[str] = None,
         max_iter=4,
         response_model: Type = str,
+        query_batch: Optional[List[str]] = None,
     ) -> List[Any]:
         """
         Generate completion responses based on a user query and contextual information.
