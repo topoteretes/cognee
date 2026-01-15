@@ -116,11 +116,11 @@ def _extract_user_id(args: tuple, kwargs: dict, param_names: list[str]) -> Optio
 def _extract_parameters(args: tuple, kwargs: dict, param_names: list[str], func: Callable) -> dict:
     """Extract function parameters - captures all parameters including defaults, sanitizes for JSON."""
     params = {}
-    
+
     for key, value in kwargs.items():
         if key != "user":
             params[key] = _sanitize_value(value)
-    
+
     if param_names:
         for i, param_name in enumerate(param_names):
             if i < len(args) and param_name != "user" and param_name not in kwargs:
@@ -128,13 +128,13 @@ def _extract_parameters(args: tuple, kwargs: dict, param_names: list[str], func:
     else:
         for i, arg_value in enumerate(args):
             params[f"arg_{i}"] = _sanitize_value(arg_value)
-    
+
     if param_names:
         defaults = _get_param_defaults(func)
         for param_name in param_names:
             if param_name != "user" and param_name not in params and param_name in defaults:
                 params[param_name] = _sanitize_value(defaults[param_name])
-    
+
     return params
 
 
@@ -288,11 +288,12 @@ if __name__ == "__main__":
             self.id = user_id
 
     @log_usage(function_name="example_with_user", log_type="example")
-    async def example_with_user(data: str, user: MockUser, wrong_param=datetime.utcnow().isoformat()):
+    async def example_with_user(
+        data: str, user: MockUser, wrong_param=datetime.utcnow().isoformat()
+    ):
         """Example function with user parameter."""
         await asyncio.sleep(0.05)
         return float("nan")
-
 
     @log_usage(function_name="returns_cycle", log_type="function")
     async def returns_cycle():
@@ -314,7 +315,9 @@ if __name__ == "__main__":
         # Example 2: Function with user
         print("\n2. Running example function with user:")
         mock_user = MockUser("example-user-123")
-        result2 = await example_with_user("sample_data", user=mock_user, wrong_param=datetime.utcnow().isoformat())
+        result2 = await example_with_user(
+            "sample_data", user=mock_user, wrong_param=datetime.utcnow().isoformat()
+        )
         result3 = await example_with_user("sample_data", user=mock_user)
 
         print(f"   Result: {result2}")
@@ -352,8 +355,6 @@ if __name__ == "__main__":
         print("  - CACHE_BACKEND=redis (or fs)")
         print("  - CACHE_HOST=localhost")
         print("  - CACHE_PORT=6379")
-
-
 
     # Run the example
     asyncio.run(run_example())
