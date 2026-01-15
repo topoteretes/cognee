@@ -8,6 +8,7 @@ from uuid import UUID
 
 from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
+from cognee.shared.exceptions import UsageLoggerError
 from cognee.shared.logging_utils import get_logger
 from cognee import __version__ as cognee_version
 
@@ -223,6 +224,11 @@ def log_usage(function_name: Optional[str] = None, log_type: str = "function"):
     """
 
     def decorator(func: Callable) -> Callable:
+        if not inspect.iscoroutinefunction(func):
+            raise UsageLoggerError(
+                f"@log_usage requires an async function. Got {func.__name__} which is not async."
+            )
+
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
             config = get_cache_config()
@@ -295,12 +301,6 @@ if __name__ == "__main__":
         await asyncio.sleep(0.05)
         return float("nan")
 
-    @log_usage(function_name="returns_cycle", log_type="function")
-    async def returns_cycle():
-        a = []
-        a.append(a)
-        return a
-
     async def run_example():
         """Run example demonstrations."""
         print("Usage Logger Example")
@@ -322,8 +322,6 @@ if __name__ == "__main__":
 
         print(f"   Result: {result2}")
         await asyncio.sleep(0.2)  # Wait for async logging to complete
-
-        await returns_cycle()
 
         # Example 3: Retrieve logs (if cache engine is available)
         print("\n3. Retrieving usage logs:")
