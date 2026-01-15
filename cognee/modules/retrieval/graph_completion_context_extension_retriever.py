@@ -56,8 +56,9 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
     async def get_completion(
         self,
-        query: str,
-        context: Optional[List[Edge]] = None,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
+        context: Optional[List[Edge] | List[List[Edge]]] = None,
         session_id: Optional[str] = None,
         context_extension_rounds=4,
         response_model: Type = str,
@@ -91,45 +92,97 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         """
         triplets = context
 
-        if triplets is None:
-            triplets = await self.get_context(query)
+        if query:
+            # This is done mostly to avoid duplicating a lot of code unnecessarily
+            query_batch = [query]
+            query = None
+            if triplets:
+                triplets = [triplets]
 
-        context_text = await self.resolve_edges_to_text(triplets)
+        if triplets is None:
+            triplets = await self.get_context(query, query_batch)
+
+        context_text = ""
+        context_texts = ""
+        if isinstance(triplets[0], list):
+            context_texts = await asyncio.gather(
+                *[self.resolve_edges_to_text(triplets_element) for triplets_element in triplets]
+            )
+        else:
+            context_text = await self.resolve_edges_to_text(triplets)
 
         round_idx = 1
 
+        # We will be removing queries, and their associated triplets and context, as we go
+        # through iterations, so we need to save their final states for the final generation.
+        original_query_batch = query_batch
+        saved_triplets = []
+        saved_context_texts = []
         while round_idx <= context_extension_rounds:
-            prev_size = len(triplets)
-
             logger.info(
                 f"Context extension: round {round_idx} - generating next graph locational query."
             )
-            completion = await generate_completion(
-                query=query,
-                context=context_text,
-                user_prompt_path=self.user_prompt_path,
-                system_prompt_path=self.system_prompt_path,
-                system_prompt=self.system_prompt,
-            )
 
-            triplets += await self.get_context(completion)
-            triplets = list(set(triplets))
-            context_text = await self.resolve_edges_to_text(triplets)
-
-            num_triplets = len(triplets)
-
-            if num_triplets == prev_size:
+            query_batch = [query for query in query_batch if query]
+            triplets = [triplet_element for triplet_element in triplets if triplet_element]
+            context_texts = [context_text for context_text in context_texts if context_text]
+            if len(query_batch) == 0:
                 logger.info(
                     f"Context extension: round {round_idx} – no new triplets found; stopping early."
                 )
                 break
 
+            prev_sizes = [len(triplets_element) for triplets_element in triplets]
+
+            completions = await asyncio.gather(
+                *[
+                    generate_completion(
+                        query=query,
+                        context=context,
+                        user_prompt_path=self.user_prompt_path,
+                        system_prompt_path=self.system_prompt_path,
+                        system_prompt=self.system_prompt,
+                    )
+                    for query, context in zip(query_batch, context_texts)
+                ],
+            )
+
+            new_triplets = await self.get_context(query_batch=completions)
+            for i, (triplets_element, new_triplets_element) in enumerate(
+                zip(triplets, new_triplets)
+            ):
+                triplets_element += new_triplets_element
+                triplets[i] = list(dict.fromkeys(triplets_element))
+
+            context_texts = await asyncio.gather(
+                *[self.resolve_edges_to_text(triplets_element) for triplets_element in triplets]
+            )
+
+            new_sizes = [len(triplets_element) for triplets_element in triplets]
+
+            for i, (query, prev_size, new_size, triplet_element, context_text) in enumerate(
+                zip(query_batch, prev_sizes, new_sizes, triplets, context_texts)
+            ):
+                if prev_size == new_size:
+                    # In this case, we can stop trying to extend the context of this query
+                    query_batch[i] = ""
+                    saved_triplets.append(triplet_element)
+                    triplets[i] = []
+                    saved_context_texts.append(context_text)
+                    context_texts[i] = ""
+
             logger.info(
                 f"Context extension: round {round_idx} - "
-                f"number of unique retrieved triplets: {num_triplets}"
+                f"number of unique retrieved triplets for each query : {new_sizes}"
             )
 
             round_idx += 1
+
+        # Reset variables for the final generations. They contain the final state
+        # of triplets and contexts for each query, after all extension iterations.
+        query_batch = original_query_batch
+        context_texts = saved_context_texts
+        triplets = saved_triplets
 
         # Check if we need to generate context summary for caching
         cache_config = CacheConfig()
@@ -153,13 +206,18 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 ),
             )
         else:
-            completion = await generate_completion(
-                query=query,
-                context=context_text,
-                user_prompt_path=self.user_prompt_path,
-                system_prompt_path=self.system_prompt_path,
-                system_prompt=self.system_prompt,
-                response_model=response_model,
+            completion = await asyncio.gather(
+                *[
+                    generate_completion(
+                        query=query,
+                        context=context_text,
+                        user_prompt_path=self.user_prompt_path,
+                        system_prompt_path=self.system_prompt_path,
+                        system_prompt=self.system_prompt,
+                        response_model=response_model,
+                    )
+                    for query, context_text in zip(query_batch, context_texts)
+                ],
             )
 
         if self.save_interaction and context_text and triplets and completion:
