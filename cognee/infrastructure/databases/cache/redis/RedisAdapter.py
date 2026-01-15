@@ -17,13 +17,14 @@ class RedisAdapter(CacheDBInterface):
         host,
         port,
         lock_name="default_lock",
+        log_key="usage_logs",
         username=None,
         password=None,
         timeout=240,
         blocking_timeout=300,
         connection_timeout=30,
     ):
-        super().__init__(host, port, lock_name)
+        super().__init__(host, port, lock_name, log_key)
 
         self.host = host
         self.port = port
@@ -195,7 +196,7 @@ class RedisAdapter(CacheDBInterface):
             CacheConnectionError: If Redis connection fails or times out.
         """
         try:
-            usage_logs_key = f"usage_logs:{user_id}"
+            usage_logs_key = f"{self.log_key}:{user_id}"
 
             await self.async_redis.rpush(usage_logs_key, json.dumps(log_entry))
 
@@ -223,7 +224,7 @@ class RedisAdapter(CacheDBInterface):
             List of usage log entries, most recent first.
         """
         try:
-            usage_logs_key = f"usage_logs:{user_id}"
+            usage_logs_key = f"{self.log_key}:{user_id}"
             entries = await self.async_redis.lrange(usage_logs_key, -limit, -1)
             return [json.loads(e) for e in reversed(entries)] if entries else []
         except (redis.ConnectionError, redis.TimeoutError) as e:
