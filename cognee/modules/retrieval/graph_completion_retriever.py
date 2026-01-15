@@ -79,7 +79,11 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         """
         return await resolve_edges_to_text(retrieved_edges)
 
-    async def get_triplets(self, query: str) -> List[Edge]:
+    async def get_triplets(
+        self,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
+    ) -> List[Edge] | List[List[Edge]]:
         """
         Retrieves relevant graph triplets based on a query string.
 
@@ -107,6 +111,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
         found_triplets = await brute_force_triplet_search(
             query,
+            query_batch,
             top_k=self.top_k,
             collections=vector_index_collections or None,
             node_type=self.node_type,
@@ -117,7 +122,11 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
         return found_triplets
 
-    async def get_context(self, query: str) -> List[Edge]:
+    async def get_context(
+        self,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
+    ) -> List[Edge] | List[List[Edge]]:
         """
         Retrieves and resolves graph triplets into context based on a query.
 
@@ -139,7 +148,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
             logger.warning("Search attempt on an empty knowledge graph")
             return []
 
-        triplets = await self.get_triplets(query)
+        triplets = await self.get_triplets(query, query_batch)
 
         if len(triplets) == 0:
             logger.warning("Empty context was provided to the completion")
@@ -158,8 +167,9 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
     async def get_completion(
         self,
-        query: str,
-        context: Optional[List[Edge]] = None,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
+        context: Optional[List[Edge] | List[List[Edge]]] = None,
         session_id: Optional[str] = None,
         response_model: Type = str,
     ) -> List[Any]:
@@ -183,9 +193,16 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         triplets = context
 
         if triplets is None:
-            triplets = await self.get_context(query)
+            triplets = await self.get_context(query, query_batch)
 
-        context_text = await resolve_edges_to_text(triplets)
+        context_text = ""
+        context_texts = ""
+        if isinstance(triplets[0], list):
+            context_texts = await asyncio.gather(
+                *[resolve_edges_to_text(triplets_element) for triplets_element in triplets]
+            )
+        else:
+            context_text = await resolve_edges_to_text(triplets)
 
         cache_config = CacheConfig()
         user = session_user.get()
@@ -208,14 +225,29 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                 ),
             )
         else:
-            completion = await generate_completion(
-                query=query,
-                context=context_text,
-                user_prompt_path=self.user_prompt_path,
-                system_prompt_path=self.system_prompt_path,
-                system_prompt=self.system_prompt,
-                response_model=response_model,
-            )
+            if query_batch and len(query_batch) > 0:
+                completion = await asyncio.gather(
+                    *[
+                        generate_completion(
+                            query=query,
+                            context=context,
+                            user_prompt_path=self.user_prompt_path,
+                            system_prompt_path=self.system_prompt_path,
+                            system_prompt=self.system_prompt,
+                            response_model=response_model,
+                        )
+                        for query, context in zip(query_batch, context_texts)
+                    ],
+                )
+            else:
+                completion = await generate_completion(
+                    query=query,
+                    context=context_text if context_text else context_texts,
+                    user_prompt_path=self.user_prompt_path,
+                    system_prompt_path=self.system_prompt_path,
+                    system_prompt=self.system_prompt,
+                    response_model=response_model,
+                )
 
         if self.save_interaction and context and triplets and completion:
             await self.save_qa(

@@ -170,7 +170,8 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
     async def get_completion(
         self,
-        query: str,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
         context: Optional[List[Edge]] = None,
         session_id: Optional[str] = None,
         max_iter=4,
@@ -213,13 +214,28 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         if session_save:
             conversation_history = await get_conversation_history(session_id=session_id)
 
-        completion, context_text, triplets = await self._run_cot_completion(
-            query=query,
-            context=context,
-            conversation_history=conversation_history,
-            max_iter=max_iter,
-            response_model=response_model,
-        )
+        completion_results = []
+        if query_batch and len(query_batch) > 0:
+            completion_results = await asyncio.gather(
+                *[
+                    self._run_cot_completion(
+                        query=query,
+                        context=context,
+                        conversation_history=conversation_history,
+                        max_iter=max_iter,
+                        response_model=response_model,
+                    )
+                    for query in query_batch
+                ]
+            )
+        else:
+            completion, context_text, triplets = await self._run_cot_completion(
+                query=query,
+                context=context,
+                conversation_history=conversation_history,
+                max_iter=max_iter,
+                response_model=response_model,
+            )
 
         if self.save_interaction and context and triplets and completion:
             await self.save_qa(
@@ -235,5 +251,8 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 answer=str(completion),
                 session_id=session_id,
             )
+
+        if completion_results:
+            return [completion for completion, _, _ in completion_results]
 
         return [completion]
