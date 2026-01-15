@@ -17,7 +17,7 @@ supported_dataset_database_handlers = {
         "handler_provider": "neo4j",
     },
     "lancedb": {"handler_instance": LanceDBDatasetDatabaseHandler, "handler_provider": "lancedb"},
-    "pgvector": {
+    "pgvector_local": {
         "handler_instance": PGVectorDatasetDatabaseHandler,
         "handler_provider": "pgvector",
     },
