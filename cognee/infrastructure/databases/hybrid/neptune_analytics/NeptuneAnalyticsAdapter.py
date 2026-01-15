@@ -236,6 +236,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         query_vector: Optional[List[float]] = None,
         limit: Optional[int] = None,
         with_vector: bool = False,
+        include_payload: bool = False,  # TODO: Add support for this parameter
     ):
         """
         Perform a search in the specified collection using either a text query or a vector
