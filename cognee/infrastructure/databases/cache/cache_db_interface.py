@@ -8,7 +8,9 @@ class CacheDBInterface(ABC):
     Provides a common interface for lock acquisition, release, and context-managed locking.
     """
 
-    def __init__(self, host: str, port: int, lock_key: str = "default_lock", log_key: str = "usage_logs"):
+    def __init__(
+        self, host: str, port: int, lock_key: str = "default_lock", log_key: str = "usage_logs"
+    ):
         self.host = host
         self.port = port
         self.lock_key = lock_key

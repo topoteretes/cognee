@@ -63,7 +63,9 @@ def create_cache_engine(
         return None
 
 
-def get_cache_engine(lock_key: Optional[str] = None, log_key: Optional[str] = None) -> CacheDBInterface:
+def get_cache_engine(
+    lock_key: Optional[str] = None, log_key: Optional[str] = None
+) -> CacheDBInterface:
     """
     Returns a cache adapter instance using current context configuration.
     """
