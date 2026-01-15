@@ -40,15 +40,16 @@ def falkordb_available():
 @pytest.mark.skipif(not falkordb_available(), reason="FalkorDB not available")
 async def test_falkordb():
     """Test FalkorDB as graph and vector database provider."""
+    # Set connection details BEFORE configuring the provider
+    # These must be set before cognee.config calls
+    os.environ["GRAPH_DATABASE_URL"] = "localhost"
+    os.environ["GRAPH_DATABASE_PORT"] = "6379"
+    os.environ["VECTOR_DB_URL"] = "localhost"
+    os.environ["VECTOR_DB_PORT"] = "6379"
+
     # Configure FalkorDB as the database provider
     cognee.config.set_graph_database_provider("falkordb")
     cognee.config.set_vector_db_provider("falkordb")
-
-    # Set connection details from environment or defaults
-    os.environ.setdefault("GRAPH_DATABASE_URL", "localhost")
-    os.environ.setdefault("GRAPH_DATABASE_PORT", "6379")
-    os.environ.setdefault("VECTOR_DATABASE_URL", "localhost")
-    os.environ.setdefault("VECTOR_DATABASE_PORT", "6379")
 
     # Set up test directories
     data_directory_path = str(
@@ -128,10 +129,12 @@ async def test_falkordb_multi_agent_isolation():
     from cognee.context_global_variables import agent_graph_name_ctx
     from cognee.infrastructure.databases.graph import get_graph_engine
 
+    # Set environment variables BEFORE configuring the provider
+    os.environ["GRAPH_DATABASE_URL"] = "localhost"
+    os.environ["GRAPH_DATABASE_PORT"] = "6379"
+
     # Configure FalkorDB
     cognee.config.set_graph_database_provider("falkordb")
-    os.environ.setdefault("GRAPH_DATABASE_URL", "localhost")
-    os.environ.setdefault("GRAPH_DATABASE_PORT", "6379")
 
     # Test with agent context
     agent_graph_name_ctx.set("TestAgentGraph")
