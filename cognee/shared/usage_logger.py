@@ -318,7 +318,7 @@ if __name__ == "__main__":
         result2 = await example_with_user(
             "sample_data", user=mock_user, wrong_param=datetime.utcnow().isoformat()
         )
-        result3 = await example_with_user("sample_data", user=mock_user)
+        await example_with_user("sample_data", user=mock_user)
 
         print(f"   Result: {result2}")
         await asyncio.sleep(0.2)  # Wait for async logging to complete
