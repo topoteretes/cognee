@@ -160,7 +160,7 @@ async def _log_usage_async(
             return
 
         logger.debug(f"Getting cache engine for {function_name}")
-        cache_engine = get_cache_engine(lock_key=None, log_key="usage_logging")
+        cache_engine = get_cache_engine()
         if cache_engine is None:
             logger.warning(
                 f"Cache engine not available for usage logging (function: {function_name})"
@@ -211,14 +211,14 @@ def log_usage(function_name: Optional[str] = None, log_type: str = "function"):
 
     Args:
         function_name: Optional name for the function (defaults to func.__name__)
-        log_type: Type of log entry (e.g., "api_endpoint", "mcp_tool", "function")
+        log_type: Type of log entry (e.g., "api_endpoint", "mcp_tool")
 
     Usage:
-        @log_usage()
-        async def my_function(...):
-            # function code
+        @log_usage(function_name="MCP my_mcp_tool", log_type="mcp_tool")
+        async def my_mcp_tool(...):
+            # mcp code
 
-        @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
+        @log_usage(function_name="POST API /v1/add", log_type="api_endpoint")
         async def add(...):
             # endpoint code
     """
@@ -278,81 +278,3 @@ def log_usage(function_name: Optional[str] = None, log_type: str = "function"):
         return async_wrapper
 
     return decorator
-
-
-if __name__ == "__main__":
-    # Example 1: Simple function with decorator
-    @log_usage(function_name="example_function", log_type="example")
-    async def example_function(param1: str, param2: int, user=None):
-        """Example function to demonstrate usage logging."""
-        await asyncio.sleep(0.1)  # Simulate some work
-        return {(1, 2): "ok"}
-
-    # Example 2: Function with user parameter
-    class MockUser:
-        def __init__(self, user_id: str):
-            self.id = user_id
-
-    @log_usage(function_name="example_with_user", log_type="example")
-    async def example_with_user(
-        data: str, user: MockUser, wrong_param=datetime.utcnow().isoformat()
-    ):
-        """Example function with user parameter."""
-        await asyncio.sleep(0.05)
-        return float("nan")
-
-    async def run_example():
-        """Run example demonstrations."""
-        print("Usage Logger Example")
-        print("=" * 50)
-
-        # Example 1: Simple function
-        print("\n1. Running example function:")
-        result1 = await example_function("example_data", 42)
-        print(f"   Result: {result1}")
-        await asyncio.sleep(0.2)  # Wait for async logging to complete
-
-        # Example 2: Function with user
-        print("\n2. Running example function with user:")
-        mock_user = MockUser("example-user-123")
-        result2 = await example_with_user(
-            "sample_data", user=mock_user, wrong_param=datetime.utcnow().isoformat()
-        )
-        await example_with_user("sample_data", user=mock_user)
-
-        print(f"   Result: {result2}")
-        await asyncio.sleep(0.2)  # Wait for async logging to complete
-
-        # Example 3: Retrieve logs (if cache engine is available)
-        print("\n3. Retrieving usage logs:")
-        try:
-            config = get_cache_config()
-            if config.usage_logging:
-                cache_engine = get_cache_engine(lock_key="usage_logging")
-                if cache_engine:
-                    # Get logs for the user
-                    user_id = str(mock_user.id)
-                    logs = await cache_engine.get_usage_logs(user_id, limit=10)
-                    print(f"   Found {len(logs)} log entries for user {user_id}")
-                    if logs:
-                        print(
-                            f"   Latest log: {logs[0]['function_name']} at {logs[0]['timestamp']}"
-                        )
-                else:
-                    print("   Cache engine not available")
-            else:
-                print("   Usage logging is disabled (set USAGE_LOGGING=true)")
-        except Exception as e:
-            print(f"   Error retrieving logs: {str(e)}")
-
-        print("\n" + "=" * 50)
-        print("Example completed!")
-        print("\nNote: Make sure to set these environment variables:")
-        print("  - USAGE_LOGGING=true")
-        print("  - CACHING=true (or ensure cache backend is configured)")
-        print("  - CACHE_BACKEND=redis (or fs)")
-        print("  - CACHE_HOST=localhost")
-        print("  - CACHE_PORT=6379")
-
-    # Run the example
-    asyncio.run(run_example())
