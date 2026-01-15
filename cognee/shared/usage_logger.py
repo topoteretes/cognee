@@ -68,7 +68,6 @@ def _sanitize_dict_key(key: Any) -> str:
     """Convert a non-string dict key to a string."""
     sanitized_key = _sanitize_value(key)
     if isinstance(sanitized_key, str):
-        # If it's a "cannot be serialized" message, use a key-specific message
         if sanitized_key.startswith("<cannot be serialized"):
             return f"<key:{type(key).__name__}>"
         return sanitized_key
@@ -81,6 +80,19 @@ def _get_param_names(func: Callable) -> list[str]:
         return list(inspect.signature(func).parameters.keys())
     except Exception:
         return []
+
+
+def _get_param_defaults(func: Callable) -> dict[str, Any]:
+    """Get parameter defaults from function signature."""
+    try:
+        sig = inspect.signature(func)
+        defaults = {}
+        for param_name, param in sig.parameters.items():
+            if param.default != inspect.Parameter.empty:
+                defaults[param_name] = param.default
+        return defaults
+    except Exception:
+        return {}
 
 
 def _extract_user_id(args: tuple, kwargs: dict, param_names: list[str]) -> Optional[str]:
@@ -101,8 +113,8 @@ def _extract_user_id(args: tuple, kwargs: dict, param_names: list[str]) -> Optio
         return None
 
 
-def _extract_parameters(args: tuple, kwargs: dict, param_names: list[str]) -> dict:
-    """Extract function parameters - captures all parameters, sanitizes for JSON."""
+def _extract_parameters(args: tuple, kwargs: dict, param_names: list[str], func: Callable) -> dict:
+    """Extract function parameters - captures all parameters including defaults, sanitizes for JSON."""
     params = {}
     
     for key, value in kwargs.items():
@@ -114,9 +126,14 @@ def _extract_parameters(args: tuple, kwargs: dict, param_names: list[str]) -> di
             if i < len(args) and param_name != "user" and param_name not in kwargs:
                 params[param_name] = _sanitize_value(args[i])
     else:
-        # Fallback: capture all args by position if signature inspection fails
         for i, arg_value in enumerate(args):
             params[f"arg_{i}"] = _sanitize_value(arg_value)
+    
+    if param_names:
+        defaults = _get_param_defaults(func)
+        for param_name in param_names:
+            if param_name != "user" and param_name not in params and param_name in defaults:
+                params[param_name] = _sanitize_value(defaults[param_name])
     
     return params
 
@@ -212,13 +229,11 @@ def log_usage(function_name: Optional[str] = None, log_type: str = "function"):
             if not config.usage_logging:
                 return await func(*args, **kwargs)
 
-            # Capture start time
             start_time = datetime.now(timezone.utc)
 
-            # Get param names once to avoid duplicate signature inspection
             param_names = _get_param_names(func)
             user_id = _extract_user_id(args, kwargs, param_names)
-            parameters = _extract_parameters(args, kwargs, param_names)
+            parameters = _extract_parameters(args, kwargs, param_names, func)
 
             result = None
             success = True
