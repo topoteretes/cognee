@@ -215,9 +215,6 @@ class CogneeGraph(CogneeAbstractGraph):
                         edge_penalty=triplet_distance_penalty,
                     )
                     self.add_edge(edge)
-
-                    source_node.add_skeleton_edge(edge)
-                    target_node.add_skeleton_edge(edge)
                 else:
                     raise EntityNotFoundError(
                         message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
