@@ -687,10 +687,11 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "redis"
 
-      - name: Install MCP dependencies from cognee-mcp pyproject.toml
+      - name: Install cognee-mcp (local version)
+        shell: bash
         run: |
-          # Extract dependencies directly from cognee-mcp/pyproject.toml and install them
-          grep -E '"(fastmcp|mcp|httpx)' cognee-mcp/pyproject.toml | sed 's/.*"\(.*\)".*/\1/' | xargs uv run pip install
+          uv pip install --no-deps -e ./cognee-mcp
+          uv pip install "fastmcp>=2.10.0,<3.0.0" "mcp>=1.12.0,<2.0.0" "httpx>=0.27.0,<1.0.0"
 
       - name: Run api/tool usage logger
         env:
