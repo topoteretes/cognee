@@ -11,16 +11,10 @@ echo "Debug port: $DEBUG_PORT"
 echo "HTTP port: $HTTP_PORT"
 
 # Run Alembic migrations with proper error handling.
-# Note on UserAlreadyExists error handling:
-# During database migrations, we attempt to create a default user. If this user
-# already exists (e.g., from a previous deployment or migration), it's not a
-# critical error and shouldn't prevent the application from starting. This is
-# different from other migration errors which could indicate database schema
-# inconsistencies and should cause the startup to fail. This check allows for
-# smooth redeployments and container restarts while maintaining data integrity.
 echo "Running database migrations..."
 
-MIGRATION_OUTPUT=$(alembic upgrade head)
+# Move to the cognee directory to run alembic migrations from there
+MIGRATION_OUTPUT=$(cd cognee && alembic upgrade head)
 MIGRATION_EXIT_CODE=$?
 
 if [[ $MIGRATION_EXIT_CODE -ne 0 ]]; then
