@@ -687,10 +687,13 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "redis"
 
-      - name: Install correct dependencies for mcp
+      - name: Install minimal MCP dependencies from cognee-mcp lockfile
         run: |
-          uv run pip install -e ./cognee-mcp
-          uv run pip install --force-reinstall -e .
+          # Extract exact versions of mcp, fastmcp, httpx from cognee-mcp lockfile and install only those
+          cd cognee-mcp
+          MCP_DEPS=$(uv export --no-hashes --format requirements | grep -E '^(mcp|fastmcp|httpx)==')
+          cd ..
+          echo "$MCP_DEPS" | xargs uv run pip install
 
       - name: Run api/tool usage logger
         env:
