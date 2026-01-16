@@ -33,7 +33,7 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
                 "username": vector_config.vector_db_username,
                 "password": vector_config.vector_db_password,
             },
-            "vector_dataset_database_handler": "pgvector",
+            "vector_dataset_database_handler": "pgvector_local",
         }
 
         from .create_db_and_tables import create_pg_database

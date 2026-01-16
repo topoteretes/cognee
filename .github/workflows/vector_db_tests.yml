@@ -149,7 +149,7 @@ jobs:
           VECTOR_DB_PORT: 5432
           VECTOR_DB_USERNAME: cognee
           VECTOR_DB_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          VECTOR_DATASET_DATABASE_HANDLER: pgvector
+          VECTOR_DATASET_DATABASE_HANDLER: pgvector_local
         run: uv run python ./cognee/tests/test_permissions.py
 
   run-lancedb-tests:

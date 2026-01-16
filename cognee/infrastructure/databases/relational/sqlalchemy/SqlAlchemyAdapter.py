@@ -559,7 +559,7 @@ class SQLAlchemyAdapter:
             # Connect to maintenance db in order to create new database
             # Make sure to execute CREATE DATABASE outside of transaction block, and set AUTOCOMMIT isolation level
             connection = await self.maintenance_engine.connect()
-            await connection.execution_options(isolation_level="AUTOCOMMIT")
+            connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
             await connection.execute(text(f'CREATE DATABASE "{self.engine.url.database}";'))
 
             # Clean up resources
