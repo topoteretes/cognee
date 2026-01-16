@@ -6,7 +6,10 @@ from types import SimpleNamespace
 from uuid import UUID
 from cognee.shared.usage_logger import log_usage
 from cognee.infrastructure.databases.cache.config import get_cache_config
-from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine, create_cache_engine
+from cognee.infrastructure.databases.cache.get_cache_engine import (
+    get_cache_engine,
+    create_cache_engine,
+)
 
 
 @pytest.fixture
@@ -77,9 +80,7 @@ class TestDecoratorBehavior:
         assert call_count == 1
 
     @pytest.mark.asyncio
-    async def test_decorator_basic_logging(
-        self, usage_logging_config, redis_adapter, test_user
-    ):
+    async def test_decorator_basic_logging(self, usage_logging_config, redis_adapter, test_user):
         """Test decorator logs to Redis and handles various scenarios."""
         from unittest.mock import patch
 
@@ -107,8 +108,18 @@ class TestDecoratorBehavior:
 
             # Test log entry structure
             required_fields = [
-                "timestamp", "type", "function_name", "user_id", "parameters",
-                "result", "success", "error", "duration_ms", "start_time", "end_time", "metadata"
+                "timestamp",
+                "type",
+                "function_name",
+                "user_id",
+                "parameters",
+                "result",
+                "success",
+                "error",
+                "duration_ms",
+                "start_time",
+                "end_time",
+                "metadata",
             ]
             for field in required_fields:
                 assert field in log
@@ -168,9 +179,7 @@ class TestDecoratorBehavior:
             assert fail_log["error"] == "Test error"
 
     @pytest.mark.asyncio
-    async def test_timing_and_multiple_calls(
-        self, usage_logging_config, redis_adapter, test_user
-    ):
+    async def test_timing_and_multiple_calls(self, usage_logging_config, redis_adapter, test_user):
         """Test timing accuracy and multiple consecutive calls."""
         from unittest.mock import patch
 
@@ -244,9 +253,7 @@ class TestRealRedisIntegration:
             assert len(logs) == 2
 
     @pytest.mark.asyncio
-    async def test_ttl_set_correctly(
-        self, usage_logging_config, redis_adapter, test_user
-    ):
+    async def test_ttl_set_correctly(self, usage_logging_config, redis_adapter, test_user):
         """Test that TTL is set correctly on Redis keys."""
         from unittest.mock import patch
 
@@ -269,9 +276,7 @@ class TestEdgeCases:
     """Test edge cases in integration tests."""
 
     @pytest.mark.asyncio
-    async def test_edge_cases(
-        self, usage_logging_config, redis_adapter, test_user
-    ):
+    async def test_edge_cases(self, usage_logging_config, redis_adapter, test_user):
         """Test various edge cases: no params, defaults, complex structures, exceptions, None, circular refs."""
         from unittest.mock import patch
 
