@@ -687,17 +687,10 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "redis"
 
-      - name: Install minimal MCP dependencies from cognee-mcp lockfile
+      - name: Install MCP dependencies from cognee-mcp pyproject.toml
         run: |
-          # Extract exact versions of mcp, fastmcp, httpx from cognee-mcp lockfile
-          cd cognee-mcp
-          MCP_DEPS=$(uv export --no-hashes --format requirements.txt | grep -E '^(mcp|fastmcp|httpx)==')
-          cd ..
-          # Install into main .venv (where pytest runs) using the same Python
-          PYTHON=$(uv run which python)
-          echo "$MCP_DEPS" | "$PYTHON" -m pip install
-          # Verify installation
-          "$PYTHON" -c "import mcp; print('mcp version:', mcp.__version__)"
+          # Extract dependencies directly from cognee-mcp/pyproject.toml and install them
+          grep -E '"(fastmcp|mcp|httpx)' cognee-mcp/pyproject.toml | sed 's/.*"\(.*\)".*/\1/' | xargs uv run pip install
 
       - name: Run api/tool usage logger
         env:
