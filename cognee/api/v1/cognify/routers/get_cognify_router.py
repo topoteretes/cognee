@@ -47,6 +47,11 @@ class CognifyPayloadDTO(InDTO):
         examples=[[]],
         description="Reference to one or more previously uploaded ontologies",
     )
+    chunks_per_batch: Optional[int] = Field(
+        default=None,
+        description="Number of chunks to process per task batch in Cognify (overrides default).",
+        examples=[10, 20, 50, 100],
+    )
 
 
 def get_cognify_router() -> APIRouter:
@@ -148,6 +153,7 @@ def get_cognify_router() -> APIRouter:
                 config=config_to_use,
                 run_in_background=payload.run_in_background,
                 custom_prompt=payload.custom_prompt,
+                chunks_per_batch=payload.chunks_per_batch,
             )
 
             # If any cognify run errored return JSONResponse with proper error status code
