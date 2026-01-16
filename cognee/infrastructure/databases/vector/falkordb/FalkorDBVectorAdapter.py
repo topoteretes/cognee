@@ -112,9 +112,7 @@ class FalkorDBVectorAdapter(VectorDBInterface):
             return
         await asyncio.get_running_loop().run_in_executor(self._executor, self._connect_sync)
 
-    async def _query(
-        self, query: str, params: Optional[Dict[str, Any]] = None
-    ) -> List[Any]:
+    async def _query(self, query: str, params: Optional[Dict[str, Any]] = None) -> List[Any]:
         """Execute a query against FalkorDB."""
         await self._ensure_connected()
         graph_name = self._get_graph_name_from_ctx()
@@ -122,9 +120,7 @@ class FalkorDBVectorAdapter(VectorDBInterface):
             self._executor, self._query_sync, query, params or {}, graph_name
         )
 
-    def _query_sync(
-        self, query: str, params: Dict[str, Any], graph_name: str
-    ) -> List[Any]:
+    def _query_sync(self, query: str, params: Dict[str, Any], graph_name: str) -> List[Any]:
         """Synchronous query execution."""
         if not self.client:
             self._connect_sync()
@@ -156,9 +152,7 @@ class FalkorDBVectorAdapter(VectorDBInterface):
         """Check if a collection exists (always returns False to force creation)."""
         return False
 
-    async def create_collection(
-        self, collection_name: str, payload_schema: Optional[Any] = None
-    ):
+    async def create_collection(self, collection_name: str, payload_schema: Optional[Any] = None):
         """Create a vector index for the collection."""
         label = collection_name.replace("-", "_")
         vector_size = self.embedding_engine.get_vector_size() if self.embedding_engine else 384
@@ -191,9 +185,7 @@ class FalkorDBVectorAdapter(VectorDBInterface):
                 )
         self._indices_created.add((graph_name, label))
 
-    async def create_data_points(
-        self, collection_name: str, data_points: List[DataPoint]
-    ):
+    async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         """Insert data points with their embeddings."""
         label = collection_name.replace("-", "_")
         logger.debug(
@@ -211,9 +203,7 @@ class FalkorDBVectorAdapter(VectorDBInterface):
                 embeddable = None
             texts.append(str(embeddable) if embeddable is not None else str(dp))
 
-        embeddings = (
-            await self.embedding_engine.embed_text(texts) if self.embedding_engine else []
-        )
+        embeddings = await self.embedding_engine.embed_text(texts) if self.embedding_engine else []
 
         for dp, text, emb in zip(data_points, texts, embeddings):
             payload = dp.model_dump() if hasattr(dp, "model_dump") else {}
@@ -248,9 +238,7 @@ class FalkorDBVectorAdapter(VectorDBInterface):
         out: List[Dict[str, Any]] = []
         for r in results:
             payload = (
-                json.loads(r.get("payload", "{}"))
-                if isinstance(r.get("payload"), str)
-                else {}
+                json.loads(r.get("payload", "{}")) if isinstance(r.get("payload"), str) else {}
             )
             out.append({"id": r.get("id"), "payload": payload})
         return out
@@ -292,9 +280,7 @@ class FalkorDBVectorAdapter(VectorDBInterface):
         if query_vector is None:
             return []
 
-        emb_list = (
-            query_vector.tolist() if hasattr(query_vector, "tolist") else list(query_vector)
-        )
+        emb_list = query_vector.tolist() if hasattr(query_vector, "tolist") else list(query_vector)
         query = (
             f"CALL db.idx.vector.queryNodes('{label}', '{VECTOR_PROPERTY}', {int(limit or 10)}, "
             f"vecf32($emb)) "
@@ -322,9 +308,7 @@ class FalkorDBVectorAdapter(VectorDBInterface):
             if not r.get("id"):
                 continue
             payload = (
-                json.loads(r.get("payload", "{}"))
-                if isinstance(r.get("payload"), str)
-                else {}
+                json.loads(r.get("payload", "{}")) if isinstance(r.get("payload"), str) else {}
             )
             scored.append(
                 ScoredResult(id=r["id"], payload=payload, score=float(r.get("score") or 0.0))
@@ -339,14 +323,9 @@ class FalkorDBVectorAdapter(VectorDBInterface):
         with_vectors: bool = False,
     ) -> List[List[ScoredResult]]:
         """Perform batch search across multiple queries."""
-        return [
-            await self.search(collection_name, query_text=t, limit=limit)
-            for t in query_texts
-        ]
+        return [await self.search(collection_name, query_text=t, limit=limit) for t in query_texts]
 
-    async def delete_data_points(
-        self, collection_name: str, data_point_ids: List[str]
-    ):
+    async def delete_data_points(self, collection_name: str, data_point_ids: List[str]):
         """Delete data points by IDs."""
         label = collection_name.replace("-", "_")
         query = f"MATCH (n:`{label}`) WHERE n.id IN $ids DETACH DELETE n"

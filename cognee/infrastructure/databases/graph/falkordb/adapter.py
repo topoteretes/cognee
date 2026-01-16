@@ -473,9 +473,7 @@ class FalkorDBAdapter(GraphDBInterface):
         id_to_idx: Dict[str, int] = {}
         for i, r in enumerate(nodes_res):
             n = r.get("n") or r.get(0)
-            props = (
-                n.properties if hasattr(n, "properties") else (n if isinstance(n, dict) else {})
-            )
+            props = n.properties if hasattr(n, "properties") else (n if isinstance(n, dict) else {})
             nodes.append((i, props))
             nid = str(props.get("id", i))
             id_to_idx[nid] = i
