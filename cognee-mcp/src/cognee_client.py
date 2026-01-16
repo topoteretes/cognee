@@ -192,7 +192,7 @@ class CogneeClient:
 
             with redirect_stdout(sys.stderr):
                 results = await self.cognee.search(
-                    query_type=SearchType[query_type.upper()], query_text=query_text
+                    query_type=SearchType[query_type.upper()], query_text=query_text, top_k=top_k
                 )
                 return results
 

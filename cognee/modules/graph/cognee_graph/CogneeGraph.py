@@ -1,6 +1,6 @@
 import time
 from cognee.shared.logging_utils import get_logger
-from typing import List, Dict, Union, Optional, Type
+from typing import List, Dict, Union, Optional, Type, Iterable, Tuple, Callable, Any
 
 from cognee.modules.graph.exceptions import (
     EntityNotFoundError,
@@ -25,12 +25,16 @@ class CogneeGraph(CogneeAbstractGraph):
 
     nodes: Dict[str, Node]
     edges: List[Edge]
+    edges_by_distance_key: Dict[str, List[Edge]]
     directed: bool
+    triplet_distance_penalty: float
 
     def __init__(self, directed: bool = True):
         self.nodes = {}
         self.edges = []
+        self.edges_by_distance_key = {}
         self.directed = directed
+        self.triplet_distance_penalty = 3.5
 
     def add_node(self, node: Node) -> None:
         if node.id not in self.nodes:
@@ -42,6 +46,12 @@ class CogneeGraph(CogneeAbstractGraph):
         self.edges.append(edge)
         edge.node1.add_skeleton_edge(edge)
         edge.node2.add_skeleton_edge(edge)
+        key = edge.get_distance_key()
+        if not key:
+            return
+        if key not in self.edges_by_distance_key:
+            self.edges_by_distance_key[key] = []
+        self.edges_by_distance_key[key].append(edge)
 
     def get_node(self, node_id: str) -> Node:
         return self.nodes.get(node_id, None)
@@ -55,6 +65,29 @@ class CogneeGraph(CogneeAbstractGraph):
 
     def get_edges(self) -> List[Edge]:
         return self.edges
+
+    def reset_distances(self, collection: Iterable[Union[Node, Edge]], query_count: int) -> None:
+        """Reset vector distances for a collection of nodes or edges."""
+        for item in collection:
+            item.reset_vector_distances(query_count, self.triplet_distance_penalty)
+
+    def _normalize_query_distance_lists(
+        self, distances: List, query_list_length: Optional[int] = None, name: str = "distances"
+    ) -> List:
+        """Normalize shape: flat list -> single-query; nested list -> multi-query."""
+        if not distances:
+            return []
+        first_item = distances[0]
+        if isinstance(first_item, (list, tuple)):
+            per_query_lists = distances
+        else:
+            per_query_lists = [distances]
+        if query_list_length is not None and len(per_query_lists) != query_list_length:
+            raise ValueError(
+                f"{name} has {len(per_query_lists)} query lists, "
+                f"but query_list_length is {query_list_length}"
+            )
+        return per_query_lists
 
     async def _get_nodeset_subgraph(
         self,
@@ -148,7 +181,7 @@ class CogneeGraph(CogneeAbstractGraph):
                     adapter, memory_fragment_filter
                 )
 
-            import time
+            self.triplet_distance_penalty = triplet_distance_penalty
 
             start_time = time.time()
             # Process nodes
@@ -182,9 +215,6 @@ class CogneeGraph(CogneeAbstractGraph):
                         edge_penalty=triplet_distance_penalty,
                     )
                     self.add_edge(edge)
-
-                    source_node.add_skeleton_edge(edge)
-                    target_node.add_skeleton_edge(edge)
                 else:
                     raise EntityNotFoundError(
                         message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
@@ -200,41 +230,123 @@ class CogneeGraph(CogneeAbstractGraph):
             logger.error(f"Error during graph projection: {str(e)}")
             raise
 
-    async def map_vector_distances_to_graph_nodes(self, node_distances) -> None:
-        mapped_nodes = 0
-        for category, scored_results in node_distances.items():
-            for scored_result in scored_results:
-                node_id = str(scored_result.id)
-                score = scored_result.score
-                node = self.get_node(node_id)
-                if node:
-                    node.add_attribute("vector_distance", score)
-                    mapped_nodes += 1
+    async def map_vector_distances_to_graph_nodes(
+        self,
+        node_distances,
+        query_list_length: Optional[int] = None,
+    ) -> None:
+        """Map vector distances to nodes, supporting single- and multi-query input shapes."""
 
-    async def map_vector_distances_to_graph_edges(self, edge_distances) -> None:
-        try:
-            if edge_distances is None:
-                return
+        query_count = query_list_length or 1
 
-            embedding_map = {result.payload["text"]: result.score for result in edge_distances}
+        self.reset_distances(self.nodes.values(), query_count)
 
-            for edge in self.edges:
-                edge_key = edge.attributes.get("edge_text") or edge.attributes.get(
-                    "relationship_type"
-                )
-                distance = embedding_map.get(edge_key, None)
-                if distance is not None:
-                    edge.attributes["vector_distance"] = distance
+        for collection_name, scored_results in node_distances.items():
+            if not scored_results:
+                continue
 
-        except Exception as ex:
-            logger.error(f"Error mapping vector distances to edges: {str(ex)}")
-            raise ex
+            per_query_scored_results = self._normalize_query_distance_lists(
+                scored_results, query_list_length, f"Collection '{collection_name}'"
+            )
 
-    async def calculate_top_triplet_importances(self, k: int) -> List[Edge]:
-        def score(edge):
-            n1 = edge.node1.attributes.get("vector_distance", 1)
-            n2 = edge.node2.attributes.get("vector_distance", 1)
-            e = edge.attributes.get("vector_distance", 1)
-            return n1 + n2 + e
+            for query_index, scored_results in enumerate(per_query_scored_results):
+                for result in scored_results:
+                    node_id = str(getattr(result, "id", None))
+                    if not node_id:
+                        continue
+                    node = self.get_node(node_id)
+                    if node is None:
+                        continue
+                    score = float(getattr(result, "score", self.triplet_distance_penalty))
+                    node.update_distance_for_query(
+                        query_index=query_index,
+                        score=score,
+                        query_count=query_count,
+                        default_penalty=self.triplet_distance_penalty,
+                    )
+
+    async def map_vector_distances_to_graph_edges(
+        self,
+        edge_distances,
+        query_list_length: Optional[int] = None,
+    ) -> None:
+        """Map vector distances to graph edges, supporting single- and multi-query input shapes."""
+        query_count = query_list_length or 1
+
+        self.reset_distances(self.edges, query_count)
+
+        if not edge_distances:
+            return None
+
+        per_query_scored_results = self._normalize_query_distance_lists(
+            edge_distances, query_list_length, "edge_distances"
+        )
+
+        for query_index, scored_results in enumerate(per_query_scored_results):
+            for result in scored_results:
+                payload = getattr(result, "payload", None)
+                if not isinstance(payload, dict):
+                    continue
+                text = payload.get("text")
+                if not text:
+                    continue
+                matching_edges = self.edges_by_distance_key.get(str(text))
+                if not matching_edges:
+                    continue
+                for edge in matching_edges:
+                    edge.update_distance_for_query(
+                        query_index=query_index,
+                        score=float(getattr(result, "score", self.triplet_distance_penalty)),
+                        query_count=query_count,
+                        default_penalty=self.triplet_distance_penalty,
+                    )
+
+    def _calculate_query_top_triplet_importances(
+        self,
+        k: int,
+        query_index: int = 0,
+    ) -> List[Edge]:
+        """Calculate top k triplet importances for a specific query index."""
+
+        def score(edge: Edge) -> float:
+            elements = (
+                (edge.node1, f"node {edge.node1.id}"),
+                (edge.node2, f"node {edge.node2.id}"),
+                (edge, f"edge {edge.node1.id}->{edge.node2.id}"),
+            )
+
+            importances = []
+            for element, label in elements:
+                distances = element.attributes.get("vector_distance")
+                if not isinstance(distances, list) or query_index >= len(distances):
+                    raise ValueError(
+                        f"{label}: vector_distance must be a list with length > {query_index} "
+                        f"before scoring (got {type(distances).__name__} with length "
+                        f"{len(distances) if isinstance(distances, list) else 'n/a'})"
+                    )
+                value = distances[query_index]
+                try:
+                    importances.append(float(value))
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"{label}: vector_distance[{query_index}] must be float-like, "
+                        f"got {type(value).__name__}"
+                    )
+
+            return sum(importances)
 
         return heapq.nsmallest(k, self.edges, key=score)
+
+    async def calculate_top_triplet_importances(
+        self, k: int, query_list_length: Optional[int] = None
+    ) -> Union[List[Edge], List[List[Edge]]]:
+        """Calculate top k triplet importances, supporting both single and multi-query modes."""
+        query_count = query_list_length or 1
+        results = [
+            self._calculate_query_top_triplet_importances(k=k, query_index=i)
+            for i in range(query_count)
+        ]
+
+        if query_list_length is None:
+            return results[0]
+        return results

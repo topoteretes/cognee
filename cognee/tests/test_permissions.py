@@ -1,227 +1,212 @@
+import asyncio
 import os
-import cognee
 import pathlib
 
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.shared.logging_utils import get_logger
+import pytest
+import pytest_asyncio
+from unittest.mock import AsyncMock, patch
+
+import cognee
+from cognee.context_global_variables import backend_access_control_enabled
+from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.search.types import SearchType
-from cognee.modules.users.methods import get_default_user, create_user
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.modules.users.methods import create_user, get_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.modules.data.methods import get_dataset_data
+from cognee.modules.users.roles.methods import add_user_to_role, create_role
+from cognee.modules.users.tenants.methods import (
+    add_user_to_tenant,
+    create_tenant,
+    select_tenant,
+)
 
-logger = get_logger()
+pytestmark = pytest.mark.asyncio
 
 
-async def main():
-    # Enable permissions feature
-    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "True"
+def _extract_dataset_id_from_cognify(cognify_result: dict):
+    """Extract dataset_id from cognify output dictionary."""
+    for dataset_id, _pipeline_result in cognify_result.items():
+        return dataset_id
+    return None
 
-    # Clean up test directories before starting
-    data_directory_path = str(
-        pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_permissions")
-        ).resolve()
+
+async def _reset_engines_and_prune() -> None:
+    """Reset db engine caches and prune data/system."""
+    try:
+        from cognee.infrastructure.databases.vector import get_vector_engine
+
+        vector_engine = get_vector_engine()
+        if hasattr(vector_engine, "engine") and hasattr(vector_engine.engine, "dispose"):
+            await vector_engine.engine.dispose(close=True)
+    except Exception:
+        pass
+
+    from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
+    from cognee.infrastructure.databases.relational.create_relational_engine import (
+        create_relational_engine,
     )
-    cognee_directory_path = str(
-        pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_permissions")
-        ).resolve()
-    )
+    from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
 
-    cognee.config.data_root_directory(data_directory_path)
-    cognee.config.system_root_directory(cognee_directory_path)
+    create_graph_engine.cache_clear()
+    create_vector_engine.cache_clear()
+    create_relational_engine.cache_clear()
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    explanation_file_path_nlp = os.path.join(
-        pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
-    )
 
-    # Add document for default user
-    await cognee.add([explanation_file_path_nlp], dataset_name="NLP")
-    default_user = await get_default_user()
-
-    explanation_file_path_quantum = os.path.join(
-        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
-    )
-
-    # Add document for test user
-    test_user = await create_user("user@example.com", "example")
-    await cognee.add([explanation_file_path_quantum], dataset_name="QUANTUM", user=test_user)
-
-    nlp_cognify_result = await cognee.cognify(["NLP"], user=default_user)
-    quantum_cognify_result = await cognee.cognify(["QUANTUM"], user=test_user)
-
-    # Extract dataset_ids from cognify results
-    def extract_dataset_id_from_cognify(cognify_result):
-        """Extract dataset_id from cognify output dictionary"""
-        for dataset_id, pipeline_result in cognify_result.items():
-            return dataset_id  # Return the first (and likely only) dataset_id
-        return None
-
-    # Get dataset IDs from cognify results
-    default_user_dataset_id = extract_dataset_id_from_cognify(nlp_cognify_result)
-    print("User is", default_user_dataset_id)
-    test_user_dataset_id = extract_dataset_id_from_cognify(quantum_cognify_result)
-
-    # Check if default_user can only see information from the NLP dataset
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="What is in the document?",
-        user=default_user,
-    )
-    assert len(search_results) == 1, "The search results list lenght is not one."
-    print("\n\nExtracted sentences are:\n")
-    for result in search_results:
-        print(f"{result}\n")
-    assert search_results[0]["dataset_name"] == "NLP", (
-        f"Dict must contain dataset name 'NLP': {search_results[0]}"
-    )
-
-    # Check if test_user can only see information from the QUANTUM dataset
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="What is in the document?",
-        user=test_user,
-    )
-    assert len(search_results) == 1, "The search results list lenght is not one."
-    print("\n\nExtracted sentences are:\n")
-    for result in search_results:
-        print(f"{result}\n")
-    assert search_results[0]["dataset_name"] == "QUANTUM", (
-        f"Dict must contain dataset name 'QUANTUM': {search_results[0]}"
-    )
-
-    # Try to add document with default_user to test_users dataset (test write permission enforcement)
-    add_error = False
+@pytest.fixture(scope="module")
+def event_loop():
+    """Single event loop for this module (avoids cross-loop futures)."""
+    loop = asyncio.new_event_loop()
     try:
-        await cognee.add(
-            [explanation_file_path_nlp],
-            dataset_name="QUANTUM",
-            dataset_id=test_user_dataset_id,
-            user=default_user,
+        yield loop
+    finally:
+        loop.close()
+
+
+@pytest_asyncio.fixture(scope="module")
+async def permissions_example_env(tmp_path_factory):
+    """One-time environment setup for the permissions example test."""
+    # Ensure permissions feature is enabled (example requires it), but don't override if caller set it already.
+    os.environ.setdefault("ENABLE_BACKEND_ACCESS_CONTROL", "True")
+
+    root = tmp_path_factory.mktemp("permissions_example")
+    cognee.config.data_root_directory(str(root / "data"))
+    cognee.config.system_root_directory(str(root / "system"))
+
+    await _reset_engines_and_prune()
+    await engine_setup()
+
+    assert backend_access_control_enabled(), (
+        "Expected permissions to be enabled via ENABLE_BACKEND_ACCESS_CONTROL=True"
+    )
+
+    yield
+
+    await _reset_engines_and_prune()
+
+
+async def test_permissions_example_flow(permissions_example_env):
+    """Pytest version of `examples/python/permissions_example.py` (same scenarios, asserts instead of prints)."""
+    # Patch LLM calls so GRAPH_COMPLETION can run without external API keys.
+    llm_patch = patch(
+        "cognee.infrastructure.llm.LLMGateway.LLMGateway.acreate_structured_output",
+        new_callable=AsyncMock,
+        return_value="MOCK_ANSWER",
+    )
+
+    # Resolve example data file path (repo-shipped PDF).
+    repo_root = pathlib.Path(__file__).resolve().parent
+    explanation_file_path = str(repo_root / "test_data" / "artificial-intelligence.pdf")
+    assert pathlib.Path(explanation_file_path).exists(), (
+        f"Expected example PDF to exist at {explanation_file_path}"
+    )
+
+    # Same QUANTUM text as in the example.
+    text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
+    At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages
+    this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the
+    preparation and manipulation of quantum states.
+    """
+
+    # Create user_1, add AI dataset.
+    user_1 = await create_user("user_1@example.com", "example")
+    await cognee.add([explanation_file_path], dataset_name="AI", user=user_1)
+
+    # Create user_2, add QUANTUM dataset.
+    user_2 = await create_user("user_2@example.com", "example")
+    await cognee.add([text], dataset_name="QUANTUM", user=user_2)
+
+    ai_cognify_result = await cognee.cognify(["AI"], user=user_1)
+    quantum_cognify_result = await cognee.cognify(["QUANTUM"], user=user_2)
+
+    ai_dataset_id = _extract_dataset_id_from_cognify(ai_cognify_result)
+    quantum_dataset_id = _extract_dataset_id_from_cognify(quantum_cognify_result)
+    assert ai_dataset_id is not None
+    assert quantum_dataset_id is not None
+
+    with llm_patch:
+        # user_1 can read own dataset.
+        search_results = await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text="What is in the document?",
+            user=user_1,
+            datasets=[ai_dataset_id],
         )
-    except PermissionDeniedError:
-        add_error = True
-    assert add_error, "PermissionDeniedError was not raised during add as expected"
+    assert isinstance(search_results, list) and len(search_results) == 1
+    assert search_results[0]["dataset_name"] == "AI"
+    assert search_results[0]["search_result"] == ["MOCK_ANSWER"]
 
-    # Try to cognify with default_user the test_users dataset (test write permission enforcement)
-    cognify_error = False
-    try:
-        await cognee.cognify(datasets=[test_user_dataset_id], user=default_user)
-    except PermissionDeniedError:
-        cognify_error = True
-    assert cognify_error, "PermissionDeniedError was not raised during cognify as expected"
+    # user_1 can't read dataset owned by user_2.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION,
+            query_text="What is in the document?",
+            user=user_1,
+            datasets=[quantum_dataset_id],
+        )
 
-    # Try to add permission for a dataset default_user does not have share permission for
-    give_permission_error = False
-    try:
+    # user_1 can't add to user_2's dataset.
+    with pytest.raises(PermissionDeniedError):
+        await cognee.add([explanation_file_path], dataset_id=quantum_dataset_id, user=user_1)
+
+        # user_2 grants read permission to user_1 for QUANTUM dataset.
         await authorized_give_permission_on_datasets(
-            default_user.id,
-            [test_user_dataset_id],
-            "write",
-            default_user.id,
+            user_1.id, [quantum_dataset_id], "read", user_2.id
         )
-    except PermissionDeniedError:
-        give_permission_error = True
-    assert give_permission_error, (
-        "PermissionDeniedError was not raised during assignment of permission as expected"
-    )
 
-    # Actually give permission to default_user to write on test_users dataset
-    await authorized_give_permission_on_datasets(
-        default_user.id,
-        [test_user_dataset_id],
-        "write",
-        test_user.id,
-    )
+        with llm_patch:
+            # Now user_1 can read QUANTUM dataset via dataset_id.
+            search_results = await cognee.search(
+                query_type=SearchType.GRAPH_COMPLETION,
+                query_text="What is in the document?",
+                user=user_1,
+                dataset_ids=[quantum_dataset_id],
+            )
+        assert isinstance(search_results, list) and len(search_results) == 1
+        assert search_results[0]["dataset_name"] == "QUANTUM"
+        assert search_results[0]["search_result"] == ["MOCK_ANSWER"]
 
-    # Add new data to test_users dataset from default_user
-    await cognee.add(
-        [explanation_file_path_nlp],
-        dataset_name="QUANTUM",
-        dataset_id=test_user_dataset_id,
-        user=default_user,
-    )
-    await cognee.cognify(datasets=[test_user_dataset_id], user=default_user)
+        # Tenant + role scenario.
+        tenant_id = await create_tenant("CogneeLab", user_2.id)
+        await select_tenant(user_id=user_2.id, tenant_id=tenant_id)
+        role_id = await create_role(role_name="Researcher", owner_id=user_2.id)
 
-    # Actually give permission to default_user to read on test_users dataset
-    await authorized_give_permission_on_datasets(
-        default_user.id,
-        [test_user_dataset_id],
-        "read",
-        test_user.id,
-    )
+        user_3 = await create_user("user_3@example.com", "example")
+        await add_user_to_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
+        await add_user_to_role(user_id=user_3.id, role_id=role_id, owner_id=user_2.id)
+        await select_tenant(user_id=user_3.id, tenant_id=tenant_id)
 
-    # Check if default_user can see from test_users datasets now
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="What is in the document?",
-        user=default_user,
-        dataset_ids=[test_user_dataset_id],
-    )
-    assert len(search_results) == 1, "The search results list length is not one."
-    print("\n\nExtracted sentences are:\n")
-    for result in search_results:
-        print(f"{result}\n")
+        # Can't grant role permission on a dataset that isn't part of the active tenant.
+        with pytest.raises(PermissionDeniedError):
+            await authorized_give_permission_on_datasets(
+                role_id, [quantum_dataset_id], "read", user_2.id
+            )
 
-    assert search_results[0]["dataset_name"] == "QUANTUM", (
-        f"Dict must contain dataset name 'QUANTUM': {search_results[0]}"
-    )
-
-    # Check if default_user can only see information from both datasets now
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="What is in the document?",
-        user=default_user,
-    )
-    assert len(search_results) == 2, "The search results list length is not two."
-    print("\n\nExtracted sentences are:\n")
-    for result in search_results:
-        print(f"{result}\n")
-
-    # Try deleting data from test_user dataset with default_user without delete permission
-    delete_error = False
-    try:
-        # Get the dataset data to find the ID of the first data item (text)
-        test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
-        text_data_id = test_user_dataset_data[0].id
-
-        await cognee.delete(
-            data_id=text_data_id, dataset_id=test_user_dataset_id, user=default_user
+        # Re-create QUANTUM dataset in CogneeLab tenant so role permissions can be assigned.
+        user_2 = await get_user(user_2.id)  # refresh tenant context
+        await cognee.add([text], dataset_name="QUANTUM_COGNEE_LAB", user=user_2)
+        quantum_cognee_lab_cognify_result = await cognee.cognify(
+            ["QUANTUM_COGNEE_LAB"], user=user_2
         )
-    except PermissionDeniedError:
-        delete_error = True
+        quantum_cognee_lab_dataset_id = _extract_dataset_id_from_cognify(
+            quantum_cognee_lab_cognify_result
+        )
+        assert quantum_cognee_lab_dataset_id is not None
 
-    assert delete_error, "PermissionDeniedError was not raised during delete operation as expected"
+        await authorized_give_permission_on_datasets(
+            role_id, [quantum_cognee_lab_dataset_id], "read", user_2.id
+        )
 
-    # Try deleting data from test_user dataset with test_user
-    # Get the dataset data to find the ID of the first data item (text)
-    test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
-    text_data_id = test_user_dataset_data[0].id
-
-    await cognee.delete(data_id=text_data_id, dataset_id=test_user_dataset_id, user=test_user)
-
-    # Actually give permission to default_user to delete data for test_users dataset
-    await authorized_give_permission_on_datasets(
-        default_user.id,
-        [test_user_dataset_id],
-        "delete",
-        test_user.id,
-    )
-
-    # Try deleting data from test_user dataset with default_user after getting delete permission
-    # Get the dataset data to find the ID of the remaining data item (explanation_file_path_nlp)
-    test_user_dataset_data = await get_dataset_data(test_user_dataset_id)
-    explanation_file_data_id = test_user_dataset_data[0].id
-
-    await cognee.delete(
-        data_id=explanation_file_data_id, dataset_id=test_user_dataset_id, user=default_user
-    )
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())
+        with llm_patch:
+            # user_3 can read via role permission.
+            search_results = await cognee.search(
+                query_type=SearchType.GRAPH_COMPLETION,
+                query_text="What is in the document?",
+                user=user_3,
+                dataset_ids=[quantum_cognee_lab_dataset_id],
+            )
+        assert isinstance(search_results, list) and len(search_results) == 1
+        assert search_results[0]["dataset_name"] == "QUANTUM_COGNEE_LAB"
+        assert search_results[0]["search_result"] == ["MOCK_ANSWER"]

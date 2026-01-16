@@ -149,7 +149,9 @@ async def e2e_state():
 
     vector_engine = get_vector_engine()
     collection = await vector_engine.search(
-        collection_name="Triplet_text", query_text="Test", limit=None
+        collection_name="Triplet_text",
+        query_text="Test",
+        limit=None,
     )
 
     # --- Retriever contexts ---
@@ -188,57 +190,70 @@ async def e2e_state():
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="Where is germany located, next to which country?",
         save_interaction=True,
+        verbose=True,
     )
     completion_cot = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION_COT,
         query_text="What is the country next to germany??",
         save_interaction=True,
+        verbose=True,
     )
     completion_ext = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
         query_text="What is the name of the country next to germany",
         save_interaction=True,
+        verbose=True,
     )
 
     await cognee.search(
-        query_type=SearchType.FEEDBACK, query_text="This was not the best answer", last_k=1
+        query_type=SearchType.FEEDBACK,
+        query_text="This was not the best answer",
+        last_k=1,
+        verbose=True,
     )
 
     completion_sum = await cognee.search(
         query_type=SearchType.GRAPH_SUMMARY_COMPLETION,
         query_text="Next to which country is Germany located?",
         save_interaction=True,
+        verbose=True,
     )
     completion_triplet = await cognee.search(
         query_type=SearchType.TRIPLET_COMPLETION,
         query_text="Next to which country is Germany located?",
         save_interaction=True,
+        verbose=True,
     )
     completion_chunks = await cognee.search(
         query_type=SearchType.CHUNKS,
         query_text="Germany",
         save_interaction=False,
+        verbose=True,
     )
     completion_summaries = await cognee.search(
         query_type=SearchType.SUMMARIES,
         query_text="Germany",
         save_interaction=False,
+        verbose=True,
     )
     completion_rag = await cognee.search(
         query_type=SearchType.RAG_COMPLETION,
         query_text="Next to which country is Germany located?",
         save_interaction=False,
+        verbose=True,
     )
     completion_temporal = await cognee.search(
         query_type=SearchType.TEMPORAL,
         query_text="Next to which country is Germany located?",
         save_interaction=False,
+        verbose=True,
     )
 
     await cognee.search(
         query_type=SearchType.FEEDBACK,
         query_text="This answer was great",
         last_k=1,
+        verbose=True,
     )
 
     # Snapshot after all E2E operations above (used by assertion-only tests).
@@ -350,11 +365,41 @@ async def test_e2e_retriever_triplets_have_vector_distances(e2e_state):
         assert triplets, f"{name}: Triplets list should not be empty"
         for edge in triplets:
             assert isinstance(edge, Edge), f"{name}: Elements should be Edge instances"
-            distance = edge.attributes.get("vector_distance")
-            node1_distance = edge.node1.attributes.get("vector_distance")
-            node2_distance = edge.node2.attributes.get("vector_distance")
-            assert isinstance(distance, float), f"{name}: vector_distance should be float"
+            vector_distances = edge.attributes.get("vector_distance")
+            assert vector_distances is not None, (
+                f"{name}: vector_distance should be set when retrievers return results"
+            )
+            assert isinstance(vector_distances, list) and vector_distances, (
+                f"{name}: vector_distance should be a non-empty list"
+            )
+            distance = vector_distances[0]
+            assert isinstance(distance, float), (
+                f"{name}: vector_distance[0] should be float, got {type(distance)}"
+            )
             assert 0 <= distance <= 1
+
+            node1_distances = edge.node1.attributes.get("vector_distance")
+            node2_distances = edge.node2.attributes.get("vector_distance")
+            assert node1_distances is not None, (
+                f"{name}: node1 vector_distance should be set when retrievers return results"
+            )
+            assert node2_distances is not None, (
+                f"{name}: node2 vector_distance should be set when retrievers return results"
+            )
+            assert isinstance(node1_distances, list) and node1_distances, (
+                f"{name}: node1 vector_distance should be a non-empty list"
+            )
+            assert isinstance(node2_distances, list) and node2_distances, (
+                f"{name}: node2 vector_distance should be a non-empty list"
+            )
+            node1_distance = node1_distances[0]
+            node2_distance = node2_distances[0]
+            assert isinstance(node1_distance, float), (
+                f"{name}: node1 vector_distance[0] should be float, got {type(node1_distance)}"
+            )
+            assert isinstance(node2_distance, float), (
+                f"{name}: node2 vector_distance[0] should be float, got {type(node2_distance)}"
+            )
             assert 0 <= node1_distance <= 1
             assert 0 <= node2_distance <= 1
 

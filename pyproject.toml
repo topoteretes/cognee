@@ -1,7 +1,7 @@
 [project]
 name = "cognee"
 
-version = "0.5.0.dev1"
+version = "0.5.1"
 description = "Cognee - is a library for enriching LLM context with a semantic layer for better understanding and reasoning."
 authors = [
     { name = "Vasilije Markovic" },
@@ -32,7 +32,7 @@ dependencies = [
     "litellm>=1.76.0",
     "instructor>=1.9.1,<2.0.0",
     "filetype>=1.2.0,<2.0.0",
-    "aiohttp>=3.11.14,<4.0.0",
+    "aiohttp>=3.13.3,<4.0.0",
     "aiofiles>=23.2.1",
     "rdflib>=7.1.4,<7.2.0",
     "pypdf>=4.1.0,<7.0.0",
@@ -60,6 +60,9 @@ dependencies = [
     "fakeredis[lua]>=2.32.0",
     "diskcache>=5.6.3",
     "aiolimiter>=1.2.1",
+    "urllib3>=2.6.0",
+    "cbor2>=5.8.0"
+
 ]
 
 [project.optional-dependencies]
@@ -95,6 +98,7 @@ notebook = ["notebook>=7.1.0,<8"]
 langchain = [
     "langsmith>=0.2.3,<1.0.0",
     "langchain_text_splitters>=0.3.2,<1.0.0",
+    "langchain-core>=1.2.5"
 ]
 llama-index = ["llama-index-core>=0.12.11,<0.13"]
 huggingface = ["transformers>=4.46.3,<5"]
@@ -104,6 +108,7 @@ anthropic = ["anthropic>=0.27"]
 deepeval = ["deepeval>=3.0.1,<4"]
 posthog = ["posthog>=3.5.0,<4"]
 groq = ["groq>=0.8.0,<1.0.0"]
+llama-cpp = ["llama-cpp-python[server]>=0.3.0,<1.0.0"]
 chromadb = [
     "chromadb>=0.6,<0.7",
     "pypika==0.48.9",
@@ -200,7 +205,8 @@ exclude = [
     "cognee/modules/users/models/Group.py",
     "cognee/modules/users/models/ACL.py",
     "cognee/modules/pipelines/models/Task.py",
-    "cognee/modules/data/models/Dataset.py"
+    "cognee/modules/data/models/Dataset.py",
+    "cognee/modules/notebooks/tutorials/"  # Ignore tutorial Python files
 ]
 
 [tool.ruff.lint]

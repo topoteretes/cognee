@@ -9,6 +9,7 @@ from cognee.shared.logging_utils import get_logger
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from cognee.tasks.web_scraper.utils import fetch_page_content
+from cognee.tasks.ingestion.data_item import DataItem
 
 
 logger = get_logger()
@@ -94,6 +95,10 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
 
         # data is text, save it to data storage and return the file path
         return await save_data_to_file(data_item)
+
+    if isinstance(data_item, DataItem):
+        # If instance is DataItem use the underlying data
+        return await save_data_item_to_storage(data_item.data)
 
     # data is not a supported type
     raise IngestionError(message=f"Data type not supported: {type(data_item)}")

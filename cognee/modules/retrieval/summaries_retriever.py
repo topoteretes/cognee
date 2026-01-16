@@ -4,6 +4,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
+from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
 
 logger = get_logger("SummariesRetriever")
@@ -54,6 +55,9 @@ class SummariesRetriever(BaseRetriever):
                 "TextSummary_text", query, limit=self.top_k
             )
             logger.info(f"Found {len(summaries_results)} summaries from vector search")
+
+            await update_node_access_timestamps(summaries_results)
+
         except CollectionNotFoundError as error:
             logger.error("TextSummary_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error
