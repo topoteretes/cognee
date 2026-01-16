@@ -189,3 +189,96 @@ async def test_api_endpoint_logging(e2e_config, authenticated_client, cache_engi
     assert search_logs[0]["type"] == "api_endpoint"
     assert search_logs[0]["user_id"] == str(user.id)
     assert search_logs[0]["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_tool_logging(e2e_config, cache_engine):
+    """Test that MCP tools succeed and log to Redis."""
+    import sys
+    import importlib.util
+    from pathlib import Path
+
+    await _reset_engines_and_prune()
+
+    repo_root = Path(__file__).parent.parent.parent
+    mcp_src_path = repo_root / "cognee-mcp" / "src"
+    mcp_server_path = mcp_src_path / "server.py"
+
+    if not mcp_server_path.exists():
+        pytest.skip(f"MCP server not found at {mcp_server_path}")
+
+    if str(mcp_src_path) not in sys.path:
+        sys.path.insert(0, str(mcp_src_path))
+
+    spec = importlib.util.spec_from_file_location("mcp_server_module", mcp_server_path)
+    mcp_server_module = importlib.util.module_from_spec(spec)
+
+    import os
+
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(str(mcp_src_path))
+        spec.loader.exec_module(mcp_server_module)
+    finally:
+        os.chdir(original_cwd)
+
+    if mcp_server_module.cognee_client is None:
+        cognee_client_path = mcp_src_path / "cognee_client.py"
+        if cognee_client_path.exists():
+            spec_client = importlib.util.spec_from_file_location(
+                "cognee_client", cognee_client_path
+            )
+            cognee_client_module = importlib.util.module_from_spec(spec_client)
+            spec_client.loader.exec_module(cognee_client_module)
+            CogneeClient = cognee_client_module.CogneeClient
+            mcp_server_module.cognee_client = CogneeClient()
+        else:
+            pytest.skip(f"CogneeClient not found at {cognee_client_path}")
+
+    test_text = "Germany is located in Europe right next to the Netherlands."
+    await mcp_server_module.cognify(data=test_text)
+    await asyncio.sleep(30.0)
+
+    list_result = await mcp_server_module.list_data()
+    assert list_result is not None, "List data should return results"
+
+    search_result = await mcp_server_module.search(
+        search_query="Germany", search_type="GRAPH_COMPLETION", top_k=5
+    )
+    assert search_result is not None, "Search should return results"
+
+    interaction_data = "User: What is Germany?\nAgent: Germany is a country in Europe."
+    await mcp_server_module.save_interaction(data=interaction_data)
+    await asyncio.sleep(30.0)
+
+    status_result = await mcp_server_module.cognify_status()
+    assert status_result is not None, "Cognify status should return results"
+
+    await mcp_server_module.prune()
+    await asyncio.sleep(0.5)
+
+    logs = await cache_engine.get_usage_logs("unknown", limit=50)
+    mcp_logs = [log for log in logs if log.get("type") == "mcp_tool"]
+    assert len(mcp_logs) > 0, (
+        f"Should have MCP tool logs with user_id='unknown'. Found logs: {[log.get('function_name') for log in logs[:5]]}"
+    )
+    assert len(mcp_logs) == 6
+    function_names = [log.get("function_name") for log in mcp_logs]
+    expected_tools = [
+        "MCP cognify",
+        "MCP list_data",
+        "MCP search",
+        "MCP save_interaction",
+        "MCP cognify_status",
+        "MCP prune",
+    ]
+
+    for expected_tool in expected_tools:
+        assert expected_tool in function_names, (
+            f"Should have {expected_tool} log. Found: {function_names}"
+        )
+
+    for log in mcp_logs:
+        assert log["type"] == "mcp_tool"
+        assert log["user_id"] == "unknown"
+        assert log["success"] is True
