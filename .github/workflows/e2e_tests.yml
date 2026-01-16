@@ -687,9 +687,10 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "redis"
 
-      - name: Sync cognee-mcp dependencies
-        working-directory: cognee-mcp
-        run: uv sync --no-dev
+      - name: Install correct dependencies for mcp
+        run: |
+          uv run pip install -e ./cognee-mcp
+          uv run pip install --force-reinstall -e .
 
       - name: Run api/tool usage logger
         env:
