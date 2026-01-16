@@ -58,14 +58,20 @@ else
     echo "Direct mode: Using local cognee instance"
     echo "Running database migrations..."
 
+    set +e # Disable exit on error to handle specific migration errors
     MIGRATION_OUTPUT=$(cd cognee && alembic upgrade head)
     MIGRATION_EXIT_CODE=$?
+    set -e
 
     if [[ $MIGRATION_EXIT_CODE -ne 0 ]]; then
-        if [[ "$MIGRATION_OUTPUT" == *"UserAlreadyExists"* ]] || [[ "$MIGRATION_OUTPUT" == *"User default_user@example.com already exists"* ]]; then
-            echo "Warning: Default user already exists, continuing startup..."
-        else
-            echo "Migration failed with unexpected error."
+
+        echo "Migration failed with unexpected error. Trying to run Cognee without migrations."
+        echo "Initializing database tables..."
+        python /app/src/run_cognee_database_setup.py
+        INIT_EXIT_CODE=$?
+
+        if [[ $INIT_EXIT_CODE -ne 0 ]]; then
+            echo "Database initialization failed!"
             exit 1
         fi
     fi

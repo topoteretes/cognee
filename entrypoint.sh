@@ -20,19 +20,15 @@ MIGRATION_EXIT_CODE=$?
 set -e
 
 if [[ $MIGRATION_EXIT_CODE -ne 0 ]]; then
-    if [[ "$MIGRATION_OUTPUT" == *"UserAlreadyExists"* ]] || [[ "$MIGRATION_OUTPUT" == *"User default_user@example.com already exists"* ]]; then
-        echo "Warning: Default user already exists, continuing startup..."
-    else
-        echo "Migration failed with unexpected error. Trying to run Cognee without migrations."
+    echo "Migration failed with unexpected error. Trying to run Cognee without migrations."
 
-        echo "Initializing database tables..."
-        python /app/cognee/modules/engine/operations/setup.py
-        INIT_EXIT_CODE=$?
+    echo "Initializing database tables..."
+    python /app/cognee/modules/engine/operations/setup.py
+    INIT_EXIT_CODE=$?
 
-        if [[ $INIT_EXIT_CODE -ne 0 ]]; then
-            echo "Database initialization failed!"
-            exit 1
-        fi
+    if [[ $INIT_EXIT_CODE -ne 0 ]]; then
+        echo "Database initialization failed!"
+        exit 1
     fi
 else
     echo "Database migrations done."
