@@ -691,7 +691,6 @@ jobs:
         shell: bash
         run: |
           uv pip install --no-deps -e ./cognee-mcp
-          uv pip install "fastmcp>=2.10.0,<3.0.0" "mcp>=1.12.0,<2.0.0" "httpx>=0.27.0,<1.0.0"
 
       - name: Run api/tool usage logger
         env:
