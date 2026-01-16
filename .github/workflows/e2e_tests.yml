@@ -689,11 +689,15 @@ jobs:
 
       - name: Install minimal MCP dependencies from cognee-mcp lockfile
         run: |
-          # Extract exact versions of mcp, fastmcp, httpx from cognee-mcp lockfile and install only those
+          # Extract exact versions of mcp, fastmcp, httpx from cognee-mcp lockfile
           cd cognee-mcp
           MCP_DEPS=$(uv export --no-hashes --format requirements.txt | grep -E '^(mcp|fastmcp|httpx)==')
           cd ..
-          echo "$MCP_DEPS" | xargs uv run pip install
+          # Install into main .venv (where pytest runs) using the same Python
+          PYTHON=$(uv run which python)
+          echo "$MCP_DEPS" | "$PYTHON" -m pip install
+          # Verify installation
+          "$PYTHON" -c "import mcp; print('mcp version:', mcp.__version__)"
 
       - name: Run api/tool usage logger
         env:
