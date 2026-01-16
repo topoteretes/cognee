@@ -380,6 +380,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         query_texts: List[str],
         limit: int = None,
         with_vectors: bool = False,
+        include_payload: bool = False,
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
@@ -390,6 +391,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     query_vector=query_vector,
                     limit=limit,
                     with_vector=with_vectors,
+                    include_payload=include_payload,
                 )
                 for query_vector in query_vectors
             ]

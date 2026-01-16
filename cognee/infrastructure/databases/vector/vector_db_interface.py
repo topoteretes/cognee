@@ -117,6 +117,7 @@ class VectorDBInterface(Protocol):
         query_texts: List[str],
         limit: Optional[int],
         with_vectors: bool = False,
+        include_payload: bool = False,
     ):
         """
         Perform a batch search using multiple text queries against a collection.
@@ -129,6 +130,9 @@ class VectorDBInterface(Protocol):
             - limit (Optional[int]): The maximum number of results to return for each query.
             - with_vectors (bool): Whether to include vector representations with search
               results. (default False)
+            - include_payload (bool): Whether to include the payload data with search. Search is faster when set to False.
+              Payload contains metadata about the data point, useful for searches that are only based on embedding distances
+              like the RAG_COMPLETION search type, but not needed when search also contains graph data.
         """
         raise NotImplementedError
 

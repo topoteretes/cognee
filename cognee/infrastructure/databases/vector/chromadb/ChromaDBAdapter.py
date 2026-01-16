@@ -442,6 +442,7 @@ class ChromaDBAdapter(VectorDBInterface):
         query_texts: List[str],
         limit: int = 5,
         with_vectors: bool = False,
+        include_payload: bool = False,
     ):
         """
         Perform multiple searches in a single request for efficiency, returning results for each
