@@ -690,7 +690,7 @@ jobs:
       - name: Install cognee-mcp (local version)
         shell: bash
         run: |
-          uv pip install --no-deps -e ./cognee-mcp
+          uv pip install -e ./cognee-mcp
 
       - name: Run api/tool usage logger
         env:
