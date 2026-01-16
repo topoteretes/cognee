@@ -262,7 +262,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                 session_id=session_id,
             )
 
-        return [completion]
+        return completion if isinstance(completion, list) else [completion]
 
     async def save_qa(self, question: str, answer: str, context: str, triplets: List) -> None:
         """

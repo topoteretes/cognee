@@ -171,7 +171,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
     async def get_completion(
         self,
         query: Optional[str] = None,
-        context: Optional[List[Edge]] = None,
+        context: Optional[List[Edge] | List[List[Edge]]] = None,
         session_id: Optional[str] = None,
         max_iter=4,
         response_model: Type = str,
@@ -216,16 +216,22 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
         completion_results = []
         if query_batch and len(query_batch) > 0:
+            if not context:
+                # Having a list is necessary to zip through it
+                context = []
+                for query in query_batch:
+                    context.append(None)
+
             completion_results = await asyncio.gather(
                 *[
                     self._run_cot_completion(
                         query=query,
-                        context=context,
+                        context=context_el,
                         conversation_history=conversation_history,
                         max_iter=max_iter,
                         response_model=response_model,
                     )
-                    for query in query_batch
+                    for query, context_el in zip(query_batch, context)
                 ]
             )
         else:
@@ -237,11 +243,13 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 response_model=response_model,
             )
 
+        # TODO: Handle save interaction for batch queries
         if self.save_interaction and context and triplets and completion:
             await self.save_qa(
                 question=query, answer=str(completion), context=context_text, triplets=triplets
             )
 
+        # TODO: Handle session save interaction for batch queries
         # Save to session cache if enabled
         if session_save:
             context_summary = await summarize_text(context_text)
