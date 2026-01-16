@@ -569,7 +569,12 @@ async def test_get_completion_batch_queries_context_extension_rounds(mock_edge):
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
-            side_effect=cycle(["Resolved context", "Extended context"]),  # Different contexts
+            side_effect=[
+                "Resolved context",
+                "Resolved context",
+                "Extended context",
+                "Extended context",
+            ],  # Different contexts
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
