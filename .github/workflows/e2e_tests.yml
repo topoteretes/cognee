@@ -691,7 +691,7 @@ jobs:
         run: |
           # Extract exact versions of mcp, fastmcp, httpx from cognee-mcp lockfile and install only those
           cd cognee-mcp
-          MCP_DEPS=$(uv export --no-hashes --format requirements | grep -E '^(mcp|fastmcp|httpx)==')
+          MCP_DEPS=$(uv export --no-hashes --format requirements.txt | grep -E '^(mcp|fastmcp|httpx)==')
           cd ..
           echo "$MCP_DEPS" | xargs uv run pip install
 
