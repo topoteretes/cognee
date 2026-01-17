@@ -62,7 +62,9 @@ class CompletionRetriever(BaseRetriever):
         vector_engine = get_vector_engine()
 
         try:
-            found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
+            found_chunks = await vector_engine.search(
+                "DocumentChunk_text", query, limit=self.top_k, include_payload=True
+            )
 
             if len(found_chunks) == 0:
                 return ""

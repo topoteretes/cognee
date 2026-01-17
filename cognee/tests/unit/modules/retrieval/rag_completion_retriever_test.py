@@ -33,7 +33,9 @@ async def test_get_context_success(mock_vector_engine):
         context = await retriever.get_context("test query")
 
     assert context == "Steve Rodger\nMike Broski"
-    mock_vector_engine.search.assert_awaited_once_with("DocumentChunk_text", "test query", limit=2)
+    mock_vector_engine.search.assert_awaited_once_with(
+        "DocumentChunk_text", "test query", limit=2, include_payload=True
+    )
 
 
 @pytest.mark.asyncio
@@ -85,7 +87,9 @@ async def test_get_context_top_k_limit(mock_vector_engine):
         context = await retriever.get_context("test query")
 
     assert context == "Chunk 0\nChunk 1"
-    mock_vector_engine.search.assert_awaited_once_with("DocumentChunk_text", "test query", limit=2)
+    mock_vector_engine.search.assert_awaited_once_with(
+        "DocumentChunk_text", "test query", limit=2, include_payload=True
+    )
 
 
 @pytest.mark.asyncio

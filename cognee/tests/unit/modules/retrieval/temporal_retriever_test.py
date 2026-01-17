@@ -63,8 +63,8 @@ async def test_filter_top_k_events_sorts_and_limits():
     ]
 
     scored_results = [
-        SimpleNamespace(payload={"id": "e2"}, score=0.10),
-        SimpleNamespace(payload={"id": "e1"}, score=0.20),
+        SimpleNamespace(id="e2", payload={"id": "e2"}, score=0.10),
+        SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.20),
     ]
 
     top = await tr.filter_top_k_events(relevant_events, scored_results)
@@ -91,8 +91,8 @@ async def test_filter_top_k_events_includes_unknown_as_infinite_but_not_in_top_k
     ]
 
     scored_results = [
-        SimpleNamespace(payload={"id": "known2"}, score=0.05),
-        SimpleNamespace(payload={"id": "known1"}, score=0.50),
+        SimpleNamespace(id="known2", payload={"id": "known2"}, score=0.05),
+        SimpleNamespace(id="known1", payload={"id": "known1"}, score=0.50),
     ]
 
     top = await tr.filter_top_k_events(relevant_events, scored_results)
@@ -119,8 +119,8 @@ async def test_filter_top_k_events_limits_when_top_k_exceeds_events():
     tr = TemporalRetriever(top_k=10)
     relevant_events = [{"events": [{"id": "a"}, {"id": "b"}]}]
     scored_results = [
-        SimpleNamespace(payload={"id": "a"}, score=0.1),
-        SimpleNamespace(payload={"id": "b"}, score=0.2),
+        SimpleNamespace(id="a", payload={"id": "a"}, score=0.1),
+        SimpleNamespace(id="b", payload={"id": "b"}, score=0.2),
     ]
     out = await tr.filter_top_k_events(relevant_events, scored_results)
     assert [e["id"] for e in out] == ["a", "b"]
@@ -179,8 +179,8 @@ async def test_get_context_with_time_range(mock_graph_engine, mock_vector_engine
         }
     ]
 
-    mock_result1 = SimpleNamespace(payload={"id": "e2"}, score=0.05)
-    mock_result2 = SimpleNamespace(payload={"id": "e1"}, score=0.10)
+    mock_result1 = SimpleNamespace(id="e2", payload={"id": "e2"}, score=0.05)
+    mock_result2 = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.10)
     mock_vector_engine.search.return_value = [mock_result1, mock_result2]
 
     with (
@@ -279,7 +279,7 @@ async def test_get_context_time_from_only(mock_graph_engine, mock_vector_engine)
         }
     ]
 
-    mock_result = SimpleNamespace(payload={"id": "e1"}, score=0.05)
+    mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
     mock_vector_engine.search.return_value = [mock_result]
 
     with (
@@ -313,7 +313,7 @@ async def test_get_context_time_to_only(mock_graph_engine, mock_vector_engine):
         }
     ]
 
-    mock_result = SimpleNamespace(payload={"id": "e1"}, score=0.05)
+    mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
     mock_vector_engine.search.return_value = [mock_result]
 
     with (
@@ -347,7 +347,7 @@ async def test_get_completion_without_context(mock_graph_engine, mock_vector_eng
         }
     ]
 
-    mock_result = SimpleNamespace(payload={"id": "e1"}, score=0.05)
+    mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
     mock_vector_engine.search.return_value = [mock_result]
 
     with (
@@ -416,7 +416,7 @@ async def test_get_completion_with_session(mock_graph_engine, mock_vector_engine
         }
     ]
 
-    mock_result = SimpleNamespace(payload={"id": "e1"}, score=0.05)
+    mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
     mock_vector_engine.search.return_value = [mock_result]
 
     mock_user = MagicMock()
@@ -481,7 +481,7 @@ async def test_get_completion_with_session_no_user_id(mock_graph_engine, mock_ve
         }
     ]
 
-    mock_result = SimpleNamespace(payload={"id": "e1"}, score=0.05)
+    mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
     mock_vector_engine.search.return_value = [mock_result]
 
     with (
@@ -570,7 +570,7 @@ async def test_get_completion_with_response_model(mock_graph_engine, mock_vector
         }
     ]
 
-    mock_result = SimpleNamespace(payload={"id": "e1"}, score=0.05)
+    mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
     mock_vector_engine.search.return_value = [mock_result]
 
     with (

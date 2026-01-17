@@ -52,7 +52,7 @@ class SummariesRetriever(BaseRetriever):
 
         try:
             summaries_results = await vector_engine.search(
-                "TextSummary_text", query, limit=self.top_k
+                "TextSummary_text", query, limit=self.top_k, include_payload=True
             )
             logger.info(f"Found {len(summaries_results)} summaries from vector search")
 

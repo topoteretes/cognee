@@ -67,7 +67,9 @@ class TripletRetriever(BaseRetriever):
                     "In order to use TRIPLET_COMPLETION first use the create_triplet_embeddings memify pipeline. "
                 )
 
-            found_triplets = await vector_engine.search("Triplet_text", query, limit=self.top_k)
+            found_triplets = await vector_engine.search(
+                "Triplet_text", query, limit=self.top_k, include_payload=True
+            )
 
             if len(found_triplets) == 0:
                 return ""

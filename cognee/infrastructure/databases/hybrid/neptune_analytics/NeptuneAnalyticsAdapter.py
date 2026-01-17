@@ -236,6 +236,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         query_vector: Optional[List[float]] = None,
         limit: Optional[int] = None,
         with_vector: bool = False,
+        include_payload: bool = False,  # TODO: Add support for this parameter
     ):
         """
         Perform a search in the specified collection using either a text query or a vector
@@ -319,7 +320,12 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
             self._na_exception_handler(e, query_string)
 
     async def batch_search(
-        self, collection_name: str, query_texts: List[str], limit: int, with_vectors: bool = False
+        self,
+        collection_name: str,
+        query_texts: List[str],
+        limit: int,
+        with_vectors: bool = False,
+        include_payload: bool = False,
     ):
         """
         Perform a batch search using multiple text queries against a collection.
@@ -342,7 +348,14 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         data_vectors = await self.embedding_engine.embed_text(query_texts)
         return await asyncio.gather(
             *[
-                self.search(collection_name, None, vector, limit, with_vectors)
+                self.search(
+                    collection_name,
+                    None,
+                    vector,
+                    limit,
+                    with_vectors,
+                    include_payload=include_payload,
+                )
                 for vector in data_vectors
             ]
         )

@@ -34,7 +34,9 @@ async def test_get_context_success(mock_vector_engine):
         context = await retriever.get_context("test query")
 
     assert context == "Alice knows Bob\nBob works at Tech Corp"
-    mock_vector_engine.search.assert_awaited_once_with("Triplet_text", "test query", limit=5)
+    mock_vector_engine.search.assert_awaited_once_with(
+        "Triplet_text", "test query", limit=5, include_payload=True
+    )
 
 
 @pytest.mark.asyncio

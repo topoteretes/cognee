@@ -98,7 +98,7 @@ class TemporalRetriever(GraphCompletionRetriever):
 
     async def filter_top_k_events(self, relevant_events, scored_results):
         # Build a score lookup from vector search results
-        score_lookup = {res.payload["id"]: res.score for res in scored_results}
+        score_lookup = {res.id: res.score for res in scored_results}
 
         events_with_scores = []
         for event in relevant_events[0]["events"]:
