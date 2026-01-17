@@ -51,7 +51,7 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=es">Español</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=fr">Français</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ja">日本語</a> |
-  <a href="README_ko.md">한국어</a> |
+  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ko">한국어</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=pt">Português</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ru">Русский</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=zh">中文</a>
@@ -65,14 +65,10 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
 
 ## About Cognee
 
-Cognee is an open-source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your documents both searchable by meaning and connected by relationships.
+Cognee is an open-source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your documents both searchable by meaning and connected by relationships. 
 
-You can use Cognee in two ways:
 
-1. [Self-host Cognee Open Source](https://docs.cognee.ai/getting-started/installation), which stores all data locally by default.
-2. [Connect to Cognee Cloud](https://platform.cognee.ai/), and get the same OSS stack on managed infrastructure for easier development and productionization.
-
-### Cognee Open Source (self-hosted):
+### Cognee Open Source:
 
 - Interconnects any type of data — including past conversations, files, images, and audio transcriptions
 - Replaces traditional RAG systems with a unified memory layer built on graphs and vectors
@@ -80,11 +76,6 @@ You can use Cognee in two ways:
 - Provides Pythonic data pipelines for ingestion from 30+ data sources
 - Offers high customizability through user-defined tasks, modular pipelines, and built-in search endpoints
 
-### Cognee Cloud (managed):
-- Hosted web UI dashboard
-- Automatic version updates
-- Resource usage analytics
-- GDPR compliant, enterprise-grade security
 
 ## Basic Usage & Feature Guide
 
@@ -119,7 +110,7 @@ To integrate other LLM providers, see our [LLM Provider Documentation](https://d
 
 ### Step 3: Run the Pipeline
 
-Cognee will take your documents, generate a knowledge graph from them and then query the graph based on combined relationships.
+Cognee will take your documents, generate a knowledge graph from them and then query the graph based on combined relationships. 
 
 Now, run a minimal pipeline:
 
@@ -158,7 +149,7 @@ As you can see, the output is generated from the document we previously stored i
   Cognee turns documents into AI memory.
 ```
 
-### Use the Cognee CLI
+### Use the Cognee CLI 
 
 As an alternative, you can get started with these essential commands:
 
