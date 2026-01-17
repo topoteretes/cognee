@@ -33,3 +33,5 @@ from .api.v1.ui import start_ui
 
 # Pipelines
 from .modules import pipelines
+
+from cognee.run_migrations import run_migrations
