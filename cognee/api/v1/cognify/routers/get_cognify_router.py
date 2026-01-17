@@ -29,6 +29,7 @@ from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
 )
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
+from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
 
 logger = get_logger("api.cognify")
@@ -57,6 +58,7 @@ def get_cognify_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("", response_model=dict)
+    @log_usage(function_name="POST /v1/cognify", log_type="api_endpoint")
     async def cognify(payload: CognifyPayloadDTO, user: User = Depends(get_authenticated_user)):
         """
         Transform datasets into structured knowledge graphs through cognitive processing.

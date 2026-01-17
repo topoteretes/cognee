@@ -89,6 +89,27 @@ class FSCacheAdapter(CacheDBInterface):
             return None
         return json.loads(value)
 
+    async def log_usage(
+        self,
+        user_id: str,
+        log_entry: dict,
+        ttl: int | None = 604800,
+    ):
+        """
+        Usage logging is not supported in filesystem cache backend.
+        This method is a no-op to satisfy the interface.
+        """
+        logger.warning("Usage logging not supported in FSCacheAdapter, skipping")
+        pass
+
+    async def get_usage_logs(self, user_id: str, limit: int = 100):
+        """
+        Usage logging is not supported in filesystem cache backend.
+        This method returns an empty list to satisfy the interface.
+        """
+        logger.warning("Usage logging not supported in FSCacheAdapter, returning empty list")
+        return []
+
     async def close(self):
         if self.cache is not None:
             self.cache.expire()
