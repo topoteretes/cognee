@@ -1,5 +1,6 @@
 from typing import List, Optional, Type, Union
 
+from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -146,17 +147,10 @@ async def brute_force_triplet_search(
         In single-query mode, node_distances and edge_distances are stored as flat lists.
         In batch mode, they are stored as list-of-lists (one list per query).
     """
-    if query is not None and query_batch is not None:
-        raise ValueError("Cannot provide both 'query' and 'query_batch'; use exactly one.")
-    if query is None and query_batch is None:
-        raise ValueError("Must provide either 'query' or 'query_batch'.")
-    if query is not None and (not query or not isinstance(query, str)):
-        raise ValueError("The query must be a non-empty string.")
-    if query_batch is not None:
-        if not isinstance(query_batch, list) or not query_batch:
-            raise ValueError("query_batch must be a non-empty list of strings.")
-        if not all(isinstance(q, str) and q for q in query_batch):
-            raise ValueError("All items in query_batch must be non-empty strings.")
+    query_validation = validate_queries(query, query_batch)
+    if not query_validation[0]:
+        raise ValueError(query_validation[1])
+
     if top_k <= 0:
         raise ValueError("top_k must be a positive integer.")
 

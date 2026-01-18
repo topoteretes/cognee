@@ -3,6 +3,7 @@ import json
 from typing import Optional, List, Type, Any
 from pydantic import BaseModel
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.shared.logging_utils import get_logger
 
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -170,11 +171,12 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
     async def get_completion(
         self,
-        query: str,
-        context: Optional[List[Edge]] = None,
+        query: Optional[str] = None,
+        context: Optional[List[Edge] | List[List[Edge]]] = None,
         session_id: Optional[str] = None,
         max_iter=4,
         response_model: Type = str,
+        query_batch: Optional[List[str]] = None,
     ) -> List[Any]:
         """
         Generate completion responses based on a user query and contextual information.
@@ -202,6 +204,10 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
             - List[str]: A list containing the generated answer to the user's query.
         """
+        query_validation = validate_queries(query, query_batch)
+        if not query_validation[0]:
+            raise ValueError(query_validation[1])
+
         # Check if session saving is enabled
         cache_config = CacheConfig()
         user = session_user.get()
@@ -213,19 +219,43 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         if session_save:
             conversation_history = await get_conversation_history(session_id=session_id)
 
-        completion, context_text, triplets = await self._run_cot_completion(
-            query=query,
-            context=context,
-            conversation_history=conversation_history,
-            max_iter=max_iter,
-            response_model=response_model,
-        )
+        context_batch = context
+        completion_batch = []
+        if query_batch and len(query_batch) > 0:
+            if not context_batch:
+                # Having a list is necessary to zip through it
+                context_batch = []
+                for _ in query_batch:
+                    context_batch.append(None)
 
+            completion_batch = await asyncio.gather(
+                *[
+                    self._run_cot_completion(
+                        query=query,
+                        context=context,
+                        conversation_history=conversation_history,
+                        max_iter=max_iter,
+                        response_model=response_model,
+                    )
+                    for batched_query, context in zip(query_batch, context_batch)
+                ]
+            )
+        else:
+            completion, context_text, triplets = await self._run_cot_completion(
+                query=query,
+                context=context,
+                conversation_history=conversation_history,
+                max_iter=max_iter,
+                response_model=response_model,
+            )
+
+        # TODO: Handle save interaction for batch queries
         if self.save_interaction and context and triplets and completion:
             await self.save_qa(
                 question=query, answer=str(completion), context=context_text, triplets=triplets
             )
 
+        # TODO: Handle session save interaction for batch queries
         # Save to session cache if enabled
         if session_save:
             context_summary = await summarize_text(context_text)
@@ -235,5 +265,8 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 answer=str(completion),
                 session_id=session_id,
             )
+
+        if completion_batch:
+            return [completion for completion, _, _ in completion_batch]
 
         return [completion]
