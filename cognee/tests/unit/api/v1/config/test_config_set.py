@@ -156,11 +156,14 @@ class TestConfigSet:
         """Test setting system root directory"""
         test_dir = "/tmp/test"
 
-        with patch("cognee.api.v1.config.config.get_base_config") as mock_get_base_config, \
-             patch("cognee.api.v1.config.config.get_relational_config") as mock_get_relational_config, \
-             patch("cognee.api.v1.config.config.get_graph_config") as mock_get_graph_config, \
-             patch("cognee.api.v1.config.config.get_vectordb_config") as mock_get_vectordb_config:
-
+        with (
+            patch("cognee.api.v1.config.config.get_base_config") as mock_get_base_config,
+            patch(
+                "cognee.api.v1.config.config.get_relational_config"
+            ) as mock_get_relational_config,
+            patch("cognee.api.v1.config.config.get_graph_config") as mock_get_graph_config,
+            patch("cognee.api.v1.config.config.get_vectordb_config") as mock_get_vectordb_config,
+        ):
             mock_base_config = MagicMock()
             mock_base_config.system_root_directory = ""
             mock_get_base_config.return_value = mock_base_config
