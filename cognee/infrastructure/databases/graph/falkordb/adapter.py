@@ -42,7 +42,7 @@ class FalkorDBAdapter(GraphDBInterface):
 
     def __init__(
         self,
-        graph_database_url: str,
+        graph_database_url: str = "",
         graph_database_port: int = 6379,
         graph_database_password: Optional[str] = None,
         graph_database_name: str = "CogneeGraph",
@@ -55,15 +55,25 @@ class FalkorDBAdapter(GraphDBInterface):
             graph_database_port: FalkorDB port (default: 6379)
             graph_database_password: Optional password for authentication
             graph_database_name: Default graph name (default: 'CogneeGraph')
+        
+        Environment Variables (preferred - unified config):
+            FALKORDB_HOST: FalkorDB host (takes precedence over graph_database_url)
+            FALKORDB_PORT: FalkorDB port (takes precedence over graph_database_port)
+            FALKORDB_PASSWORD: FalkorDB password (takes precedence over graph_database_password)
+            FALKORDB_GRAPH_NAME: Graph name (takes precedence over graph_database_name)
         """
+        import os
+
+        # Prefer unified FALKORDB_* env vars, fall back to constructor params
+        raw_host = os.getenv("FALKORDB_HOST") or graph_database_url
         self.host = (
-            graph_database_url.replace("redis://", "").split(":")[0]
-            if "redis://" in graph_database_url
-            else graph_database_url
+            raw_host.replace("redis://", "").split(":")[0]
+            if raw_host and "redis://" in raw_host
+            else (raw_host or "localhost")
         )
-        self.port = int(graph_database_port) if graph_database_port else 6379
-        self.password = graph_database_password
-        self._default_graph_name = graph_database_name
+        self.port = int(os.getenv("FALKORDB_PORT") or graph_database_port or 6379)
+        self.password = os.getenv("FALKORDB_PASSWORD") or graph_database_password
+        self._default_graph_name = os.getenv("FALKORDB_GRAPH_NAME") or graph_database_name or "CogneeGraph"
 
         self.client = None
         self._executor = ThreadPoolExecutor(max_workers=5)
@@ -224,6 +234,8 @@ class FalkorDBAdapter(GraphDBInterface):
         else:
             node_id = str(node)
             label = "Node"
+        
+        # logger.warning(f"DEBUG: add_node id={node_id} label={label}")
 
         properties = properties or {}
         if "type" not in properties:
@@ -242,6 +254,7 @@ class FalkorDBAdapter(GraphDBInterface):
     @record_graph_changes
     async def add_nodes(self, nodes: Union[List[Any], List[DataPoint]]) -> None:
         """Add multiple nodes to the graph."""
+        # logger.warning(f"DEBUG: add_nodes called with {len(nodes)} nodes")
         for node in nodes:
             await self.add_node(node)
 
@@ -267,6 +280,7 @@ class FalkorDBAdapter(GraphDBInterface):
     @record_graph_changes
     async def add_edges(self, edges: Union[List[Tuple], List[Any]]) -> None:
         """Add multiple edges to the graph."""
+        # logger.warning(f"DEBUG: add_edges called with {len(edges)} edges")
         for edge in edges:
             if isinstance(edge, tuple):
                 if len(edge) >= 4:
@@ -458,24 +472,47 @@ class FalkorDBAdapter(GraphDBInterface):
     ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
         """Get a subgraph containing nodes of a specific type."""
         label = getattr(node_type, "__name__", str(node_type))
+        
+        # Modified to fetch neighbors as well, matching Neo4j behavior
         if node_name:
             nodes_res = await self.query(
-                f"MATCH (n:`{BASE_LABEL}`:`{label}`) WHERE n.name IN $names RETURN n",
+                f"MATCH (n:`{BASE_LABEL}`:`{label}`) WHERE n.name IN $names "
+                f"OPTIONAL MATCH (n)--(nbr) "
+                f"RETURN n, nbr",
                 {"names": node_name},
             )
         else:
             nodes_res = await self.query(
-                f"MATCH (n:`{BASE_LABEL}`:`{label}`) RETURN n",
+                f"MATCH (n:`{BASE_LABEL}`:`{label}`) "
+                f"OPTIONAL MATCH (n)--(nbr) "
+                f"RETURN n, nbr",
                 {},
             )
 
+        unique_nodes: Dict[str, Any] = {}
+        
+        for r in nodes_res:
+            # Process primary node 'n'
+            n = r.get("n")
+            if n:
+               props = n.properties if hasattr(n, "properties") else (n if isinstance(n, dict) else {})
+               nid = str(props.get("id"))
+               if nid and nid not in unique_nodes:
+                   unique_nodes[nid] = props
+            
+            # Process neighbor node 'nbr'
+            nbr = r.get("nbr")
+            if nbr:
+               props = nbr.properties if hasattr(nbr, "properties") else (nbr if isinstance(nbr, dict) else {})
+               nid = str(props.get("id"))
+               if nid and nid not in unique_nodes:
+                   unique_nodes[nid] = props
+
         nodes: List[Tuple[int, dict]] = []
         id_to_idx: Dict[str, int] = {}
-        for i, r in enumerate(nodes_res):
-            n = r.get("n") or r.get(0)
-            props = n.properties if hasattr(n, "properties") else (n if isinstance(n, dict) else {})
+        
+        for i, (nid, props) in enumerate(unique_nodes.items()):
             nodes.append((i, props))
-            nid = str(props.get("id", i))
             id_to_idx[nid] = i
 
         node_ids = list(id_to_idx.keys())
@@ -483,7 +520,7 @@ class FalkorDBAdapter(GraphDBInterface):
             return nodes, []
 
         edges_res = await self.query(
-            f"MATCH (a:`{BASE_LABEL}`)-[r]->(b:`{BASE_LABEL}`) "
+            f"MATCH (a:`{BASE_LABEL}`)-[r]-(b:`{BASE_LABEL}`) "
             f"WHERE a.id IN $ids AND b.id IN $ids "
             f"RETURN a.id as source_id, b.id as target_id, type(r) as rel_type, r",
             {"ids": node_ids},

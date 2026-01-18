@@ -55,7 +55,7 @@ class FalkorDBVectorAdapter(VectorDBInterface):
 
     def __init__(
         self,
-        url: str,
+        url: str = "",
         port: int = 6379,
         api_key: Optional[str] = None,
         embedding_engine: Optional[EmbeddingEngine] = None,
@@ -70,11 +70,25 @@ class FalkorDBVectorAdapter(VectorDBInterface):
             api_key: Optional password for authentication
             embedding_engine: Engine for generating embeddings
             graph_name: Default graph name (default: 'CogneeGraph')
+        
+        Environment Variables (preferred - unified config):
+            FALKORDB_HOST: FalkorDB host (takes precedence over url)
+            FALKORDB_PORT: FalkorDB port (takes precedence over port)
+            FALKORDB_PASSWORD: FalkorDB password (takes precedence over api_key)
+            FALKORDB_GRAPH_NAME: Graph name (takes precedence over graph_name)
         """
-        self.host = url.replace("redis://", "").split(":")[0] if "redis://" in url else url
-        self.port = int(port) if port else 6379
-        self.password = api_key
-        self._default_graph_name = graph_name
+        import os
+
+        # Prefer unified FALKORDB_* env vars, fall back to constructor params
+        raw_host = os.getenv("FALKORDB_HOST") or url
+        self.host = (
+            raw_host.replace("redis://", "").split(":")[0]
+            if raw_host and "redis://" in raw_host
+            else (raw_host or "localhost")
+        )
+        self.port = int(os.getenv("FALKORDB_PORT") or port or 6379)
+        self.password = os.getenv("FALKORDB_PASSWORD") or api_key
+        self._default_graph_name = os.getenv("FALKORDB_GRAPH_NAME") or graph_name or "CogneeGraph"
         self.embedding_engine = embedding_engine
 
         self.client = None
@@ -158,11 +172,12 @@ class FalkorDBVectorAdapter(VectorDBInterface):
         vector_size = self.embedding_engine.get_vector_size() if self.embedding_engine else 384
 
         graph_name = self._get_graph_name_from_ctx()
-        logger.debug(
-            "FalkorDBVectorAdapter.create_collection graph=%s collection=%s",
-            graph_name,
-            label,
-        )
+        # logger.warning(
+        #     "DEBUG CREATE_COLLECTION: graph=%s collection=%s vector_size=%s query_syntax=CREATE_VECTOR_INDEX",
+        #     graph_name,
+        #     label,
+        #     vector_size,
+        # )
 
         if (graph_name, label) in self._indices_created:
             return
@@ -288,10 +303,13 @@ class FalkorDBVectorAdapter(VectorDBInterface):
             f"RETURN node.id as id, node.payload as payload, score"
         )
 
+        graph_name = self._get_graph_name_from_ctx()
         try:
+            # logger.warning(f"DEBUG SEARCH: graph={graph_name} collection={label} limit={limit} emb_len={len(emb_list)}")
             results = await self._query(query, {"emb": emb_list})
         except Exception as e:
             msg = str(e)
+            logger.warning(f"DEBUG SEARCH EXCEPTION: {msg} for query={query}")
             if "Invalid arguments for procedure 'db.idx.vector.queryNodes'" in msg:
                 logger.warning(
                     "Vector queryNodes failed for graph=%s collection=%s; returning empty.",
