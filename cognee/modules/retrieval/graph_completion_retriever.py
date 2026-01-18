@@ -4,6 +4,7 @@ from uuid import NAMESPACE_OID, uuid5
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.tasks.storage import add_data_points
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
@@ -150,15 +151,33 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
         triplets = await self.get_triplets(query, query_batch)
 
-        if len(triplets) == 0:
-            logger.warning("Empty context was provided to the completion")
-            return []
+        if query_batch:
+            for batched_triplets, batched_query in zip(triplets, query_batch):
+                if len(batched_triplets) == 0:
+                    logger.warning(
+                        f"Empty context was provided to the completion for the query: {batched_query}"
+                    )
+            entity_nodes_batch = []
+            for batched_triplets in triplets:
+                entity_nodes_batch.append(get_entity_nodes_from_triplets(batched_triplets))
 
-        # context = await self.resolve_edges_to_text(triplets)
+            await asyncio.gather(
+                *[
+                    update_node_access_timestamps(batched_entity_nodes)
+                    for batched_entity_nodes in entity_nodes_batch
+                ]
+            )
+        else:
+            if len(triplets) == 0:
+                logger.warning("Empty context was provided to the completion")
+                return []
 
-        entity_nodes = get_entity_nodes_from_triplets(triplets)
+            # context = await self.resolve_edges_to_text(triplets)
 
-        await update_node_access_timestamps(entity_nodes)
+            entity_nodes = get_entity_nodes_from_triplets(triplets)
+
+            await update_node_access_timestamps(entity_nodes)
+
         return triplets
 
     async def convert_retrieved_objects_to_context(self, triplets: List[Edge]):
@@ -190,15 +209,19 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
             - Any: A generated completion based on the query and context provided.
         """
+        query_validation = validate_queries(query, query_batch)
+        if not query_validation[0]:
+            raise ValueError(query_validation[1])
+
         triplets = context
 
         if triplets is None:
             triplets = await self.get_context(query, query_batch)
 
         context_text = ""
-        context_texts = ""
+        context_text_batch = []
         if triplets and isinstance(triplets[0], list):
-            context_texts = await asyncio.gather(
+            context_text_batch = await asyncio.gather(
                 *[resolve_edges_to_text(triplets_element) for triplets_element in triplets]
             )
         else:
@@ -236,7 +259,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                             system_prompt=self.system_prompt,
                             response_model=response_model,
                         )
-                        for query, context in zip(query_batch, context_texts)
+                        for query, context in zip(query_batch, context_text_batch)
                     ],
                 )
             else:

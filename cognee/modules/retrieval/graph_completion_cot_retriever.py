@@ -3,6 +3,7 @@ import json
 from typing import Optional, List, Type, Any
 from pydantic import BaseModel
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.shared.logging_utils import get_logger
 
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -203,6 +204,10 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
             - List[str]: A list containing the generated answer to the user's query.
         """
+        query_validation = validate_queries(query, query_batch)
+        if not query_validation[0]:
+            raise ValueError(query_validation[1])
+
         # Check if session saving is enabled
         cache_config = CacheConfig()
         user = session_user.get()
@@ -214,24 +219,25 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         if session_save:
             conversation_history = await get_conversation_history(session_id=session_id)
 
-        completion_results = []
+        context_batch = context
+        completion_batch = []
         if query_batch and len(query_batch) > 0:
-            if not context:
+            if not context_batch:
                 # Having a list is necessary to zip through it
-                context = []
-                for query in query_batch:
-                    context.append(None)
+                context_batch = []
+                for _ in query_batch:
+                    context_batch.append(None)
 
-            completion_results = await asyncio.gather(
+            completion_batch = await asyncio.gather(
                 *[
                     self._run_cot_completion(
                         query=query,
-                        context=context_el,
+                        context=context,
                         conversation_history=conversation_history,
                         max_iter=max_iter,
                         response_model=response_model,
                     )
-                    for query, context_el in zip(query_batch, context)
+                    for batched_query, context in zip(query_batch, context_batch)
                 ]
             )
         else:
@@ -260,7 +266,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 session_id=session_id,
             )
 
-        if completion_results:
-            return [completion for completion, _, _ in completion_results]
+        if completion_batch:
+            return [completion for completion, _, _ in completion_batch]
 
         return [completion]
