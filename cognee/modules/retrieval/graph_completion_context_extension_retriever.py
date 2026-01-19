@@ -15,6 +15,19 @@ from cognee.infrastructure.databases.cache.config import CacheConfig
 logger = get_logger()
 
 
+class QueryState:
+    """
+    Helper class containing all necessary information about the query state:
+    the triplets and context associated with it, and also a check whether
+    it has fully extended the context.
+    """
+
+    def __init__(self, triplets: List[Edge], context_text: str, finished_extending_context: bool):
+        self.triplets = triplets
+        self.context_text = context_text
+        self.finished_extending_context = finished_extending_context
+
+
 class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
     """
     Handles graph context completion for question answering tasks, extending context based
@@ -91,10 +104,9 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             - List[str]: A list containing the generated answer based on the query and the
               extended context.
         """
-        # TODO: This may be unnecessary in this retriever, will check later
-        query_validation = validate_queries(query, query_batch)
-        if not query_validation[0]:
-            raise ValueError(query_validation[1])
+        is_query_valid, msg = validate_queries(query, query_batch)
+        if not is_query_valid:
+            raise ValueError(msg)
 
         triplets_batch = context
 
@@ -117,70 +129,87 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
         round_idx = 1
 
-        # We will be removing queries, and their associated triplets and context, as we go
-        # through iterations, so we need to save their final states for the final generation.
-        # Final state is stored in the finished_queries_data dict, and we populate it at the start as well.
-        original_query_batch = query_batch
-        finished_queries_data = {}
-        for i, batched_query in enumerate(query_batch):
-            if not triplets_batch[i]:
-                query_batch[i] = ""
-            else:
-                finished_queries_data[batched_query] = (triplets_batch[i], context_text_batch[i])
+        # We store queries as keys and their associated states in this dict.
+        # The state is a 3-item object QueryState, which holds triplets, context text,
+        # and a boolean marking whether we should continue extending the context for that query.
+        finished_queries_states = {}
+
+        for batched_query, batched_triplets, batched_context_text in zip(
+            query_batch, triplets_batch, context_text_batch
+        ):
+            # Populating the dict at the start with initial information.
+            finished_queries_states[batched_query] = QueryState(
+                batched_triplets, batched_context_text, False
+            )
 
         while round_idx <= context_extension_rounds:
             logger.info(
                 f"Context extension: round {round_idx} - generating next graph locational query."
             )
 
-            # Filter out the queries that cannot be extended further, and their associated contexts
-            query_batch = [query for query in query_batch if query]
-            triplets_batch = [triplets for triplets in triplets_batch if triplets]
-            context_text_batch = [
-                context_text for context_text in context_text_batch if context_text
-            ]
-            if len(query_batch) == 0:
+            if all(
+                batched_query_state.finished_extending_context
+                for batched_query_state in finished_queries_states.values()
+            ):
+                # We stop early only if all queries in the batch have reached their final state
                 logger.info(
                     f"Context extension: round {round_idx} – no new triplets found; stopping early."
                 )
                 break
 
-            prev_sizes = [len(triplets) for triplets in triplets_batch]
+            prev_sizes = [
+                len(batched_query_state.triplets)
+                for batched_query_state in finished_queries_states.values()
+                if not batched_query_state.finished_extending_context
+            ]
 
             completions = await asyncio.gather(
                 *[
                     generate_completion(
-                        query=query,
-                        context=context,
+                        query=batched_query,
+                        context=batched_query_state.context_text,
                         user_prompt_path=self.user_prompt_path,
                         system_prompt_path=self.system_prompt_path,
                         system_prompt=self.system_prompt,
                     )
-                    for query, context in zip(query_batch, context_text_batch)
+                    for batched_query, batched_query_state in finished_queries_states.items()
+                    if not batched_query_state.finished_extending_context
                 ],
             )
 
             # Get new triplets, and merge them with existing ones, filtering out duplicates
             new_triplets_batch = await self.get_context(query_batch=completions)
-            for i, (triplets, new_triplets) in enumerate(zip(triplets_batch, new_triplets_batch)):
-                triplets += new_triplets
-                triplets_batch[i] = list(dict.fromkeys(triplets))
+            for batched_query, batched_new_triplets in zip(query_batch, new_triplets_batch):
+                finished_queries_states[batched_query].triplets = list(
+                    dict.fromkeys(
+                        finished_queries_states[batched_query].triplets + batched_new_triplets
+                    )
+                )
 
+            # Resolve new triplets to text
             context_text_batch = await asyncio.gather(
-                *[self.resolve_edges_to_text(triplets) for triplets in triplets_batch]
+                *[
+                    self.resolve_edges_to_text(batched_query_state.triplets)
+                    for batched_query_state in finished_queries_states.values()
+                    if not batched_query_state.finished_extending_context
+                ]
             )
 
-            new_sizes = [len(triplets) for triplets in triplets_batch]
+            # Update context_texts in query states
+            for batched_query, batched_context_text in zip(query_batch, context_text_batch):
+                if not finished_queries_states[batched_query].finished_extending_context:
+                    finished_queries_states[batched_query].context_text = batched_context_text
 
-            for i, (batched_query, prev_size, new_size, triplets, context_text) in enumerate(
-                zip(query_batch, prev_sizes, new_sizes, triplets_batch, context_text_batch)
-            ):
-                finished_queries_data[query] = (triplets, context_text)
+            new_sizes = [
+                len(batched_query_state.triplets)
+                for batched_query_state in finished_queries_states.values()
+                if not batched_query_state.finished_extending_context
+            ]
+
+            for batched_query, prev_size, new_size in zip(query_batch, prev_sizes, new_sizes):
+                # Mark done queries accordingly
                 if prev_size == new_size:
-                    # In this case, we can stop trying to extend the context of this query
-                    query_batch[i] = ""
-                    triplets_batch[i] = []
-                    context_text_batch[i] = ""
+                    finished_queries_states[batched_query].finished_extending_context = True
 
             logger.info(
                 f"Context extension: round {round_idx} - "
@@ -188,15 +217,6 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             )
 
             round_idx += 1
-
-        # Reset variables for the final generations. They contain the final state
-        # of triplets and contexts for each query, after all extension iterations.
-        query_batch = original_query_batch
-        triplets_batch = []
-        context_text_batch = []
-        for batched_query in query_batch:
-            triplets_batch.append(finished_queries_data[batched_query][0])
-            context_text_batch.append(finished_queries_data[batched_query][1])
 
         # Check if we need to generate context summary for caching
         cache_config = CacheConfig()
@@ -226,13 +246,13 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 *[
                     generate_completion(
                         query=batched_query,
-                        context=batched_context_text,
+                        context=batched_query_state.context_text,
                         user_prompt_path=self.user_prompt_path,
                         system_prompt_path=self.system_prompt_path,
                         system_prompt=self.system_prompt,
                         response_model=response_model,
                     )
-                    for batched_query, batched_context_text in zip(query_batch, context_text_batch)
+                    for batched_query, batched_query_state in finished_queries_states.items()
                 ],
             )
 

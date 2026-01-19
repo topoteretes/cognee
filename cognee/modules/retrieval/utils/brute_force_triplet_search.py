@@ -147,9 +147,9 @@ async def brute_force_triplet_search(
         In single-query mode, node_distances and edge_distances are stored as flat lists.
         In batch mode, they are stored as list-of-lists (one list per query).
     """
-    query_validation = validate_queries(query, query_batch)
-    if not query_validation[0]:
-        raise ValueError(query_validation[1])
+    is_query_valid, msg = validate_queries(query, query_batch)
+    if not is_query_valid:
+        raise ValueError(msg)
 
     if top_k <= 0:
         raise ValueError("top_k must be a positive integer.")

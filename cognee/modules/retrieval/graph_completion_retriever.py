@@ -158,15 +158,18 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                         f"Empty context was provided to the completion for the query: {batched_query}"
                     )
             entity_nodes_batch = []
+
             for batched_triplets in triplets:
                 entity_nodes_batch.append(get_entity_nodes_from_triplets(batched_triplets))
 
-            await asyncio.gather(
-                *[
-                    update_node_access_timestamps(batched_entity_nodes)
-                    for batched_entity_nodes in entity_nodes_batch
-                ]
-            )
+            # Remove duplicates and update node access, if it is enabled
+            for batched_entity_nodes in entity_nodes_batch:
+                # from itertools import chain
+                #
+                # flattened_entity_nodes = list(chain.from_iterable(entity_nodes_batch))
+                # entity_nodes = list(set(flattened_entity_nodes))
+
+                await update_node_access_timestamps(batched_entity_nodes)
         else:
             if len(triplets) == 0:
                 logger.warning("Empty context was provided to the completion")
@@ -209,9 +212,9 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
             - Any: A generated completion based on the query and context provided.
         """
-        query_validation = validate_queries(query, query_batch)
-        if not query_validation[0]:
-            raise ValueError(query_validation[1])
+        is_query_valid, msg = validate_queries(query, query_batch)
+        if not is_query_valid:
+            raise ValueError(msg)
 
         triplets = context
 
