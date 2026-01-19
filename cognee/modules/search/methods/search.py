@@ -13,8 +13,9 @@ from cognee.context_global_variables import backend_access_control_enabled
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.search.types import (
-    SearchResult,
-    SearchType,
+   SearchResultDataset,
+   SearchResult,
+   SearchType,
 )
 from cognee.modules.search.operations import log_query, log_result
 from cognee.modules.users.models import User
@@ -44,11 +45,12 @@ async def search(
     save_interaction: bool = False,
     last_k: Optional[int] = None,
     only_context: bool = False,
+    use_combined_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
     verbose: bool = False,
-) -> Union[CombinedSearchResult, List[SearchResult]]:
+) -> List[SearchResult]:
     """
 
     Args:
