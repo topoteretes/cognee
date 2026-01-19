@@ -7,9 +7,11 @@ cognee:
     HOST: "0.0.0.0"
     ENVIRONMENT: "local"
     PYTHONPATH: "."
+    LLM_MODEL: "openai/gpt-4o-mini"
+    LLM_PROVIDER: "openai"
   resources:
     cpu: "4.0"
-    memory: "8Gi"
+    memory: "2Gi"
 
 # Configuration for the 'postgres' database service
 postgres:
@@ -19,4 +21,4 @@ postgres:
     POSTGRES_USER: "cognee"
     POSTGRES_PASSWORD: "cognee"
     POSTGRES_DB: "cognee_db"
-  storage: "8Gi"
+  storage: "2Gi"

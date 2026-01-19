@@ -8,7 +8,7 @@ body:
     attributes:
       value: |
         Thanks for helping improve our documentation! Please provide details about the documentation issue or improvement.
-        
+
   - type: dropdown
     id: doc-type
     attributes:
@@ -22,7 +22,7 @@ body:
         - New documentation request
     validations:
       required: true
-      
+
   - type: textarea
     id: location
     attributes:
@@ -31,7 +31,7 @@ body:
       placeholder: https://cognee.ai/docs/... or specific file/section
     validations:
       required: true
-      
+
   - type: textarea
     id: issue
     attributes:
@@ -40,7 +40,7 @@ body:
       placeholder: The documentation is unclear about...
     validations:
       required: true
-      
+
   - type: textarea
     id: suggestion
     attributes:
@@ -49,7 +49,7 @@ body:
       placeholder: I suggest changing this to...
     validations:
       required: false
-      
+
   - type: textarea
     id: additional
     attributes:
@@ -58,7 +58,7 @@ body:
       placeholder: Additional context...
     validations:
       required: false
-      
+
   - type: checkboxes
     id: checklist
     attributes:
@@ -71,4 +71,3 @@ body:
           required: true
         - label: I have specified the location of the documentation issue
           required: true
-

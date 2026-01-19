@@ -128,5 +128,3 @@ MCP server and Frontend:
 ## CI Mirrors Local Commands
 
 Our GitHub Actions run the same ruff checks and pytest suites shown above (`.github/workflows/basic_tests.yml` and related workflows). Use the commands in this document locally to minimize CI surprises.
-
-
