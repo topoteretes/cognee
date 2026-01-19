@@ -7,13 +7,6 @@ from fastapi.testclient import TestClient
 import cognee
 from cognee.api.client import app
 from cognee.modules.users.methods import get_default_user, get_authenticated_user
-from cognee.infrastructure.databases.cache.config import get_cache_config
-from cognee.infrastructure.databases.cache.get_cache_engine import create_cache_engine
-from cognee.infrastructure.databases.graph.get_graph_engine import create_graph_engine
-from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
-from cognee.infrastructure.databases.relational.create_relational_engine import (
-    create_relational_engine,
-)
 
 
 async def _reset_engines_and_prune():
