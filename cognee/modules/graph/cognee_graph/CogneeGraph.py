@@ -1,5 +1,6 @@
 import time
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 from typing import List, Dict, Union, Optional, Type, Iterable, Tuple, Callable, Any
 
 from cognee.modules.graph.exceptions import (
@@ -205,6 +206,10 @@ class CogneeGraph(CogneeAbstractGraph):
                         key: properties.get(key) for key in edge_properties_to_project
                     }
                     edge_attributes["relationship_type"] = relationship_type
+                    edge_text = properties.get("edge_text") or properties.get("relationship_name")
+                    edge_attributes["edge_type_id"] = (
+                        generate_edge_id(edge_id=edge_text) if edge_text else None
+                    )
 
                     edge = Edge(
                         source_node,
@@ -284,13 +289,7 @@ class CogneeGraph(CogneeAbstractGraph):
 
         for query_index, scored_results in enumerate(per_query_scored_results):
             for result in scored_results:
-                payload = getattr(result, "payload", None)
-                if not isinstance(payload, dict):
-                    continue
-                text = payload.get("text")
-                if not text:
-                    continue
-                matching_edges = self.edges_by_distance_key.get(str(text))
+                matching_edges = self.edges_by_distance_key.get(str(result.id))
                 if not matching_edges:
                     continue
                 for edge in matching_edges:
