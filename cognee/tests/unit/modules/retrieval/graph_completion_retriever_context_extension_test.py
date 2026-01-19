@@ -611,7 +611,12 @@ async def test_get_completion_batch_queries_context_extension_stops_early(mock_e
     retriever = GraphCompletionContextExtensionRetriever()
 
     with (
-        patch.object(retriever, "get_context", new_callable=AsyncMock, return_value=[[mock_edge]]),
+        patch.object(
+            retriever,
+            "get_context",
+            new_callable=AsyncMock,
+            return_value=[[mock_edge], [mock_edge]],
+        ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
             return_value="Resolved context",
