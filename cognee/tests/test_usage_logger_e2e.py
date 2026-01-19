@@ -27,9 +27,6 @@ async def _reset_engines_and_prune():
     except Exception:
         pass
 
-    create_graph_engine.cache_clear()
-    create_vector_engine.cache_clear()
-    create_relational_engine.cache_clear()
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -53,14 +50,9 @@ def e2e_config():
     os.environ["CACHE_BACKEND"] = "redis"
     os.environ["CACHE_HOST"] = "localhost"
     os.environ["CACHE_PORT"] = "6379"
-    get_cache_config.cache_clear()
-    create_cache_engine.cache_clear()
     yield
     os.environ.clear()
     os.environ.update(original_env)
-    get_cache_config.cache_clear()
-    create_cache_engine.cache_clear()
-
 
 @pytest.fixture(scope="session")
 def authenticated_client(test_client):
@@ -116,7 +108,6 @@ def test_client():
 @pytest_asyncio.fixture
 async def cache_engine(e2e_config):
     """Get cache engine for log verification in test's event loop."""
-    create_cache_engine.cache_clear()
     from cognee.infrastructure.databases.cache.redis.RedisAdapter import RedisAdapter
     from cognee.infrastructure.databases.cache.config import get_cache_config
 
