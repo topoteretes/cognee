@@ -1,6 +1,7 @@
 import os
 import cognee
 import pathlib
+from pprint import pprint
 
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.tenants.methods import select_tenant
@@ -86,7 +87,7 @@ async def main():
     )
     print("\nSearch results as user_1 on dataset owned by user_1:")
     for result in search_results:
-        print(f"{result}\n")
+        pprint(result)
 
     # But user_1 cant read the dataset owned by user_2 (QUANTUM dataset)
     print("\nSearch result as user_1 on the dataset owned by user_2:")
@@ -134,7 +135,7 @@ async def main():
         dataset_ids=[quantum_dataset_id],
     )
     for result in search_results:
-        print(f"{result}\n")
+        pprint(result)
 
     # If we'd like for user_1 to add new documents to the QUANTUM dataset owned by user_2, user_1 would have to get
     # "write" access permission, which user_1 currently does not have
@@ -217,7 +218,7 @@ async def main():
         dataset_ids=[quantum_cognee_lab_dataset_id],
     )
     for result in search_results:
-        print(f"{result}\n")
+        pprint(result)
 
     # Note: All of these function calls and permission system is available through our backend endpoints as well
 

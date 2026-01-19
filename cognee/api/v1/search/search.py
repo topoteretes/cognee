@@ -4,13 +4,16 @@ from typing import Union, Optional, List, Type
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
-from cognee.modules.search.types import SearchResult, SearchType, CombinedSearchResult
+from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.exceptions import DatasetNotFoundError
 from cognee.context_global_variables import set_session_user_context_variable
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.exceptions import CogneeValidationError
+from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 
 logger = get_logger()
 
@@ -29,11 +32,11 @@ async def search(
     save_interaction: bool = False,
     last_k: Optional[int] = 1,
     only_context: bool = False,
-    use_combined_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
-) -> Union[List[SearchResult], CombinedSearchResult]:
+    verbose: bool = False,
+) -> List[SearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -123,6 +126,8 @@ async def search(
 
         session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
 
+        verbose: If True, returns detailed result information including graph representation (when possible).
+
     Returns:
         list: Search results in format determined by query_type:
 
@@ -176,7 +181,18 @@ async def search(
         datasets = [datasets]
 
     if user is None:
-        user = await get_default_user()
+        try:
+            user = await get_default_user()
+        except (DatabaseNotCreatedError, UserNotFoundError) as error:
+            # Provide a clear, actionable message instead of surfacing low-level stacktraces
+            raise CogneeValidationError(
+                message=(
+                    "Search prerequisites not met: no database/default user found. "
+                    "Initialize Cognee before searching by:\n"
+                    "• running `await cognee.add(...)` followed by `await cognee.cognify()`."
+                ),
+                name="SearchPreconditionError",
+            ) from error
 
     await set_session_user_context_variable(user)
 
@@ -200,10 +216,10 @@ async def search(
         save_interaction=save_interaction,
         last_k=last_k,
         only_context=only_context,
-        use_combined_context=use_combined_context,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
+        verbose=verbose,
     )
 
     return filtered_search_results
