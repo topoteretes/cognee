@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock
 
+from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 from cognee.modules.graph.exceptions import EntityNotFoundError, EntityAlreadyExistsError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
@@ -379,7 +380,7 @@ async def test_map_vector_distances_to_graph_edges_with_payload(setup_graph):
     graph.add_edge(edge)
 
     edge_distances = [
-        MockScoredResult("e1", 0.92, payload={"text": "CONNECTS_TO"}),
+        MockScoredResult(generate_edge_id("CONNECTS_TO"), 0.92, payload={"text": "CONNECTS_TO"}),
     ]
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
@@ -404,8 +405,9 @@ async def test_map_vector_distances_partial_edge_coverage(setup_graph):
     graph.add_edge(edge1)
     graph.add_edge(edge2)
 
+    edge_1_text = "CONNECTS_TO"
     edge_distances = [
-        MockScoredResult("e1", 0.92, payload={"text": "CONNECTS_TO"}),
+        MockScoredResult(generate_edge_id(edge_1_text), 0.92, payload={"text": edge_1_text}),
     ]
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
@@ -431,8 +433,9 @@ async def test_map_vector_distances_edges_fallback_to_relationship_type(setup_gr
     )
     graph.add_edge(edge)
 
+    edge_text = "KNOWS"
     edge_distances = [
-        MockScoredResult("e1", 0.85, payload={"text": "KNOWS"}),
+        MockScoredResult(generate_edge_id(edge_text), 0.85, payload={"text": edge_text}),
     ]
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
@@ -457,8 +460,9 @@ async def test_map_vector_distances_no_edge_matches(setup_graph):
     )
     graph.add_edge(edge)
 
+    edge_text = "SOME_OTHER_EDGE"
     edge_distances = [
-        MockScoredResult("e1", 0.92, payload={"text": "SOME_OTHER_EDGE"}),
+        MockScoredResult(generate_edge_id(edge_text), 0.92, payload={"text": edge_text}),
     ]
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
@@ -511,9 +515,15 @@ async def test_map_vector_distances_to_graph_edges_multi_query(setup_graph):
     graph.add_edge(edge1)
     graph.add_edge(edge2)
 
+    edge_1_text = "A"
+    edge_2_text = "B"
     edge_distances = [
-        [MockScoredResult("e1", 0.1, payload={"text": "A"})],  # query 0
-        [MockScoredResult("e2", 0.2, payload={"text": "B"})],  # query 1
+        [
+            MockScoredResult(generate_edge_id(edge_1_text), 0.1, payload={"text": edge_1_text})
+        ],  # query 0
+        [
+            MockScoredResult(generate_edge_id(edge_2_text), 0.2, payload={"text": edge_2_text})
+        ],  # query 1
     ]
 
     await graph.map_vector_distances_to_graph_edges(
@@ -541,8 +551,11 @@ async def test_map_vector_distances_to_graph_edges_preserves_unmapped_indices(se
     graph.add_edge(edge1)
     graph.add_edge(edge2)
 
+    edge_1_text = "A"
     edge_distances = [
-        [MockScoredResult("e1", 0.1, payload={"text": "A"})],  # query 0: only edge1 mapped
+        [
+            MockScoredResult(generate_edge_id(edge_1_text), 0.1, payload={"text": edge_1_text})
+        ],  # query 0: only edge1 mapped
         [],  # query 1: no edges mapped
     ]
 

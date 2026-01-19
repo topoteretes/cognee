@@ -45,6 +45,12 @@ class CogneeGraph(CogneeAbstractGraph):
 
     def add_edge(self, edge: Edge) -> None:
         self.edges.append(edge)
+
+        edge_text = edge.attributes.get("edge_text") or edge.attributes.get("relationship_type")
+        edge.attributes["edge_type_id"] = (
+            generate_edge_id(edge_id=edge_text) if edge_text else None
+        )  # Update edge with generated edge_type_id
+
         edge.node1.add_skeleton_edge(edge)
         edge.node2.add_skeleton_edge(edge)
         key = edge.get_distance_key()
@@ -206,10 +212,6 @@ class CogneeGraph(CogneeAbstractGraph):
                         key: properties.get(key) for key in edge_properties_to_project
                     }
                     edge_attributes["relationship_type"] = relationship_type
-                    edge_text = properties.get("edge_text") or properties.get("relationship_name")
-                    edge_attributes["edge_type_id"] = (
-                        generate_edge_id(edge_id=edge_text) if edge_text else None
-                    )
 
                     edge = Edge(
                         source_node,
