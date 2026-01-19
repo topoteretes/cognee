@@ -158,7 +158,7 @@ async def _log_usage_async(
     end_time: datetime,
 ):
     """Asynchronously log function usage to Redis.
-    
+
     Args:
         function_name: Name of the function being logged.
         log_type: Type of log entry (e.g., "api_endpoint", "mcp_tool", "function").
@@ -167,9 +167,10 @@ async def _log_usage_async(
         result: Function return value (will be sanitized).
         success: Whether the function executed successfully.
         error: Error message if function failed, None otherwise.
+        duration_ms: Execution duration in milliseconds.
         start_time: Function start timestamp.
         end_time: Function end timestamp.
-    
+
     Note:
         This function silently handles errors to avoid disrupting the original
         function execution. Logs are written to Redis with TTL from config.
@@ -247,13 +248,13 @@ def log_usage(function_name: Optional[str] = None, log_type: str = "function"):
 
     def decorator(func: Callable) -> Callable:
         """Inner decorator that wraps the function with usage logging.
-        
+
         Args:
             func: The async function to wrap with usage logging.
-            
+
         Returns:
             Callable: The wrapped function with usage logging enabled.
-            
+
         Raises:
             UsageLoggerError: If the function is not async.
         """
@@ -265,20 +266,20 @@ def log_usage(function_name: Optional[str] = None, log_type: str = "function"):
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
             """Wrapper function that executes the original function and logs usage.
-            
+
             This wrapper:
             - Extracts user ID and parameters from function arguments
             - Executes the original function
             - Captures result, success status, and any errors
             - Logs usage information asynchronously without blocking
-            
+
             Args:
                 *args: Positional arguments passed to the original function.
                 **kwargs: Keyword arguments passed to the original function.
-                
+
             Returns:
                 Any: The return value of the original function.
-                
+
             Raises:
                 Any exception raised by the original function (re-raised after logging).
             """
