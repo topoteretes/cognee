@@ -27,7 +27,6 @@ async def _reset_engines_and_prune():
     except Exception:
         pass
 
-
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
@@ -53,6 +52,7 @@ def e2e_config():
     yield
     os.environ.clear()
     os.environ.update(original_env)
+
 
 @pytest.fixture(scope="session")
 def authenticated_client(test_client):
