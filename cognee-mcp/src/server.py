@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
+from cognee.shared.usage_logger import log_usage
 import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
@@ -91,6 +92,7 @@ async def health_check(request):
 
 
 @mcp.tool()
+@log_usage(function_name="MCP cognify", log_type="mcp_tool")
 async def cognify(
     data: str, graph_model_file: str = None, graph_model_name: str = None, custom_prompt: str = None
 ) -> list:
@@ -257,6 +259,7 @@ async def cognify(
 @mcp.tool(
     name="save_interaction", description="Logs user-agent interactions and query-answer pairs"
 )
+@log_usage(function_name="MCP save_interaction", log_type="mcp_tool")
 async def save_interaction(data: str) -> list:
     """
     Transform and save a user-agent interaction into structured knowledge.
@@ -316,6 +319,7 @@ async def save_interaction(data: str) -> list:
 
 
 @mcp.tool()
+@log_usage(function_name="MCP search", log_type="mcp_tool")
 async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -496,6 +500,7 @@ async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
 
 
 @mcp.tool()
+@log_usage(function_name="MCP list_data", log_type="mcp_tool")
 async def list_data(dataset_id: str = None) -> list:
     """
     List all datasets and their data items with IDs for deletion operations.
@@ -624,6 +629,7 @@ async def list_data(dataset_id: str = None) -> list:
 
 
 @mcp.tool()
+@log_usage(function_name="MCP delete", log_type="mcp_tool")
 async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
     """
     Delete specific data from a dataset in the Cognee knowledge graph.
@@ -703,6 +709,7 @@ async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
 
 
 @mcp.tool()
+@log_usage(function_name="MCP prune", log_type="mcp_tool")
 async def prune():
     """
     Reset the Cognee knowledge graph by removing all stored information.
@@ -739,6 +746,7 @@ async def prune():
 
 
 @mcp.tool()
+@log_usage(function_name="MCP cognify_status", log_type="mcp_tool")
 async def cognify_status():
     """
     Get the current status of the cognify pipeline.

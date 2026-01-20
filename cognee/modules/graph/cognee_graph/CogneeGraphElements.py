@@ -141,7 +141,7 @@ class Edge:
         self.status = np.ones(dimension, dtype=int)
 
     def get_distance_key(self) -> Optional[str]:
-        key = self.attributes.get("edge_text") or self.attributes.get("relationship_type")
+        key = self.attributes.get("edge_type_id")
         if key is None:
             return None
         return str(key)
