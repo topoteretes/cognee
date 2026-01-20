@@ -29,7 +29,7 @@ async def create_pg_database(vector_config):
 
     pg_relational_engine = create_relational_engine(
         db_path="",
-        db_host=vector_config["vector_db_url"],
+        db_host=vector_config["vector_db_host"],
         db_name=vector_config["vector_db_name"],
         db_port=vector_config["vector_db_port"],
         db_username=vector_config["vector_db_username"],

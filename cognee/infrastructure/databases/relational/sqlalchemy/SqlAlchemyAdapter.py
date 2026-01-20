@@ -102,7 +102,7 @@ class SQLAlchemyAdapter:
                         "postgresql+asyncpg",
                         username=vector_config.vector_db_username,
                         password=vector_config.vector_db_password,
-                        host=vector_config.vector_db_url,
+                        host=vector_config.vector_db_host,
                         port=int(vector_config.vector_db_port),
                         database=maintenance_db_name,
                     )

@@ -32,6 +32,7 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
                 "port": vector_config.vector_db_port,
                 "username": vector_config.vector_db_username,
                 "password": vector_config.vector_db_password,
+                "host": vector_config.vector_db_host,
             },
             "vector_dataset_database_handler": "pgvector_local",
         }
@@ -51,6 +52,7 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
                 "vector_db_password": new_vector_config["vector_database_connection_info"][
                     "password"
                 ],
+                "vector_db_host": new_vector_config["vector_database_connection_info"]["host"],
                 "vector_dataset_database_handler": "pgvector",
             }
         )

@@ -16,6 +16,7 @@ def create_vector_engine(
     vector_dataset_database_handler: str = "",
     vector_db_username: str = "",
     vector_db_password: str = "",
+    vector_db_host: str = "",
 ):
     """
     Wrapper function to call create vector engine with caching.
@@ -28,6 +29,9 @@ def create_vector_engine(
         vector_db_port,
         vector_db_key,
         vector_dataset_database_handler,
+        vector_db_username,
+        vector_db_password,
+        vector_db_host,
     )
 
 
@@ -36,9 +40,12 @@ def _create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
     vector_db_name: str,
-    vector_db_port: str = "",
-    vector_db_key: str = "",
-    vector_dataset_database_handler: str = "",
+    vector_db_port: str,
+    vector_db_key: str,
+    vector_dataset_database_handler: str,
+    vector_db_username: str,
+    vector_db_password: str,
+    vector_db_host: str,
 ):
     """
     Create a vector database engine based on the specified provider.
@@ -84,19 +91,19 @@ def _create_vector_engine(
         if backend_access_control_enabled():
             connection_string: str = (
                 f"postgresql+asyncpg://{vector_db_username}:{vector_db_password}"
-                f"@{vector_db_url}:{vector_db_port}/{vector_db_name}"
+                f"@{vector_db_host}:{vector_db_port}/{vector_db_name}"
             )
         else:
             if (
                 vector_db_port
                 and vector_db_username
                 and vector_db_password
-                and vector_db_url
+                and vector_db_host
                 and vector_db_name
             ):
                 connection_string: str = (
                     f"postgresql+asyncpg://{vector_db_username}:{vector_db_password}"
-                    f"@{vector_db_url}:{vector_db_port}/{vector_db_name}"
+                    f"@{vector_db_host}:{vector_db_port}/{vector_db_name}"
                 )
             else:
                 from cognee.infrastructure.databases.relational import get_relational_config
