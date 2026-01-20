@@ -172,12 +172,13 @@ class FalkorDBVectorAdapter(VectorDBInterface):
         vector_size = self.embedding_engine.get_vector_size() if self.embedding_engine else 384
 
         graph_name = self._get_graph_name_from_ctx()
-        # logger.warning(
-        #     "DEBUG CREATE_COLLECTION: graph=%s collection=%s vector_size=%s query_syntax=CREATE_VECTOR_INDEX",
-        #     graph_name,
-        #     label,
-        #     vector_size,
-        # )
+        logger.warning(
+            "DEBUG CREATE_COLLECTION: graph=%s collection=%s vector_size=%s engine=%s",
+            graph_name,
+            label,
+            vector_size,
+            type(self.embedding_engine).__name__ if self.embedding_engine else "None",
+        )
 
         if (graph_name, label) in self._indices_created:
             return
@@ -203,11 +204,12 @@ class FalkorDBVectorAdapter(VectorDBInterface):
     async def create_data_points(self, collection_name: str, data_points: List[DataPoint]):
         """Insert data points with their embeddings."""
         label = collection_name.replace("-", "_")
-        logger.debug(
-            "FalkorDBVectorAdapter.create_data_points graph=%s collection=%s count=%s",
+        logger.warning(
+            "DEBUG CREATE_DATA_POINTS: graph=%s collection=%s count=%s engine=%s",
             self._get_graph_name_from_ctx(),
             label,
             len(data_points),
+            type(self.embedding_engine).__name__ if self.embedding_engine else "None",
         )
 
         texts: List[str] = []
@@ -306,6 +308,7 @@ class FalkorDBVectorAdapter(VectorDBInterface):
         graph_name = self._get_graph_name_from_ctx()
         try:
             # logger.warning(f"DEBUG SEARCH: graph={graph_name} collection={label} limit={limit} emb_len={len(emb_list)}")
+            logger.warning(f"DEBUG SEARCH CALL: graph={self._get_graph_name_from_ctx()} collection={label} emb_len={len(emb_list)} engine={type(self.embedding_engine).__name__ if self.embedding_engine else 'None'} query={query}")
             results = await self._query(query, {"emb": emb_list})
         except Exception as e:
             msg = str(e)
@@ -350,8 +353,25 @@ class FalkorDBVectorAdapter(VectorDBInterface):
         await self._query(query, {"ids": data_point_ids})
 
     async def prune(self):
-        """Delete all data in the graph."""
-        await self._query("MATCH (n) DETACH DELETE n")
+        """Delete all data and indices in the graph."""
+        graph_name = self._get_graph_name_from_ctx()
+        try:
+            # Drop all indices
+            indices_res = await self._query("CALL db.indexes()")
+            for idx_info in indices_res:
+                idx_name = idx_info[0]
+                properties = idx_info[1]
+                prop_name = properties[0]
+                try:
+                    # Try dropping as standard index
+                    await self._query(f"DROP INDEX ON :{idx_name}({prop_name})")
+                except:
+                    pass
+            # Delete all nodes
+            await self._query("MATCH (n) DETACH DELETE n")
+        except Exception as e:
+            logger.warning(f"Error during FalkorDB prune: {e}")
+        self._indices_created.clear()
 
     async def embed_data(self, data: List[str]) -> List[List[float]]:
         """Embed text data into vectors."""

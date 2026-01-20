@@ -1,10 +1,13 @@
-from typing import List, Union
+from typing import List, Union, Optional
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.engine.models.Edge import Edge
 from cognee.modules.data.processing.document_types import Document
 from cognee.modules.engine.models import Entity
 from cognee.tasks.temporal_graph.models import Event
+
+
+from cognee.modules.engine.models.node_set import NodeSet
 
 
 class DocumentChunk(DataPoint):
@@ -23,6 +26,7 @@ class DocumentChunk(DataPoint):
     - cut_type: The type of cut that defined this chunk.
     - is_part_of: The document to which this chunk belongs.
     - contains: A list of entities or events contained within the chunk (default is None).
+    - belongs_to_set: A list of node sets to which this chunk belongs (default is None).
     - metadata: A dictionary to hold meta information related to the chunk, including index
     fields.
     """
@@ -33,4 +37,6 @@ class DocumentChunk(DataPoint):
     cut_type: str
     is_part_of: Document
     contains: List[Union[Entity, Event, tuple[Edge, Entity]]] = None
+    belongs_to_set: Optional[List[NodeSet]] = None
+
     metadata: dict = {"index_fields": ["text"]}
