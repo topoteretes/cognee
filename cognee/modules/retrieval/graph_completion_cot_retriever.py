@@ -318,15 +318,21 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
             - List[str]: A list containing the generated answer to the user's query.
         """
-        is_query_valid, msg = validate_queries(query, query_batch)
-        if not is_query_valid:
-            raise ValueError(msg)
 
         # Check if session saving is enabled
         cache_config = CacheConfig()
         user = session_user.get()
         user_id = getattr(user, "id", None)
         session_save = user_id and cache_config.caching
+
+        if query_batch and session_save:
+            raise ValueError("You cannot use batch queries with session saving currently.")
+        if query_batch and self.save_interaction:
+            raise ValueError("Cannot use batch queries with interaction saving currently.")
+
+        is_query_valid, msg = validate_queries(query, query_batch)
+        if not is_query_valid:
+            raise ValueError(msg)
 
         # Load conversation history if enabled
         conversation_history = ""

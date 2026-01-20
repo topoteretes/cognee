@@ -163,13 +163,16 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                 entity_nodes_batch.append(get_entity_nodes_from_triplets(batched_triplets))
 
             # Remove duplicates and update node access, if it is enabled
-            for batched_entity_nodes in entity_nodes_batch:
-                # from itertools import chain
-                #
-                # flattened_entity_nodes = list(chain.from_iterable(entity_nodes_batch))
-                # entity_nodes = list(set(flattened_entity_nodes))
+            import os
 
-                await update_node_access_timestamps(batched_entity_nodes)
+            if os.getenv("ENABLE_LAST_ACCESSED", "false").lower() == "true":
+                for batched_entity_nodes in entity_nodes_batch:
+                    # from itertools import chain
+                    #
+                    # flattened_entity_nodes = list(chain.from_iterable(entity_nodes_batch))
+                    # entity_nodes = list(set(flattened_entity_nodes))
+
+                    await update_node_access_timestamps(batched_entity_nodes)
         else:
             if len(triplets) == 0:
                 logger.warning("Empty context was provided to the completion")
@@ -212,6 +215,16 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
             - Any: A generated completion based on the query and context provided.
         """
+        cache_config = CacheConfig()
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+        session_save = user_id and cache_config.caching
+
+        if query_batch and session_save:
+            raise ValueError("You cannot use batch queries with session saving currently.")
+        if query_batch and self.save_interaction:
+            raise ValueError("Cannot use batch queries with interaction saving currently.")
+
         is_query_valid, msg = validate_queries(query, query_batch)
         if not is_query_valid:
             raise ValueError(msg)
@@ -229,11 +242,6 @@ class GraphCompletionRetriever(BaseGraphRetriever):
             )
         else:
             context_text = await resolve_edges_to_text(triplets)
-
-        cache_config = CacheConfig()
-        user = session_user.get()
-        user_id = getattr(user, "id", None)
-        session_save = user_id and cache_config.caching
 
         if session_save:
             conversation_history = await get_conversation_history(session_id=session_id)

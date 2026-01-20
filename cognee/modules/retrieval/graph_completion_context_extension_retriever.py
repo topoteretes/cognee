@@ -104,6 +104,18 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             - List[str]: A list containing the generated answer based on the query and the
               extended context.
         """
+
+        # Check if we need to generate context summary for caching
+        cache_config = CacheConfig()
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+        session_save = user_id and cache_config.caching
+
+        if query_batch and session_save:
+            raise ValueError("You cannot use batch queries with session saving currently.")
+        if query_batch and self.save_interaction:
+            raise ValueError("Cannot use batch queries with interaction saving currently.")
+
         is_query_valid, msg = validate_queries(query, query_batch)
         if not is_query_valid:
             raise ValueError(msg)
@@ -160,7 +172,6 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             prev_sizes = [
                 len(batched_query_state.triplets)
                 for batched_query_state in finished_queries_states.values()
-                if not batched_query_state.finished_extending_context
             ]
 
             completions = await asyncio.gather(
@@ -203,7 +214,6 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             new_sizes = [
                 len(batched_query_state.triplets)
                 for batched_query_state in finished_queries_states.values()
-                if not batched_query_state.finished_extending_context
             ]
 
             for batched_query, prev_size, new_size in zip(query_batch, prev_sizes, new_sizes):
@@ -217,12 +227,6 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             )
 
             round_idx += 1
-
-        # Check if we need to generate context summary for caching
-        cache_config = CacheConfig()
-        user = session_user.get()
-        user_id = getattr(user, "id", None)
-        session_save = user_id and cache_config.caching
 
         completion_batch = []
 
