@@ -167,11 +167,6 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
             if os.getenv("ENABLE_LAST_ACCESSED", "false").lower() == "true":
                 for batched_entity_nodes in entity_nodes_batch:
-                    # from itertools import chain
-                    #
-                    # flattened_entity_nodes = list(chain.from_iterable(entity_nodes_batch))
-                    # entity_nodes = list(set(flattened_entity_nodes))
-
                     await update_node_access_timestamps(batched_entity_nodes)
         else:
             if len(triplets) == 0:
