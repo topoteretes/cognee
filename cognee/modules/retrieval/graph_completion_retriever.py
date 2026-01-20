@@ -220,6 +220,10 @@ class GraphCompletionRetriever(BaseGraphRetriever):
             raise QueryValidationError(
                 message="You cannot use batch queries with session saving currently."
             )
+        if query_batch and self.save_interaction:
+            raise QueryValidationError(
+                message="Cannot use batch queries with interaction saving currently."
+            )
 
         is_query_valid, msg = validate_queries(query, query_batch)
         if not is_query_valid:
@@ -232,7 +236,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
         context_text = ""
         context_text_batch = []
-        if query_batch:
+        if triplets and isinstance(triplets[0], list):
             context_text_batch = await asyncio.gather(
                 *[resolve_edges_to_text(triplets_element) for triplets_element in triplets]
             )
@@ -280,24 +284,9 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                 )
 
         if self.save_interaction and context and triplets and completion:
-            if query:
-                await self.save_qa(
-                    question=query, answer=completion, context=context_text, triplets=triplets
-                )
-            else:
-                await asyncio.gather(
-                    *[
-                        await self.save_qa(
-                            question=batched_query,
-                            answer=batched_completion,
-                            context=batched_context_text,
-                            triplets=batched_triplets,
-                        )
-                        for batched_query, batched_completion, batched_context_text, batched_triplets in zip(
-                            query_batch, completion, context_text_batch, triplets
-                        )
-                    ]
-                )
+            await self.save_qa(
+                question=query, answer=completion, context=context_text, triplets=triplets
+            )
 
         if session_save:
             await save_conversation_history(
