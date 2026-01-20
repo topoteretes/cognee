@@ -4,25 +4,25 @@
 
 #### Prepare release
 1. Set the project version that will be released in [pyproject.toml](https://github.com/topoteretes/cognee/blob/dev/pyproject.toml#L4)
-2. Update `uv.locl` with `uv lock` lock command
-3. Create a PR `dev` and merge it.
+2. Update `uv.lock` with `uv lock` lock command
+3. Create a PR with the changes mentioned above to `dev` and merge it.
 
 #### Perform Release
 1. Go to [Release action](https://github.com/topoteretes/cognee/actions/workflows/release.yml)
 2. Select `dev` branch and run the workflow.
-3. Whatch the logs and make sure that everything goes well
+3. Watch the logs and make sure that everything goes well
 
 ### Main release
 
 #### Prepare release
 1. Set the project version that will be released in [pyproject.toml](https://github.com/topoteretes/cognee/blob/dev/pyproject.toml#L4)
-2. Update `uv.locl` with `uv lock` lock command
-3. Create a PR `main` and merge it.
+2. Update `uv.lock` with `uv lock` lock command
+3. Create a PR with the changes mentioned above to `dev` and merge it.
 
 #### Perform Release
 1. Go to [Release action](https://github.com/topoteretes/cognee/actions/workflows/release.yml)
 2. Select `main` branch and run the workflow.
-3. Whatch the logs and make sure that everything goes well
+3. Watch the logs and make sure that everything goes well
 
 ### Release validation
 
