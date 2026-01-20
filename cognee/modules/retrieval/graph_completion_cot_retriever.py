@@ -257,7 +257,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
                 for batched_query, batched_query_state in query_state_tracker.items():
                     followup_args = {
-                        "query": query,
+                        "query": batched_query,
                         "answer": batched_query_state.answer_text,
                         "reasoning": batched_query_state.reasoning,
                     }
