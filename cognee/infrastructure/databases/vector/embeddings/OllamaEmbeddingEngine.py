@@ -124,6 +124,8 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                     data = await response.json()
                     if "embeddings" in data:
                         return data["embeddings"][0]
+                    if "embedding" in data:
+                        return data["embedding"]
                     else:
                         return data["data"][0]["embedding"]
 
