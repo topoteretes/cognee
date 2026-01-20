@@ -853,3 +853,87 @@ async def test_get_completion_batch_queries_duplicate_queries(mock_edge):
     assert isinstance(completion, list)
     assert len(completion) == 2
     assert completion[0] == "Generated answer" and completion[1] == "Generated answer"
+
+
+@pytest.mark.asyncio
+async def test_get_completion_batch_queries_with_save_interaction(mock_edge):
+    """Test get_completion batch queries with save_interaction enabled."""
+    mock_graph_engine = AsyncMock()
+    mock_graph_engine.is_empty = AsyncMock(return_value=False)
+    mock_graph_engine.add_edges = AsyncMock()
+
+    retriever = GraphCompletionCotRetriever(save_interaction=True)
+
+    mock_node1 = MagicMock()
+    mock_node2 = MagicMock()
+    mock_edge.node1 = mock_node1
+    mock_edge.node2 = mock_node2
+
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
+            return_value="Resolved context",
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_cot_retriever.generate_completion",
+            return_value="Generated answer",
+        ),
+        patch.object(
+            retriever,
+            "get_context",
+            new_callable=AsyncMock,
+            return_value=[[mock_edge], [mock_edge]],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_cot_retriever._as_answer_text",
+            return_value="Generated answer",
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_cot_retriever.render_prompt",
+            return_value="Rendered prompt",
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_cot_retriever.read_query_prompt",
+            return_value="System prompt",
+        ),
+        patch.object(
+            LLMGateway,
+            "acreate_structured_output",
+            new_callable=AsyncMock,
+            side_effect=[
+                "validation_result",
+                "validation_result",
+                "followup_question",
+                "followup_question",
+            ],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.extract_uuid_from_node",
+            side_effect=[
+                UUID("550e8400-e29b-41d4-a716-446655440000"),
+                UUID("550e8400-e29b-41d4-a716-446655440000"),
+                UUID("550e8400-e29b-41d4-a716-446655440001"),
+                UUID("550e8400-e29b-41d4-a716-446655440001"),
+            ],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.add_data_points",
+        ) as mock_add_data,
+        patch(
+            "cognee.modules.retrieval.graph_completion_cot_retriever.CacheConfig"
+        ) as mock_cache_config,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
+        # Pass context so save_interaction condition is met
+        completion = await retriever.get_completion(
+            query_batch=["test query 1", "test query 2"],
+            context=[[mock_edge], [mock_edge]],
+            max_iter=1,
+        )
+
+    assert isinstance(completion, list)
+    assert len(completion) == 2
+    mock_add_data.assert_awaited()

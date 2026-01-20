@@ -104,10 +104,6 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             raise QueryValidationError(
                 message="You cannot use batch queries with session saving currently."
             )
-        if query_batch and self.save_interaction:
-            raise QueryValidationError(
-                message="Cannot use batch queries with interaction saving currently."
-            )
 
         is_query_valid, msg = validate_queries(query, query_batch)
         if not is_query_valid:
@@ -264,13 +260,17 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             for batched_query in query_batch:
                 result_completion_batch.append(finished_queries_states[batched_query].completion)
 
-        # TODO: Do batch queries for save interaction
         if self.save_interaction and context_text_batch and triplets_batch and completion_batch:
-            await self.save_qa(
-                question=query,
-                answer=completion_batch[0],
-                context=context_text_batch[0],
-                triplets=triplets_batch[0],
+            await asyncio.gather(
+                *[
+                    self.save_qa(
+                        question=batched_query,
+                        answer=finished_queries_states[batched_query].completion,
+                        context=finished_queries_states[batched_query].context_text,
+                        triplets=finished_queries_states[batched_query].triplets,
+                    )
+                    for batched_query in query_batch
+                ]
             )
 
         if session_save:
