@@ -30,18 +30,19 @@ class QueryState:
     enable as many parallel calls to llms as possible.
     """
 
-    completion: str = ""
-    triplets: List[Edge] = []
-    context_text: str = ""
+    def __init__(self):
+        self.completion: str = ""
+        self.triplets: List[Edge] = []
+        self.context_text: str = ""
 
-    answer_text: str = ""
-    valid_user_prompt: str = ""
-    valid_system_prompt: str = ""
-    reasoning: str = ""
+        self.answer_text: str = ""
+        self.valid_user_prompt: str = ""
+        self.valid_system_prompt: str = ""
+        self.reasoning: str = ""
 
-    followup_question: str = ""
-    followup_prompt: str = ""
-    followup_system: str = ""
+        self.followup_question: str = ""
+        self.followup_prompt: str = ""
+        self.followup_system: str = ""
 
 
 def _as_answer_text(completion: Any) -> str:
