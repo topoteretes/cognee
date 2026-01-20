@@ -6,6 +6,7 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import (
     get_memory_fragment,
     format_triplets,
 )
+from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
@@ -1036,9 +1037,11 @@ async def test_cognee_graph_mapping_batch_shapes():
         ]
     }
 
+    edge_1_text = "relates_to"
+    edge_2_text = "relates_to"
     edge_distances_batch = [
-        [MockScoredResult("edge1", 0.92, payload={"text": "relates_to"})],
-        [MockScoredResult("edge2", 0.88, payload={"text": "relates_to"})],
+        [MockScoredResult(generate_edge_id(edge_1_text), 0.92, payload={"text": edge_1_text})],
+        [MockScoredResult(generate_edge_id(edge_2_text), 0.88, payload={"text": edge_2_text})],
     ]
 
     await graph.map_vector_distances_to_graph_nodes(

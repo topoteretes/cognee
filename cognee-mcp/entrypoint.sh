@@ -56,24 +56,22 @@ if [ -n "$API_URL" ]; then
     echo "Skipping database migrations (API server handles its own database)"
 else
     echo "Direct mode: Using local cognee instance"
-    # Run Alembic migrations with proper error handling.
-    # Note on UserAlreadyExists error handling:
-    # During database migrations, we attempt to create a default user. If this user
-    # already exists (e.g., from a previous deployment or migration), it's not a
-    # critical error and shouldn't prevent the application from starting. This is
-    # different from other migration errors which could indicate database schema
-    # inconsistencies and should cause the startup to fail. This check allows for
-    # smooth redeployments and container restarts while maintaining data integrity.
     echo "Running database migrations..."
 
-    MIGRATION_OUTPUT=$(alembic upgrade head)
+    set +e # Disable exit on error to handle specific migration errors
+    MIGRATION_OUTPUT=$(cd cognee && alembic upgrade head)
     MIGRATION_EXIT_CODE=$?
+    set -e
 
     if [[ $MIGRATION_EXIT_CODE -ne 0 ]]; then
-        if [[ "$MIGRATION_OUTPUT" == *"UserAlreadyExists"* ]] || [[ "$MIGRATION_OUTPUT" == *"User default_user@example.com already exists"* ]]; then
-            echo "Warning: Default user already exists, continuing startup..."
-        else
-            echo "Migration failed with unexpected error."
+
+        echo "Migration failed with unexpected error. Trying to run Cognee without migrations."
+        echo "Initializing database tables..."
+        python /app/src/run_cognee_database_setup.py
+        INIT_EXIT_CODE=$?
+
+        if [[ $INIT_EXIT_CODE -ne 0 ]]; then
+            echo "Database initialization failed!"
             exit 1
         fi
     fi
