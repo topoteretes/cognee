@@ -277,6 +277,12 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                         for batched_query_state in query_state_tracker.values()
                     ]
                 )
+
+                for batched_query, batched_followup_question in zip(
+                    query_batch, followup_question_batch
+                ):
+                    query_state_tracker[batched_query].followup_question = batched_followup_question
+
                 logger.info(
                     f"Chain-of-thought: round {round_idx} - follow-up questions: {followup_question_batch}"
                 )
