@@ -1,4 +1,6 @@
 import asyncio
+from pprint import pprint
+
 import cognee
 from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
@@ -54,7 +56,7 @@ async def main():
     print("Search results:")
     # Display results
     for result_text in search_results:
-        print(result_text)
+        pprint(result_text)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import asyncio
+from pprint import pprint
 
 import cognee
 from cognee.memify_pipelines.create_triplet_embeddings import create_triplet_embeddings
@@ -65,7 +66,7 @@ async def main():
         query_type=SearchType.TRIPLET_COMPLETION,
         query_text="What are the models produced by Volkswagen based on the context?",
     )
-    print(search_results)
+    pprint(search_results)
 
 
 if __name__ == "__main__":

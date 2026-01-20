@@ -47,7 +47,9 @@ class ChunksRetriever(BaseRetriever):
         vector_engine = get_vector_engine()
 
         try:
-            found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
+            found_chunks = await vector_engine.search(
+                "DocumentChunk_text", query, limit=self.top_k, include_payload=True
+            )
             logger.info(f"Found {len(found_chunks)} chunks from vector search")
             await update_node_access_timestamps(found_chunks)
 
