@@ -30,8 +30,6 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
             "vector_database_name": vector_db_name,
             "vector_database_connection_info": {
                 "port": vector_config.vector_db_port,
-                "username": vector_config.vector_db_username,
-                "password": vector_config.vector_db_password,
                 "host": vector_config.vector_db_host,
             },
             "vector_dataset_database_handler": "pgvector",
@@ -46,12 +44,8 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
                 "vector_db_name": new_vector_config["vector_database_name"],
                 "vector_db_port": new_vector_config["vector_database_connection_info"]["port"],
                 "vector_db_key": "",
-                "vector_db_username": new_vector_config["vector_database_connection_info"][
-                    "username"
-                ],
-                "vector_db_password": new_vector_config["vector_database_connection_info"][
-                    "password"
-                ],
+                "vector_db_username": vector_config.vector_db_username,
+                "vector_db_password": vector_config.vector_db_password,
                 "vector_db_host": new_vector_config["vector_database_connection_info"]["host"],
                 "vector_dataset_database_handler": "pgvector",
             }
@@ -63,16 +57,25 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     async def resolve_dataset_connection_info(
         cls, dataset_database: DatasetDatabase
     ) -> DatasetDatabase:
+        vector_config = get_vectordb_config()
+        # Note: For PGVector, we use the vector DB username/password from configuration so it's never stored in the DB
+        dataset_database.vector_database_connection_info["vector_db_username"] = (
+            vector_config.vector_db_username
+        )
+        dataset_database.vector_database_connection_info["vector_db_password"] = (
+            vector_config.vector_db_password
+        )
         return dataset_database
 
     @classmethod
     async def delete_dataset(cls, dataset_database: DatasetDatabase):
+        vector_config = get_vectordb_config()
         vector_engine = create_vector_engine(
             vector_db_provider=dataset_database.vector_database_provider,
             vector_db_url=dataset_database.vector_database_url,
             vector_db_name=dataset_database.vector_database_name,
             vector_db_port=dataset_database.vector_database_connection_info["port"],
-            vector_db_username=dataset_database.vector_database_connection_info["username"],
-            vector_db_password=dataset_database.vector_database_connection_info["password"],
+            vector_db_username=vector_config.vector_db_username,
+            vector_db_password=vector_config.vector_db_password,
         )
         await vector_engine.prune()
