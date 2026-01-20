@@ -55,7 +55,7 @@ class FalkorDBAdapter(GraphDBInterface):
             graph_database_port: FalkorDB port (default: 6379)
             graph_database_password: Optional password for authentication
             graph_database_name: Default graph name (default: 'CogneeGraph')
-        
+
         Environment Variables (preferred - unified config):
             FALKORDB_HOST: FalkorDB host (takes precedence over graph_database_url)
             FALKORDB_PORT: FalkorDB port (takes precedence over graph_database_port)
@@ -73,7 +73,9 @@ class FalkorDBAdapter(GraphDBInterface):
         )
         self.port = int(os.getenv("FALKORDB_PORT") or graph_database_port or 6379)
         self.password = os.getenv("FALKORDB_PASSWORD") or graph_database_password
-        self._default_graph_name = os.getenv("FALKORDB_GRAPH_NAME") or graph_database_name or "CogneeGraph"
+        self._default_graph_name = (
+            os.getenv("FALKORDB_GRAPH_NAME") or graph_database_name or "CogneeGraph"
+        )
 
         self.client = None
         self._executor = ThreadPoolExecutor(max_workers=5)
@@ -234,7 +236,7 @@ class FalkorDBAdapter(GraphDBInterface):
         else:
             node_id = str(node)
             label = "Node"
-        
+
         # logger.warning(f"DEBUG: add_node id={node_id} label={label}")
 
         properties = properties or {}
@@ -472,7 +474,7 @@ class FalkorDBAdapter(GraphDBInterface):
     ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
         """Get a subgraph containing nodes of a specific type."""
         label = getattr(node_type, "__name__", str(node_type))
-        
+
         # Modified to fetch neighbors as well, matching Neo4j behavior
         if node_name:
             nodes_res = await self.query(
@@ -483,34 +485,38 @@ class FalkorDBAdapter(GraphDBInterface):
             )
         else:
             nodes_res = await self.query(
-                f"MATCH (n:`{BASE_LABEL}`:`{label}`) "
-                f"OPTIONAL MATCH (n)--(nbr) "
-                f"RETURN n, nbr",
+                f"MATCH (n:`{BASE_LABEL}`:`{label}`) OPTIONAL MATCH (n)--(nbr) RETURN n, nbr",
                 {},
             )
 
         unique_nodes: Dict[str, Any] = {}
-        
+
         for r in nodes_res:
             # Process primary node 'n'
             n = r.get("n")
             if n:
-               props = n.properties if hasattr(n, "properties") else (n if isinstance(n, dict) else {})
-               nid = str(props.get("id"))
-               if nid and nid not in unique_nodes:
-                   unique_nodes[nid] = props
-            
+                props = (
+                    n.properties if hasattr(n, "properties") else (n if isinstance(n, dict) else {})
+                )
+                nid = str(props.get("id"))
+                if nid and nid not in unique_nodes:
+                    unique_nodes[nid] = props
+
             # Process neighbor node 'nbr'
             nbr = r.get("nbr")
             if nbr:
-               props = nbr.properties if hasattr(nbr, "properties") else (nbr if isinstance(nbr, dict) else {})
-               nid = str(props.get("id"))
-               if nid and nid not in unique_nodes:
-                   unique_nodes[nid] = props
+                props = (
+                    nbr.properties
+                    if hasattr(nbr, "properties")
+                    else (nbr if isinstance(nbr, dict) else {})
+                )
+                nid = str(props.get("id"))
+                if nid and nid not in unique_nodes:
+                    unique_nodes[nid] = props
 
         nodes: List[Tuple[int, dict]] = []
         id_to_idx: Dict[str, int] = {}
-        
+
         for i, (nid, props) in enumerate(unique_nodes.items()):
             nodes.append((i, props))
             id_to_idx[nid] = i

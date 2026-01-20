@@ -70,7 +70,7 @@ class FalkorDBVectorAdapter(VectorDBInterface):
             api_key: Optional password for authentication
             embedding_engine: Engine for generating embeddings
             graph_name: Default graph name (default: 'CogneeGraph')
-        
+
         Environment Variables (preferred - unified config):
             FALKORDB_HOST: FalkorDB host (takes precedence over url)
             FALKORDB_PORT: FalkorDB port (takes precedence over port)
@@ -305,10 +305,11 @@ class FalkorDBVectorAdapter(VectorDBInterface):
             f"RETURN node.id as id, node.payload as payload, score"
         )
 
-        graph_name = self._get_graph_name_from_ctx()
         try:
             # logger.warning(f"DEBUG SEARCH: graph={graph_name} collection={label} limit={limit} emb_len={len(emb_list)}")
-            logger.warning(f"DEBUG SEARCH CALL: graph={self._get_graph_name_from_ctx()} collection={label} emb_len={len(emb_list)} engine={type(self.embedding_engine).__name__ if self.embedding_engine else 'None'} query={query}")
+            logger.warning(
+                f"DEBUG SEARCH CALL: graph={self._get_graph_name_from_ctx()} collection={label} emb_len={len(emb_list)} engine={type(self.embedding_engine).__name__ if self.embedding_engine else 'None'} query={query}"
+            )
             results = await self._query(query, {"emb": emb_list})
         except Exception as e:
             msg = str(e)
@@ -354,7 +355,6 @@ class FalkorDBVectorAdapter(VectorDBInterface):
 
     async def prune(self):
         """Delete all data and indices in the graph."""
-        graph_name = self._get_graph_name_from_ctx()
         try:
             # Drop all indices
             indices_res = await self._query("CALL db.indexes()")
@@ -365,7 +365,7 @@ class FalkorDBVectorAdapter(VectorDBInterface):
                 try:
                     # Try dropping as standard index
                     await self._query(f"DROP INDEX ON :{idx_name}({prop_name})")
-                except:
+                except Exception:
                     pass
             # Delete all nodes
             await self._query("MATCH (n) DETACH DELETE n")
