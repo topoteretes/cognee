@@ -35,4 +35,5 @@ async def main():
     await add_data_points([alice, bob, charlie])
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

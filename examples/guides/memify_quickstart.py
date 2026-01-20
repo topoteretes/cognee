@@ -1,6 +1,6 @@
 import asyncio
 import cognee
-from cognee import SearchType
+from cognee.modules.search.types import SearchType
 
 
 async def main():
@@ -26,4 +26,5 @@ async def main():
     print("Rules:", rules)
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

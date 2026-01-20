@@ -14,7 +14,7 @@ async def main():
         [
             "Alice moved to Paris in 2010, while Bob has always lived in New York.",
             "Andreas was born in Venice, but later settled in Lisbon.",
-            "Diana and Tom were born and raised in Helsingy. Diana currently resides in Berlin, while Tom never moved.",
+            "Diana and Tom were born and raised in Helsinki. Diana currently resides in Berlin, while Tom never moved.",
         ]
     )
     await cognee.cognify(custom_prompt=custom_prompt)

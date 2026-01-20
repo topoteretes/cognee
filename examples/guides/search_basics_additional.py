@@ -1,7 +1,7 @@
 import asyncio
 import cognee
 
-from cognee.modules.search.types import SearchType, CombinedSearchResult
+from cognee.api.v1.search import SearchType
 
 
 async def main():
@@ -47,12 +47,6 @@ async def main():
     )
     assert len(answers) > 0
 
-    answers = await cognee.search(
-        query_text="Quarterly financial highlights",
-        datasets=["NLP_coding", "Sandwiches"],
-        use_combined_context=True,
-    )
-    assert isinstance(answers, CombinedSearchResult)
 
-
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

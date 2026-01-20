@@ -10,4 +10,5 @@ async def main():
     await visualize_graph("./graph_after_cognify.html")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
