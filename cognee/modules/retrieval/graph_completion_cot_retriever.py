@@ -3,6 +3,8 @@ import json
 from typing import Optional, List, Type, Any
 from pydantic import BaseModel
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+from cognee.modules.retrieval.utils.query_state import QueryState
 from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.shared.logging_utils import get_logger
 
@@ -21,28 +23,6 @@ from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 
 logger = get_logger()
-
-
-class QueryState:
-    """
-    Helper class containing all necessary information about the query state.
-    Used to keep track of important information in a more readable way, and
-    enable as many parallel calls to llms as possible.
-    """
-
-    def __init__(self):
-        self.completion: str = ""
-        self.triplets: List[Edge] = []
-        self.context_text: str = ""
-
-        self.answer_text: str = ""
-        self.valid_user_prompt: str = ""
-        self.valid_system_prompt: str = ""
-        self.reasoning: str = ""
-
-        self.followup_question: str = ""
-        self.followup_prompt: str = ""
-        self.followup_system: str = ""
 
 
 def _as_answer_text(completion: Any) -> str:
@@ -155,7 +135,9 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             if round_idx == 0:
                 if context is None:
                     # Get context, resolve to text, and store info in the query state
-                    triplets_batch = await self.get_context(query_batch=query_batch)
+                    triplets_batch = await self.get_context(
+                        query_batch=list(query_state_tracker.keys())
+                    )
                     context_text_batch = await asyncio.gather(
                         *[
                             self.resolve_edges_to_text(batched_triplets)
@@ -163,7 +145,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                         ]
                     )
                     for batched_query, batched_triplets, batched_context_text in zip(
-                        query_batch, triplets_batch, context_text_batch
+                        query_state_tracker.keys(), triplets_batch, context_text_batch
                     ):
                         query_state_tracker[batched_query].triplets = batched_triplets
                         query_state_tracker[batched_query].context_text = batched_context_text
@@ -176,7 +158,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                         ]
                     )
                     for batched_query, batched_triplets, batched_context_text in zip(
-                        query_batch, context, context_text_batch
+                        query_state_tracker.keys(), context, context_text_batch
                     ):
                         query_state_tracker[batched_query].triplets = batched_triplets
                         query_state_tracker[batched_query].context_text = batched_context_text
@@ -184,7 +166,9 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 # Find new triplets, and update existing query states
                 triplets_batch = await self.get_context(query_batch=followup_question_batch)
 
-                for batched_query, batched_followup_triplets in zip(query_batch, triplets_batch):
+                for batched_query, batched_followup_triplets in zip(
+                    query_state_tracker.keys(), triplets_batch
+                ):
                     query_state_tracker[batched_query].triplets = list(
                         dict.fromkeys(
                             query_state_tracker[batched_query].triplets + batched_followup_triplets
@@ -198,7 +182,9 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                     ]
                 )
 
-                for batched_query, batched_context_text in zip(query_batch, context_text_batch):
+                for batched_query, batched_context_text in zip(
+                    query_state_tracker.keys(), context_text_batch
+                ):
                     query_state_tracker[batched_query].context_text = batched_context_text
 
             completion_batch = await asyncio.gather(
@@ -216,8 +202,17 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 ]
             )
 
-            for batched_query, batched_completion in zip(query_batch, completion_batch):
+            for batched_query, batched_completion in zip(
+                query_state_tracker.keys(), completion_batch
+            ):
                 query_state_tracker[batched_query].completion = batched_completion
+
+            if round_idx == max_iter:
+                # When we finish all iterations:
+                # Make sure answers are returned for duplicate queries, in the order they were asked.
+                completion_batch = []
+                for batched_query in query_batch:
+                    completion_batch.append(query_state_tracker[batched_query].completion)
 
             logger.info(f"Chain-of-thought: round {round_idx} - answers: {completion_batch}")
 
@@ -332,13 +327,17 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         session_save = user_id and cache_config.caching
 
         if query_batch and session_save:
-            raise ValueError("You cannot use batch queries with session saving currently.")
+            raise QueryValidationError(
+                message="You cannot use batch queries with session saving currently."
+            )
         if query_batch and self.save_interaction:
-            raise ValueError("Cannot use batch queries with interaction saving currently.")
+            raise QueryValidationError(
+                message="Cannot use batch queries with interaction saving currently."
+            )
 
         is_query_valid, msg = validate_queries(query, query_batch)
         if not is_query_valid:
-            raise ValueError(msg)
+            raise QueryValidationError(message=msg)
 
         # Load conversation history if enabled
         conversation_history = ""

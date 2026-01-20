@@ -747,3 +747,60 @@ async def test_get_completion_batch_queries_with_response_model(mock_edge):
     assert isinstance(completion, list)
     assert len(completion) == 2
     assert isinstance(completion[0], TestModel) and isinstance(completion[1], TestModel)
+
+
+@pytest.mark.asyncio
+async def test_get_completion_batch_queries_duplicate_queries(mock_edge):
+    """Test get_completion batch queries with duplicate queries."""
+    mock_graph_engine = AsyncMock()
+    mock_graph_engine.is_empty = AsyncMock(return_value=False)
+
+    retriever = GraphCompletionContextExtensionRetriever()
+
+    # Create a second edge for extension rounds
+    mock_edge2 = MagicMock(spec=Edge)
+
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch.object(
+            retriever,
+            "get_context",
+            new_callable=AsyncMock,
+            side_effect=[[[mock_edge], [mock_edge]], [[mock_edge2], [mock_edge2]]],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
+            side_effect=[
+                "Resolved context",
+                "Resolved context",
+                "Extended context",
+                "Extended context",
+            ],  # Different contexts
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
+            side_effect=[
+                "Extension query",
+                "Extension query",
+                "Generated answer",
+                "Generated answer",
+            ],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+        ) as mock_cache_config,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
+        completion = await retriever.get_completion(
+            query_batch=["test query 1", "test query 2"], context_extension_rounds=1
+        )
+
+    assert isinstance(completion, list)
+    assert len(completion) == 2
+    assert completion[0] == "Generated answer" and completion[1] == "Generated answer"

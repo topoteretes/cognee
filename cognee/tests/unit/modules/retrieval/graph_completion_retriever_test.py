@@ -802,3 +802,43 @@ async def test_get_completion_batch_queries_empty_context(mock_edge):
 
     assert isinstance(completion, list)
     assert len(completion) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_completion_batch_queries_duplicate_queries(mock_edge):
+    """Test get_completion retrieves context when not provided."""
+    mock_graph_engine = AsyncMock()
+    mock_graph_engine.is_empty = AsyncMock(return_value=False)
+
+    retriever = GraphCompletionRetriever()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
+            return_value=[[mock_edge], [mock_edge]],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
+            return_value="Resolved context",
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
+            return_value="Generated answer",
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
+        completion = await retriever.get_completion(query_batch=["test query 1", "test query 1"])
+
+    assert isinstance(completion, list)
+    assert len(completion) == 2
+    assert completion[0] == "Generated answer" and completion[1] == "Generated answer"

@@ -1,6 +1,8 @@
 import asyncio
 from typing import Optional, List, Type, Any
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+from cognee.modules.retrieval.utils.query_state import QueryState
 from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -13,19 +15,6 @@ from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 
 logger = get_logger()
-
-
-class QueryState:
-    """
-    Helper class containing all necessary information about the query state:
-    the triplets and context associated with it, and also a check whether
-    it has fully extended the context.
-    """
-
-    def __init__(self, triplets: List[Edge], context_text: str, finished_extending_context: bool):
-        self.triplets = triplets
-        self.context_text = context_text
-        self.finished_extending_context = finished_extending_context
 
 
 class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
@@ -112,13 +101,17 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         session_save = user_id and cache_config.caching
 
         if query_batch and session_save:
-            raise ValueError("You cannot use batch queries with session saving currently.")
+            raise QueryValidationError(
+                message="You cannot use batch queries with session saving currently."
+            )
         if query_batch and self.save_interaction:
-            raise ValueError("Cannot use batch queries with interaction saving currently.")
+            raise QueryValidationError(
+                message="Cannot use batch queries with interaction saving currently."
+            )
 
         is_query_valid, msg = validate_queries(query, query_batch)
         if not is_query_valid:
-            raise ValueError(msg)
+            raise QueryValidationError(message=msg)
 
         triplets_batch = context
 
@@ -190,7 +183,9 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
             # Get new triplets, and merge them with existing ones, filtering out duplicates
             new_triplets_batch = await self.get_context(query_batch=completions)
-            for batched_query, batched_new_triplets in zip(query_batch, new_triplets_batch):
+            for batched_query, batched_new_triplets in zip(
+                finished_queries_states.keys(), new_triplets_batch
+            ):
                 finished_queries_states[batched_query].triplets = list(
                     dict.fromkeys(
                         finished_queries_states[batched_query].triplets + batched_new_triplets
@@ -207,7 +202,9 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             )
 
             # Update context_texts in query states
-            for batched_query, batched_context_text in zip(query_batch, context_text_batch):
+            for batched_query, batched_context_text in zip(
+                finished_queries_states.keys(), context_text_batch
+            ):
                 if not finished_queries_states[batched_query].finished_extending_context:
                     finished_queries_states[batched_query].context_text = batched_context_text
 
@@ -216,7 +213,9 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 for batched_query_state in finished_queries_states.values()
             ]
 
-            for batched_query, prev_size, new_size in zip(query_batch, prev_sizes, new_sizes):
+            for batched_query, prev_size, new_size in zip(
+                finished_queries_states.keys(), prev_sizes, new_sizes
+            ):
                 # Mark done queries accordingly
                 if prev_size == new_size:
                     finished_queries_states[batched_query].finished_extending_context = True
@@ -229,6 +228,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             round_idx += 1
 
         completion_batch = []
+        result_completion_batch = []
 
         if session_save:
             conversation_history = await get_conversation_history(session_id=session_id)
@@ -260,6 +260,15 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 ],
             )
 
+            # Make sure answers are returned for duplicate queries, in the order they were asked.
+            for batched_query, batched_completion in zip(
+                finished_queries_states.keys(), completion_batch
+            ):
+                finished_queries_states[batched_query].completion = batched_completion
+
+            for batched_query in query_batch:
+                result_completion_batch.append(finished_queries_states[batched_query].completion)
+
         # TODO: Do batch queries for save interaction
         if self.save_interaction and context_text_batch and triplets_batch and completion_batch:
             await self.save_qa(
@@ -277,4 +286,4 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 session_id=session_id,
             )
 
-        return completion_batch if completion_batch else [completion]
+        return result_completion_batch if result_completion_batch else [completion]

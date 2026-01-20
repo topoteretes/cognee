@@ -4,6 +4,7 @@ from uuid import NAMESPACE_OID, uuid5
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.tasks.storage import add_data_points
 from cognee.modules.graph.utils import resolve_edges_to_text
@@ -216,13 +217,17 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         session_save = user_id and cache_config.caching
 
         if query_batch and session_save:
-            raise ValueError("You cannot use batch queries with session saving currently.")
+            raise QueryValidationError(
+                message="You cannot use batch queries with session saving currently."
+            )
         if query_batch and self.save_interaction:
-            raise ValueError("Cannot use batch queries with interaction saving currently.")
+            raise QueryValidationError(
+                message="Cannot use batch queries with interaction saving currently."
+            )
 
         is_query_valid, msg = validate_queries(query, query_batch)
         if not is_query_valid:
-            raise ValueError(msg)
+            raise QueryValidationError(message=msg)
 
         triplets = context
 
