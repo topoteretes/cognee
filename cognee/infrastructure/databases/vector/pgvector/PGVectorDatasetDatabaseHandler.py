@@ -34,7 +34,7 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
                 "password": vector_config.vector_db_password,
                 "host": vector_config.vector_db_host,
             },
-            "vector_dataset_database_handler": "pgvector_local",
+            "vector_dataset_database_handler": "pgvector",
         }
 
         from .create_db_and_tables import create_pg_database
@@ -58,6 +58,12 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         )
 
         return new_vector_config
+
+    @classmethod
+    async def resolve_dataset_connection_info(
+        cls, dataset_database: DatasetDatabase
+    ) -> DatasetDatabase:
+        return dataset_database
 
     @classmethod
     async def delete_dataset(cls, dataset_database: DatasetDatabase):
