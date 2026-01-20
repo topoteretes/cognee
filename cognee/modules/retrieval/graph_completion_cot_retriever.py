@@ -182,12 +182,9 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                         query_state_tracker[batched_query].context_text = batched_context_text
             else:
                 # Find new triplets, and update existing query states
-                followup_triplets_batch = await self.get_context(
-                    query_batch=followup_question_batch
-                )
-                for batched_query, batched_followup_triplets in zip(
-                    query_batch, followup_triplets_batch
-                ):
+                triplets_batch = await self.get_context(query_batch=followup_question_batch)
+
+                for batched_query, batched_followup_triplets in zip(query_batch, triplets_batch):
                     query_state_tracker[batched_query].triplets = list(
                         dict.fromkeys(
                             query_state_tracker[batched_query].triplets + batched_followup_triplets
