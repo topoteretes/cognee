@@ -55,9 +55,28 @@ async def prepare_search_result(search_result):
     if isinstance(results, List) and len(results) > 0 and isinstance(results[0], Edge):
         result_graph = transform_context_to_graph(results)
 
+    citations = []
+    if isinstance(context, List) and len(context) > 0 and isinstance(context[0], Edge):
+        seen_ids = set()
+        for edge in context:
+            for node in [edge.node1, edge.node2]:
+                if node.id not in seen_ids:
+                    seen_ids.add(node.id)
+                    # Extract attributes, prioritizing commonly used citation fields
+                    citation = {
+                        "id": str(node.id),
+                        "text": node.attributes.get("text", ""),
+                        "metadata": {
+                            k: v for k, v in node.attributes.items() 
+                            if k not in ["text", "vector_distance"]
+                        }
+                    }
+                    citations.append(citation)
+
     return {
         "result": result_graph or results[0] if results and len(results) == 1 else results,
         "graphs": graphs,
         "context": context_texts,
         "datasets": datasets,
+        "citations": citations,
     }
