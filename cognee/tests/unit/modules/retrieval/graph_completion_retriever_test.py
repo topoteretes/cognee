@@ -806,7 +806,7 @@ async def test_get_completion_batch_queries_empty_context(mock_edge):
 
 @pytest.mark.asyncio
 async def test_get_completion_batch_queries_duplicate_queries(mock_edge):
-    """Test get_completion retrieves context when not provided."""
+    """Test get_completion batch queries with duplicate queries."""
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 

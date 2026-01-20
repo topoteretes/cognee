@@ -245,7 +245,9 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                     ]
                 )
 
-                for batched_query, batched_reasoning in zip(query_batch, reasoning_batch):
+                for batched_query, batched_reasoning in zip(
+                    query_state_tracker.keys(), reasoning_batch
+                ):
                     query_state_tracker[batched_query].reasoning = batched_reasoning
 
                 for batched_query, batched_query_state in query_state_tracker.items():
@@ -274,7 +276,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 )
 
                 for batched_query, batched_followup_question in zip(
-                    query_batch, followup_question_batch
+                    query_state_tracker.keys(), followup_question_batch
                 ):
                     query_state_tracker[batched_query].followup_question = batched_followup_question
 
