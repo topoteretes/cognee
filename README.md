@@ -64,13 +64,15 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
 </div>
 
 
-:star: _Help us reach more developers and grow the cognee community. Star this repo!_
 
 
 ## About Cognee
 
 Cognee is an open-source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your documents both searchable by meaning and connected by relationships. 
 Cognee offers default memory creation and search which we describe bellow. But with Cognee you can build your own!
+
+
+:star: _Help us reach more developers and grow the cognee community. Star this repo!_
 
 
 ### Cognee Open Source:
