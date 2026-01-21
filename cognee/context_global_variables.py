@@ -129,6 +129,7 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
         "vector_db_key": dataset_database.vector_database_key,
         "vector_db_name": dataset_database.vector_database_name,
         "vector_db_port": dataset_database.vector_database_connection_info.get("port", ""),
+        "vector_db_host": dataset_database.vector_database_connection_info.get("host", ""),
         "vector_db_username": dataset_database.vector_database_connection_info.get("username", ""),
         "vector_db_password": dataset_database.vector_database_connection_info.get("password", ""),
     }

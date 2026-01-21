@@ -59,10 +59,10 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     ) -> DatasetDatabase:
         vector_config = get_vectordb_config()
         # Note: For PGVector, we use the vector DB username/password from configuration so it's never stored in the DB
-        dataset_database.vector_database_connection_info["vector_db_username"] = (
+        dataset_database.vector_database_connection_info["username"] = (
             vector_config.vector_db_username
         )
-        dataset_database.vector_database_connection_info["vector_db_password"] = (
+        dataset_database.vector_database_connection_info["password"] = (
             vector_config.vector_db_password
         )
         return dataset_database
@@ -70,12 +70,19 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     @classmethod
     async def delete_dataset(cls, dataset_database: DatasetDatabase):
         vector_config = get_vectordb_config()
-        vector_engine = create_vector_engine(
-            vector_db_provider=dataset_database.vector_database_provider,
-            vector_db_url=dataset_database.vector_database_url,
-            vector_db_name=dataset_database.vector_database_name,
-            vector_db_port=dataset_database.vector_database_connection_info["port"],
-            vector_db_username=vector_config.vector_db_username,
-            vector_db_password=vector_config.vector_db_password,
+
+        from cognee.infrastructure.databases.relational.create_relational_engine import (
+            create_relational_engine,
         )
-        await vector_engine.prune()
+
+        pg_relational_engine = create_relational_engine(
+            db_path="",
+            db_host=dataset_database.vector_database_connection_info["host"],
+            db_name=dataset_database.vector_database_name,
+            db_port=dataset_database.vector_database_connection_info["port"],
+            db_username=vector_config.vector_db_username,
+            db_password=vector_config.vector_db_password,
+            db_provider="postgres",
+        )
+
+        await pg_relational_engine.delete_database()

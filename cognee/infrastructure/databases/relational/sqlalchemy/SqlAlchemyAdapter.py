@@ -544,7 +544,6 @@ class SQLAlchemyAdapter:
 
         if self.engine.dialect.name == "sqlite" or (
             self.engine.dialect.name == "postgresql"
-            and relational_config.db_provider == "postgres"
             and self.engine.url.database == relational_config.db_name
         ):
             # In this case we already have a relational db created in sqlite or postgres, we just need to populate it
@@ -593,6 +592,31 @@ class SQLAlchemyAdapter:
                             )
                             await connection.execute(drop_table_query)
                         metadata.clear()
+
+                from cognee.context_global_variables import backend_access_control_enabled
+                from cognee.infrastructure.databases.vector.config import get_vectordb_config
+                from cognee.infrastructure.databases.relational.config import get_relational_config
+
+                if (
+                    backend_access_control_enabled()
+                    and get_vectordb_config().vector_db_provider == "pgvector"
+                    and get_relational_config().db_name != self.engine.url.database
+                ):
+                    connection = await self.maintenance_engine.connect()
+                    connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
+                    await self.engine.dispose(close=True)
+                    # We first have to kill all active sessions on the database, then delete it
+                    await connection.execute(
+                        text(
+                            "SELECT pg_terminate_backend(pid) "
+                            "FROM pg_stat_activity "
+                            "WHERE datname = :db AND pid <> pg_backend_pid()"
+                        ),
+                        {"db": self.engine.url.database},
+                    )
+                    await connection.execute(text(f'DROP DATABASE "{self.engine.url.database}";'))
+
+                    await connection.close()
         except Exception as e:
             logger.error(f"Error deleting database: {e}")
             raise e
