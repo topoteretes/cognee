@@ -86,11 +86,17 @@ def run_migrations_online() -> None:
 db_engine = get_relational_engine()
 
 print("Using database:", db_engine.db_uri)
+# In case db_uri is a SQLAlchemy URL object, convert it to string
+db_uri = (
+    db_engine.db_uri
+    if isinstance(db_engine.db_uri, str)
+    else db_engine.db_uri.render_as_string(hide_password=False)
+)
 
 config.set_section_option(
     config.config_ini_section,
     "SQLALCHEMY_DATABASE_URI",
-    db_engine.db_uri,
+    db_uri,
 )
 
 
