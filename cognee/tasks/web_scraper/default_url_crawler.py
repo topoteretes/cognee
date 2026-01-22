@@ -285,7 +285,7 @@ class DefaultUrlCrawler:
         crawl_delay = await self._get_crawl_delay(url)
         logger.info(f"Fetching URL with httpx (crawl_delay={crawl_delay}s): {url}")
         headers = {
-            "User-Agent": "Cognee/1.0 (contact@yourdomain.com)",
+            "User-Agent": "Cognee/1.0 (hello@cognee.ai)",
             "Accept": "text/html",
             "Accept-Language": "en-US,en;q=0.9",
         }
