@@ -80,6 +80,11 @@ async def lifespan(app: FastAPI):
     # Emit a clear startup message for docker logs
     logger.info("Backend server has started")
 
+    from cognee.modules.users.methods import get_authenticated_user
+
+    # Override checking of authenticated user for Cognee
+    app.dependency_overrides[get_authenticated_user] = get_default_user
+
     yield
 
 
