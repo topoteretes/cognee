@@ -284,11 +284,16 @@ class DefaultUrlCrawler:
         attempt = 0
         crawl_delay = await self._get_crawl_delay(url)
         logger.info(f"Fetching URL with httpx (crawl_delay={crawl_delay}s): {url}")
+        headers = {
+            "User-Agent": "Cognee/1.0 (contact@yourdomain.com)",
+            "Accept": "text/html",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
 
         while True:
             try:
                 await self._respect_rate_limit(url, crawl_delay)
-                resp = await self._client.get(url)
+                resp = await self._client.get(url, headers=headers)
                 resp.raise_for_status()
                 logger.info(
                     f"Successfully fetched {url} (status={resp.status_code}, size={len(resp.text)} bytes)"
