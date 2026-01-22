@@ -11,7 +11,7 @@ import asyncio
 from cognee.modules.engine.models.node_set import NodeSet
 
 # provide your OpenAI key here
-os.environ["LLM_API_KEY"] = ""
+os.environ["LLM_API_KEY"] = "your_api_key"
 
 # create artifacts directory for storing visualization outputs
 artifacts_path = "artifacts"
@@ -24,7 +24,7 @@ developer_intro = (
 )
 
 asset_paths = {
-    "human_agent_conversations": "data/copilot_convesations.json",
+    "human_agent_conversations": "data/copilot_conversations.json",
     "python_zen_principles": "data/zen_principles.md",
     "ontology": "data/basic_ontology.owl",
 }
