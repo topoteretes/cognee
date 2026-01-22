@@ -7,11 +7,16 @@ from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.shared.logging_utils import setup_logging
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.ontology.ontology_config import Config
+from pathlib import Path
 
-with open("data/text_1.txt", "r", encoding="utf-8") as f:
+with open(
+    os.path.join(Path(__file__).resolve().parent, "data/text_1.txt"), "r", encoding="utf-8"
+) as f:
     text_1 = f.read()
 
-with open("data/text_2.txt", "r", encoding="utf-8") as f:
+with open(
+    os.path.join(Path(__file__).resolve().parent, "data/text_2.txt"), "r", encoding="utf-8"
+) as f:
     text_2 = f.read()
 
 
