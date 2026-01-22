@@ -2,7 +2,6 @@ import asyncio
 from cognee.context_global_variables import (
     graph_db_config as context_graph_db_config,
     vector_db_config as context_vector_db_config,
-    backend_access_control_enabled,
 )
 
 from cognee.infrastructure.databases.relational import (
@@ -27,8 +26,7 @@ async def setup_and_check_environment(
 
     # Create tables for databases
     await create_relational_db_and_tables()
-    if not backend_access_control_enabled():
-        await create_pgvector_db_and_tables()
+    await create_pgvector_db_and_tables()
 
     global _first_run_done
     async with _first_run_lock:

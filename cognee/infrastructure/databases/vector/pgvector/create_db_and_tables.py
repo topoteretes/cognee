@@ -3,6 +3,7 @@ from sqlalchemy import text
 from cognee.modules.users.models import DatasetDatabase
 from ..get_vector_engine import get_vector_engine, get_vectordb_context_config
 from ...vector import get_vectordb_config
+from cognee.context_global_variables import backend_access_control_enabled
 
 
 async def create_db_and_tables():
@@ -10,7 +11,7 @@ async def create_db_and_tables():
     vector_config = get_vectordb_context_config()
     vector_engine = get_vector_engine()
 
-    if vector_config["vector_db_provider"] == "pgvector":
+    if vector_config["vector_db_provider"] == "pgvector" and not backend_access_control_enabled():
         async with vector_engine.engine.begin() as connection:
             await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
 
