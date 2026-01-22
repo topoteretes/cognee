@@ -2,6 +2,7 @@ from uuid import UUID
 from typing import Optional
 
 from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
+from cognee.infrastructure.databases.vector.pgvector.create_db_and_tables import delete_pg_database
 from cognee.modules.users.models import User
 from cognee.modules.users.models import DatasetDatabase
 from cognee.infrastructure.databases.vector import get_vectordb_config
@@ -69,20 +70,17 @@ class PGVectorDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
 
     @classmethod
     async def delete_dataset(cls, dataset_database: DatasetDatabase):
-        vector_config = get_vectordb_config()
-
-        from cognee.infrastructure.databases.relational.create_relational_engine import (
-            create_relational_engine,
+        dataset_database = await cls.resolve_dataset_connection_info(dataset_database)
+        vector_engine = create_vector_engine(
+            vector_db_provider=dataset_database.vector_database_provider,
+            vector_db_url=dataset_database.vector_database_url,
+            vector_db_name=dataset_database.vector_database_name,
+            vector_db_port=dataset_database.vector_database_connection_info["port"],
+            vector_db_username=dataset_database.vector_database_connection_info["username"],
+            vector_db_password=dataset_database.vector_database_connection_info["password"],
         )
+        # Prune data
+        await vector_engine.prune()
 
-        pg_relational_engine = create_relational_engine(
-            db_path="",
-            db_host=dataset_database.vector_database_connection_info["host"],
-            db_name=dataset_database.vector_database_name,
-            db_port=dataset_database.vector_database_connection_info["port"],
-            db_username=vector_config.vector_db_username,
-            db_password=vector_config.vector_db_password,
-            db_provider="postgres",
-        )
-
-        await pg_relational_engine.delete_database()
+        # Drop entire database
+        await delete_pg_database(dataset_database)

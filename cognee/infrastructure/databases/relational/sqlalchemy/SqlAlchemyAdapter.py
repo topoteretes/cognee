@@ -538,31 +538,9 @@ class SQLAlchemyAdapter:
             if not await file_storage.file_exists(db_name):
                 await file_storage.ensure_directory_exists()
 
-        from cognee.infrastructure.databases.relational.config import get_relational_config
-
-        relational_config = get_relational_config()
-
-        if self.engine.dialect.name == "sqlite" or (
-            self.engine.dialect.name == "postgresql"
-            and self.engine.url.database == relational_config.db_name
-        ):
-            # In this case we already have a relational db created in sqlite or postgres, we just need to populate it
-            async with self.engine.begin() as connection:
-                if len(Base.metadata.tables.keys()) > 0:
-                    await connection.run_sync(Base.metadata.create_all)
-            return
-
-        from cognee.context_global_variables import backend_access_control_enabled
-
-        if self.engine.dialect.name == "postgresql" and backend_access_control_enabled():
-            # Connect to maintenance db in order to create new database
-            # Make sure to execute CREATE DATABASE outside of transaction block, and set AUTOCOMMIT isolation level
-            connection = await self.maintenance_engine.connect()
-            connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
-            await connection.execute(text(f'CREATE DATABASE "{self.engine.url.database}";'))
-
-            # Clean up resources
-            await connection.close()
+        async with self.engine.begin() as connection:
+            if len(Base.metadata.tables.keys()) > 0:
+                await connection.run_sync(Base.metadata.create_all)
 
     async def delete_database(self):
         """
@@ -593,30 +571,6 @@ class SQLAlchemyAdapter:
                             await connection.execute(drop_table_query)
                         metadata.clear()
 
-                from cognee.context_global_variables import backend_access_control_enabled
-                from cognee.infrastructure.databases.vector.config import get_vectordb_config
-                from cognee.infrastructure.databases.relational.config import get_relational_config
-
-                if (
-                    backend_access_control_enabled()
-                    and get_vectordb_config().vector_db_provider == "pgvector"
-                    and get_relational_config().db_name != self.engine.url.database
-                ):
-                    connection = await self.maintenance_engine.connect()
-                    connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
-                    await self.engine.dispose(close=True)
-                    # We first have to kill all active sessions on the database, then delete it
-                    await connection.execute(
-                        text(
-                            "SELECT pg_terminate_backend(pid) "
-                            "FROM pg_stat_activity "
-                            "WHERE datname = :db AND pid <> pg_backend_pid()"
-                        ),
-                        {"db": self.engine.url.database},
-                    )
-                    await connection.execute(text(f'DROP DATABASE "{self.engine.url.database}";'))
-
-                    await connection.close()
         except Exception as e:
             logger.error(f"Error deleting database: {e}")
             raise e
