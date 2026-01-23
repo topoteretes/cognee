@@ -1,5 +1,7 @@
 import os
-from typing import Callable, List, Optional, Type
+from typing import Callable, List, Optional, Type, Tuple
+
+from cognee.modules.retrieval.base_retriever import BaseRetriever
 
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.retrieval.triplet_retriever import TripletRetriever
@@ -40,157 +42,98 @@ async def get_search_type_tools(
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
 ) -> list:
-    search_tasks: dict[SearchType, List[Callable]] = {
-        SearchType.SUMMARIES: [
-            SummariesRetriever(top_k=top_k).get_completion,
-            SummariesRetriever(top_k=top_k).get_context,
-        ],
-        SearchType.CHUNKS: [
-            ChunksRetriever(top_k=top_k).get_completion,
-            ChunksRetriever(top_k=top_k).get_context,
-        ],
-        SearchType.RAG_COMPLETION: [
-            CompletionRetriever(
-                system_prompt_path=system_prompt_path,
-                top_k=top_k,
-                system_prompt=system_prompt,
-            ).get_completion,
-            CompletionRetriever(
-                system_prompt_path=system_prompt_path,
-                top_k=top_k,
-                system_prompt=system_prompt,
-            ).get_context,
-        ],
-        SearchType.TRIPLET_COMPLETION: [
-            TripletRetriever(
-                system_prompt_path=system_prompt_path,
-                top_k=top_k,
-                system_prompt=system_prompt,
-            ).get_completion,
-            TripletRetriever(
-                system_prompt_path=system_prompt_path,
-                top_k=top_k,
-                system_prompt=system_prompt,
-            ).get_context,
-        ],
-        SearchType.GRAPH_COMPLETION: [
-            GraphCompletionRetriever(
-                system_prompt_path=system_prompt_path,
-                top_k=top_k,
-                node_type=node_type,
-                node_name=node_name,
-                save_interaction=save_interaction,
-                system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k,
-                triplet_distance_penalty=triplet_distance_penalty,
-            ).get_completion,
-            GraphCompletionRetriever(
-                system_prompt_path=system_prompt_path,
-                top_k=top_k,
-                node_type=node_type,
-                node_name=node_name,
-                save_interaction=save_interaction,
-                system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k,
-                triplet_distance_penalty=triplet_distance_penalty,
-            ).get_context,
-        ],
-        SearchType.GRAPH_COMPLETION_COT: [
-            GraphCompletionCotRetriever(
-                system_prompt_path=system_prompt_path,
-                top_k=top_k,
-                node_type=node_type,
-                node_name=node_name,
-                save_interaction=save_interaction,
-                system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k,
-                triplet_distance_penalty=triplet_distance_penalty,
-            ).get_completion,
-            GraphCompletionCotRetriever(
-                system_prompt_path=system_prompt_path,
-                top_k=top_k,
-                node_type=node_type,
-                node_name=node_name,
-                save_interaction=save_interaction,
-                system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k,
-                triplet_distance_penalty=triplet_distance_penalty,
-            ).get_context,
-        ],
-        SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: [
-            GraphCompletionContextExtensionRetriever(
-                system_prompt_path=system_prompt_path,
-                top_k=top_k,
-                node_type=node_type,
-                node_name=node_name,
-                save_interaction=save_interaction,
-                system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k,
-                triplet_distance_penalty=triplet_distance_penalty,
-            ).get_completion,
-            GraphCompletionContextExtensionRetriever(
-                system_prompt_path=system_prompt_path,
-                top_k=top_k,
-                node_type=node_type,
-                node_name=node_name,
-                save_interaction=save_interaction,
-                system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k,
-                triplet_distance_penalty=triplet_distance_penalty,
-            ).get_context,
-        ],
-        SearchType.GRAPH_SUMMARY_COMPLETION: [
-            GraphSummaryCompletionRetriever(
-                system_prompt_path=system_prompt_path,
-                top_k=top_k,
-                node_type=node_type,
-                node_name=node_name,
-                save_interaction=save_interaction,
-                system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k,
-                triplet_distance_penalty=triplet_distance_penalty,
-            ).get_completion,
-            GraphSummaryCompletionRetriever(
-                system_prompt_path=system_prompt_path,
-                top_k=top_k,
-                node_type=node_type,
-                node_name=node_name,
-                save_interaction=save_interaction,
-                system_prompt=system_prompt,
-                wide_search_top_k=wide_search_top_k,
-                triplet_distance_penalty=triplet_distance_penalty,
-            ).get_context,
-        ],
-        SearchType.CYPHER: [
-            CypherSearchRetriever().get_completion,
-            CypherSearchRetriever().get_context,
-        ],
-        SearchType.NATURAL_LANGUAGE: [
-            NaturalLanguageRetriever().get_completion,
-            NaturalLanguageRetriever().get_context,
-        ],
-        SearchType.FEEDBACK: [UserQAFeedback(last_k=last_k).add_feedback],
-        SearchType.TEMPORAL: [
-            TemporalRetriever(
-                top_k=top_k,
-                wide_search_top_k=wide_search_top_k,
-                triplet_distance_penalty=triplet_distance_penalty,
-            ).get_completion,
-            TemporalRetriever(
-                top_k=top_k,
-                wide_search_top_k=wide_search_top_k,
-                triplet_distance_penalty=triplet_distance_penalty,
-            ).get_context,
-        ],
-        SearchType.CHUNKS_LEXICAL: (
-            lambda _r=JaccardChunksRetriever(top_k=top_k): [
-                _r.get_completion,
-                _r.get_context,
-            ]
-        )(),
-        SearchType.CODING_RULES: [
-            CodingRulesRetriever(rules_nodeset_name=node_name).get_existing_rules,
-        ],
+    # Registry mapping search types to their corresponding retriever classes and input parameters
+    search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
+        SearchType.SUMMARIES: (SummariesRetriever, {"top_k": top_k}),
+        SearchType.CHUNKS: (
+            ChunksRetriever,
+            {"top_k": top_k},
+        ),
+        SearchType.RAG_COMPLETION: (
+            CompletionRetriever,
+            {
+                "system_prompt_path": system_prompt_path,
+                "top_k": top_k,
+                "system_prompt": system_prompt,
+            },
+        ),
+        SearchType.TRIPLET_COMPLETION: (
+            TripletRetriever,
+            {
+                "system_prompt_path": system_prompt_path,
+                "top_k": top_k,
+                "system_prompt": system_prompt,
+            },
+        ),
+        SearchType.GRAPH_COMPLETION: (
+            GraphCompletionRetriever,
+            {
+                "system_prompt_path": system_prompt_path,
+                "top_k": top_k,
+                "node_type": node_type,
+                "node_name": node_name,
+                "save_interaction": save_interaction,
+                "system_prompt": system_prompt,
+                "wide_search_top_k": wide_search_top_k,
+                "triplet_distance_penalty": triplet_distance_penalty,
+            },
+        ),
+        SearchType.GRAPH_COMPLETION_COT: (
+            GraphCompletionCotRetriever,
+            {
+                "system_prompt_path": system_prompt_path,
+                "top_k": top_k,
+                "node_type": node_type,
+                "node_name": node_name,
+                "save_interaction": save_interaction,
+                "system_prompt": system_prompt,
+                "wide_search_top_k": wide_search_top_k,
+                "triplet_distance_penalty": triplet_distance_penalty,
+            },
+        ),
+        SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: (
+            GraphCompletionContextExtensionRetriever,
+            {
+                "system_prompt_path": system_prompt_path,
+                "top_k": top_k,
+                "node_type": node_type,
+                "node_name": node_name,
+                "save_interaction": save_interaction,
+                "system_prompt": system_prompt,
+                "wide_search_top_k": wide_search_top_k,
+                "triplet_distance_penalty": triplet_distance_penalty,
+            },
+        ),
+        SearchType.GRAPH_SUMMARY_COMPLETION: (
+            GraphSummaryCompletionRetriever,
+            {
+                "system_prompt_path": system_prompt_path,
+                "top_k": top_k,
+                "node_type": node_type,
+                "node_name": node_name,
+                "save_interaction": save_interaction,
+                "system_prompt": system_prompt,
+                "wide_search_top_k": wide_search_top_k,
+                "triplet_distance_penalty": triplet_distance_penalty,
+            },
+        ),
+        SearchType.CYPHER: (CypherSearchRetriever, {}),
+        SearchType.NATURAL_LANGUAGE: (NaturalLanguageRetriever, {}),
+        # TODO: Remove UserQAFeedback retriever once feedback mechanism is revamped
+        SearchType.FEEDBACK: (UserQAFeedback(last_k=last_k)).add_feedback,
+        SearchType.TEMPORAL: (
+            TemporalRetriever,
+            {
+                "top_k": top_k,
+                "wide_search_top_k": wide_search_top_k,
+                "triplet_distance_penalty": triplet_distance_penalty,
+            },
+        ),
+        SearchType.CHUNKS_LEXICAL: (JaccardChunksRetriever, {"top_k": top_k}),
+        SearchType.CODING_RULES: (
+            CodingRulesRetriever,
+            {"rules_nodeset_name": node_name},
+        ),
     }
 
     # If the query type is FEELING_LUCKY, select the search type intelligently
@@ -215,7 +158,12 @@ async def get_search_type_tools(
             retriever_instance.get_context,
         ]
     else:
-        search_type_tools = search_tasks.get(query_type)
+        retriever_cls, kwargs = search_core_registry.get(query_type)
+        retriever_instance = retriever_cls(**kwargs)
+        search_type_tools = [
+            retriever_instance.get_completion,
+            retriever_instance.get_context,
+        ]
 
     if not search_type_tools:
         raise UnsupportedSearchTypeError(str(query_type))

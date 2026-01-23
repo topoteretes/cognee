@@ -19,7 +19,18 @@ class CodingRulesRetriever:
         self.rules_nodeset_name = rules_nodeset_name
         """Initialize retriever with search parameters."""
 
-    async def get_existing_rules(self, query_text):
+    async def get_context(self, query_text):
+        if self.rules_nodeset_name:
+            rules_list = await asyncio.gather(
+                *[
+                    get_existing_rules(rules_nodeset_name=nodeset)
+                    for nodeset in self.rules_nodeset_name
+                ]
+            )
+
+            return reduce(lambda x, y: x + y, rules_list, [])
+
+    async def get_completion(self, query_text):
         if self.rules_nodeset_name:
             rules_list = await asyncio.gather(
                 *[
