@@ -1,0 +1,16 @@
+#!/bin/bash
+# Wrapper script to run release notes generator with proper environment
+
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
+
+# Set PYTHONPATH to include the project root
+export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
+
+# Run the generator with python from venv if available, otherwise use system python
+if [ -f "$PROJECT_ROOT/.venv/bin/python" ]; then
+    exec "$PROJECT_ROOT/.venv/bin/python" "$PROJECT_ROOT/tools/generate_release_notes.py" "$@"
+else
+    exec python "$PROJECT_ROOT/tools/generate_release_notes.py" "$@"
+fi
