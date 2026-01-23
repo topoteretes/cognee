@@ -127,8 +127,9 @@ async def test_coding_rules_uses_node_name_as_rules_nodeset_name():
     from cognee.modules.retrieval.coding_rules_retriever import CodingRulesRetriever
 
     tools = await mod.get_search_type_tools(SearchType.CODING_RULES, query_text="q", node_name=[])
-    assert len(tools) == 1
-    assert tools[0].__name__ == "get_existing_rules"
+    assert len(tools) == 2
+    assert tools[0].__name__ == "get_completion"
+    assert tools[1].__name__ == "get_context"
     assert tools[0].__self__.__class__ is CodingRulesRetriever
 
     assert tools[0].__self__.rules_nodeset_name == ["coding_agent_rules"]
