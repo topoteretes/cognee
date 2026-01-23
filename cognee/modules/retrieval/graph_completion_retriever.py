@@ -63,6 +63,25 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         self.node_name = node_name
         self.triplet_distance_penalty = triplet_distance_penalty
 
+    async def get_retrieved_objects(self, query: str) -> List[Edge]:
+        graph_engine = await get_graph_engine()
+        is_empty = await graph_engine.is_empty()
+
+        if is_empty:
+            logger.warning("Search attempt on an empty knowledge graph")
+            return []
+
+        triplets = await self.get_triplets(query)
+
+        if len(triplets) == 0:
+            logger.warning("Empty context was provided to the completion")
+            return []
+        # TODO: Remove when refactor of timestamps tracking is merged
+        entity_nodes = get_entity_nodes_from_triplets(triplets)
+        await update_node_access_timestamps(entity_nodes)
+
+        return triplets
+
     async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
         """
         Converts retrieved graph edges into a human-readable string format.
@@ -117,7 +136,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
         return found_triplets
 
-    async def get_context(self, query: str) -> List[Edge]:
+    async def get_context(self, retrieved_objects) -> str:
         """
         Retrieves and resolves graph triplets into context based on a query.
 
@@ -132,34 +151,19 @@ class GraphCompletionRetriever(BaseGraphRetriever):
             - str: A string representing the resolved context from the retrieved triplets, or an
               empty string if no triplets are found.
         """
-        graph_engine = await get_graph_engine()
-        is_empty = await graph_engine.is_empty()
 
-        if is_empty:
-            logger.warning("Search attempt on an empty knowledge graph")
-            return []
-
-        triplets = await self.get_triplets(query)
+        triplets = retrieved_objects
 
         if len(triplets) == 0:
             logger.warning("Empty context was provided to the completion")
             return []
 
-        # context = await self.resolve_edges_to_text(triplets)
-
-        entity_nodes = get_entity_nodes_from_triplets(triplets)
-
-        await update_node_access_timestamps(entity_nodes)
-        return triplets
-
-    async def convert_retrieved_objects_to_context(self, triplets: List[Edge]):
-        context = await self.resolve_edges_to_text(triplets)
-        return context
+        return await self.resolve_edges_to_text(triplets)
 
     async def get_completion(
         self,
         query: str,
-        context: Optional[List[Edge]] = None,
+        retrieved_objects: Optional[List[Edge]] = None,
         session_id: Optional[str] = None,
         response_model: Type = str,
     ) -> List[Any]:
@@ -180,12 +184,8 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
             - Any: A generated completion based on the query and context provided.
         """
-        triplets = context
 
-        if triplets is None:
-            triplets = await self.get_context(query)
-
-        context_text = await resolve_edges_to_text(triplets)
+        context_text = await resolve_edges_to_text(retrieved_objects)
 
         cache_config = CacheConfig()
         user = session_user.get()
@@ -217,9 +217,9 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                 response_model=response_model,
             )
 
-        if self.save_interaction and context and triplets and completion:
+        if self.save_interaction and retrieved_objects and completion:
             await self.save_qa(
-                question=query, answer=completion, context=context_text, triplets=triplets
+                question=query, answer=completion, context=context_text, triplets=retrieved_objects
             )
 
         if session_save:

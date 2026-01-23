@@ -29,19 +29,18 @@ from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriev
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 
 
-async def get_search_type_tools(
-    query_type: SearchType,
-    query_text: str,
-    system_prompt_path: str = "answer_simple_question.txt",
-    system_prompt: Optional[str] = None,
-    top_k: int = 10,
-    node_type: Optional[Type] = NodeSet,
-    node_name: Optional[List[str]] = None,
-    save_interaction: bool = False,
-    last_k: Optional[int] = None,
-    wide_search_top_k: Optional[int] = 100,
-    triplet_distance_penalty: Optional[float] = 3.5,
-) -> list:
+async def get_search_type(query_type: SearchType, query_text: str, **kwargs) -> list:
+    # Extract common defaults with fallback values from kwargs
+    top_k = kwargs.get("top_k", 10)
+    system_prompt_path = kwargs.get("system_prompt_path", "answer_simple_question.txt")
+    system_prompt = kwargs.get("system_prompt")
+    node_type = kwargs.get("node_type", NodeSet)
+    node_name = kwargs.get("node_name")
+    save_interaction = kwargs.get("save_interaction", False)
+    wide_search_top_k = kwargs.get("wide_search_top_k", 100)
+    triplet_distance_penalty = kwargs.get("triplet_distance_penalty", 3.5)
+    last_k = kwargs.get("last_k")
+
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
         SearchType.SUMMARIES: (SummariesRetriever, {"top_k": top_k}),
@@ -152,20 +151,13 @@ async def get_search_type_tools(
 
     if query_type in registered_community_retrievers:
         retriever = registered_community_retrievers[query_type]
-        retriever_instance = retriever(top_k=top_k)
-        search_type_tools = [
-            retriever_instance.get_completion,
-            retriever_instance.get_context,
-        ]
+        # TODO: Fix community retrievers so they get all input parameters properly
+        retriever_instance = retriever(**kwargs)
     else:
-        retriever_cls, kwargs = search_core_registry.get(query_type)
-        retriever_instance = retriever_cls(**kwargs)
-        search_type_tools = [
-            retriever_instance.get_completion,
-            retriever_instance.get_context,
-        ]
+        retriever_cls, retriever_args = search_core_registry.get(query_type)
+        retriever_instance = retriever_cls(**retriever_args)
 
-    if not search_type_tools:
+    if not retriever_instance:
         raise UnsupportedSearchTypeError(str(query_type))
 
-    return search_type_tools
+    return retriever_instance

@@ -23,7 +23,7 @@ from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
 from cognee import __version__ as cognee_version
-from .get_search_type_tools import get_search_type_tools
+from .get_search_type import get_search_type
 from .no_access_control_search import no_access_control_search
 from ..utils.prepare_search_result import prepare_search_result
 
@@ -291,7 +291,7 @@ async def search_in_datasets_context(
                     "Search attempt on an empty knowledge graph - no data has been added to this dataset"
                 )
 
-        specific_search_tools = await get_search_type_tools(
+        specific_search_tools = await get_search_type(
             query_type=query_type,
             query_text=query_text,
             system_prompt_path=system_prompt_path,
