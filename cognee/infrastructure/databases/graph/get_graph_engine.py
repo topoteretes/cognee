@@ -24,8 +24,36 @@ async def get_graph_engine() -> GraphDBInterface:
     return graph_client
 
 
-@lru_cache
 def create_graph_engine(
+    graph_database_provider,
+    graph_file_path,
+    graph_database_url="",
+    graph_database_name="",
+    graph_database_username="",
+    graph_database_password="",
+    graph_database_port="",
+    graph_database_key="",
+    graph_dataset_database_handler="",
+):
+    """
+    Wrapper function to call create graph engine with caching.
+    For a detailed description, see _create_graph_engine.
+    """
+    return _create_graph_engine(
+        graph_database_provider,
+        graph_file_path,
+        graph_database_url,
+        graph_database_name,
+        graph_database_username,
+        graph_database_password,
+        graph_database_port,
+        graph_database_key,
+        graph_dataset_database_handler,
+    )
+
+
+@lru_cache
+def _create_graph_engine(
     graph_database_provider,
     graph_file_path,
     graph_database_url="",

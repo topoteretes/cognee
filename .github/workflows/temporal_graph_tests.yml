@@ -37,6 +37,7 @@ jobs:
           LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
           LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -76,6 +77,7 @@ jobs:
           LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
           LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -128,6 +130,7 @@ jobs:
             LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
             LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
             LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+            EMBEDDING_DIMENSIONS: 300
             EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
             EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
             EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -195,6 +198,7 @@ jobs:
           LLM_MODEL: ${{ secrets.OPENAI_MODEL }}
           LLM_ENDPOINT: ${{ secrets.OPENAI_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}

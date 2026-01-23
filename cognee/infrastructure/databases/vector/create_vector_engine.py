@@ -7,8 +7,30 @@ from cognee.infrastructure.databases.graph.config import get_graph_context_confi
 from functools import lru_cache
 
 
-@lru_cache
 def create_vector_engine(
+    vector_db_provider: str,
+    vector_db_url: str,
+    vector_db_name: str,
+    vector_db_port: str = "",
+    vector_db_key: str = "",
+    vector_dataset_database_handler: str = "",
+):
+    """
+    Wrapper function to call create vector engine with caching.
+    For a detailed description, see _create_vector_engine.
+    """
+    return _create_vector_engine(
+        vector_db_provider,
+        vector_db_url,
+        vector_db_name,
+        vector_db_port,
+        vector_db_key,
+        vector_dataset_database_handler,
+    )
+
+
+@lru_cache
+def _create_vector_engine(
     vector_db_provider: str,
     vector_db_url: str,
     vector_db_name: str,

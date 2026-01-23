@@ -105,14 +105,14 @@ If you'd rather run cognee-mcp in a container, you have two options:
       ```bash
       # For HTTP transport (recommended for web deployments)
       docker run -e TRANSPORT_MODE=http --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
-      # For SSE transport  
+      # For SSE transport
       docker run -e TRANSPORT_MODE=sse --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
       # For stdio transport (default)
       docker run -e TRANSPORT_MODE=stdio --env-file ./.env --rm -it cognee/cognee-mcp:main
       ```
-      
+
       **Installing optional dependencies at runtime:**
-      
+
       You can install optional dependencies when running the container by setting the `EXTRAS` environment variable:
       ```bash
       # Install a single optional dependency group at runtime
@@ -122,7 +122,7 @@ If you'd rather run cognee-mcp in a container, you have two options:
         --env-file ./.env \
         -p 8000:8000 \
         --rm -it cognee/cognee-mcp:main
-      
+
       # Install multiple optional dependency groups at runtime (comma-separated)
       docker run \
         -e TRANSPORT_MODE=sse \
@@ -131,7 +131,7 @@ If you'd rather run cognee-mcp in a container, you have two options:
         -p 8000:8000 \
         --rm -it cognee/cognee-mcp:main
       ```
-      
+
       **Available optional dependency groups:**
       - `aws` - S3 storage support
       - `postgres` / `postgres-binary` - PostgreSQL database support
@@ -160,7 +160,7 @@ If you'd rather run cognee-mcp in a container, you have two options:
    # With stdio transport (default)
    docker run -e TRANSPORT_MODE=stdio --env-file ./.env --rm -it cognee/cognee-mcp:main
    ```
-   
+
    **With runtime installation of optional dependencies:**
    ```bash
    # Install optional dependencies from Docker Hub image
@@ -357,7 +357,7 @@ You can configure both transports simultaneously for testing:
       "url": "http://localhost:8000/sse"
     },
     "cognee-http": {
-      "type": "http", 
+      "type": "http",
       "url": "http://localhost:8000/mcp"
     }
   }

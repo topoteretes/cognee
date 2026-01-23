@@ -55,7 +55,7 @@ export default function CogneeAddWidget({ onData, useCloud = false }: CogneeAddW
     setTrue: setProcessingFilesInProgress,
     setFalse: setProcessingFilesDone,
   } = useBoolean(false);
-  
+
   const handleAddFiles = (dataset: Dataset, event: ChangeEvent<HTMLInputElement>) => {
     event.stopPropagation();
 

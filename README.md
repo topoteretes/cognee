@@ -65,12 +65,12 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
 
 ## About Cognee
 
-Cognee is an open-source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your documents both searchable by meaning and connected by relationships. 
+Cognee is an open-source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your documents both searchable by meaning and connected by relationships.
 
 You can use Cognee in two ways:
 
 1. [Self-host Cognee Open Source](https://docs.cognee.ai/getting-started/installation), which stores all data locally by default.
-2. [Connect to Cognee Cloud](https://platform.cognee.ai/), and get the same OSS stack on managed infrastructure for easier development and productionization. 
+2. [Connect to Cognee Cloud](https://platform.cognee.ai/), and get the same OSS stack on managed infrastructure for easier development and productionization.
 
 ### Cognee Open Source (self-hosted):
 
@@ -81,8 +81,8 @@ You can use Cognee in two ways:
 - Offers high customizability through user-defined tasks, modular pipelines, and built-in search endpoints
 
 ### Cognee Cloud (managed):
-- Hosted web UI dashboard 
-- Automatic version updates 
+- Hosted web UI dashboard
+- Automatic version updates
 - Resource usage analytics
 - GDPR compliant, enterprise-grade security
 
@@ -119,13 +119,14 @@ To integrate other LLM providers, see our [LLM Provider Documentation](https://d
 
 ### Step 3: Run the Pipeline
 
-Cognee will take your documents, generate a knowledge graph from them and then query the graph based on combined relationships. 
+Cognee will take your documents, generate a knowledge graph from them and then query the graph based on combined relationships.
 
 Now, run a minimal pipeline:
 
 ```python
 import cognee
 import asyncio
+from pprint import pprint
 
 
 async def main():
@@ -143,7 +144,7 @@ async def main():
 
     # Display the results
     for result in results:
-        print(result)
+        pprint(result)
 
 
 if __name__ == '__main__':
@@ -157,7 +158,7 @@ As you can see, the output is generated from the document we previously stored i
   Cognee turns documents into AI memory.
 ```
 
-### Use the Cognee CLI 
+### Use the Cognee CLI
 
 As an alternative, you can get started with these essential commands:
 
