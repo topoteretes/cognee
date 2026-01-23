@@ -87,27 +87,6 @@ class SQLAlchemyAdapter:
                 connect_args=final_connect_args,
             )
 
-            from cognee.context_global_variables import backend_access_control_enabled
-
-            if backend_access_control_enabled():
-                from cognee.infrastructure.databases.vector.config import get_vectordb_config
-
-                vector_config = get_vectordb_config()
-                if vector_config.vector_db_provider == "pgvector":
-                    # Create a maintenance engine, used when creating new postgres databases.
-                    # Database named "postgres" should always exist. We need this since the SQLAlchemy
-                    # engine cannot directly execute queries without first connecting to a database.
-                    maintenance_db_name = "postgres"
-                    maintenance_db_url = URL.create(
-                        "postgresql+asyncpg",
-                        username=vector_config.vector_db_username,
-                        password=vector_config.vector_db_password,
-                        host=vector_config.vector_db_host,
-                        port=int(vector_config.vector_db_port),
-                        database=maintenance_db_name,
-                    )
-                    self.maintenance_engine = create_async_engine(maintenance_db_url)
-
         self.sessionmaker = async_sessionmaker(bind=self.engine, expire_on_commit=False)
 
     async def push_to_s3(self) -> None:

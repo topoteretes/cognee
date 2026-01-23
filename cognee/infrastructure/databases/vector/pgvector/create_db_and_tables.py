@@ -1,4 +1,5 @@
-from sqlalchemy import text
+from sqlalchemy import text, URL
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from cognee.modules.users.models import DatasetDatabase
 from ..get_vector_engine import get_vector_engine, get_vectordb_context_config
@@ -22,27 +23,26 @@ async def create_pg_database(vector_config):
     This is defined separately because the creation needs the latest vector config,
     which is not yet saved in the vector config context variable.
     """
-    from cognee.infrastructure.databases.relational.create_relational_engine import (
-        create_relational_engine,
-    )
 
     from cognee.infrastructure.databases.vector.create_vector_engine import create_vector_engine
-    from sqlalchemy import text
 
-    pg_relational_engine = create_relational_engine(
-        db_path="",
-        db_host=vector_config["vector_db_host"],
-        db_name=vector_config["vector_db_name"],
-        db_port=vector_config["vector_db_port"],
-        db_username=vector_config["vector_db_username"],
-        db_password=vector_config["vector_db_password"],
-        db_provider="postgres",
+    # Create a maintenance engine, used when creating new postgres databases.
+    # Database named "postgres" should always exist. We need this since the SQLAlchemy
+    # engine cannot directly execute queries without first connecting to a database.
+    maintenance_db_name = "postgres"
+    maintenance_db_url = URL.create(
+        "postgresql+asyncpg",
+        username=vector_config["vector_db_username"],
+        password=vector_config["vector_db_password"],
+        host=vector_config["vector_db_host"],
+        port=int(vector_config["vector_db_port"]),
+        database=maintenance_db_name,
     )
-    # await pg_relational_engine.create_database()
+    maintenance_engine = create_async_engine(maintenance_db_url)
 
     # Connect to maintenance db in order to create new database
     # Make sure to execute CREATE DATABASE outside of transaction block, and set AUTOCOMMIT isolation level
-    connection = await pg_relational_engine.maintenance_engine.connect()
+    connection = await maintenance_engine.connect()
     connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
     await connection.execute(text(f'CREATE DATABASE "{vector_config["vector_db_name"]}";'))
 
@@ -61,24 +61,22 @@ async def delete_pg_database(dataset_database: DatasetDatabase):
     """
 
     vector_config = get_vectordb_config()
-
-    from cognee.infrastructure.databases.relational.create_relational_engine import (
-        create_relational_engine,
+    # Create a maintenance engine, used when creating new postgres databases.
+    # Database named "postgres" should always exist. We need this since the SQLAlchemy
+    # engine cannot drop a database to which it is connected.
+    maintenance_db_name = "postgres"
+    maintenance_db_url = URL.create(
+        "postgresql+asyncpg",
+        username=vector_config.vector_db_username,
+        password=vector_config.vector_db_password,
+        host=vector_config.vector_db_host,
+        port=int(vector_config.vector_db_port),
+        database=maintenance_db_name,
     )
+    maintenance_engine = create_async_engine(maintenance_db_url)
 
-    pg_relational_engine = create_relational_engine(
-        db_path="",
-        db_host=dataset_database.vector_database_connection_info["host"],
-        db_name=dataset_database.vector_database_name,
-        db_port=dataset_database.vector_database_connection_info["port"],
-        db_username=vector_config.vector_db_username,
-        db_password=vector_config.vector_db_password,
-        db_provider="postgres",
-    )
-
-    connection = await pg_relational_engine.maintenance_engine.connect()
+    connection = await maintenance_engine.connect()
     connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
-    await pg_relational_engine.engine.dispose(close=True)
     # We first have to kill all active sessions on the database, then delete it
     await connection.execute(
         text(
