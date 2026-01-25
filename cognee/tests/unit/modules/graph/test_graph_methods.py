@@ -79,14 +79,18 @@ async def test_get_data_related_nodes_excludes_shared():
 
     # Create nodes for data A: Apple (unique), Google (shared)
     node_apple = Node(
+        id=uuid4(),
         slug=apple_slug,
+        user_id=user.id,
         data_id=data_a_id,
         dataset_id=dataset_id,
         type="Entity",
         indexed_fields=["name"],
     )
     node_google_a = Node(
+        id=uuid4(),
         slug=google_slug,  # Same slug as in data B
+        user_id=user.id,
         data_id=data_a_id,
         dataset_id=dataset_id,
         type="Entity",
@@ -95,14 +99,18 @@ async def test_get_data_related_nodes_excludes_shared():
 
     # Create nodes for data B: Google (shared), Microsoft (unique)
     node_google_b = Node(
+        id=uuid4(),
         slug=google_slug,  # Same slug as in data A
+        user_id=user.id,
         data_id=data_b_id,
         dataset_id=dataset_id,
         type="Entity",
         indexed_fields=["name"],
     )
     node_microsoft = Node(
+        id=uuid4(),
         slug=microsoft_slug,
+        user_id=user.id,
         data_id=data_b_id,
         dataset_id=dataset_id,
         type="Entity",
@@ -208,22 +216,32 @@ async def test_delete_data_nodes_and_edges_removes_from_all_systems():
     node_3_slug = uuid5(NAMESPACE_OID, f"Node3_{data_id}")
 
     # Create nodes
+    node_1_id = uuid4()
+    node_2_id = uuid4()
+    node_3_id = uuid4()
+
     node_1 = Node(
+        id=node_1_id,
         slug=node_1_slug,
+        user_id=user.id,
         data_id=data_id,
         dataset_id=dataset_id,
         type="Entity",
         indexed_fields=["name"],
     )
     node_2 = Node(
+        id=node_2_id,
         slug=node_2_slug,
+        user_id=user.id,
         data_id=data_id,
         dataset_id=dataset_id,
         type="Entity",
         indexed_fields=["name"],
     )
     node_3 = Node(
+        id=node_3_id,
         slug=node_3_slug,
+        user_id=user.id,
         data_id=data_id,
         dataset_id=dataset_id,
         type="Entity",
@@ -235,20 +253,24 @@ async def test_delete_data_nodes_and_edges_removes_from_all_systems():
     edge_2_slug = uuid5(NAMESPACE_OID, f"Edge2_{data_id}")
 
     edge_1 = Edge(
+        id=uuid4(),
         slug=edge_1_slug,
+        user_id=user.id,
         data_id=data_id,
         dataset_id=dataset_id,
         relationship_name="related_to",
-        source_node_id=node_1.id,
-        target_node_id=node_2.id,
+        source_node_id=node_1_id,
+        destination_node_id=node_2_id,
     )
     edge_2 = Edge(
+        id=uuid4(),
         slug=edge_2_slug,
+        user_id=user.id,
         data_id=data_id,
         dataset_id=dataset_id,
         relationship_name="connected_to",
-        source_node_id=node_2.id,
-        target_node_id=node_3.id,
+        source_node_id=node_2_id,
+        destination_node_id=node_3_id,
     )
 
     # Insert into relational database
