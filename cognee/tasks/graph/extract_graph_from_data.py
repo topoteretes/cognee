@@ -1,8 +1,11 @@
 import asyncio
-from typing import Type, List, Optional
+from typing import Dict, Type, List, Optional
 from pydantic import BaseModel
 
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.graph.methods import upsert_edges
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
+from cognee.tasks.storage import index_graph_edges
 from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.get_default_ontology_resolver import (
@@ -31,6 +34,7 @@ async def integrate_chunk_graphs(
     chunk_graphs: list,
     graph_model: Type[BaseModel],
     ontology_resolver: BaseOntologyResolver,
+    context: Dict,
 ) -> List[DocumentChunk]:
     """Integrate chunk graphs with ontology validation and store in databases.
 
@@ -66,6 +70,8 @@ async def integrate_chunk_graphs(
             type(ontology_resolver).__name__ if ontology_resolver else "None"
         )
 
+    graph_engine = await get_graph_engine()
+
     if graph_model is not KnowledgeGraph:
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
             data_chunks[chunk_index].contains = chunk_graph
@@ -85,17 +91,31 @@ async def integrate_chunk_graphs(
     embed_triplets = cognify_config.triplet_embedding
 
     if len(graph_nodes) > 0:
-        await add_data_points(
-            data_points=graph_nodes, custom_edges=graph_edges, embed_triplets=embed_triplets
-        )
+        await add_data_points( data_points=graph_nodes, custom_edges=context, embed_triplets=embed_triplets)
+
+    if len(graph_edges) > 0:
+        await graph_engine.add_edges(graph_edges)
+        await index_graph_edges(graph_edges)
+
+        user = context["user"] if "user" in context else None
+
+        if user:
+            await upsert_edges(
+                graph_edges,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=context["dataset"].id,
+                data_id=context["data"].id,
+            )
 
     return data_chunks
 
 
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
+    context: Dict,
     graph_model: Type[BaseModel],
-    config: Config = None,
+    config: Optional[Config] = None,
     custom_prompt: Optional[str] = None,
     **kwargs,
 ) -> List[DocumentChunk]:
@@ -147,4 +167,4 @@ async def extract_graph_from_data(
 
     ontology_resolver = config["ontology_config"]["ontology_resolver"]
 
-    return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_resolver)
+    return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_resolver, context)

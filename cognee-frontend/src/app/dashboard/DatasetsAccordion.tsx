@@ -19,11 +19,13 @@ interface DatasetsChangePayload {
 export interface DatasetsAccordionProps extends Omit<AccordionProps, "isOpen" | "openAccordion" | "closeAccordion" | "children"> {
   onDatasetsChange?: (payload: DatasetsChangePayload) => void;
   useCloud?: boolean;
+  searchValue: string;
 }
 
 export default function DatasetsAccordion({
   title,
   tools,
+  searchValue,
   switchCaretPosition = false,
   className,
   contentClassName,
@@ -43,13 +45,7 @@ export default function DatasetsAccordion({
     removeDataset,
     getDatasetData,
     removeDatasetData,
-  } = useDatasets(useCloud);
-
-  useEffect(() => {
-    if (datasets.length === 0) {
-      refreshDatasets();
-    }
-  }, [datasets.length, refreshDatasets]);
+  } = useDatasets(useCloud, searchValue);
 
   const [openDatasets, openDataset] = useState<Set<string>>(new Set());
 
@@ -237,9 +233,14 @@ export default function DatasetsAccordion({
         contentClassName={contentClassName}
       >
         <div className="flex flex-col">
-          {datasets.length === 0 && (
+          {datasets.length === 0 && !searchValue && (
             <div className="flex flex-row items-baseline-last text-sm text-gray-400 mt-2 px-2">
               <span>No datasets here, add one by clicking +</span>
+            </div>
+          )}
+          {datasets.length === 0 && searchValue && (
+            <div className="flex flex-row items-baseline-last text-sm text-gray-400 mt-2 px-2">
+              <span>No datasets found, please adjust your search term</span>
             </div>
           )}
           {datasets.map((dataset) => {

@@ -2,17 +2,20 @@
 
 import asyncio
 from uuid import uuid5, NAMESPACE_OID
-from typing import Type
+from typing import Dict, Type
 from pydantic import BaseModel
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.infrastructure.engine.models import DataPoint
+from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.infrastructure.llm.extraction import extract_categories
 from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 
 
 async def chunk_naive_llm_classifier(
-    data_chunks: list[DocumentChunk], classification_model: Type[BaseModel]
+    data_chunks: list[DocumentChunk],
+    classification_model: Type[BaseModel],
+    context: Dict,
 ) -> list[DocumentChunk]:
     """
     Classifies a list of document chunks using a specified classification model and updates vector and graph databases with the classification results.
@@ -97,8 +100,8 @@ async def chunk_naive_llm_classifier(
                         {
                             "uuid": str(classification_type_id),
                             "text": classification_type_label,
-                            "chunk_id": str(data_chunk.chunk_id),
-                            "document_id": str(data_chunk.document_id),
+                            "chunk_id": str(data_chunk.id),
+                            "document_id": str(data_chunk.is_part_of.id),
                         }
                     ),
                     index_fields=["text"],
@@ -119,12 +122,12 @@ async def chunk_naive_llm_classifier(
 
         edges.append(
             (
-                str(data_chunk.chunk_id),
+                str(data_chunk.id),
                 str(classification_type_id),
                 "is_media_type",
                 dict(
                     relationship_name="is_media_type",
-                    source_node_id=str(data_chunk.chunk_id),
+                    source_node_id=str(data_chunk.id),
                     target_node_id=str(classification_type_id),
                 ),
             )
@@ -142,8 +145,8 @@ async def chunk_naive_llm_classifier(
                             {
                                 "uuid": str(classification_subtype_id),
                                 "text": classification_subtype_label,
-                                "chunk_id": str(data_chunk.chunk_id),
-                                "document_id": str(data_chunk.document_id),
+                                "chunk_id": str(data_chunk.id),
+                                "document_id": str(data_chunk.is_part_of.id),
                             }
                         ),
                         index_fields=["text"],
@@ -177,12 +180,12 @@ async def chunk_naive_llm_classifier(
 
             edges.append(
                 (
-                    str(data_chunk.chunk_id),
+                    str(data_chunk.id),
                     str(classification_subtype_id),
                     "is_classified_as",
                     dict(
                         relationship_name="is_classified_as",
-                        source_node_id=str(data_chunk.chunk_id),
+                        source_node_id=str(data_chunk.id),
                         target_node_id=str(classification_subtype_id),
                     ),
                 )
@@ -193,7 +196,25 @@ async def chunk_naive_llm_classifier(
 
         graph_engine = await get_graph_engine()
 
+        user = context["user"] if "user" in context else None
+
         await graph_engine.add_nodes(nodes)
         await graph_engine.add_edges(edges)
+
+        if user:
+            await upsert_nodes(
+                nodes,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=context["dataset"].id,
+                data_id=context["data"].id,
+            )
+            await upsert_edges(
+                edges,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=context["dataset"].id,
+                data_id=context["data"].id,
+            )
 
     return data_chunks

@@ -1,5 +1,6 @@
 import asyncio
 from typing import List, Optional, get_type_hints
+from uuid import UUID
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
@@ -397,7 +398,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             ]
         )
 
-    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
         async with self.get_async_session() as session:
             # Get PGVectorDataPoint Table from database
             PGVectorDataPoint = await self.get_table(collection_name)

@@ -18,7 +18,6 @@ from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
-    record_graph_changes,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
@@ -440,7 +439,6 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to add node: {e}")
             raise
 
-    @record_graph_changes
     async def add_nodes(self, nodes: List[DataPoint]) -> None:
         """
         Add multiple nodes to the graph in a batch operation.
@@ -737,7 +735,6 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to add edge: {e}")
             raise
 
-    @record_graph_changes
     async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> None:
         """
         Add multiple edges in a batch operation.

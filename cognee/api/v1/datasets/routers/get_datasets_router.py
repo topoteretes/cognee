@@ -11,12 +11,13 @@ from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from urllib.parse import urlparse
 from pathlib import Path
 
+from cognee import datasets
 from cognee.api.DTO import InDTO, OutDTO
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.data.methods import create_dataset, get_datasets_by_name
 from cognee.shared.logging_utils import get_logger
-from cognee.api.v1.exceptions import DataNotFoundError, DatasetNotFoundError
+from cognee.api.v1.exceptions import DataNotFoundError
 from cognee.modules.users.models import User
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.permissions.methods import (
@@ -46,7 +47,6 @@ class DatasetDTO(OutDTO):
 class DataDTO(OutDTO):
     id: UUID
     name: str
-    label: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     extension: str
@@ -181,6 +181,20 @@ def get_datasets_router() -> APIRouter:
                 detail=f"Error creating dataset: {str(error)}",
             ) from error
 
+    @router.delete("")
+    async def delete_all(user: User = Depends(get_authenticated_user)):
+        """
+        Delete all user's data.
+
+        This endpoint permanently deletes all datasets that user created and all its associated data.
+        The user must have delete permissions on the dataset to perform this operation.
+
+        ## Response
+        No content returned on successful deletion.
+        If no datasets exist for the users, nothing happens.
+        """
+        await datasets.delete_all(user)
+
     @router.delete(
         "/{dataset_id}", response_model=None, responses={404: {"model": ErrorResponseDTO}}
     )
@@ -211,14 +225,7 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.data.methods import delete_dataset
-
-        dataset = await get_authorized_existing_datasets([dataset_id], "delete", user)
-
-        if dataset is None:
-            raise DatasetNotFoundError(message=f"Dataset ({str(dataset_id)}) not found.")
-
-        await delete_dataset(dataset[0])
+        await datasets.delete_dataset(dataset_id, user)
 
     @router.delete(
         "/{dataset_id}/data/{data_id}",
@@ -257,21 +264,7 @@ def get_datasets_router() -> APIRouter:
             },
         )
 
-        from cognee.modules.data.methods import get_data, delete_data
-        from cognee.modules.data.methods import get_dataset
-
-        # Check if user has permission to access dataset and data by trying to get the dataset
-        dataset = await get_dataset(user.id, dataset_id)
-
-        if dataset is None:
-            raise DatasetNotFoundError(message=f"Dataset ({str(dataset_id)}) not found.")
-
-        data = await get_data(user.id, data_id)
-
-        if data is None:
-            raise DataNotFoundError(message=f"Data ({str(data_id)}) not found.")
-
-        await delete_data(data)
+        await datasets.delete_data(dataset_id, data_id, user)
 
     @router.get("/{dataset_id}/graph", response_model=GraphDTO)
     async def get_dataset_graph(dataset_id: UUID, user: User = Depends(get_authenticated_user)):

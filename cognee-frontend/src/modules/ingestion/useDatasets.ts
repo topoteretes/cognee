@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { fetch } from '@/utils';
 import { DataFile } from './useData';
@@ -11,7 +11,20 @@ export interface Dataset {
   status: string;
 }
 
-function useDatasets(useCloud = false) {
+function filterDatasets(datasets: Dataset[], searchValue: string) {
+  if (searchValue.trim() === "") {
+    return datasets;
+  }
+
+  const lowercaseSearchValue = searchValue.toLowerCase();
+
+  return datasets.filter((dataset) =>
+    dataset.name.toLowerCase().includes(lowercaseSearchValue)
+  );
+}
+
+function useDatasets(useCloud = false, searchValue: string = "") {
+  const allDatasets = useRef<Dataset[]>([]);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   // const statusTimeout = useRef<any>(null);
 
@@ -56,26 +69,32 @@ function useDatasets(useCloud = false) {
   //   };
   // }, []);
 
+  useLayoutEffect(() => {
+    setDatasets(filterDatasets(allDatasets.current, searchValue));
+  }, [searchValue]);
+
   const addDataset = useCallback((datasetName: string) => {
     return createDataset({ name: datasetName  }, useCloud)
       .then((dataset) => {
-        setDatasets((datasets) => [
-          ...datasets,
+        const newDatasets = [
+          ...allDatasets.current,
           dataset,
-        ]);
+        ];
+        allDatasets.current = newDatasets;
+        setDatasets(filterDatasets(newDatasets, searchValue));
       });
-  }, [useCloud]);
+  }, [searchValue, useCloud]);
 
   const removeDataset = useCallback((datasetId: string) => {
     return fetch(`/v1/datasets/${datasetId}`, {
       method: 'DELETE',
     }, useCloud)
       .then(() => {
-        setDatasets((datasets) =>
-          datasets.filter((dataset) => dataset.id !== datasetId)
-        );
+        const newDatasets = allDatasets.current.filter((dataset) => dataset.id !== datasetId)
+        allDatasets.current = newDatasets;
+        setDatasets(filterDatasets(newDatasets, searchValue));
       });
-  }, [useCloud]);
+  }, [searchValue, useCloud]);
 
   const fetchDatasets = useCallback(() => {
     return fetch('/v1/datasets', {
@@ -85,7 +104,8 @@ function useDatasets(useCloud = false) {
       }, useCloud)
       .then((response) => response.json())
       .then((datasets) => {
-        setDatasets(datasets);
+        allDatasets.current = datasets;
+        setDatasets(filterDatasets(datasets, searchValue));
 
         // if (datasets.length > 0) {
         //   checkDatasetStatuses(datasets);
@@ -97,28 +117,38 @@ function useDatasets(useCloud = false) {
         console.error('Error fetching datasets:', error);
         throw error;
       });
-  }, [useCloud]);
+  }, [searchValue, useCloud]);
+
+  useEffect(() => {
+    if (allDatasets.current.length === 0) {
+      fetchDatasets();
+    }
+  }, [fetchDatasets]);
 
   const getDatasetData = useCallback((datasetId: string) => {
     return fetch(`/v1/datasets/${datasetId}/data`, {}, useCloud)
       .then((response) => response.json())
       .then((data) => {
-        const datasetIndex = datasets.findIndex((dataset) => dataset.id === datasetId);
+        const datasetIndex = allDatasets.current.findIndex((dataset) => dataset.id === datasetId);
 
         if (datasetIndex >= 0) {
-          setDatasets((datasets) => [
-           ...datasets.slice(0, datasetIndex),
-            {
-             ...datasets[datasetIndex],
-              data,
-            },
-           ...datasets.slice(datasetIndex + 1),
-          ]);
+          const newDatasets = [
+            ...allDatasets.current.slice(0, datasetIndex),
+              {
+              ...allDatasets.current[datasetIndex],
+                data,
+              },
+            ...allDatasets.current.slice(datasetIndex + 1),
+          ];
+
+          allDatasets.current = newDatasets;
+
+          setDatasets(filterDatasets(newDatasets, searchValue));
         }
 
         return data;
       });
-  }, [datasets, useCloud]);
+  }, [searchValue, useCloud]);
 
   const removeDatasetData = useCallback((datasetId: string, dataId: string) => {
     return fetch(`/v1/datasets/${datasetId}/data/${dataId}`, {
