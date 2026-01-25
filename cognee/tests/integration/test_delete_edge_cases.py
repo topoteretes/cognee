@@ -50,14 +50,12 @@ async def test_last_accessed_updates_on_search():
     os.environ["ENABLE_LAST_ACCESSED"] = "true"
 
     data_directory_path = os.path.join(
-        pathlib.Path(__file__).parent.parent,
-        ".data_storage/test_last_accessed_updates"
+        pathlib.Path(__file__).parent.parent, ".data_storage/test_last_accessed_updates"
     )
     cognee.config.data_root_directory(data_directory_path)
 
     cognee_directory_path = os.path.join(
-        pathlib.Path(__file__).parent.parent,
-        ".cognee_system/test_last_accessed_updates"
+        pathlib.Path(__file__).parent.parent, ".cognee_system/test_last_accessed_updates"
     )
     cognee.config.system_root_directory(cognee_directory_path)
 
@@ -96,6 +94,7 @@ async def test_last_accessed_updates_on_search():
 
     # Wait a moment to ensure timestamp difference
     import asyncio
+
     await asyncio.sleep(0.1)
 
     # Perform search to trigger last_accessed update
@@ -111,9 +110,7 @@ async def test_last_accessed_updates_on_search():
 
     # Check last_accessed after search
     async with db_engine.get_async_session() as session:
-        result = await session.execute(
-            select(Data).where(Data.id == data_id)
-        )
+        result = await session.execute(select(Data).where(Data.id == data_id))
         data_after = result.scalar_one_or_none()
 
         assert data_after is not None, "Data should still exist"
@@ -122,9 +119,7 @@ async def test_last_accessed_updates_on_search():
         logger.info(f"last_accessed after search: {last_accessed_after}")
 
         # Verify last_accessed was updated
-        assert last_accessed_after is not None, (
-            "last_accessed should be set after search operation"
-        )
+        assert last_accessed_after is not None, "last_accessed should be set after search operation"
 
         # Verify timestamp is recent (within last 5 seconds)
         if last_accessed_after.tzinfo is None:
@@ -164,14 +159,12 @@ async def test_cleanup_unused_data_dry_run():
     os.environ["ENABLE_LAST_ACCESSED"] = "true"
 
     data_directory_path = os.path.join(
-        pathlib.Path(__file__).parent.parent,
-        ".data_storage/test_cleanup_dry_run"
+        pathlib.Path(__file__).parent.parent, ".data_storage/test_cleanup_dry_run"
     )
     cognee.config.data_root_directory(data_directory_path)
 
     cognee_directory_path = os.path.join(
-        pathlib.Path(__file__).parent.parent,
-        ".cognee_system/test_cleanup_dry_run"
+        pathlib.Path(__file__).parent.parent, ".cognee_system/test_cleanup_dry_run"
     )
     cognee.config.system_root_directory(cognee_directory_path)
 
@@ -224,17 +217,13 @@ async def test_cleanup_unused_data_dry_run():
     # Run dry run cleanup
     logger.info("Running cleanup with dry_run=True...")
     result = await cleanup_unused_data(
-        minutes_threshold=threshold_minutes,
-        dry_run=True,
-        user_id=user.id
+        minutes_threshold=threshold_minutes, dry_run=True, user_id=user.id
     )
 
     logger.info(f"Cleanup result: {result}")
 
     # Assertions for dry run
-    assert result["status"] == "dry_run", (
-        f"Status should be 'dry_run', got {result['status']}"
-    )
+    assert result["status"] == "dry_run", f"Status should be 'dry_run', got {result['status']}"
     assert result["unused_count"] == 3, (
         f"Should find 3 unused documents, found {result['unused_count']}"
     )
@@ -244,9 +233,7 @@ async def test_cleanup_unused_data_dry_run():
 
     # Verify all documents still exist
     async with db_engine.get_async_session() as session:
-        result = await session.execute(
-            select(Data).where(Data.id.in_(data_ids))
-        )
+        result = await session.execute(select(Data).where(Data.id.in_(data_ids)))
         remaining_data = result.all()
         assert len(remaining_data) == 5, (
             f"All 5 documents should still exist, found {len(remaining_data)}"
@@ -278,14 +265,12 @@ async def test_cleanup_actual_deletion():
     os.environ["ENABLE_LAST_ACCESSED"] = "true"
 
     data_directory_path = os.path.join(
-        pathlib.Path(__file__).parent.parent,
-        ".data_storage/test_cleanup_actual"
+        pathlib.Path(__file__).parent.parent, ".data_storage/test_cleanup_actual"
     )
     cognee.config.data_root_directory(data_directory_path)
 
     cognee_directory_path = os.path.join(
-        pathlib.Path(__file__).parent.parent,
-        ".cognee_system/test_cleanup_actual"
+        pathlib.Path(__file__).parent.parent, ".cognee_system/test_cleanup_actual"
     )
     cognee.config.system_root_directory(cognee_directory_path)
 
@@ -338,26 +323,20 @@ async def test_cleanup_actual_deletion():
     # Run actual cleanup
     logger.info("Running cleanup with dry_run=False...")
     result = await cleanup_unused_data(
-        minutes_threshold=threshold_minutes,
-        dry_run=False,
-        user_id=user.id
+        minutes_threshold=threshold_minutes, dry_run=False, user_id=user.id
     )
 
     logger.info(f"Cleanup result: {result}")
 
     # Assertions for actual deletion
-    assert result["status"] == "completed", (
-        f"Status should be 'completed', got {result['status']}"
-    )
+    assert result["status"] == "completed", f"Status should be 'completed', got {result['status']}"
     assert result["deleted_count"]["documents"] == 3, (
         f"Should delete 3 documents, deleted {result['deleted_count']['documents']}"
     )
 
     # Verify only 2 documents remain
     async with db_engine.get_async_session() as session:
-        result = await session.execute(
-            select(Data).where(Data.id.in_(data_ids))
-        )
+        result = await session.execute(select(Data).where(Data.id.in_(data_ids)))
         remaining_data = result.all()
         assert len(remaining_data) == 2, (
             f"Should have 2 remaining documents, found {len(remaining_data)}"

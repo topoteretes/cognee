@@ -91,7 +91,9 @@ async def integrate_chunk_graphs(
     embed_triplets = cognify_config.triplet_embedding
 
     if len(graph_nodes) > 0:
-        await add_data_points( data_points=graph_nodes, custom_edges=context, embed_triplets=embed_triplets)
+        await add_data_points(
+            data_points=graph_nodes, custom_edges=context, embed_triplets=embed_triplets
+        )
 
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
@@ -167,4 +169,6 @@ async def extract_graph_from_data(
 
     ontology_resolver = config["ontology_config"]["ontology_resolver"]
 
-    return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_resolver, context)
+    return await integrate_chunk_graphs(
+        data_chunks, chunk_graphs, graph_model, ontology_resolver, context
+    )

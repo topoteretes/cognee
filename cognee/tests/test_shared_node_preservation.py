@@ -88,13 +88,13 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
         if "BMW" in text_input and response_model == SummarizedContent:
             return SummarizedContent(
                 summary="BMW is a German car manufacturer.",
-                description="BMW is a German car manufacturer."
+                description="BMW is a German car manufacturer.",
             )
 
         if "Netherlands" in text_input and response_model == SummarizedContent:
             return SummarizedContent(
                 summary="Germany is next to the Netherlands.",
-                description="Germany is next to the Netherlands."
+                description="Germany is next to the Netherlands.",
             )
 
         if "BMW" in text_input and response_model == KnowledgeGraph:
@@ -104,13 +104,13 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
                         id="BMW",
                         name="BMW",
                         type="Company",
-                        description="BMW is a German car manufacturer"
+                        description="BMW is a German car manufacturer",
                     ),
                     Node(
                         id="Germany",
                         name="Germany",
                         type="Country",
-                        description="Germany is a country"
+                        description="Germany is a country",
                     ),
                 ],
                 edges=[
@@ -129,13 +129,13 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
                         id="Germany",
                         name="Germany",
                         type="Country",
-                        description="Germany is a country"
+                        description="Germany is a country",
                     ),
                     Node(
                         id="Netherlands",
                         name="Netherlands",
                         type="Country",
-                        description="Netherlands is a country"
+                        description="Netherlands is a country",
                     ),
                 ],
                 edges=[
@@ -242,9 +242,7 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
 
     # Verify Netherlands node is deleted
     netherlands_nodes_after = [n for n in nodes_after if "Netherlands" in str(n)]
-    assert len(netherlands_nodes_after) == 0, (
-        "Netherlands node should be deleted"
-    )
+    assert len(netherlands_nodes_after) == 0, "Netherlands node should be deleted"
     logger.info("✅ Netherlands node deleted as expected")
 
     # Verify BMW node still exists
@@ -253,18 +251,12 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
     logger.info("✅ BMW node preserved")
 
     # Verify BMW→Germany edge still exists
-    germany_edges = [
-        e for e in edges_after
-        if "Germany" in str(e) and "BMW" in str(e)
-    ]
+    germany_edges = [e for e in edges_after if "Germany" in str(e) and "BMW" in str(e)]
     assert len(germany_edges) > 0, "BMW→Germany edge should still exist"
     logger.info("✅ BMW→Germany edge preserved")
 
     # Verify Germany→Netherlands edge is deleted
-    netherlands_edges = [
-        e for e in edges_after
-        if "Netherlands" in str(e)
-    ]
+    netherlands_edges = [e for e in edges_after if "Netherlands" in str(e)]
     assert len(netherlands_edges) == 0, "Germany→Netherlands edge should be deleted"
     logger.info("✅ Germany→Netherlands edge deleted")
 
@@ -331,9 +323,7 @@ async def test_delete_permission_checks_delete_not_read():
     dataset_y = await create_authorized_dataset(dataset_name="dataset_y", user=owner_user)
 
     # Grant user_c only READ permission (NOT delete)
-    await authorized_give_permission_on_datasets(
-        user_c.id, [dataset_y.id], "read", owner_user.id
-    )
+    await authorized_give_permission_on_datasets(user_c.id, [dataset_y.id], "read", owner_user.id)
 
     # Add data to dataset
     data_y = CustomData(id=uuid4())
@@ -341,6 +331,7 @@ async def test_delete_permission_checks_delete_not_read():
 
     await set_database_global_context_variables(dataset_y.id, dataset_y.owner_id)
     from cognee.tasks.storage import add_data_points
+
     await add_data_points(
         [org_y],
         context={"user": owner_user, "dataset": dataset_y, "data": data_y},
@@ -366,7 +357,9 @@ async def test_delete_permission_checks_delete_not_read():
         "CRITICAL BUG: Delete succeeded with only read permission! "
         "The system should check 'delete' permission, not 'read'."
     )
-    assert delete_error is not None, "Should have raised PermissionDeniedError or UnauthorizedDataAccessError"
+    assert delete_error is not None, (
+        "Should have raised PermissionDeniedError or UnauthorizedDataAccessError"
+    )
 
     # Verify data still exists
     nodes_after, _ = await graph_engine.get_graph_data()
@@ -433,6 +426,7 @@ async def test_dataset_deletion_removes_files():
 
     # Check that files/data exist in storage
     from cognee.modules.data.methods import get_data
+
     data_1 = await get_data(data_1_id)
     data_2 = await get_data(data_2_id)
 
@@ -456,6 +450,7 @@ async def test_dataset_deletion_removes_files():
 
     # Verify dataset is deleted
     from cognee.modules.data.methods import get_dataset
+
     try:
         deleted_dataset = await get_dataset(dataset_id)
         assert deleted_dataset is None, "Dataset should be deleted"
@@ -478,13 +473,16 @@ async def test_dataset_deletion_removes_files():
     # For text data added via cognee.add(), the files are stored in the data directory
     # Check that the data directory for this dataset is cleaned up
     import os
+
     dataset_dir = os.path.join(data_directory_path, str(dataset_id))
 
     # Note: The exact storage structure may vary, but we should verify
     # that there are no orphaned files
     if os.path.exists(dataset_dir):
         files_in_dir = os.listdir(dataset_dir)
-        logger.warning(f"POTENTIAL BUG: Dataset directory still exists with {len(files_in_dir)} files")
+        logger.warning(
+            f"POTENTIAL BUG: Dataset directory still exists with {len(files_in_dir)} files"
+        )
         # This is informational - the exact cleanup behavior may depend on storage engine
     else:
         logger.info("✅ Dataset directory cleaned up")

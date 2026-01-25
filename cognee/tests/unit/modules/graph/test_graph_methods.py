@@ -46,13 +46,13 @@ async def test_get_data_related_nodes_excludes_shared():
     """
     data_directory_path = os.path.join(
         pathlib.Path(__file__).parent.parent.parent.parent,
-        ".data_storage/test_get_data_related_nodes"
+        ".data_storage/test_get_data_related_nodes",
     )
     cognee.config.data_root_directory(data_directory_path)
 
     cognee_directory_path = os.path.join(
         pathlib.Path(__file__).parent.parent.parent.parent,
-        ".cognee_system/test_get_data_related_nodes"
+        ".cognee_system/test_get_data_related_nodes",
     )
     cognee.config.system_root_directory(cognee_directory_path)
 
@@ -177,13 +177,13 @@ async def test_delete_data_nodes_and_edges_removes_from_all_systems():
 
     data_directory_path = os.path.join(
         pathlib.Path(__file__).parent.parent.parent.parent,
-        ".data_storage/test_delete_data_nodes_edges"
+        ".data_storage/test_delete_data_nodes_edges",
     )
     cognee.config.data_root_directory(data_directory_path)
 
     cognee_directory_path = os.path.join(
         pathlib.Path(__file__).parent.parent.parent.parent,
-        ".cognee_system/test_delete_data_nodes_edges"
+        ".cognee_system/test_delete_data_nodes_edges",
     )
     cognee.config.system_root_directory(cognee_directory_path)
 
@@ -278,17 +278,13 @@ async def test_delete_data_nodes_and_edges_removes_from_all_systems():
 
     # Verify nodes exist in relational DB before deletion
     async with db_engine.get_async_session() as session:
-        nodes_before = await session.scalars(
-            select(Node).where(Node.data_id == data_id)
-        )
+        nodes_before = await session.scalars(select(Node).where(Node.data_id == data_id))
         nodes_before_list = nodes_before.all()
         assert len(nodes_before_list) == 3, (
             f"Should have 3 nodes before deletion, found {len(nodes_before_list)}"
         )
 
-        edges_before = await session.scalars(
-            select(Edge).where(Edge.data_id == data_id)
-        )
+        edges_before = await session.scalars(select(Edge).where(Edge.data_id == data_id))
         edges_before_list = edges_before.all()
         assert len(edges_before_list) == 2, (
             f"Should have 2 edges before deletion, found {len(edges_before_list)}"
@@ -302,17 +298,13 @@ async def test_delete_data_nodes_and_edges_removes_from_all_systems():
 
     # Verify deletion from relational DB
     async with db_engine.get_async_session() as session:
-        nodes_after = await session.scalars(
-            select(Node).where(Node.data_id == data_id)
-        )
+        nodes_after = await session.scalars(select(Node).where(Node.data_id == data_id))
         nodes_after_list = nodes_after.all()
         assert len(nodes_after_list) == 0, (
             f"Should have 0 nodes after deletion, found {len(nodes_after_list)}"
         )
 
-        edges_after = await session.scalars(
-            select(Edge).where(Edge.data_id == data_id)
-        )
+        edges_after = await session.scalars(select(Edge).where(Edge.data_id == data_id))
         edges_after_list = edges_after.all()
         assert len(edges_after_list) == 0, (
             f"Should have 0 edges after deletion, found {len(edges_after_list)}"

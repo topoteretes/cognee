@@ -69,9 +69,7 @@ async def test_delete_all_with_partial_permissions():
     dataset_4 = await create_authorized_dataset(dataset_name="dataset_4", user=other_user)
 
     # Grant user_a delete permission on dataset_3 (owned by other_user)
-    await authorized_give_permission_on_datasets(
-        user_a.id, [dataset_3.id], "delete", other_user.id
-    )
+    await authorized_give_permission_on_datasets(user_a.id, [dataset_3.id], "delete", other_user.id)
 
     # Add text data to all datasets using cognee.add()
     await cognee.add(["Document about Company A"], dataset_name="dataset_1", user=user_a)
@@ -87,6 +85,7 @@ async def test_delete_all_with_partial_permissions():
 
     # Verify all datasets exist before deletion
     from cognee.infrastructure.databases.graph import get_graph_engine
+
     graph_engine = await get_graph_engine()
     nodes_before, edges_before = await graph_engine.get_graph_data()
     logger.info(f"Before delete_all: {len(nodes_before)} nodes, {len(edges_before)} edges")
@@ -166,9 +165,7 @@ async def test_delete_all_permission_error_handling():
     dataset_x = await create_authorized_dataset(dataset_name="dataset_x", user=owner_user)
 
     # Grant user_b only READ permission (not delete)
-    await authorized_give_permission_on_datasets(
-        user_b.id, [dataset_x.id], "read", owner_user.id
-    )
+    await authorized_give_permission_on_datasets(user_b.id, [dataset_x.id], "read", owner_user.id)
 
     # Add data to dataset using cognee.add()
     await cognee.add(["Document about Company X"], dataset_name="dataset_x", user=owner_user)
@@ -176,6 +173,7 @@ async def test_delete_all_permission_error_handling():
 
     # Verify dataset exists
     from cognee.infrastructure.databases.graph import get_graph_engine
+
     graph_engine = await get_graph_engine()
     nodes_before, _ = await graph_engine.get_graph_data()
 
@@ -200,9 +198,7 @@ async def test_delete_all_permission_error_handling():
 
     # Verify dataset still has data
     nodes_after, _ = await graph_engine.get_graph_data()
-    assert len(nodes_after) == len(nodes_before), (
-        "Graph should be unchanged (no nodes deleted)"
-    )
+    assert len(nodes_after) == len(nodes_before), "Graph should be unchanged (no nodes deleted)"
 
     dataset_x_data = await datasets.list_data(dataset_x.id, user=owner_user)
     assert len(dataset_x_data) > 0, "Dataset X should still have data"

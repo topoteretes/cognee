@@ -7,7 +7,6 @@ from .get_default_user import get_default_user
 from cognee.shared.logging_utils import get_logger
 
 
-
 logger = get_logger("get_authenticated_user")
 
 # Check environment variable to determine authentication requirement

@@ -19,9 +19,11 @@ logger = get_logger("add_data_points")
 
 
 async def add_data_points(
-    data_points: List[DataPoint], context: Optional[Dict[str, Any]], custom_edges: Optional[List] = None, embed_triplets: bool = False
+    data_points: List[DataPoint],
+    context: Optional[Dict[str, Any]],
+    custom_edges: Optional[List] = None,
+    embed_triplets: bool = False,
 ) -> List[DataPoint]:
-
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
     deduplicating them, and indexing them for retrieval.
