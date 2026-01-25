@@ -31,6 +31,9 @@ from ..utils.prepare_search_result import prepare_search_result
 
 logger = get_logger()
 
+# Alias for backwards compatibility and test mocking
+backend_access_control_enabled = is_backend_access_control_enabled
+
 
 async def search(
     query_text: str,
@@ -76,7 +79,7 @@ async def search(
     )
 
     # Use search function filtered by permissions if access control is enabled
-    if is_backend_access_control_enabled():
+    if backend_access_control_enabled():
         search_results = await authorized_search(
             query_type=query_type,
             query_text=query_text,
@@ -133,7 +136,7 @@ async def search(
     )
 
     # This is for maintaining backwards compatibility
-    if is_backend_access_control_enabled():
+    if backend_access_control_enabled():
         return_value = []
         for search_result in search_results:
             prepared_search_results = await prepare_search_result(search_result)
