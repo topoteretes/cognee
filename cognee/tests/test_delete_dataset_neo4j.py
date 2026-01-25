@@ -30,6 +30,9 @@ async def main(mock_create_structured_output: AsyncMock):
     )
     cognee.config.system_root_directory(cognee_directory_path)
 
+    # Disable backend access control for this test
+    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
+
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
     await setup()
