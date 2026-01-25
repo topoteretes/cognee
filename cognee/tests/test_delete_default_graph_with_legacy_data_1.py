@@ -139,6 +139,9 @@ def create_legacy_data_points():
 @pytest.mark.asyncio
 @patch.object(LLMGateway, "acreate_structured_output", new_callable=AsyncMock)
 async def main(mock_create_structured_output: AsyncMock):
+    # Disable backend access control for this legacy test
+    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
+
     data_directory_path = os.path.join(
         pathlib.Path(__file__).parent, ".data_storage/test_delete_default_graph_with_legacy_graph_1"
     )
