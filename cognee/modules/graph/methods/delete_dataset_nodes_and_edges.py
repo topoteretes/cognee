@@ -16,6 +16,7 @@ from cognee.modules.graph.methods import (
     get_global_dataset_related_nodes,
     get_global_dataset_related_edges,
 )
+from cognee.modules.engine.utils import generate_node_id
 
 
 async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> None:
@@ -63,6 +64,24 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Non
                 [str(relationship.slug) for relationship in non_legacy_relationships],
             )
 
+            # Delete corresponding triplets from Triplet_text collection
+            triplet_ids = [
+                str(
+                    generate_node_id(
+                        str(edge.source_node_id)
+                        + edge.relationship_name
+                        + str(edge.destination_node_id)
+                    )
+                )
+                for edge in non_legacy_relationships
+            ]
+            if triplet_ids:
+                try:
+                    await vector_engine.delete_data_points("Triplet_text", triplet_ids)
+                except Exception:
+                    # Triplet collection might not exist if triplet embedding was never enabled
+                    pass
+
         await delete_dataset_related_nodes(dataset_id)
         await delete_dataset_related_edges(dataset_id)
     else:
@@ -108,6 +127,24 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Non
                 "EdgeType_relationship_name",
                 [str(relationship.slug) for relationship in non_legacy_relationships],
             )
+
+            # Delete corresponding triplets from Triplet_text collection
+            triplet_ids = [
+                str(
+                    generate_node_id(
+                        str(edge.source_node_id)
+                        + edge.relationship_name
+                        + str(edge.destination_node_id)
+                    )
+                )
+                for edge in non_legacy_relationships
+            ]
+            if triplet_ids:
+                try:
+                    await vector_engine.delete_data_points("Triplet_text", triplet_ids)
+                except Exception:
+                    # Triplet collection might not exist if triplet embedding was never enabled
+                    pass
 
         await delete_dataset_related_nodes(dataset_id)
         await delete_dataset_related_edges(dataset_id)

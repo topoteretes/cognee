@@ -205,7 +205,11 @@ class LanceDBAdapter(VectorDBInterface):
             )
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        collection = await self.get_collection(collection_name)
+        try:
+            collection = await self.get_collection(collection_name)
+        except CollectionNotFoundError:
+            # If collection doesn't exist, return empty list (no items to retrieve)
+            return []
 
         if len(data_point_ids) == 1:
             query = collection.query().where(f"id = '{data_point_ids[0]}'")
