@@ -335,7 +335,12 @@ class ChromaDBAdapter(VectorDBInterface):
             Returns a list of ScoredResult instances containing the retrieved data points and
             their metadata.
         """
-        collection = await self.get_collection(collection_name)
+        try:
+            collection = await self.get_collection(collection_name)
+        except CollectionNotFoundError:
+            # If collection doesn't exist, return empty list (no items to retrieve)
+            return []
+
         results = await collection.get(ids=data_point_ids, include=["metadatas"])
 
         return [

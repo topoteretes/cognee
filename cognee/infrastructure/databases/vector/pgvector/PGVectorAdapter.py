@@ -282,7 +282,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
         # Get PGVectorDataPoint Table from database
-        PGVectorDataPoint = await self.get_table(collection_name)
+        try:
+            PGVectorDataPoint = await self.get_table(collection_name)
+        except CollectionNotFoundError:
+            # If collection doesn't exist, return empty list (no items to retrieve)
+            return []
 
         async with self.get_async_session() as session:
             results = await session.execute(
