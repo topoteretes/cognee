@@ -472,8 +472,6 @@ async def test_dataset_deletion_removes_files():
     # CRITICAL: Verify files are deleted from storage
     # For text data added via cognee.add(), the files are stored in the data directory
     # Check that the data directory for this dataset is cleaned up
-    import os
-
     dataset_dir = os.path.join(data_directory_path, str(dataset_id))
 
     # Note: The exact storage structure may vary, but we should verify
