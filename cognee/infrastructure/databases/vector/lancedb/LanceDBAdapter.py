@@ -299,6 +299,10 @@ class LanceDBAdapter(VectorDBInterface):
         )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
+        # Skip deletion if collection doesn't exist
+        if not await self.has_collection(collection_name):
+            return
+
         collection = await self.get_collection(collection_name)
 
         # Delete one at a time to avoid commit conflicts

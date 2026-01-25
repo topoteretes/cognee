@@ -20,8 +20,7 @@ from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.data.methods import create_dataset, get_dataset_data
 from cognee.modules.engine.operations.setup import setup
-from cognee.modules.graph.methods.delete_data_nodes_and_edges import delete_data_nodes_and_edges
-from cognee.modules.graph.methods.get_data_related_nodes import get_data_related_nodes
+from cognee.modules.graph.methods import delete_data_nodes_and_edges, get_data_related_nodes
 from cognee.modules.graph.models import Node, Edge
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger
@@ -287,13 +286,6 @@ async def test_delete_data_nodes_and_edges_removes_from_all_systems():
 
     # Insert into graph engine
     await get_graph_engine()
-
-    # Add nodes to graph
-    from cognee.infrastructure.engine.models import DataPoint
-
-    class TestEntity(DataPoint):
-        name: str
-        metadata: dict = {"index_fields": ["name"]}
 
     # Note: In real scenario, nodes would be added through normal cognify process
     # For unit test, we verify the relational DB records exist

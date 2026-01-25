@@ -530,6 +530,10 @@ class ChromaDBAdapter(VectorDBInterface):
 
             Returns True upon successful deletion of the data points.
         """
+        # Skip deletion if collection doesn't exist
+        if not await self.has_collection(collection_name):
+            return True
+
         collection = await self.get_collection(collection_name)
         await collection.delete(ids=data_point_ids)
         return True

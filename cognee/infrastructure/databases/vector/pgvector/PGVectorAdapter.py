@@ -399,6 +399,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
 
     async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
+        # Skip deletion if collection doesn't exist
+        if not await self.has_collection(collection_name):
+            return None
+
         async with self.get_async_session() as session:
             # Get PGVectorDataPoint Table from database
             PGVectorDataPoint = await self.get_table(collection_name)
