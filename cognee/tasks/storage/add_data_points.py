@@ -19,7 +19,7 @@ logger = get_logger("add_data_points")
 
 async def add_data_points(
     data_points: List[DataPoint],
-    context: Optional[Dict[str, Any]],
+    context: Optional[Dict[str, Any]] = None,
     custom_edges: Optional[List] = None,
     embed_triplets: bool = False,
 ) -> List[DataPoint]:
