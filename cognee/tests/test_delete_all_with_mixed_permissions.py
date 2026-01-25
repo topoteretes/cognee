@@ -63,8 +63,8 @@ async def test_delete_all_with_partial_permissions():
     other_user: User = await create_user(email="other_user@test.com", password="password456")
 
     # Create datasets with different ownership
-    dataset_1 = await create_authorized_dataset(dataset_name="dataset_1", user=user_a)
-    dataset_2 = await create_authorized_dataset(dataset_name="dataset_2", user=user_a)
+    await create_authorized_dataset(dataset_name="dataset_1", user=user_a)
+    await create_authorized_dataset(dataset_name="dataset_2", user=user_a)
     dataset_3 = await create_authorized_dataset(dataset_name="dataset_3", user=other_user)
     dataset_4 = await create_authorized_dataset(dataset_name="dataset_4", user=other_user)
 

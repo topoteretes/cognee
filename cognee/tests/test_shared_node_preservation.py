@@ -67,6 +67,8 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
     - BMW→Germany edge: REMAINS
     - Germany→Netherlands edge: DELETED
     """
+    import os
+
     data_directory_path = os.path.join(
         pathlib.Path(__file__).parent, ".data_storage/test_shared_node_preservation"
     )
@@ -181,7 +183,7 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
         cut_type="sentence_end",
         is_part_of=bmw_document,
     )
-    bmw_summary = extract_summary(bmw_chunk, mock_llm_output("BMW", "", SummarizedContent))
+    extract_summary(bmw_chunk, mock_llm_output("BMW", "", SummarizedContent))
 
     netherlands_document = TextDocument(
         id=netherlands_data_id,
@@ -197,9 +199,7 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
         cut_type="sentence_end",
         is_part_of=netherlands_document,
     )
-    netherlands_summary = extract_summary(
-        netherlands_chunk, mock_llm_output("Netherlands", "", SummarizedContent)
-    )
+    extract_summary(netherlands_chunk, mock_llm_output("Netherlands", "", SummarizedContent))
 
     # Extract entities from both documents
     bmw_kg = mock_llm_output("BMW", "", KnowledgeGraph)
@@ -209,11 +209,11 @@ async def test_shared_entity_preserved_across_documents(mock_create_structured_o
     netherlands_entities = extract_entities(netherlands_kg)
 
     # Find the shared Germany entity
-    bmw_germany = [e for e in bmw_entities if e.name == "Germany"][0]
-    netherlands_germany = [e for e in netherlands_entities if e.name == "Germany"][0]
+    [e for e in bmw_entities if e.name == "Germany"][0]
+    [e for e in netherlands_entities if e.name == "Germany"][0]
 
-    bmw_entity = [e for e in bmw_entities if e.name == "BMW"][0]
-    netherlands_entity = [e for e in netherlands_entities if e.name == "Netherlands"][0]
+    [e for e in bmw_entities if e.name == "BMW"][0]
+    [e for e in netherlands_entities if e.name == "Netherlands"][0]
 
     # Verify both documents created nodes in the graph
     graph_engine = await get_graph_engine()

@@ -264,7 +264,7 @@ async def test_delete_data_nodes_and_edges_removes_from_all_systems():
     logger.info("Inserted 3 nodes and 2 edges into relational DB")
 
     # Insert into graph engine
-    graph_engine = await get_graph_engine()
+    await get_graph_engine()
 
     # Add nodes to graph
     from cognee.infrastructure.engine.models import DataPoint

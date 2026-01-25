@@ -191,7 +191,7 @@ async def test_cleanup_unused_data_dry_run():
         data_ids.append(add_result.data_ingestion_info[0]["data_id"])
 
     cognify_result = await cognee.cognify([dataset_name], user=user)
-    dataset_id = list(cognify_result.keys())[0]
+    list(cognify_result.keys())[0]
 
     # Age the first 3 documents to be "old"
     db_engine = get_relational_engine()
@@ -297,7 +297,7 @@ async def test_cleanup_actual_deletion():
         data_ids.append(add_result.data_ingestion_info[0]["data_id"])
 
     cognify_result = await cognee.cognify([dataset_name], user=user)
-    dataset_id = list(cognify_result.keys())[0]
+    list(cognify_result.keys())[0]
 
     # Age the first 3 documents to be "old"
     db_engine = get_relational_engine()
