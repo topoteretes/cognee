@@ -34,8 +34,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev --no-editable
 
 # Copy Alembic configuration
-COPY alembic.ini /app/alembic.ini
-COPY alembic/ /app/alembic
+COPY cognee/alembic.ini /app/cognee/alembic.ini
+COPY cognee/alembic/ /app/cognee/alembic
 
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
