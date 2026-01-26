@@ -1,19 +1,15 @@
 import asyncio
-import os
 import cognee
 from cognee.shared.logging_utils import setup_logging, INFO
 from cognee.api.v1.search import SearchType
 from pathlib import Path
 
-with open(
-    os.path.join(Path(__file__).resolve().parent, "data/biography_1.txt"), "r", encoding="utf-8"
-) as f:
-    biography_1 = f.read()
-
-with open(
-    os.path.join(Path(__file__).resolve().parent, "data/biography_2.txt"), "r", encoding="utf-8"
-) as f:
-    biography_2 = f.read()
+data_dir = Path(__file__).resolve().parent / "data"
+try:
+    biography_1 = (data_dir / "biography_1.txt").read_text(encoding="utf-8")
+    biography_2 = (data_dir / "biography_2.txt").read_text(encoding="utf-8")
+except (FileNotFoundError, OSError) as exc:
+    raise RuntimeError(f"Missing demo data file under: {data_dir}") from exc
 
 
 async def main():
@@ -21,7 +17,7 @@ async def main():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
-    # Step 2: Add text and create knwoledge graph
+    # Step 2: Add text and create knowledge graph
     await cognee.add([biography_1, biography_2])
     await cognee.cognify(temporal_cognify=True)
 
@@ -54,3 +50,4 @@ if __name__ == "__main__":
         loop.run_until_complete(main())
     finally:
         loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()

@@ -8,6 +8,7 @@ Reference: https://colab.research.google.com/drive/12Vi9zID-M3fpKpKiaqDBvkk98Elk
 import os
 import cognee
 import asyncio
+from pathlib import Path
 from cognee.modules.engine.models.node_set import NodeSet
 
 # provide your OpenAI key here
@@ -22,11 +23,11 @@ developer_intro = (
     "and production testing via pytest-asyncio. "
     "I've shipped low-latency APIs on AWS, Azure, and GoogleCloud."
 )
-
+data_dir = Path(__file__).resolve().parent / "data"
 asset_paths = {
-    "human_agent_conversations": "data/copilot_conversations.json",
-    "python_zen_principles": "data/zen_principles.md",
-    "ontology": "data/basic_ontology.owl",
+    "human_agent_conversations": data_dir / "copilot_conversations.json",
+    "python_zen_principles": data_dir / "zen_principles.md",
+    "ontology": data_dir / "basic_ontology.owl",
 }
 
 human_agent_conversations = asset_paths["human_agent_conversations"]
