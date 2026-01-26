@@ -64,14 +64,22 @@ async def get_retriever_output(query_type: SearchType, query_text: str, **kwargs
         query_type=query_type, query_text=query_text, **kwargs
     )
 
+    # Get raw result objects from retriever and forward to context and completion methods to avoid duplicate retrievals.
     retrieved_objects = await retriever_instance.get_retrieved_objects(query=query_text)
 
+    # Handle raw result object to extract context information
     context = await retriever_instance.get_context(retrieved_objects=retrieved_objects)
 
     completion = None
-    if not kwargs.get("only_context", False):  # If only_context is True, skip getting completion
+    if not kwargs.get(
+        "only_context", False
+    ):  # If only_context is True, skip getting completion. Performance optimization.
+        # Handle raw result and context object to handle completion operation
         completion = await retriever_instance.get_completion(
-            query=query_text, retrieved_objects=retrieved_objects
+            query=query_text,
+            retrieved_objects=retrieved_objects,
+            context=context,
+            session_id=kwargs.get("session_id", None),
         )
 
     search_result = SearchResultPayload(

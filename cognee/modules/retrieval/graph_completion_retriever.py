@@ -164,6 +164,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         self,
         query: str,
         retrieved_objects: Optional[List[Edge]] = None,
+        context: str = None,
         session_id: Optional[str] = None,
         response_model: Type = str,
     ) -> List[Any]:
@@ -185,8 +186,6 @@ class GraphCompletionRetriever(BaseGraphRetriever):
             - Any: A generated completion based on the query and context provided.
         """
 
-        context_text = await resolve_edges_to_text(retrieved_objects)
-
         cache_config = CacheConfig()
         user = session_user.get()
         user_id = getattr(user, "id", None)
@@ -196,10 +195,10 @@ class GraphCompletionRetriever(BaseGraphRetriever):
             conversation_history = await get_conversation_history(session_id=session_id)
 
             context_summary, completion = await asyncio.gather(
-                summarize_text(context_text),
+                summarize_text(context),
                 generate_completion(
                     query=query,
-                    context=context_text,
+                    context=context,
                     user_prompt_path=self.user_prompt_path,
                     system_prompt_path=self.system_prompt_path,
                     system_prompt=self.system_prompt,
@@ -210,7 +209,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         else:
             completion = await generate_completion(
                 query=query,
-                context=context_text,
+                context=context,
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
@@ -219,7 +218,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
         if self.save_interaction and retrieved_objects and completion:
             await self.save_qa(
-                question=query, answer=completion, context=context_text, triplets=retrieved_objects
+                question=query, answer=completion, context=context, triplets=retrieved_objects
             )
 
         if session_save:

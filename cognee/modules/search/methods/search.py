@@ -104,38 +104,7 @@ async def search(
         user.id,
     )
 
-    # This is for maintaining backwards compatibility
-    if backend_access_control_enabled():
-        return_value = []
-        for search_result in search_results:
-            # Dataset info needs to be always included
-            search_result_dict = {
-                "dataset_id": search_result.dataset_id,
-                "dataset_name": search_result.dataset_name,
-                "dataset_tenant_id": search_result.dataset_tenant_id,
-            }
-            if verbose:
-                # Include graphs only in verbose mode
-                search_result_dict["text_result"] = search_result.completion
-                search_result_dict["context_result"] = search_result.context
-                search_result_dict["objects_result"] = search_result.result_object
-            else:
-                # Result attribute handles returning appropriate result based on set flags and outputs
-                search_result_dict["search_result"] = search_result.result
-
-            return_value.append(search_result_dict)
-        return return_value
-    else:
-        return_value = []
-        for search_result in search_results:
-            # Result attribute handles returning appropriate result based on set flags and outputs
-            return_value.append(search_result.result)
-
-        # For maintaining backwards compatibility
-        if len(return_value) == 1 and isinstance(return_value[0], list):
-            return return_value[0]
-        else:
-            return return_value
+    return _backwards_compatible_search_results(search_results, verbose)
 
 
 async def authorized_search(
@@ -285,3 +254,43 @@ async def search_in_datasets_context(
         )
 
     return await asyncio.gather(*tasks)
+
+
+def _backwards_compatible_search_results(search_results, verbose: bool):
+    """
+    Prepares search results in a format compatible with previous versions of the API.
+    """
+    # This is for maintaining backwards compatibility
+    if backend_access_control_enabled():
+        return_value = []
+        for search_result in search_results:
+            # Dataset info needs to be always included
+            search_result_dict = {
+                "dataset_id": search_result.dataset_id,
+                "dataset_name": search_result.dataset_name,
+                "dataset_tenant_id": search_result.dataset_tenant_id,
+            }
+            if verbose:
+                # Include all different types of results only in verbose mode
+                search_result_dict["text_result"] = search_result.completion
+                search_result_dict["context_result"] = search_result.context
+                search_result_dict["objects_result"] = search_result.result_object
+            else:
+                # Result attribute handles returning appropriate result based on set flags and outputs
+                search_result_dict["search_result"] = search_result.result
+
+            return_value.append(search_result_dict)
+        return return_value
+    else:
+        return_value = []
+        for search_result in search_results:
+            # Result attribute handles returning appropriate result based on set flags and outputs
+            return_value.append(search_result.result)
+
+        # For maintaining backwards compatibility
+        if len(return_value) == 1 and isinstance(return_value[0], list):
+            # If a single element list return the element directly
+            return return_value[0]
+        else:
+            # Otherwise return the list of results
+            return return_value
