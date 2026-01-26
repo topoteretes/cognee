@@ -24,7 +24,6 @@ from cognee.modules.data.methods.get_authorized_existing_datasets import (
 )
 from cognee import __version__ as cognee_version
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
-from .no_access_control_search import no_access_control_search
 
 logger = get_logger()
 
