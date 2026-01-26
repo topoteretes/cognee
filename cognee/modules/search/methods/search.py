@@ -72,43 +72,23 @@ async def search(
         },
     )
 
-    # Use search function filtered by permissions if access control is enabled
-    if backend_access_control_enabled():
-        search_results = await authorized_search(
-            query_type=query_type,
-            query_text=query_text,
-            user=user,
-            dataset_ids=dataset_ids,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            top_k=top_k,
-            node_type=node_type,
-            node_name=node_name,
-            save_interaction=save_interaction,
-            last_k=last_k,
-            only_context=only_context,
-            session_id=session_id,
-            wide_search_top_k=wide_search_top_k,
-            triplet_distance_penalty=triplet_distance_penalty,
-        )
-    else:
-        search_results = [
-            await no_access_control_search(
-                query_type=query_type,
-                query_text=query_text,
-                system_prompt_path=system_prompt_path,
-                system_prompt=system_prompt,
-                top_k=top_k,
-                node_type=node_type,
-                node_name=node_name,
-                save_interaction=save_interaction,
-                last_k=last_k,
-                only_context=only_context,
-                session_id=session_id,
-                wide_search_top_k=wide_search_top_k,
-                triplet_distance_penalty=triplet_distance_penalty,
-            )
-        ]
+    search_results = await authorized_search(
+        query_type=query_type,
+        query_text=query_text,
+        user=user,
+        dataset_ids=dataset_ids,
+        system_prompt_path=system_prompt_path,
+        system_prompt=system_prompt,
+        top_k=top_k,
+        node_type=node_type,
+        node_name=node_name,
+        save_interaction=save_interaction,
+        last_k=last_k,
+        only_context=only_context,
+        session_id=session_id,
+        wide_search_top_k=wide_search_top_k,
+        triplet_distance_penalty=triplet_distance_penalty,
+    )
 
     send_telemetry(
         "cognee.search EXECUTION COMPLETED",
