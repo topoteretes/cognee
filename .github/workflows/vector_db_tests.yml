@@ -145,7 +145,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          VECTOR_DB_URL: 127.0.0.1
+          VECTOR_DB_HOST: 127.0.0.1
           VECTOR_DB_PORT: 5432
           VECTOR_DB_USERNAME: cognee
           VECTOR_DB_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
