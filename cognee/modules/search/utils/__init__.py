@@ -1,1 +1,1 @@
-from .transform_context_to_graph import transform_context_to_graph
+from .transform_triplets_to_graph import transform_triplets_to_graph

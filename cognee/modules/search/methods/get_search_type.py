@@ -39,7 +39,7 @@ async def get_search_type(query_type: SearchType, query_text: str, **kwargs) -> 
     save_interaction = kwargs.get("save_interaction", False)
     wide_search_top_k = kwargs.get("wide_search_top_k", 100)
     triplet_distance_penalty = kwargs.get("triplet_distance_penalty", 3.5)
-    last_k = kwargs.get("last_k")
+    # last_k = kwargs.get("last_k")
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
@@ -118,8 +118,6 @@ async def get_search_type(query_type: SearchType, query_text: str, **kwargs) -> 
         ),
         SearchType.CYPHER: (CypherSearchRetriever, {}),
         SearchType.NATURAL_LANGUAGE: (NaturalLanguageRetriever, {}),
-        # TODO: Remove UserQAFeedback retriever once feedback mechanism is revamped
-        SearchType.FEEDBACK: (UserQAFeedback(last_k=last_k)).add_feedback,
         SearchType.TEMPORAL: (
             TemporalRetriever,
             {

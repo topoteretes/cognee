@@ -163,8 +163,8 @@ class GraphCompletionRetriever(BaseGraphRetriever):
     async def get_completion(
         self,
         query: str,
-        retrieved_objects: Optional[List[Edge]] = None,
-        context: str = None,
+        retrieved_objects: Optional[List[Edge]],
+        context: str,
         session_id: Optional[str] = None,
         response_model: Type = str,
     ) -> List[Any]:
