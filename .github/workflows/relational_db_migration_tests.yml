@@ -86,6 +86,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
           EMBEDDING_PROVIDER: openai
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -150,6 +151,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
           EMBEDDING_PROVIDER: openai
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -221,6 +223,7 @@ jobs:
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
           EMBEDDING_PROVIDER: openai
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
