@@ -177,6 +177,7 @@ class config:
     def set_vector_db_url(db_url: str):
         vector_db_config = get_vectordb_config()
         vector_db_config.vector_db_url = db_url
+
     # Translation configuration methods
 
     @staticmethod
@@ -235,4 +236,3 @@ class config:
         method_name = setter_mapping[key]
         method = getattr(config, method_name)
         method(value)
-
