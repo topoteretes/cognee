@@ -10,6 +10,7 @@ from cognee.infrastructure.llm.config import (
     get_llm_config,
 )
 from cognee.infrastructure.databases.relational import get_relational_config, get_migration_config
+from cognee.tasks.translation.config import get_translation_config
 from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
 
 
@@ -176,8 +177,32 @@ class config:
     def set_vector_db_url(db_url: str):
         vector_db_config = get_vectordb_config()
         vector_db_config.vector_db_url = db_url
+    # Translation configuration methods
 
     @staticmethod
+    def set_translation_provider(provider: str):
+        """Set the translation provider (llm, google, azure)."""
+        translation_config = get_translation_config()
+        translation_config.translation_provider = provider
+
+    @staticmethod
+    def set_translation_target_language(target_language: str):
+        """Set the default target language for translations."""
+        translation_config = get_translation_config()
+        translation_config.target_language = target_language
+
+    @staticmethod
+    def set_translation_config(config_dict: dict):
+        """
+        Updates the translation config with values from config_dict.
+        """
+        translation_config = get_translation_config()
+        for key, value in config_dict.items():
+            if hasattr(translation_config, key):
+                object.__setattr__(translation_config, key, value)
+            else:
+                raise InvalidConfigAttributeError(attribute=key)
+
     def set(key: str, value):
         """
         Generic setter that maps configuration keys to their specific setter methods.
@@ -210,3 +235,4 @@ class config:
         method_name = setter_mapping[key]
         method = getattr(config, method_name)
         method(value)
+
