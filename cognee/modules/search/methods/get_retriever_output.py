@@ -1,7 +1,8 @@
 from uuid import UUID
 from typing import Optional, Any, Dict, List, Union
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 from pydantic.alias_generators import to_camel
+from pydantic.main import IncEx
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.search.methods.get_search_type import get_search_type
@@ -26,11 +27,30 @@ class SearchResultPayload(BaseModel):
 
     # TODO: Add return_type info
     search_type: SearchType
+    only_context: bool = False
+
+    dataset_name: Optional[str] = None
+    dataset_id: Optional[UUID] = None
+    dataset_tenant_id: Optional[UUID] = None
+
+    @field_serializer("result_object")
+    def serialize_complex_types(self, v: Any):
+        # Handle serialization of complex types in result_object.
+        # If result_object is a complex class, convert it to string here.
+        if isinstance(v, list):
+            return [str(i) if not isinstance(i, (int, float, dict, str)) else i for i in v]
+        return v
 
     @property
     def result(self) -> Any:
-        """Returns completion if available, otherwise context_object."""
-        return self.completion if self.completion is not None else self.result_object
+        """Function used to determine search_result for users request.
+        Return context if only_context is True, else return completion if it exists, else return result_object."""
+        if self.only_context:
+            return self.context
+        elif self.completion:
+            return self.completion
+        else:
+            return self.result_object
 
 
 async def get_retriever_output(query_type: SearchType, query_text: str, **kwargs):
@@ -38,7 +58,6 @@ async def get_retriever_output(query_type: SearchType, query_text: str, **kwargs
     is_empty = await graph_engine.is_empty()
 
     if is_empty:
-        # TODO: we can log here, but not all search types use graph. Still keeping this here for reviewer input
         logger.warning("Search attempt on an empty knowledge graph")
 
     retriever_instance = await get_search_type(
@@ -49,15 +68,21 @@ async def get_retriever_output(query_type: SearchType, query_text: str, **kwargs
 
     context = await retriever_instance.get_context(retrieved_objects=retrieved_objects)
 
-    completion = await retriever_instance.get_completion(
-        query=query_text, retrieved_objects=retrieved_objects
-    )
+    completion = None
+    if not kwargs.get("only_context", False):  # If only_context is True, skip getting completion
+        completion = await retriever_instance.get_completion(
+            query=query_text, retrieved_objects=retrieved_objects
+        )
 
     search_result = SearchResultPayload(
         result_object=retrieved_objects,
         context=context,
         completion=completion,
         search_type=query_type,
+        only_context=kwargs.get("only_context", False),
+        dataset_name=kwargs.get("dataset").name if kwargs.get("dataset") else None,
+        dataset_id=kwargs.get("dataset").id if kwargs.get("dataset") else None,
+        dataset_tenant_id=kwargs.get("dataset").tenant_id if kwargs.get("dataset") else None,
     )
 
     return search_result

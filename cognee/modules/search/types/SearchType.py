@@ -1,7 +1,7 @@
 from enum import Enum
 
 
-class SearchType(Enum):
+class SearchType(str, Enum):
     SUMMARIES = "SUMMARIES"
     CHUNKS = "CHUNKS"
     RAG_COMPLETION = "RAG_COMPLETION"

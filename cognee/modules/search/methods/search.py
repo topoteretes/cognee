@@ -23,9 +23,8 @@ from cognee.modules.data.methods.get_authorized_existing_datasets import (
     get_authorized_existing_datasets,
 )
 from cognee import __version__ as cognee_version
-from .get_search_type import get_search_type
+from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from .no_access_control_search import no_access_control_search
-from ..utils.prepare_search_result import prepare_search_result
 
 logger = get_logger()
 
@@ -122,11 +121,7 @@ async def search(
 
     await log_result(
         query.id,
-        json.dumps(
-            jsonable_encoder(
-                [await prepare_search_result(search_result) for search_result in search_results]
-            )
-        ),
+        json.dumps(jsonable_encoder(search_results)),
         user.id,
     )
 
@@ -134,48 +129,29 @@ async def search(
     if backend_access_control_enabled():
         return_value = []
         for search_result in search_results:
-            prepared_search_results = await prepare_search_result(search_result)
-
-            result = prepared_search_results["result"]
-            graphs = prepared_search_results["graphs"]
-            context = prepared_search_results["context"]
-            datasets = prepared_search_results["datasets"]
-
-            if only_context:
-                search_result_dict = {
-                    "search_result": [context] if context else None,
-                    "dataset_id": datasets[0].id,
-                    "dataset_name": datasets[0].name,
-                    "dataset_tenant_id": datasets[0].tenant_id,
-                }
-                if verbose:
-                    # Include graphs only in verbose mode
-                    search_result_dict["graphs"] = graphs
-
-                return_value.append(search_result_dict)
+            # Dataset info needs to be always included
+            search_result_dict = {
+                "dataset_id": search_result.dataset_id,
+                "dataset_name": search_result.dataset_name,
+                "dataset_tenant_id": search_result.dataset_tenant_id,
+            }
+            if verbose:
+                # Include graphs only in verbose mode
+                search_result_dict["text_result"] = search_result.completion
+                search_result_dict["context_result"] = search_result.context
+                search_result_dict["objects_result"] = search_result.result_object
             else:
-                search_result_dict = {
-                    "search_result": [result] if result else None,
-                    "dataset_id": datasets[0].id,
-                    "dataset_name": datasets[0].name,
-                    "dataset_tenant_id": datasets[0].tenant_id,
-                }
-                if verbose:
-                    # Include graphs only in verbose mode
-                    search_result_dict["graphs"] = graphs
-                return_value.append(search_result_dict)
+                # Result attribute handles returning appropriate result based on set flags and outputs
+                search_result_dict["search_result"] = search_result.result
 
+            return_value.append(search_result_dict)
         return return_value
     else:
         return_value = []
-        if only_context:
-            for search_result in search_results:
-                prepared_search_results = await prepare_search_result(search_result)
-                return_value.append(prepared_search_results["context"])
-        else:
-            for search_result in search_results:
-                result, context, datasets = search_result
-                return_value.append(result)
+        for search_result in search_results:
+            # Result attribute handles returning appropriate result based on set flags and outputs
+            return_value.append(search_result.result)
+
         # For maintaining backwards compatibility
         if len(return_value) == 1 and isinstance(return_value[0], list):
             return return_value[0]
@@ -242,7 +218,6 @@ async def search_in_datasets_context(
     save_interaction: bool = False,
     last_k: Optional[int] = None,
     only_context: bool = False,
-    context: Optional[Any] = None,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
@@ -264,7 +239,6 @@ async def search_in_datasets_context(
         save_interaction: bool = False,
         last_k: Optional[int] = None,
         only_context: bool = False,
-        context: Optional[Any] = None,
         session_id: Optional[str] = None,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
@@ -272,9 +246,9 @@ async def search_in_datasets_context(
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
+        # Check if graph for dataset is empty and log warnings if necessary
         graph_engine = await get_graph_engine()
         is_empty = await graph_engine.is_empty()
-
         if is_empty:
             # TODO: we can log here, but not all search types use graph. Still keeping this here for reviewer input
             from cognee.modules.data.methods import get_dataset_data
@@ -288,12 +262,14 @@ async def search_in_datasets_context(
                 )
             else:
                 logger.warning(
-                    "Search attempt on an empty knowledge graph - no data has been added to this dataset"
+                    f"Search attempt on an empty knowledge graph - no data has been added to this dataset: {dataset.name}"
                 )
 
-        specific_search_tools = await get_search_type(
+        # Get retriever output in the context of the current dataset
+        return await get_retriever_output(
             query_type=query_type,
             query_text=query_text,
+            dataset=dataset,
             system_prompt_path=system_prompt_path,
             system_prompt=system_prompt,
             top_k=top_k,
@@ -301,24 +277,11 @@ async def search_in_datasets_context(
             node_name=node_name,
             save_interaction=save_interaction,
             last_k=last_k,
+            only_context=only_context,
+            session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
         )
-        search_tools = specific_search_tools
-        if len(search_tools) == 2:
-            [get_completion, get_context] = search_tools
-
-            if only_context:
-                return None, await get_context(query_text), [dataset]
-
-            search_context = context or await get_context(query_text)
-            search_result = await get_completion(query_text, search_context, session_id=session_id)
-
-            return search_result, search_context, [dataset]
-        else:
-            unknown_tool = search_tools[0]
-
-            return await unknown_tool(query_text), "", [dataset]
 
     # Search every dataset async based on query and appropriate database configuration
     tasks = []
@@ -336,7 +299,6 @@ async def search_in_datasets_context(
                 save_interaction=save_interaction,
                 last_k=last_k,
                 only_context=only_context,
-                context=context,
                 session_id=session_id,
                 wide_search_top_k=wide_search_top_k,
                 triplet_distance_penalty=triplet_distance_penalty,

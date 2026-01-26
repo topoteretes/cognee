@@ -29,7 +29,7 @@ from cognee.modules.retrieval.cypher_search_retriever import CypherSearchRetriev
 from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageRetriever
 
 
-async def get_search_type(query_type: SearchType, query_text: str, **kwargs) -> list:
+async def get_search_type(query_type: SearchType, query_text: str, **kwargs) -> list[BaseRetriever]:
     # Extract common defaults with fallback values from kwargs
     top_k = kwargs.get("top_k", 10)
     system_prompt_path = kwargs.get("system_prompt_path", "answer_simple_question.txt")
