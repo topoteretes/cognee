@@ -1,6 +1,8 @@
 import os
 import asyncio
 import pathlib
+from pprint import pprint
+
 from cognee.shared.logging_utils import setup_logging, ERROR
 
 import cognee
@@ -42,7 +44,7 @@ async def main():
 
     # Display search results
     for result_text in search_results:
-        print(result_text)
+        pprint(result_text)
 
 
 if __name__ == "__main__":

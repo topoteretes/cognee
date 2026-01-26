@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
+from cognee.shared.usage_logger import log_usage
 import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
@@ -91,6 +92,7 @@ async def health_check(request):
 
 
 @mcp.tool()
+@log_usage(function_name="MCP cognify", log_type="mcp_tool")
 async def cognify(
     data: str, graph_model_file: str = None, graph_model_name: str = None, custom_prompt: str = None
 ) -> list:
@@ -257,6 +259,7 @@ async def cognify(
 @mcp.tool(
     name="save_interaction", description="Logs user-agent interactions and query-answer pairs"
 )
+@log_usage(function_name="MCP save_interaction", log_type="mcp_tool")
 async def save_interaction(data: str) -> list:
     """
     Transform and save a user-agent interaction into structured knowledge.
@@ -316,7 +319,8 @@ async def save_interaction(data: str) -> list:
 
 
 @mcp.tool()
-async def search(search_query: str, search_type: str) -> list:
+@log_usage(function_name="MCP search", log_type="mcp_tool")
+async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -389,6 +393,13 @@ async def search(search_query: str, search_type: str) -> list:
 
         The search_type is case-insensitive and will be converted to uppercase.
 
+    top_k : int, optional
+        Maximum number of results to return (default: 10).
+        Controls the amount of context retrieved from the knowledge graph.
+        - Lower values (3-5): Faster, more focused results
+        - Higher values (10-20): More comprehensive, but slower and more context-heavy
+        Helps manage response size and context window usage in MCP clients.
+
     Returns
     -------
     list
@@ -425,13 +436,32 @@ async def search(search_query: str, search_type: str) -> list:
 
     """
 
-    async def search_task(search_query: str, search_type: str) -> str:
-        """Search the knowledge graph"""
+    async def search_task(search_query: str, search_type: str, top_k: int) -> str:
+        """
+        Internal task to execute knowledge graph search with result formatting.
+
+        Handles the actual search execution and formats results appropriately
+        for MCP clients based on the search type and execution mode (API vs direct).
+
+        Parameters
+        ----------
+        search_query : str
+            The search query in natural language
+        search_type : str
+            Type of search to perform (GRAPH_COMPLETION, CHUNKS, etc.)
+        top_k : int
+            Maximum number of results to return
+
+        Returns
+        -------
+        str
+            Formatted search results as a string, with format depending on search_type
+        """
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
         with redirect_stdout(sys.stderr):
             search_results = await cognee_client.search(
-                query_text=search_query, query_type=search_type
+                query_text=search_query, query_type=search_type, top_k=top_k
             )
 
             # Handle different result formats based on API vs direct mode
@@ -465,11 +495,12 @@ async def search(search_query: str, search_type: str) -> list:
                 else:
                     return str(search_results)
 
-    search_results = await search_task(search_query, search_type)
+    search_results = await search_task(search_query, search_type, top_k)
     return [types.TextContent(type="text", text=search_results)]
 
 
 @mcp.tool()
+@log_usage(function_name="MCP list_data", log_type="mcp_tool")
 async def list_data(dataset_id: str = None) -> list:
     """
     List all datasets and their data items with IDs for deletion operations.
@@ -598,6 +629,7 @@ async def list_data(dataset_id: str = None) -> list:
 
 
 @mcp.tool()
+@log_usage(function_name="MCP delete", log_type="mcp_tool")
 async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
     """
     Delete specific data from a dataset in the Cognee knowledge graph.
@@ -677,6 +709,7 @@ async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
 
 
 @mcp.tool()
+@log_usage(function_name="MCP prune", log_type="mcp_tool")
 async def prune():
     """
     Reset the Cognee knowledge graph by removing all stored information.
@@ -713,6 +746,7 @@ async def prune():
 
 
 @mcp.tool()
+@log_usage(function_name="MCP cognify_status", log_type="mcp_tool")
 async def cognify_status():
     """
     Get the current status of the cognify pipeline.
@@ -858,26 +892,11 @@ async def main():
 
         await setup()
 
-        # Run Alembic migrations from the main cognee directory where alembic.ini is located
+        # Run Cognee migrations
         logger.info("Running database migrations...")
-        migration_result = subprocess.run(
-            ["python", "-m", "alembic", "upgrade", "head"],
-            capture_output=True,
-            text=True,
-            cwd=Path(__file__).resolve().parent.parent.parent,
-        )
+        from cognee.run_migrations import run_migrations
 
-        if migration_result.returncode != 0:
-            migration_output = migration_result.stderr + migration_result.stdout
-            # Check for the expected UserAlreadyExists error (which is not critical)
-            if (
-                "UserAlreadyExists" in migration_output
-                or "User default_user@example.com already exists" in migration_output
-            ):
-                logger.warning("Warning: Default user already exists, continuing startup...")
-            else:
-                logger.error(f"Migration failed with unexpected error: {migration_output}")
-                sys.exit(1)
+        await run_migrations()
 
         logger.info("Database migrations done.")
     elif args.api_url:

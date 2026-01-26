@@ -177,7 +177,6 @@ class config:
     def set_vector_db_url(db_url: str):
         vector_db_config = get_vectordb_config()
         vector_db_config.vector_db_url = db_url
-
     # Translation configuration methods
 
     @staticmethod
@@ -203,3 +202,37 @@ class config:
                 object.__setattr__(translation_config, key, value)
             else:
                 raise InvalidConfigAttributeError(attribute=key)
+
+    def set(key: str, value):
+        """
+        Generic setter that maps configuration keys to their specific setter methods.
+        This enables CLI commands like 'cognee config set llm_api_key <value>'.
+        """
+        # Map configuration keys to their setter methods
+        setter_mapping = {
+            "llm_provider": "set_llm_provider",
+            "llm_model": "set_llm_model",
+            "llm_api_key": "set_llm_api_key",
+            "llm_endpoint": "set_llm_endpoint",
+            "graph_database_provider": "set_graph_database_provider",
+            "vector_db_provider": "set_vector_db_provider",
+            "vector_db_url": "set_vector_db_url",
+            "vector_db_key": "set_vector_db_key",
+            "chunk_size": "set_chunk_size",
+            "chunk_overlap": "set_chunk_overlap",
+            "chunk_strategy": "set_chunk_strategy",
+            "chunk_engine": "set_chunk_engine",
+            "classification_model": "set_classification_model",
+            "summarization_model": "set_summarization_model",
+            "graph_model": "set_graph_model",
+            "system_root_directory": "system_root_directory",
+            "data_root_directory": "data_root_directory",
+        }
+
+        if key not in setter_mapping:
+            raise InvalidConfigAttributeError(attribute=key)
+
+        method_name = setter_mapping[key]
+        method = getattr(config, method_name)
+        method(value)
+

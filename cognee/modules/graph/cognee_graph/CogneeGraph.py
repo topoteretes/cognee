@@ -1,5 +1,6 @@
 import time
 from cognee.shared.logging_utils import get_logger
+from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 from typing import List, Dict, Union, Optional, Type, Iterable, Tuple, Callable, Any
 
 from cognee.modules.graph.exceptions import (
@@ -44,6 +45,12 @@ class CogneeGraph(CogneeAbstractGraph):
 
     def add_edge(self, edge: Edge) -> None:
         self.edges.append(edge)
+
+        edge_text = edge.attributes.get("edge_text") or edge.attributes.get("relationship_type")
+        edge.attributes["edge_type_id"] = (
+            generate_edge_id(edge_id=edge_text) if edge_text else None
+        )  # Update edge with generated edge_type_id
+
         edge.node1.add_skeleton_edge(edge)
         edge.node2.add_skeleton_edge(edge)
         key = edge.get_distance_key()
@@ -215,9 +222,6 @@ class CogneeGraph(CogneeAbstractGraph):
                         edge_penalty=triplet_distance_penalty,
                     )
                     self.add_edge(edge)
-
-                    source_node.add_skeleton_edge(edge)
-                    target_node.add_skeleton_edge(edge)
                 else:
                     raise EntityNotFoundError(
                         message=f"Edge references nonexistent nodes: {source_id} -> {target_id}"
@@ -287,13 +291,7 @@ class CogneeGraph(CogneeAbstractGraph):
 
         for query_index, scored_results in enumerate(per_query_scored_results):
             for result in scored_results:
-                payload = getattr(result, "payload", None)
-                if not isinstance(payload, dict):
-                    continue
-                text = payload.get("text")
-                if not text:
-                    continue
-                matching_edges = self.edges_by_distance_key.get(str(text))
+                matching_edges = self.edges_by_distance_key.get(str(result.id))
                 if not matching_edges:
                     continue
                 for edge in matching_edges:
