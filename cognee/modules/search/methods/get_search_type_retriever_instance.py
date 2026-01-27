@@ -47,7 +47,9 @@ async def get_search_type_retriever_instance(
 
     """
     # Transform retriever specific config if empty to avoid None checks later
-    retriever_specific_config = kwargs.get("retriever_specific_config", {})
+    retriever_specific_config = kwargs.get("retriever_specific_config")
+    if retriever_specific_config is None:
+        retriever_specific_config = {}
 
     # Extract common defaults with fallback values from kwargs
     top_k = kwargs.get("top_k", 10)

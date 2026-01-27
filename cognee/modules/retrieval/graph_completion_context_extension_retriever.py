@@ -104,7 +104,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
         return triplets
 
-    async def get_completion(
+    async def get_completion_from_context(
         self,
         query: str,
         retrieved_objects: List[Edge],
