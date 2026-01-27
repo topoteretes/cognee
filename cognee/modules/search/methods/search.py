@@ -13,8 +13,9 @@ from cognee.context_global_variables import backend_access_control_enabled
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.search.types import (
-    SearchResult,
-    SearchType,
+   SearchResultDataset,
+   SearchResult,
+   SearchType,
 )
 from cognee.modules.search.operations import log_query, log_result
 from cognee.modules.users.models import User
@@ -26,6 +27,7 @@ from cognee import __version__ as cognee_version
 from .get_search_type_tools import get_search_type_tools
 from .no_access_control_search import no_access_control_search
 from ..utils.prepare_search_result import prepare_search_result
+from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps 
 
 logger = get_logger()
 
@@ -43,10 +45,11 @@ async def search(
     save_interaction: bool = False,
     last_k: Optional[int] = None,
     only_context: bool = False,
+    use_combined_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
-    verbose=False,
+    verbose: bool = False,
 ) -> List[SearchResult]:
     """
 
@@ -73,9 +76,11 @@ async def search(
         },
     )
 
+    actual_accessed_items = [] # Collect all accessed items here
+
     # Use search function filtered by permissions if access control is enabled
     if backend_access_control_enabled():
-        search_results = await authorized_search(
+        raw_search_results = await authorized_search(
             query_type=query_type,
             query_text=query_text,
             user=user,
@@ -92,8 +97,19 @@ async def search(
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
         )
+        if use_combined_context:
+            # raw_search_results is (completion, context, datasets)
+            _, context_data, _ = raw_search_results
+            if isinstance(context_data, list): # Expecting a list of Edge or similar
+                actual_accessed_items.extend(context_data)
+            # If context_data is a string, it's already textual and might not map to specific nodes for timestamp updates
+        else:
+            for result_tuple in raw_search_results:
+                _, context_data, _ = result_tuple
+                if isinstance(context_data, list): # Expecting a list of Edge or similar
+                    actual_accessed_items.extend(context_data)
     else:
-        search_results = [
+        raw_search_results = [
             await no_access_control_search(
                 query_type=query_type,
                 query_text=query_text,
@@ -110,6 +126,15 @@ async def search(
                 triplet_distance_penalty=triplet_distance_penalty,
             )
         ]
+        # In this case, raw_search_results is a list containing a single tuple
+        if raw_search_results:
+            _, context_data, _ = raw_search_results[0]
+            if isinstance(context_data, list): # Expecting a list of Edge or similar
+                actual_accessed_items.extend(context_data)
+
+    # Call the update_node_access_timestamps function here
+    # Pass the collected actual_accessed_items
+    await update_node_access_timestamps(actual_accessed_items)
 
     send_telemetry(
         "cognee.search EXECUTION COMPLETED",
@@ -119,6 +144,8 @@ async def search(
             "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
         },
     )
+
+    search_results = raw_search_results
 
     await log_result(
         query.id,
@@ -130,48 +157,65 @@ async def search(
         user.id,
     )
 
-    # This is for maintaining backwards compatibility
-    if backend_access_control_enabled():
-        return_value = []
-        for search_result in search_results:
-            prepared_search_results = await prepare_search_result(search_result)
+    if use_combined_context:
+        # Note: combined context search must always be verbose and return a CombinedSearchResult with graphs info
+        prepared_search_results = await prepare_search_result(
+            search_results[0] if isinstance(search_results, list) else search_results
+        )
+        result = prepared_search_results["result"]
+        graphs = prepared_search_results["graphs"]
+        context = prepared_search_results["context"]
+        datasets = prepared_search_results["datasets"]
 
-            result = prepared_search_results["result"]
-            graphs = prepared_search_results["graphs"]
-            context = prepared_search_results["context"]
-            datasets = prepared_search_results["datasets"]
-
-            if only_context:
-                search_result_dict = {
-                    "search_result": [context] if context else None,
-                    "dataset_id": datasets[0].id,
-                    "dataset_name": datasets[0].name,
-                    "dataset_tenant_id": datasets[0].tenant_id,
-                }
-                if verbose:
-                    # Include graphs only in verbose mode
-                    search_result_dict["graphs"] = graphs
-
-                return_value.append(search_result_dict)
-            else:
-                search_result_dict = {
-                    "search_result": [result] if result else None,
-                    "dataset_id": datasets[0].id,
-                    "dataset_name": datasets[0].name,
-                    "dataset_tenant_id": datasets[0].tenant_id,
-                }
-                if verbose:
-                    # Include graphs only in verbose mode
-                    search_result_dict["graphs"] = graphs
-                return_value.append(search_result_dict)
-
-        return return_value
+        return CombinedSearchResult(
+            result=result,
+            graphs=graphs,
+            context=context,
+            datasets=[
+                SearchResultDataset(
+                    id=dataset.id,
+                    name=dataset.name,
+                )
+                for dataset in datasets
+            ],
+        )
     else:
         return_value = []
         if only_context:
             for search_result in search_results:
                 prepared_search_results = await prepare_search_result(search_result)
-                return_value.append(prepared_search_results["context"])
+
+                result = prepared_search_results["result"]
+                graphs = prepared_search_results["graphs"]
+                context = prepared_search_results["context"]
+                datasets = prepared_search_results["datasets"]
+
+                if only_context:
+                    search_result_dict = {
+                        "search_result": [context] if context else None,
+                        "dataset_id": datasets[0].id,
+                        "dataset_name": datasets[0].name,
+                        "dataset_tenant_id": datasets[0].tenant_id,
+                    }
+                    if verbose:
+                        # Include graphs only in verbose mode
+                        search_result_dict["graphs"] = graphs
+
+                    return_value.append(search_result_dict)
+                else:
+                    search_result_dict = {
+                        "search_result": [result] if result else None,
+                        "dataset_id": datasets[0].id,
+                        "dataset_name": datasets[0].name,
+                        "dataset_tenant_id": datasets[0].tenant_id,
+                    }
+                    if verbose:
+                        # Include graphs only in verbose mode
+                        search_result_dict["graphs"] = graphs
+
+                    return_value.append(search_result_dict)
+
+            return return_value
         else:
             for search_result in search_results:
                 result, context, datasets = search_result
