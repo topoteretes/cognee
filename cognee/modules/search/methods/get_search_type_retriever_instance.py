@@ -74,6 +74,8 @@ async def get_search_type_retriever_instance(
                 "system_prompt_path": system_prompt_path,
                 "top_k": top_k,
                 "system_prompt": system_prompt,
+                "session_id": retriever_specific_config.get("session_id", None),
+                "response_model": retriever_specific_config.get("response_model", str),
             },
         ),
         SearchType.TRIPLET_COMPLETION: (
