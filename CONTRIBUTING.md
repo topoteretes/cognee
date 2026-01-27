@@ -149,6 +149,7 @@ git push origin feature/your-feature-name
    - Go to the [**cognee** repository](https://github.com/topoteretes/cognee) or [cognee community repository](https://github.com/topoteretes/cognee-community)
    - Click "Compare & Pull Request" and open a PR against dev branch
    - Fill in the PR template with details about your changes
+   - You MUST provide screenshots of unit and integration tests passing on your machine. We can't merge PRs otherwise
 
 ## 5. 📜 Developer Certificate of Origin (DCO)
 
