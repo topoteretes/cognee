@@ -47,7 +47,7 @@ class BaseRetriever(ABC):
         query: str,
         retrieved_objects: Any,
         context: Any,
-        session_id: Optional[str] = None,
+        session_id: Optional[str],
         response_model: Type = str,
     ) -> List[str]:
         """

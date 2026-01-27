@@ -30,8 +30,25 @@ from cognee.modules.retrieval.natural_language_retriever import NaturalLanguageR
 
 
 async def get_search_type_retriever_instance(
-    query_type: SearchType, query_text: str, **kwargs
+    query_type: SearchType,
+    query_text: str,
+    **kwargs,
 ) -> BaseRetriever:
+    """
+    Factory method to get the appropriate retriever instance based on the search type.
+
+    Args:
+        query_type: SearchType enum indicating the type of search.
+        query_text: query string.
+        retriever_specific_config: Retriever specific configuration dictionary.
+        **kwargs: General keyword arguments for retriever initialization.
+
+    Returns:
+
+    """
+    # Transform retriever specific config if empty to avoid None checks later
+    retriever_specific_config = kwargs.get("retriever_specific_config", {})
+
     # Extract common defaults with fallback values from kwargs
     top_k = kwargs.get("top_k", 10)
     system_prompt_path = kwargs.get("system_prompt_path", "answer_simple_question.txt")
@@ -102,6 +119,9 @@ async def get_search_type_retriever_instance(
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
+                "context_extension_rounds": retriever_specific_config.get(
+                    "context_extension_rounds", 4
+                ),
             },
         ),
         SearchType.GRAPH_SUMMARY_COMPLETION: (

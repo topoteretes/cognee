@@ -18,16 +18,6 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
     """
     Handles graph context completion for question answering tasks, extending context based
     on retrieved triplets.
-
-    Public methods:
-    - get_completion
-
-    Instance variables:
-    - user_prompt_path
-    - system_prompt_path
-    - top_k
-    - node_type
-    - node_name
     """
 
     def __init__(
@@ -41,20 +31,22 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         save_interaction: bool = False,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
+        context_extension_rounds: int = 4,
     ):
-        super().__init__(
-            user_prompt_path=user_prompt_path,
-            system_prompt_path=system_prompt_path,
-            top_k=top_k,
-            node_type=node_type,
-            node_name=node_name,
-            save_interaction=save_interaction,
-            system_prompt=system_prompt,
-            wide_search_top_k=wide_search_top_k,
-            triplet_distance_penalty=triplet_distance_penalty,
-        )
+        self.save_interaction = save_interaction
+        self.user_prompt_path = user_prompt_path
+        self.system_prompt_path = system_prompt_path
+        self.system_prompt = system_prompt
+        self.top_k = top_k if top_k is not None else 5
+        self.wide_search_top_k = wide_search_top_k
+        self.node_type = node_type
+        self.node_name = node_name
+        self.triplet_distance_penalty = triplet_distance_penalty
+        # context_extension_rounds: The maximum number of rounds to extend the context with
+        # new triplets before halting. (default 4)
+        self.context_extension_rounds = context_extension_rounds
 
-    async def get_retrieved_objects(self, query: str, context_extension_rounds=4) -> List[Edge]:
+    async def get_retrieved_objects(self, query: str) -> List[Edge]:
         """
         Extends the context for a given query by retrieving related triplets and generating new
         completions based on them.
@@ -67,8 +59,6 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         Parameters:
         -----------
             - query (str): The input query for which the completion is generated.
-            - context_extension_rounds: The maximum number of rounds to extend the context with
-              new triplets before halting. (default 4)
 
         Returns:
         --------
@@ -79,7 +69,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         context_text = await self.resolve_edges_to_text(triplets)
         round_idx = 1
 
-        while round_idx <= context_extension_rounds:
+        while round_idx <= self.context_extension_rounds:
             prev_size = len(triplets)
 
             logger.info(

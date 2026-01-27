@@ -45,6 +45,7 @@ async def search(
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
     verbose=False,
+    retriever_specific_config: Optional[dict] = None,
 ) -> List[SearchResult]:
     """
 
@@ -87,6 +88,7 @@ async def search(
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
+        retriever_specific_config=retriever_specific_config,
     )
 
     send_telemetry(
@@ -123,6 +125,7 @@ async def authorized_search(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
+    retriever_specific_config: Optional[dict] = None,
 ) -> List[Tuple[Any, Union[List[Edge], str], List[Dataset]]]:
     """
     Verifies access for provided datasets or uses all datasets user has read access for and performs search per dataset.
@@ -149,6 +152,7 @@ async def authorized_search(
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
+        retriever_specific_config=retriever_specific_config,
     )
 
     return search_results
@@ -169,6 +173,7 @@ async def search_in_datasets_context(
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
+    retriever_specific_config: Optional[dict] = None,
 ) -> List[Tuple[Any, Union[str, List[Edge]], List[Dataset]]]:
     """
     Searches all provided datasets and handles setting up of appropriate database context based on permissions.
@@ -190,6 +195,7 @@ async def search_in_datasets_context(
         session_id: Optional[str] = None,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
+        retriever_specific_config: Optional[dict] = None,
     ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
         # Set database configuration in async context for each dataset user has access for
         await set_database_global_context_variables(dataset.id, dataset.owner_id)
@@ -229,6 +235,7 @@ async def search_in_datasets_context(
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
+            retriever_specific_config=retriever_specific_config,
         )
 
     # Search every dataset async based on query and appropriate database configuration
@@ -250,6 +257,7 @@ async def search_in_datasets_context(
                 session_id=session_id,
                 wide_search_top_k=wide_search_top_k,
                 triplet_distance_penalty=triplet_distance_penalty,
+                retriever_specific_config=retriever_specific_config,
             )
         )
 
