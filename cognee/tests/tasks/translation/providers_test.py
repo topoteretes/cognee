@@ -58,7 +58,7 @@ async def test_llm_provider_long_text():
     provider = LLMTranslationProvider()
 
     long_text = """
-    La inteligencia artificial es una rama de la informática que se centra en 
+    La inteligencia artificial es una rama de la informática que se centra en
     crear sistemas capaces de realizar tareas que normalmente requieren inteligencia humana.
     Estos sistemas pueden aprender, razonar y resolver problemas complejos.
     """
