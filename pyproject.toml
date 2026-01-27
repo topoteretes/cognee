@@ -156,7 +156,7 @@ dev = [
     "mkdocstrings[python]>=0.26.2,<0.27",
 ]
 debug = ["debugpy>=1.8.9,<2.0.0"]
-redis = ["redis>=5.0.3,<6.0.0"]
+redis = ["redis>=5.0.3,<6.0.0", "redisvl>=0.6.0,<=1.0.0"]
 
 monitoring = ["sentry-sdk[fastapi]>=2.9.0,<3", "langfuse>=2.32.0,<3"]
 
