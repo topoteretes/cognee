@@ -139,8 +139,9 @@ services:
       - cognee-network
 
   redis:
-    image: redis:7-alpine
+    image: redis/redis-stack-server:latest
     container_name: redis
+    restart: always
     profiles:
       - redis
     ports:
@@ -149,7 +150,8 @@ services:
       - cognee-network
     volumes:
       - redis_data:/data
-    command: [ "redis-server", "--appendonly", "yes" ]
+    environment:
+      - REDIS_ARGS=--appendonly yes
 
 
   redisinsight:
