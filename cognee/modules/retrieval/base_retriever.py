@@ -47,8 +47,6 @@ class BaseRetriever(ABC):
         query: str,
         retrieved_objects: Any,
         context: Any,
-        session_id: Optional[str],
-        response_model: Type = str,
     ) -> List[str]:
         """
         Generates a final output or answer based on the query and retrieved context.
@@ -58,10 +56,6 @@ class BaseRetriever(ABC):
             retrieved_objects (List[Any]): The output from get_retrieved_objects.
             context (Optional[Any]): The formatted context string/data used to
                 augment the generation. Output from get_context_from_objects.
-            session_id (Optional[str]): Unique identifier for conversation history
-                and session-based caching.
-            response_model (Type): The expected return type or Pydantic model for
-                structured outputs. Defaults to str.
 
         Returns:
             List[Any]: A list containing the generated completions or response objects.

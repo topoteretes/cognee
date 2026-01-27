@@ -37,7 +37,6 @@ async def get_retriever_output(query_type: SearchType, query_text: str, **kwargs
             query=query_text,
             retrieved_objects=retrieved_objects,
             context=context,
-            session_id=kwargs.get("session_id", None),
         )
 
     search_result = SearchResultPayload(

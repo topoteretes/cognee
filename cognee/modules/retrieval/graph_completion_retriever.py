@@ -47,6 +47,8 @@ class GraphCompletionRetriever(BaseRetriever):
         save_interaction: bool = False,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.save_interaction = save_interaction
@@ -58,6 +60,10 @@ class GraphCompletionRetriever(BaseRetriever):
         self.node_type = node_type
         self.node_name = node_name
         self.triplet_distance_penalty = triplet_distance_penalty
+        # session_id (Optional[str]): Identifier for managing conversation history.
+        self.session_id = session_id
+        # response_model (Type): The Pydantic model or type for the expected response.
+        self.response_model = response_model
 
     async def get_retrieved_objects(self, query: str) -> List[Edge]:
         """
@@ -172,8 +178,6 @@ class GraphCompletionRetriever(BaseRetriever):
         query: str,
         retrieved_objects: Optional[List[Edge]],
         context: str,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
     ) -> List[Any]:
         """
         Generates an LLM response based on the query, context, and conversation history.
@@ -185,8 +189,6 @@ class GraphCompletionRetriever(BaseRetriever):
                                                      Output of get_retrieved_objects method.
             context (str): The text-resolved graph context.
                            Output of the get_context_from_objects method.
-            session_id (Optional[str]): Identifier for managing conversation history.
-            response_model (Type): The Pydantic model or type for the expected response.
 
         Returns:
             List[Any]: A list containing the generated response (completion).
@@ -201,7 +203,7 @@ class GraphCompletionRetriever(BaseRetriever):
         session_save = user_id and cache_config.caching
 
         if session_save:
-            conversation_history = await get_conversation_history(session_id=session_id)
+            conversation_history = await get_conversation_history(session_id=self.session_id)
 
             context_summary, completion = await asyncio.gather(
                 summarize_text(context),
@@ -212,7 +214,7 @@ class GraphCompletionRetriever(BaseRetriever):
                     system_prompt_path=self.system_prompt_path,
                     system_prompt=self.system_prompt,
                     conversation_history=conversation_history,
-                    response_model=response_model,
+                    response_model=self.response_model,
                 ),
             )
         else:
@@ -222,7 +224,7 @@ class GraphCompletionRetriever(BaseRetriever):
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
-                response_model=response_model,
+                response_model=self.response_model,
             )
 
         if self.save_interaction and retrieved_objects and completion:
@@ -235,7 +237,7 @@ class GraphCompletionRetriever(BaseRetriever):
                 query=query,
                 context_summary=context_summary,
                 answer=completion,
-                session_id=session_id,
+                session_id=self.session_id,
             )
 
         return [completion]

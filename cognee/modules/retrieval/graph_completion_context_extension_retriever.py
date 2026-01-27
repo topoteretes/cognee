@@ -32,16 +32,23 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
         context_extension_rounds: int = 4,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
     ):
-        self.save_interaction = save_interaction
-        self.user_prompt_path = user_prompt_path
-        self.system_prompt_path = system_prompt_path
-        self.system_prompt = system_prompt
-        self.top_k = top_k if top_k is not None else 5
-        self.wide_search_top_k = wide_search_top_k
-        self.node_type = node_type
-        self.node_name = node_name
-        self.triplet_distance_penalty = triplet_distance_penalty
+        super().__init__(
+            user_prompt_path=user_prompt_path,
+            system_prompt_path=system_prompt_path,
+            top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
+            save_interaction=save_interaction,
+            system_prompt=system_prompt,
+            wide_search_top_k=wide_search_top_k,
+            triplet_distance_penalty=triplet_distance_penalty,
+            session_id=session_id,
+            response_model=response_model,
+        )
+
         # context_extension_rounds: The maximum number of rounds to extend the context with
         # new triplets before halting. (default 4)
         self.context_extension_rounds = context_extension_rounds

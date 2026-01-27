@@ -95,6 +95,8 @@ async def get_search_type_retriever_instance(
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
+                "session_id": retriever_specific_config.get("session_id", None),
+                "response_model": retriever_specific_config.get("response_model", str),
             },
         ),
         SearchType.GRAPH_COMPLETION_COT: (
@@ -108,6 +110,21 @@ async def get_search_type_retriever_instance(
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
+                "max_iter": retriever_specific_config.get("max_iter", 4),
+                "validation_system_prompt_path": retriever_specific_config.get(
+                    "validation_system_prompt_path", "cot_validation_system_prompt.txt"
+                ),
+                "validation_user_prompt_path": retriever_specific_config.get(
+                    "validation_user_prompt_path", "cot_validation_user_prompt.txt"
+                ),
+                "followup_system_prompt_path": retriever_specific_config.get(
+                    "followup_system_prompt_path", "cot_followup_system_prompt.txt"
+                ),
+                "followup_user_prompt_path": retriever_specific_config.get(
+                    "followup_user_prompt_path", "cot_followup_user_prompt.txt"
+                ),
+                "session_id": retriever_specific_config.get("session_id", None),
+                "response_model": retriever_specific_config.get("response_model", str),
             },
         ),
         SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION: (
@@ -124,6 +141,8 @@ async def get_search_type_retriever_instance(
                 "context_extension_rounds": retriever_specific_config.get(
                     "context_extension_rounds", 4
                 ),
+                "session_id": retriever_specific_config.get("session_id", None),
+                "response_model": retriever_specific_config.get("response_model", str),
             },
         ),
         SearchType.GRAPH_SUMMARY_COMPLETION: (
