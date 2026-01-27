@@ -134,3 +134,73 @@ def test_get_raw_data_s3_streams_bytes_without_s3_dependency(client, monkeypatch
     assert response.status_code == 200
     assert response.content == b"hello from s3"
     assert response.headers.get("content-disposition") == 'attachment; filename="file.txt"'
+
+
+def test_get_raw_data_unsupported_scheme_returns_501(client, monkeypatch):
+    """Returns 501 for unsupported raw_data_location schemes (e.g., http://)."""
+    dataset_id = uuid.uuid4()
+    data_id = uuid.uuid4()
+
+    _patch_raw_download_dependencies(
+        monkeypatch,
+        dataset_id=dataset_id,
+        data_id=data_id,
+        raw_data_location="http://example.com/file.txt",
+        name="file.txt",
+        mime_type="text/plain",
+    )
+
+    response = client.get(f"/api/v1/datasets/{dataset_id}/data/{data_id}/raw")
+    assert response.status_code == 501
+    assert "Storage scheme 'http' not supported" in response.json()["detail"]
+
+
+def test_get_raw_data_plain_path_downloads_bytes(client, monkeypatch, tmp_path):
+    """Downloads bytes from a plain local path (no scheme)."""
+    dataset_id = uuid.uuid4()
+    data_id = uuid.uuid4()
+
+    file_path = tmp_path / "plain.txt"
+    content = b"plain content"
+    file_path.write_bytes(content)
+
+    _patch_raw_download_dependencies(
+        monkeypatch,
+        dataset_id=dataset_id,
+        data_id=data_id,
+        raw_data_location=str(file_path),
+        name="plain.txt",
+        mime_type="text/plain",
+    )
+
+    response = client.get(f"/api/v1/datasets/{dataset_id}/data/{data_id}/raw")
+    assert response.status_code == 200
+    assert response.content == content
+
+
+def test_get_raw_data_encoded_path_downloads_bytes(client, monkeypatch, tmp_path):
+    """Downloads bytes from a percent-encoded file URI (e.g. spaces)."""
+    dataset_id = uuid.uuid4()
+    data_id = uuid.uuid4()
+
+    file_name = "example file.txt"
+    file_path = tmp_path / file_name
+    content = b"content with spaces"
+    file_path.write_bytes(content)
+
+    # Convert to URI, which should encode space as %20
+    uri = file_path.as_uri()
+    assert "%20" in uri
+
+    _patch_raw_download_dependencies(
+        monkeypatch,
+        dataset_id=dataset_id,
+        data_id=data_id,
+        raw_data_location=uri,
+        name=file_name,
+        mime_type="text/plain",
+    )
+
+    response = client.get(f"/api/v1/datasets/{dataset_id}/data/{data_id}/raw")
+    assert response.status_code == 200
+    assert response.content == content

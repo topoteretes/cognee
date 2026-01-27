@@ -7,7 +7,7 @@ from fastapi import status
 from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
 from fastapi import HTTPException, Query, Depends
-from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, Response
 from urllib.parse import urlparse
 from pathlib import Path
 
@@ -417,7 +417,7 @@ def get_datasets_router() -> APIRouter:
     @router.get("/{dataset_id}/data/{data_id}/raw", response_class=FileResponse)
     async def get_raw_data(
         dataset_id: UUID, data_id: UUID, user: User = Depends(get_authenticated_user)
-    ):
+    ) -> Response:
         """
         Download the raw data file for a specific data item.
 
@@ -479,18 +479,13 @@ def get_datasets_router() -> APIRouter:
             )
 
         raw_location = data.raw_data_location
+        parsed_uri = urlparse(raw_location)
 
-        if raw_location.startswith("file://"):
-            from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
-
-            raw_location = get_data_file_path(raw_location)
-
-        if raw_location.startswith("s3://"):
+        if parsed_uri.scheme == "s3":
             from cognee.infrastructure.files.utils.open_data_file import open_data_file
             from cognee.infrastructure.utils.run_async import run_async
 
-            parsed = urlparse(raw_location)
-            download_name = Path(parsed.path).name or data.name
+            download_name = Path(parsed_uri.path).name or data.name
             media_type = data.mime_type or "application/octet-stream"
 
             async def file_iterator(chunk_size: int = 1024 * 1024):
@@ -507,11 +502,20 @@ def get_datasets_router() -> APIRouter:
                 headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
             )
 
-        path = Path(raw_location)
+        if parsed_uri.scheme in ("file", "") or (len(parsed_uri.scheme) == 1 and parsed_uri.scheme.isalpha()):
+            from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 
-        if not path.is_file():
-            raise DataNotFoundError(message=f"Raw file not found on disk for data ({data_id}).")
+            file_path = get_data_file_path(raw_location)
+            path = Path(file_path)
 
-        return FileResponse(path=path)
+            if not path.is_file():
+                raise DataNotFoundError(message=f"Raw file not found on disk for data ({data_id}).")
+
+            return FileResponse(path=path)
+
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=f"Storage scheme '{parsed_uri.scheme}' not supported for direct download.",
+        )
 
     return router
