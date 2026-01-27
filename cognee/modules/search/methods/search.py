@@ -283,14 +283,25 @@ def _backwards_compatible_search_results(search_results, verbose: bool):
         return return_value
     else:
         return_value = []
-        for search_result in search_results:
-            # Result attribute handles returning appropriate result based on set flags and outputs
-            return_value.append(search_result.result)
-
-        # For maintaining backwards compatibility
-        if len(return_value) == 1 and isinstance(return_value[0], list):
-            # If a single element list return the element directly
-            return return_value[0]
-        else:
-            # Otherwise return the list of results
+        if verbose:
+            for search_result in search_results:
+                # Include all different types of results only in verbose mode
+                search_result_dict = {
+                    "text_result": search_result.completion,
+                    "context_result": search_result.context,
+                    "objects_result": search_result.result_object,
+                }
+                return_value.append(search_result_dict)
             return return_value
+        else:
+            for search_result in search_results:
+                # Result attribute handles returning appropriate result based on set flags and outputs
+                return_value.append(search_result.result)
+
+            # For maintaining backwards compatibility
+            if len(return_value) == 1 and isinstance(return_value[0], list):
+                # If a single element list return the element directly
+                return return_value[0]
+            else:
+                # Otherwise return the list of results
+                return return_value
