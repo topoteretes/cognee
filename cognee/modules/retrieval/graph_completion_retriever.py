@@ -7,7 +7,7 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.tasks.storage import add_data_points
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
-from cognee.modules.retrieval.base_graph_retriever import BaseGraphRetriever
+from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
 from cognee.modules.retrieval.utils.session_cache import (
@@ -27,17 +27,13 @@ from cognee.modules.graph.utils import get_entity_nodes_from_triplets
 logger = get_logger("GraphCompletionRetriever")
 
 
-class GraphCompletionRetriever(BaseGraphRetriever):
+class GraphCompletionRetriever(BaseRetriever):
     """
     Retriever for handling graph-based completion searches.
 
-    This class provides methods to retrieve graph nodes and edges, resolve them into a
-    human-readable format, and generate completions based on graph context. Public methods
-    include:
-    - resolve_edges_to_text
-    - get_triplets
-    - get_context
-    - get_completion
+    This class implements the retrieval pipeline by searching for graph triplets (get_retrieved_objects function),
+    resolving those triplets into human-readable text context (get_context_from_objects function), and generating
+    LLM completions using the retrieved graph data (get_completion_from_context function).
     """
 
     def __init__(
@@ -136,7 +132,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
         return found_triplets
 
-    async def get_context(self, retrieved_objects) -> str:
+    async def get_context_from_objects(self, query, retrieved_objects) -> str:
         """
         Retrieves and resolves graph triplets into context based on a query.
 
@@ -160,7 +156,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
         return await self.resolve_edges_to_text(triplets)
 
-    async def get_completion(
+    async def get_completion_from_context(
         self,
         query: str,
         retrieved_objects: Optional[List[Edge]],
