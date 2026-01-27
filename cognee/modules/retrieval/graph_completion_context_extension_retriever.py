@@ -54,48 +54,29 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             triplet_distance_penalty=triplet_distance_penalty,
         )
 
-    async def get_completion(
-        self,
-        query: str,
-        context: Optional[List[Edge]] = None,
-        session_id: Optional[str] = None,
-        context_extension_rounds=4,
-        response_model: Type = str,
-    ) -> List[Any]:
+    async def get_retrieved_objects(self, query: str, context_extension_rounds=4) -> List[Edge]:
         """
         Extends the context for a given query by retrieving related triplets and generating new
         completions based on them.
 
-        The method runs for a specified number of rounds to enhance context until no new
+        The method runs for a specified number of rounds to enhance results until no new
         triplets are found or the maximum rounds are reached. It retrieves triplet suggestions
         based on a generated completion from previous iterations, logging the process of context
         extension.
 
         Parameters:
         -----------
-
             - query (str): The input query for which the completion is generated.
-            - context (Optional[Any]): The existing context to use for enhancing the query; if
-              None, it will be initialized from triplets generated for the query. (default None)
-            - session_id (Optional[str]): Optional session identifier for caching. If None,
-              defaults to 'default_session'. (default None)
             - context_extension_rounds: The maximum number of rounds to extend the context with
               new triplets before halting. (default 4)
-            - response_model (Type): The Pydantic model type for structured output. (default str)
 
         Returns:
         --------
-
-            - List[str]: A list containing the generated answer based on the query and the
-              extended context.
+            - List[Edge]: A list of retrieved triplet edges relevant to the query.
         """
-        triplets = context
 
-        if triplets is None:
-            triplets = await self.get_context(query)
-
+        triplets = await self.get_triplets(query)
         context_text = await self.resolve_edges_to_text(triplets)
-
         round_idx = 1
 
         while round_idx <= context_extension_rounds:
@@ -112,7 +93,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 system_prompt=self.system_prompt,
             )
 
-            triplets += await self.get_context(completion)
+            triplets += await self.get_triplets(completion)
             triplets = list(set(triplets))
             context_text = await self.resolve_edges_to_text(triplets)
 
@@ -131,6 +112,26 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
             round_idx += 1
 
+        return triplets
+
+    async def get_completion(
+        self,
+        query: str,
+        retrieved_objects: List[Edge],
+        context: str,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
+    ) -> List[Any]:
+        """
+        Returns a human readable answer based on the provided query and extended context derived from the retrieved objects.
+
+        Returns:
+        --------
+
+            - List[str]: A list containing the generated answer based on the query and the
+              extended context.
+        """
+
         # Check if we need to generate context summary for caching
         cache_config = CacheConfig()
         user = session_user.get()
@@ -141,10 +142,10 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             conversation_history = await get_conversation_history(session_id=session_id)
 
             context_summary, completion = await asyncio.gather(
-                summarize_text(context_text),
+                summarize_text(context),
                 generate_completion(
                     query=query,
-                    context=context_text,
+                    context=context,
                     user_prompt_path=self.user_prompt_path,
                     system_prompt_path=self.system_prompt_path,
                     system_prompt=self.system_prompt,
@@ -155,16 +156,16 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         else:
             completion = await generate_completion(
                 query=query,
-                context=context_text,
+                context=context,
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
                 response_model=response_model,
             )
 
-        if self.save_interaction and context_text and triplets and completion:
+        if self.save_interaction and context and retrieved_objects and completion:
             await self.save_qa(
-                question=query, answer=completion, context=context_text, triplets=triplets
+                question=query, answer=completion, context=context, triplets=retrieved_objects
             )
 
         if session_save:
