@@ -60,6 +60,16 @@ class GraphCompletionRetriever(BaseRetriever):
         self.triplet_distance_penalty = triplet_distance_penalty
 
     async def get_retrieved_objects(self, query: str) -> List[Edge]:
+        """
+        Performs a brute-force triplet search on the graph and updates access timestamps.
+
+        Args:
+            query (str): The search query to find relevant graph triplets.
+
+        Returns:
+            List[Edge]: A list of retrieved Edge objects (triplets).
+                       Returns an empty list if the graph is empty or no results are found.
+        """
         graph_engine = await get_graph_engine()
         is_empty = await graph_engine.is_empty()
 
@@ -134,18 +144,19 @@ class GraphCompletionRetriever(BaseRetriever):
 
     async def get_context_from_objects(self, query, retrieved_objects) -> str:
         """
-        Retrieves and resolves graph triplets into context based on a query.
+        Transforms raw retrieved graph triplets into a textual context string.
 
-        Parameters:
-        -----------
-
-            - query (str): The query string used to retrieve context from the graph triplets.
+        Args:
+            query (str): The original search query.
+            retrieved_objects (List[Edge]): The raw triplets returned from the search.
+                                            Output of the get_retrieved_objects method.
 
         Returns:
-        --------
+            str: A string representing the resolved graph context.
+                 Returns an empty list (as string) if no triplets are provided.
 
-            - str: A string representing the resolved context from the retrieved triplets, or an
-              empty string if no triplets are found.
+        Note: To avoid duplicate retrievals, ensure that retrieved_objects
+              are provided from get_retrieved_objects method call.
         """
 
         triplets = retrieved_objects
@@ -165,21 +176,23 @@ class GraphCompletionRetriever(BaseRetriever):
         response_model: Type = str,
     ) -> List[Any]:
         """
-        Generates a completion using graph connections context based on a query.
+        Generates an LLM response based on the query, context, and conversation history.
+        Optionally saves the interaction and updates the session cache.
 
-        Parameters:
-        -----------
-
-            - query (str): The query string for which a completion is generated.
-            - context (Optional[Any]): Optional context to use for generating the completion; if
-              not provided, context is retrieved based on the query. (default None)
-            - session_id (Optional[str]): Optional session identifier for caching. If None,
-              defaults to 'default_session'. (default None)
+        Args:
+            query (str): The user's question or prompt.
+            retrieved_objects (Optional[List[Edge]]): Raw triplets used for interaction mapping.
+                                                     Output of get_retrieved_objects method.
+            context (str): The text-resolved graph context.
+                           Output of the get_context_from_objects method.
+            session_id (Optional[str]): Identifier for managing conversation history.
+            response_model (Type): The Pydantic model or type for the expected response.
 
         Returns:
-        --------
+            List[Any]: A list containing the generated response (completion).
 
-            - Any: A generated completion based on the query and context provided.
+        Note: To avoid duplicate retrievals, ensure that retrieved_objects and context
+              are provided from previous method calls.
         """
 
         cache_config = CacheConfig()
