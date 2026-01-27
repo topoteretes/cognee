@@ -2,10 +2,9 @@ from datetime import datetime, timezone
 from typing import Tuple, List, Any, Dict, Optional
 from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.modules.storage.utils import copy_model
-import logging
+from cognee.shared.logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger()
 
 def _extract_field_data(field_value: Any) -> List[Tuple[Optional[Edge], List[DataPoint]]]:
     """Extract edge metadata and datapoints from a field value."""

@@ -1,13 +1,12 @@
-import logging
 import string
 from typing import List
 from collections import Counter
 
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.stop_words import DEFAULT_STOP_WORDS
+from cognee.shared.logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger()
 
 def _get_top_n_frequent_words(
     text: str, stop_words: set = None, top_n: int = 3, separator: str = ", "
