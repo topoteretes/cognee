@@ -173,6 +173,7 @@ async def search(
                 graphs = prepared_search_results["graphs"]
                 context = prepared_search_results["context"]
                 datasets = prepared_search_results["datasets"]
+                citations = prepared_search_results.get("citations", [])
 
                 if only_context:
                     search_result_dict = {
@@ -180,6 +181,7 @@ async def search(
                         "dataset_id": datasets[0].id,
                         "dataset_name": datasets[0].name,
                         "dataset_tenant_id": datasets[0].tenant_id,
+                        "citations": citations,
                     }
                     if verbose:
                         # Include graphs only in verbose mode
@@ -192,6 +194,7 @@ async def search(
                         "dataset_id": datasets[0].id,
                         "dataset_name": datasets[0].name,
                         "dataset_tenant_id": datasets[0].tenant_id,
+                        "citations": citations,
                     }
                     if verbose:
                         # Include graphs only in verbose mode
