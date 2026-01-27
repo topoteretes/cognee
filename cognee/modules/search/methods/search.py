@@ -4,11 +4,13 @@ from uuid import UUID
 from fastapi.encoders import jsonable_encoder
 from typing import Any, List, Optional, Tuple, Type, Union
 
+from cognee.infrastructure.environment.config.is_backend_access_control_enabled import (
+    is_backend_access_control_enabled,
+)
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.context_global_variables import backend_access_control_enabled
 
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
@@ -28,6 +30,9 @@ from .no_access_control_search import no_access_control_search
 from ..utils.prepare_search_result import prepare_search_result
 
 logger = get_logger()
+
+# Alias for backwards compatibility and test mocking
+backend_access_control_enabled = is_backend_access_control_enabled
 
 
 async def search(

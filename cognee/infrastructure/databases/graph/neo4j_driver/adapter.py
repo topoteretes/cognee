@@ -16,7 +16,6 @@ from cognee.tasks.temporal_graph.models import Timestamp
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
-    record_graph_changes,
 )
 from cognee.modules.storage.utils import JSONEncoder
 
@@ -184,7 +183,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
-    @record_graph_changes
     @override_distributed(queued_add_nodes)
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
         """
@@ -455,7 +453,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return flattened
 
-    @record_graph_changes
     @override_distributed(queued_add_edges)
     async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
         """

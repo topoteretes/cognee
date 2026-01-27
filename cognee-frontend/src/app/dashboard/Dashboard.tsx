@@ -121,6 +121,13 @@ export default function Dashboard({ accessToken }: DashboardProps) {
     setDatasets(datasets);
   }, []);
 
+  const [searchValue, setSearchValue] = useState<string>("");
+
+  const handleSearchDatasetInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const newSearchValue = event.currentTarget.value;
+    setSearchValue(newSearchValue);
+  }, []);
+
   const isCloudEnv = isCloudEnvironment();
 
   return (
@@ -142,7 +149,7 @@ export default function Dashboard({ accessToken }: DashboardProps) {
         <div className="px-5 py-4 lg:w-96 bg-white rounded-xl h-[calc(100%-2.75rem)]">
           <div className="relative mb-2">
             <label htmlFor="search-input"><SearchIcon className="absolute left-3 top-[10px] cursor-text" /></label>
-            <input id="search-input" className="text-xs leading-3 w-full h-8 flex flex-row items-center gap-2.5 rounded-3xl pl-9 placeholder-gray-300 border-gray-300 border-[1px] focus:outline-indigo-600" placeholder="Search datasets..." />
+            <input onChange={handleSearchDatasetInputChange} id="search-input" className="text-xs leading-3 w-full h-8 flex flex-row items-center gap-2.5 rounded-3xl pl-9 placeholder-gray-300 border-gray-300 border-[1px] focus:outline-indigo-600" placeholder="Search datasets..." />
           </div>
 
           <AddDataToCognee
@@ -161,6 +168,7 @@ export default function Dashboard({ accessToken }: DashboardProps) {
           <div className="mt-7 mb-14">
             <CogneeInstancesAccordion>
               <InstanceDatasetsAccordion
+                searchValue={searchValue}
                 onDatasetsChange={handleDatasetsChange}
               />
             </CogneeInstancesAccordion>

@@ -104,6 +104,9 @@ async def test_deduplication():
 
 @pytest.mark.asyncio
 async def test_deduplication_postgres():
+    # Disable backend access control to avoid dataset handler mismatch
+    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "False"
+
     cognee.config.set_vector_db_config(
         {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "pgvector"}
     )
