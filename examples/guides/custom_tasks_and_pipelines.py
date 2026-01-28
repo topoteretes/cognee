@@ -36,7 +36,6 @@ async def extract_people(text: str) -> List[Person]:
     system_prompt = (
         "Extract people mentioned in the text. "
         "Return as `persons: Person[]` with each Person having `name` and optional `knows` relations. "
-        "If the text says someone knows someone set `knows` accordingly. "
         "Infer ‘knows’ only when there is a clear interpersonal interaction in the text."
     )
     people_llm = await LLMGateway.acreate_structured_output(text, system_prompt, PeopleLLM)
