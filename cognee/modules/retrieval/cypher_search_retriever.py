@@ -23,10 +23,12 @@ class CypherSearchRetriever(BaseRetriever):
         self,
         user_prompt_path: str = "context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
+        session_id: Optional[str] = None,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
+        self.session_id = session_id
 
     async def get_retrieved_objects(self, query: str) -> Any:
         try:
@@ -59,7 +61,9 @@ class CypherSearchRetriever(BaseRetriever):
 
             - Any: The result of the cypher query execution.
         """
-        return jsonable_encoder(retrieved_objects)
+        # TODO: Do we want to return a string response here?
+        # return jsonable_encoder(retrieved_objects)
+        return None
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Optional[Any] = None
@@ -75,7 +79,6 @@ class CypherSearchRetriever(BaseRetriever):
             - query (str): The query to retrieve context.
             - context (Optional[Any]): Optional context to use, otherwise fetched using the
               query. (default None)
-            - session_id (Optional[str]): Optional session identifier for caching. If None,
               defaults to 'default_session'. (default None)
 
         Returns:
@@ -84,4 +87,4 @@ class CypherSearchRetriever(BaseRetriever):
             - Any: The context, either provided or retrieved.
         """
         # TODO: Do we want to generate a completion using LLM here?
-        return context
+        return None
