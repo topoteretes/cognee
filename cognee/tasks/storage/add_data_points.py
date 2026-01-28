@@ -4,6 +4,7 @@ from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.utils import deduplicate_nodes_and_edges, get_graph_from_model
 from .index_data_points import index_data_points
+from .index_data_points import index_datapoints_into_cache
 from .index_graph_edges import index_graph_edges
 from cognee.modules.engine.models import Triplet
 from cognee.shared.logging_utils import get_logger
@@ -96,6 +97,7 @@ async def add_data_points(
         triplets = _create_triplets_from_graph(nodes, edges)
         if triplets:
             await index_data_points(triplets)
+            await index_datapoints_into_cache(triplets)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
 
     return data_points
