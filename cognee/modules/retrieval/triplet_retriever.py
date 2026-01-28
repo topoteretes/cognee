@@ -32,19 +32,23 @@ class TripletRetriever(BaseRetriever):
         system_prompt_path: str = "answer_simple_question.txt",
         system_prompt: Optional[str] = None,
         top_k: Optional[int] = 5,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 5
         self.system_prompt = system_prompt
+        self.session_id = session_id
+        self.response_model = response_model
 
-    async def get_context(self, query: str) -> str:
+    async def get_retrieved_objects(self, query: str) -> Any:
         """
-        Retrieves relevant triplets as context.
+        Retrieves relevant triplets.
 
-        Fetches triplets based on a query from a vector engine and combines their text.
-        Returns empty string if no triplets are found. Raises NoDataError if the collection is not
+        Fetches triplets based on a query from a vector engine.
+        Returns empty list if no triplets are found. Raises NoDataError if the collection is not
         found.
 
         Parameters:
@@ -55,8 +59,7 @@ class TripletRetriever(BaseRetriever):
         Returns:
         --------
 
-            - str: A string containing the combined text of the retrieved triplets, or an
-              empty string if none are found.
+            - Any: A list containing the retrieved triplets, or an empty list if none are found.
         """
         vector_engine = get_vector_engine()
 
@@ -72,22 +75,21 @@ class TripletRetriever(BaseRetriever):
             )
 
             if len(found_triplets) == 0:
-                return ""
+                return []
 
-            triplets_payload = [found_triplet.payload["text"] for found_triplet in found_triplets]
-            combined_context = "\n".join(triplets_payload)
-            return combined_context
+            return found_triplets
         except CollectionNotFoundError as error:
             logger.error("Triplet_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
 
-    async def get_completion(
-        self,
-        query: str,
-        context: Optional[Any] = None,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
-    ) -> List[Any]:
+    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
+        triplets_payload = [found_triplet.payload["text"] for found_triplet in retrieved_objects]
+        combined_context = "\n".join(triplets_payload)
+        return combined_context
+
+    async def get_completion_from_context(
+        self, query: str, retrieved_objects: Any, context: Any
+    ) -> List[str]:
         """
         Generates an LLM completion using the context.
 
@@ -109,9 +111,6 @@ class TripletRetriever(BaseRetriever):
 
             - Any: The generated completion based on the provided query and context.
         """
-        if context is None:
-            context = await self.get_context(query)
-
         cache_config = CacheConfig()
         user = session_user.get()
         user_id = getattr(user, "id", None)
@@ -121,14 +120,11 @@ class TripletRetriever(BaseRetriever):
             completion = await self._get_completion_with_session(
                 query=query,
                 context=context,
-                session_id=session_id,
-                response_model=response_model,
             )
         else:
             completion = await self._get_completion_without_session(
                 query=query,
                 context=context,
-                response_model=response_model,
             )
 
         return [completion]
@@ -137,11 +133,9 @@ class TripletRetriever(BaseRetriever):
         self,
         query: str,
         context: str,
-        session_id: Optional[str],
-        response_model: Type,
     ) -> Any:
         """Generate completion with session history and caching."""
-        conversation_history = await get_conversation_history(session_id=session_id)
+        conversation_history = await get_conversation_history(session_id=self.session_id)
 
         context_summary, completion = await asyncio.gather(
             summarize_text(context),
@@ -152,7 +146,7 @@ class TripletRetriever(BaseRetriever):
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
                 conversation_history=conversation_history,
-                response_model=response_model,
+                response_model=self.response_model,
             ),
         )
 
@@ -160,7 +154,7 @@ class TripletRetriever(BaseRetriever):
             query=query,
             context_summary=context_summary,
             answer=completion,
-            session_id=session_id,
+            session_id=self.session_id,
         )
 
         return completion
@@ -169,7 +163,6 @@ class TripletRetriever(BaseRetriever):
         self,
         query: str,
         context: str,
-        response_model: Type,
     ) -> Any:
         """Generate completion without session history."""
         completion = await generate_completion(
@@ -178,7 +171,7 @@ class TripletRetriever(BaseRetriever):
             user_prompt_path=self.user_prompt_path,
             system_prompt_path=self.system_prompt_path,
             system_prompt=self.system_prompt,
-            response_model=response_model,
+            response_model=self.response_model,
         )
 
         return completion
