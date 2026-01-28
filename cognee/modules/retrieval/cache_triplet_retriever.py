@@ -1,11 +1,3 @@
-"""
-Triplet-style retriever that reads from the cache vector DB (Redis) instead of the default vector DB.
-
-Uses the same completion flow as TripletRetriever but get_context() queries the "cache"
-collection via get_cache_vector_engine(). Works with cognee.search when query_type is
-SearchType.TRIPLET_COMPLETION_CACHE.
-"""
-
 import asyncio
 from typing import Any, Optional, Type, List
 
@@ -25,7 +17,6 @@ from cognee.infrastructure.databases.cache.config import CacheConfig
 logger = get_logger("CacheTripletRetriever")
 
 
-# Must match the collection used by index_datapoints_into_cache
 CACHE_COLLECTION_NAME = "cache"
 
 
