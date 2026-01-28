@@ -172,7 +172,16 @@ async def get_search_type_retriever_instance(
                 "session_id": retriever_specific_config.get("session_id", None),
             },
         ),
-        SearchType.NATURAL_LANGUAGE: (NaturalLanguageRetriever, {}),
+        SearchType.NATURAL_LANGUAGE: (
+            NaturalLanguageRetriever,
+            {
+                "session_id": retriever_specific_config.get("session_id", None),
+                "system_prompt_path": retriever_specific_config.get(
+                    "system_prompt_path", "natural_language_retriever_system.txt"
+                ),
+                "max_attempts": retriever_specific_config.get("max_attempts", 3),
+            },
+        ),
         SearchType.TEMPORAL: (
             TemporalRetriever,
             {
