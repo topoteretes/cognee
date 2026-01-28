@@ -5,7 +5,7 @@ import time
 from typing import Any, Union, List, Dict, Optional
 from urllib.parse import urlparse
 import httpx
-
+import os
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.web_scraper.types import UrlsToHtmls
 
@@ -47,8 +47,8 @@ class DefaultUrlCrawler:
         *,
         concurrency: int = 5,
         crawl_delay: float = 0.5,
-        max_crawl_delay: Optional[float] = 10.0,
-        timeout: float = 15.0,
+        max_crawl_delay: Optional[float] = float(os.getenv("WEB_SCRAPER_MAX_DELAY", 10.0)),
+        timeout: float = float(os.getenv("WEB_SCRAPER_TIMEOUT", 15.0)),
         max_retries: int = 2,
         retry_delay_factor: float = 0.5,
         headers: Optional[Dict[str, str]] = None,

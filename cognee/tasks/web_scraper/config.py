@@ -16,7 +16,7 @@ class DefaultCrawlerConfig(BaseModel):
     max_crawl_delay: Optional[float] = (
         10.0  # Maximum crawl delay to respect from robots.txt (None = no limit)
     )
-    timeout: float = 15.0
+    timeout: float = float(os.getenv("WEB_SCRAPER_TIMEOUT", 15.0))
     max_retries: int = 2
     retry_delay_factor: float = 0.5
     headers: Optional[Dict[str, str]] = None
