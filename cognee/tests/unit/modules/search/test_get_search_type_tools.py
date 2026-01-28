@@ -154,6 +154,11 @@ async def test_feedback_uses_last_k():
         (SearchType.RAG_COMPLETION, "CompletionRetriever", ("get_completion", "get_context")),
         (SearchType.TRIPLET_COMPLETION, "TripletRetriever", ("get_completion", "get_context")),
         (
+            SearchType.TRIPLET_COMPLETION_CACHE,
+            "CacheTripletRetriever",
+            ("get_completion", "get_context"),
+        ),
+        (
             SearchType.GRAPH_COMPLETION,
             "GraphCompletionRetriever",
             ("get_completion", "get_context"),
