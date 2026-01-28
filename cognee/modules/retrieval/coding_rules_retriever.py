@@ -28,10 +28,10 @@ class CodingRulesRetriever(BaseRetriever):
                     for nodeset in self.rules_nodeset_name
                 ]
             )
-            return rules_list
+            return reduce(lambda x, y: x + y, rules_list, [])
 
     async def get_context_from_objects(self, query, retrieved_objects):
-        return reduce(lambda x, y: x + y, retrieved_objects, [])
+        return retrieved_objects
 
     async def get_completion_from_context(self, query, retrieved_objects, context):
         # TODO: Add completion generation logic if needed
