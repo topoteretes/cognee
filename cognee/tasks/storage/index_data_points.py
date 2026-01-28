@@ -7,50 +7,31 @@ from cognee.infrastructure.engine import DataPoint
 logger = get_logger("index_data_points")
 
 
+CACHE_COLLECTION_NAME = "cache"
+
+
 async def index_datapoints_into_cache(data_points: list[DataPoint]):
-    """Index data points into the cache vector engine (Redis), same logic as index_data_points.
+    """Index data points into the cache vector engine (Redis) into a single collection named 'cache'.
 
-    Uses get_cache_vector_engine() and the same batching/grouping by type and index field.
-    Not wired into any pipeline by default; call explicitly when cache indexing is needed.
+    Same batching and index_fields logic as index_data_points, but all data is stored in the
+    collection named 'cache'. Not wired into any pipeline by default.
     """
-    data_points_by_type = {}
-
     cache_engine = get_cache_vector_engine()
+    await cache_engine.create_collection(CACHE_COLLECTION_NAME)
 
+    to_index: list[DataPoint] = []
     for data_point in data_points:
-        data_point_type = type(data_point)
-        type_name = data_point_type.__name__
-
         for field_name in data_point.metadata["index_fields"]:
             if getattr(data_point, field_name, None) is None:
                 continue
-
-            if type_name not in data_points_by_type:
-                data_points_by_type[type_name] = {}
-
-            if field_name not in data_points_by_type[type_name]:
-                await cache_engine.create_vector_index(type_name, field_name)
-                data_points_by_type[type_name][field_name] = []
-
             indexed_data_point = data_point.model_copy()
             indexed_data_point.metadata["index_fields"] = [field_name]
-            data_points_by_type[type_name][field_name].append(indexed_data_point)
+            to_index.append(indexed_data_point)
 
     batch_size = cache_engine.embedding_engine.get_batch_size()
-
-    batches = (
-        (type_name, field_name, points[i : i + batch_size])
-        for type_name, fields in data_points_by_type.items()
-        for field_name, points in fields.items()
-        for i in range(0, len(points), batch_size)
-    )
-
-    tasks = [
-        asyncio.create_task(cache_engine.index_data_points(type_name, field_name, batch_points))
-        for type_name, field_name, batch_points in batches
-    ]
-
-    await asyncio.gather(*tasks)
+    for i in range(0, len(to_index), batch_size):
+        batch_points = to_index[i : i + batch_size]
+        await cache_engine.create_data_points(CACHE_COLLECTION_NAME, batch_points)
 
     return data_points
 
