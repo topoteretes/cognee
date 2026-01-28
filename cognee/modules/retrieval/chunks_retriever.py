@@ -1,4 +1,4 @@
-from typing import Any, Optional, List
+from typing import Any, Optional, List, Union
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -30,10 +30,11 @@ class ChunksRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
-    ) -> List[str]:
+    ) -> Union[List[str], List[dict]]:
         """
         Generates a completion using document chunks context.
-        In case of the Chunks Retriever, it returns the payloads of chunks found during vector search.
+        In case of the Chunks Retriever, we do not generate a completion, we just return
+        the payloads of found chunks.
 
         Parameters:
         -----------
@@ -45,17 +46,30 @@ class ChunksRetriever(BaseRetriever):
         Returns:
         --------
 
-            - List[str]: The payloads of chunks found during vector search.
+            - List[dict]: A list of payloads of found chunks.
         """
-
-        # chunk_payloads = [found_chunk.payload for found_chunk in retrieved_objects]
-        # logger.info(f"Returning {len(chunk_payloads)} chunk payloads")
-        # return chunk_payloads
-        return []
+        # TODO: Do we want to generate a completion using LLM here?
+        chunk_payloads = [found_chunk.payload for found_chunk in retrieved_objects]
+        return chunk_payloads
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
-        chunk_payloads = [found_chunk.payload["text"] for found_chunk in retrieved_objects]
-        return "\n".join(chunk_payloads)
+        """
+        Retrieves context from retrieved chunks, in text form.
+
+        Parameters:
+        -----------
+
+            - query (str): The query string used to search for relevant document chunks.
+            - retrieved_objects (Any): The retrieved objects to be used for generating textual context.
+
+        Returns:
+        --------
+
+            - str: A string containing the combined text of the retrieved chunks, or an
+              empty string if none are found.
+        """
+        chunk_payload_texts = [found_chunk.payload["text"] for found_chunk in retrieved_objects]
+        return "\n".join(chunk_payload_texts)
 
     async def get_retrieved_objects(self, query: str) -> Any:
         """
@@ -67,7 +81,7 @@ class ChunksRetriever(BaseRetriever):
             - query (str): The query string to search for relevant document chunks.
         Returns:
         --------
-            - Any: A list of document chunk payloads retrieved from the search.
+            - Any: A list of document chunks retrieved from the search.
         """
         logger.info(
             f"Starting chunk retrieval for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"

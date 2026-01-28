@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Type, List
+from typing import Any, Optional, Type, List, Union
 
 
 class BaseRetriever(ABC):
@@ -47,7 +47,7 @@ class BaseRetriever(ABC):
         query: str,
         retrieved_objects: Any,
         context: Any,
-    ) -> List[str]:
+    ) -> Union[List[str], List[dict]]:
         """
         Generates a final output or answer based on the query and retrieved context.
 

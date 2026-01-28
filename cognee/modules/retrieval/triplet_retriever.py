@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Optional, Type, List
+from typing import Any, Optional, Type, List, Union
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -89,7 +89,7 @@ class TripletRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
-    ) -> List[str]:
+    ) -> Union[List[str], List[dict]]:
         """
         Generates an LLM completion using the context.
 
