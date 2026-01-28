@@ -160,7 +160,18 @@ async def get_search_type_retriever_instance(
                 "triplet_distance_penalty": triplet_distance_penalty,
             },
         ),
-        SearchType.CYPHER: (CypherSearchRetriever, {}),
+        SearchType.CYPHER: (
+            CypherSearchRetriever,
+            {
+                "user_prompt_path": retriever_specific_config.get(
+                    "user_prompt_path", "context_for_question.txt"
+                ),
+                "system_prompt_path": retriever_specific_config.get(
+                    "system_prompt_path", "answer_simple_question.txt"
+                ),
+                "session_id": retriever_specific_config.get("session_id", None),
+            },
+        ),
         SearchType.NATURAL_LANGUAGE: (NaturalLanguageRetriever, {}),
         SearchType.TEMPORAL: (
             TemporalRetriever,

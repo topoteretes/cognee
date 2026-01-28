@@ -37,16 +37,21 @@ class SearchResultPayload(BaseModel):
         def is_simple(item):
             return isinstance(item, (int, float, dict, str, bool, type(None)))
 
-        # Handle Lists
-        if isinstance(v, list):
+        if isinstance(v, list) and all(isinstance(item, dict) for item in v):
+            # Handle List of Dictionaries
+            return [
+                {key: (val if is_simple(val) else str(val)) for key, val in item.items()}
+                for item in v
+            ]
+        elif isinstance(v, list):
+            # Handle Lists
             return [item if is_simple(item) else str(item) for item in v]
-
-        # Handle Dictionaries
-        if isinstance(v, dict):
+        elif isinstance(v, dict):
+            # Handle Dictionaries
             return {key: (val if is_simple(val) else str(val)) for key, val in v.items()}
-
-        # Fallback for the object itself
-        return v if is_simple(v) else str(v)
+        else:
+            # Fallback for the object itself
+            return v if is_simple(v) else str(v)
 
     @property
     def result(self) -> Any:
@@ -56,5 +61,7 @@ class SearchResultPayload(BaseModel):
             return self.context
         elif self.completion:
             return self.completion
+        elif self.context:
+            return self.context
         else:
             return self.result_object
