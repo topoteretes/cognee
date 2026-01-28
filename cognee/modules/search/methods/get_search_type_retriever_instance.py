@@ -162,7 +162,18 @@ async def get_search_type_retriever_instance(
                 "triplet_distance_penalty": triplet_distance_penalty,
             },
         ),
-        SearchType.CYPHER: (CypherSearchRetriever, {}),
+        SearchType.CYPHER: (
+            CypherSearchRetriever,
+            {
+                "user_prompt_path": retriever_specific_config.get(
+                    "user_prompt_path", "context_for_question.txt"
+                ),
+                "system_prompt_path": retriever_specific_config.get(
+                    "system_prompt_path", "answer_simple_question.txt"
+                ),
+                "session_id": retriever_specific_config.get("session_id", None),
+            },
+        ),
         SearchType.NATURAL_LANGUAGE: (NaturalLanguageRetriever, {}),
         SearchType.TEMPORAL: (
             TemporalRetriever,
@@ -170,6 +181,19 @@ async def get_search_type_retriever_instance(
                 "top_k": top_k,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
+                "session_id": retriever_specific_config.get("session_id", None),
+                "response_model": retriever_specific_config.get("response_model", str),
+                "user_prompt_path": retriever_specific_config.get(
+                    "user_prompt_path", "graph_context_for_question.txt"
+                ),
+                "system_prompt_path": retriever_specific_config.get(
+                    "system_prompt_path", "answer_simple_question.txt"
+                ),
+                "time_extraction_prompt_path": retriever_specific_config.get(
+                    "time_extraction_prompt_path", "extract_query_time.txt"
+                ),
+                "node_type": retriever_specific_config.get("node_type", None),
+                "node_name": retriever_specific_config.get("node_name", None),
             },
         ),
         SearchType.CHUNKS_LEXICAL: (JaccardChunksRetriever, {"top_k": top_k}),

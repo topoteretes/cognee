@@ -28,7 +28,22 @@ class CypherSearchRetriever(BaseRetriever):
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
 
-    async def get_context(self, query: str) -> Any:
+    async def get_retrieved_objects(self, query: str) -> Any:
+        try:
+            graph_engine = await get_graph_engine()
+            is_empty = await graph_engine.is_empty()
+
+            if is_empty:
+                logger.warning("Search attempt on an empty knowledge graph")
+                return []
+
+            result = await graph_engine.query(query)
+        except Exception as e:
+            logger.error("Failed to execture cypher search retrieval: %s", str(e))
+            raise CypherSearchError() from e
+        return result
+
+    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> Any:
         """
         Retrieves relevant context using a cypher query.
 
@@ -44,22 +59,10 @@ class CypherSearchRetriever(BaseRetriever):
 
             - Any: The result of the cypher query execution.
         """
-        try:
-            graph_engine = await get_graph_engine()
-            is_empty = await graph_engine.is_empty()
+        return jsonable_encoder(retrieved_objects)
 
-            if is_empty:
-                logger.warning("Search attempt on an empty knowledge graph")
-                return []
-
-            result = jsonable_encoder(await graph_engine.query(query))
-        except Exception as e:
-            logger.error("Failed to execture cypher search retrieval: %s", str(e))
-            raise CypherSearchError() from e
-        return result
-
-    async def get_completion(
-        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
+    async def get_completion_from_context(
+        self, query: str, retrieved_objects: Any, context: Optional[Any] = None
     ) -> Any:
         """
         Returns the graph connections context.
@@ -80,6 +83,5 @@ class CypherSearchRetriever(BaseRetriever):
 
             - Any: The context, either provided or retrieved.
         """
-        if context is None:
-            context = await self.get_context(query)
+        # TODO: Do we want to generate a completion using LLM here?
         return context
