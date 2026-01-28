@@ -165,7 +165,7 @@ class config:
             if hasattr(vector_db_config, key):
                 object.__setattr__(vector_db_config, key, value)
             else:
-                InvalidConfigAttributeError(attribute=key)
+                raise InvalidConfigAttributeError(attribute=key)
 
     @staticmethod
     def set_vector_db_key(db_key: str):
