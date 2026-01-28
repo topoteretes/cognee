@@ -28,11 +28,25 @@ class SearchResultPayload(BaseModel):
 
     @field_serializer("result_object")
     def serialize_complex_types(self, v: Any):
-        # Handle serialization of complex types in result_object.
-        # If result_object is a complex class, convert it to string here.
+        """
+        Custom serializer to handle complex types in result_object.
+        Transforms non-JSON-compatible types to their string representation.
+        """
+
+        # Helper to check if a value is a "simple" JSON-compatible type
+        def is_simple(item):
+            return isinstance(item, (int, float, dict, str, bool, type(None)))
+
+        # Handle Lists
         if isinstance(v, list):
-            return [str(i) if not isinstance(i, (int, float, dict, str)) else i for i in v]
-        return v
+            return [item if is_simple(item) else str(item) for item in v]
+
+        # Handle Dictionaries
+        if isinstance(v, dict):
+            return {key: (val if is_simple(val) else str(val)) for key, val in v.items()}
+
+        # Fallback for the object itself
+        return v if is_simple(v) else str(v)
 
     @property
     def result(self) -> Any:

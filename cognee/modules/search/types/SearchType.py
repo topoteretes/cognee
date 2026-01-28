@@ -15,6 +15,6 @@ class SearchType(str, Enum):
     GRAPH_COMPLETION_COT = "GRAPH_COMPLETION_COT"
     GRAPH_COMPLETION_CONTEXT_EXTENSION = "GRAPH_COMPLETION_CONTEXT_EXTENSION"
     FEELING_LUCKY = "FEELING_LUCKY"
-    TEMPORAL = "TEMPORAL"  # TODO: Update with search refactor - IGOR
-    CODING_RULES = "CODING_RULES"  # TODO: Update with search refactor - IGOR
+    TEMPORAL = "TEMPORAL"  # Test temporal Igor
+    CODING_RULES = "CODING_RULES"  # Test coding rules Igor
     CHUNKS_LEXICAL = "CHUNKS_LEXICAL"  # TODO: Update with search refactor - Andrej
