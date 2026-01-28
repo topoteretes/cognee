@@ -12,7 +12,7 @@ class CodingRulesRetriever(BaseRetriever):
     """Retriever for handling codeing rule based searches."""
 
     def __init__(self, rules_nodeset_name: Optional[List[str]] = None):
-        if isinstance(rules_nodeset_name, list):
+        if isinstance(rules_nodeset_name, list) or rules_nodeset_name is None:
             if not rules_nodeset_name:
                 # If there is no provided nodeset set to coding_agent_rules
                 rules_nodeset_name = ["coding_agent_rules"]
@@ -30,9 +30,9 @@ class CodingRulesRetriever(BaseRetriever):
             )
             return rules_list
 
-    async def get_context_from_objects(self, query_text, retrieved_objects):
+    async def get_context_from_objects(self, query, retrieved_objects):
         return reduce(lambda x, y: x + y, retrieved_objects, [])
 
-    async def get_completion_from_context(self, query_text, retrieved_objects, context):
+    async def get_completion_from_context(self, query, retrieved_objects, context):
         # TODO: Add completion generation logic if needed
         return context

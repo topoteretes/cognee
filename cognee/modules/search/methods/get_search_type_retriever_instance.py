@@ -74,7 +74,7 @@ async def get_search_type_retriever_instance(
                 "system_prompt_path": system_prompt_path,
                 "top_k": top_k,
                 "system_prompt": system_prompt,
-                "session_id": retriever_specific_config.get("session_id", None),
+                "session_id": retriever_specific_config.get("session_id"),
                 "response_model": retriever_specific_config.get("response_model", str),
             },
         ),
@@ -99,7 +99,7 @@ async def get_search_type_retriever_instance(
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
-                "session_id": retriever_specific_config.get("session_id", None),
+                "session_id": retriever_specific_config.get("session_id"),
                 "response_model": retriever_specific_config.get("response_model", str),
             },
         ),
@@ -127,7 +127,7 @@ async def get_search_type_retriever_instance(
                 "followup_user_prompt_path": retriever_specific_config.get(
                     "followup_user_prompt_path", "cot_followup_user_prompt.txt"
                 ),
-                "session_id": retriever_specific_config.get("session_id", None),
+                "session_id": retriever_specific_config.get("session_id"),
                 "response_model": retriever_specific_config.get("response_model", str),
             },
         ),
@@ -145,7 +145,7 @@ async def get_search_type_retriever_instance(
                 "context_extension_rounds": retriever_specific_config.get(
                     "context_extension_rounds", 4
                 ),
-                "session_id": retriever_specific_config.get("session_id", None),
+                "session_id": retriever_specific_config.get("session_id"),
                 "response_model": retriever_specific_config.get("response_model", str),
             },
         ),
@@ -171,13 +171,13 @@ async def get_search_type_retriever_instance(
                 "system_prompt_path": retriever_specific_config.get(
                     "system_prompt_path", "answer_simple_question.txt"
                 ),
-                "session_id": retriever_specific_config.get("session_id", None),
+                "session_id": retriever_specific_config.get("session_id"),
             },
         ),
         SearchType.NATURAL_LANGUAGE: (
             NaturalLanguageRetriever,
             {
-                "session_id": retriever_specific_config.get("session_id", None),
+                "session_id": retriever_specific_config.get("session_id"),
                 "system_prompt_path": retriever_specific_config.get(
                     "system_prompt_path", "natural_language_retriever_system.txt"
                 ),
@@ -190,7 +190,7 @@ async def get_search_type_retriever_instance(
                 "top_k": top_k,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
-                "session_id": retriever_specific_config.get("session_id", None),
+                "session_id": retriever_specific_config.get("session_id"),
                 "response_model": retriever_specific_config.get("response_model", str),
                 "user_prompt_path": retriever_specific_config.get(
                     "user_prompt_path", "graph_context_for_question.txt"
@@ -201,8 +201,8 @@ async def get_search_type_retriever_instance(
                 "time_extraction_prompt_path": retriever_specific_config.get(
                     "time_extraction_prompt_path", "extract_query_time.txt"
                 ),
-                "node_type": retriever_specific_config.get("node_type", None),
-                "node_name": retriever_specific_config.get("node_name", None),
+                "node_type": node_type,
+                "node_name": node_name,
             },
         ),
         SearchType.CHUNKS_LEXICAL: (JaccardChunksRetriever, {"top_k": top_k}),

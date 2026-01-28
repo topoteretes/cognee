@@ -15,7 +15,7 @@ class SearchResultPayload(BaseModel):
     )
 
     result_object: Any = None
-    context: Optional[str] = None
+    context: Optional[Union[str, List[str]]] = None
     completion: Optional[Union[str, List[str], List[dict]]] = None
 
     # TODO: Add return_type info
