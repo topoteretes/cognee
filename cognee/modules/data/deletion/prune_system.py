@@ -2,7 +2,7 @@ from sqlalchemy.exc import OperationalError
 
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.context_global_variables import backend_access_control_enabled
-from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.databases.vector import get_vector_engine, get_cache_vector_engine
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.utils import (
@@ -12,6 +12,9 @@ from cognee.infrastructure.databases.utils import (
 from cognee.shared.cache import delete_cache
 from cognee.modules.users.models import DatasetDatabase
 from cognee.shared.logging_utils import get_logger
+
+# This is a part of cache eval POC so shouldn't end up in production (ever)
+CACHE_VECTOR_COLLECTION_NAME = "cache"
 
 logger = get_logger()
 
@@ -62,6 +65,15 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
         await vector_engine.prune()
     elif vector and backend_access_control_enabled():
         await prune_vector_databases()
+
+    if vector:
+        try:
+            cache_engine = get_cache_vector_engine()
+            cache_engine._get_index(CACHE_VECTOR_COLLECTION_NAME)
+            await cache_engine.prune()
+            logger.debug("Pruned cache vector DB collection %s", CACHE_VECTOR_COLLECTION_NAME)
+        except Exception as e:
+            logger.debug("Skipping pruning of cache vector DB: %s", e)
 
     if metadata:
         db_engine = get_relational_engine()
