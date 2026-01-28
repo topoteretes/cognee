@@ -15,20 +15,9 @@ from collections import Counter
 
 import cognee
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.search.types import SearchType
-from cognee.shared.data_models import KnowledgeGraph
 from cognee.shared.logging_utils import get_logger
-from cognee.tasks.feedback.create_enrichments import create_enrichments
-from cognee.tasks.feedback.extract_feedback_interactions import (
-    extract_feedback_interactions,
-)
-from cognee.tasks.feedback.generate_improved_answers import generate_improved_answers
-from cognee.tasks.feedback.link_enrichments_to_feedback import (
-    link_enrichments_to_feedback,
-)
-from cognee.tasks.graph import extract_graph_from_data
-from cognee.tasks.storage import add_data_points
+from cognee.memify_pipelines.feedback_enrichment_memify import feedback_enrichment_memify
 
 logger = get_logger()
 
@@ -116,23 +105,7 @@ async def main():
         f"Expected at least 1 'gives_feedback_to' edge, found {edge_types_before.get('gives_feedback_to', 0)}"
     )
 
-    extraction_tasks = [Task(extract_feedback_interactions, last_n=5)]
-    enrichment_tasks = [
-        Task(generate_improved_answers, top_k=20),
-        Task(create_enrichments),
-        Task(
-            extract_graph_from_data,
-            graph_model=KnowledgeGraph,
-            task_config={"batch_size": 10},
-        ),
-        Task(add_data_points, task_config={"batch_size": 10}),
-        Task(link_enrichments_to_feedback),
-    ]
-
-    await cognee.memify(
-        extraction_tasks=extraction_tasks,
-        enrichment_tasks=enrichment_tasks,
-        data=[{}],
+    await feedback_enrichment_memify(
         dataset=dataset_name,
     )
 
