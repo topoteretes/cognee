@@ -34,43 +34,6 @@ env:
   ENV: 'dev'
 
 jobs:
-
-  lint:
-    name: Run Linting
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: ${{ inputs.python-version }}
-
-      - name: Run Linting
-        uses: astral-sh/ruff-action@v2
-
-  format-check:
-    name: Run Formatting Check
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: ${{ inputs.python-version }}
-
-      - name: Run Formatting Check
-        uses: astral-sh/ruff-action@v2
-        with:
-          args: "format --check"
-
   unit-tests:
     name: Run Unit Tests
     runs-on: ubuntu-22.04
@@ -85,6 +48,7 @@ jobs:
       EMBEDDING_PROVIDER: openai
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
       EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_DIMENSIONS: 300
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
       EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
@@ -111,6 +75,7 @@ jobs:
       LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
       LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+      EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
       EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -142,6 +107,7 @@ jobs:
       LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
       EMBEDDING_PROVIDER: openai
+      EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
       EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -179,6 +145,7 @@ jobs:
       LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
 
       EMBEDDING_PROVIDER: openai
+      EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
       EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}

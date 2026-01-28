@@ -97,7 +97,7 @@ async def test_vector_engine_search_none_limit():
     query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
 
     result = await vector_engine.search(
-        collection_name=collection_name, query_vector=query_vector, limit=None
+        collection_name=collection_name, query_vector=query_vector, limit=None, include_payload=True
     )
 
     # Check that we did not accidentally use any default value for limit

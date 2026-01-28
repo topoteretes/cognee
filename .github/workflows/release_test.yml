@@ -15,4 +15,3 @@ jobs:
     name: Load Tests
     uses: ./.github/workflows/load_tests.yml
     secrets: inherit
-

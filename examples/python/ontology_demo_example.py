@@ -1,5 +1,6 @@
 import asyncio
 import os
+from pprint import pprint
 
 import cognee
 from cognee.api.v1.search import SearchType
@@ -77,7 +78,7 @@ async def main():
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What are the exact cars and their types produced by Audi?",
     )
-    print(search_results)
+    pprint(search_results)
 
     await visualize_graph()
 

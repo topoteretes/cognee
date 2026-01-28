@@ -92,7 +92,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         }
         links_list.append(link_data)
 
-    html_template = """
+    html_template = r"""
     <!DOCTYPE html>
     <html>
     <head>

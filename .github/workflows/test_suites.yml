@@ -18,11 +18,11 @@ env:
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
 
-jobs: 
+jobs:
   pre-test:
     name: basic checks
     uses: ./.github/workflows/pre_test.yml
-    
+
   basic-tests:
     name: Basic Tests
     uses: ./.github/workflows/basic_tests.yml

@@ -47,6 +47,7 @@ jobs:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -78,6 +79,7 @@ jobs:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -109,6 +111,7 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -135,6 +138,7 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -161,6 +165,7 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -187,6 +192,7 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -213,6 +219,7 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -239,6 +246,7 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -265,6 +273,7 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -309,6 +318,7 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -350,6 +360,7 @@ jobs:
           LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
           EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}

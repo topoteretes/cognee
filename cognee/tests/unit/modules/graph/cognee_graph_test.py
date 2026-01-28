@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock
 
+from cognee.modules.engine.utils.generate_edge_id import generate_edge_id
 from cognee.modules.graph.exceptions import EntityNotFoundError, EntityAlreadyExistsError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge, Node
@@ -379,7 +380,7 @@ async def test_map_vector_distances_to_graph_edges_with_payload(setup_graph):
     graph.add_edge(edge)
 
     edge_distances = [
-        MockScoredResult("e1", 0.92, payload={"text": "CONNECTS_TO"}),
+        MockScoredResult(generate_edge_id("CONNECTS_TO"), 0.92, payload={"text": "CONNECTS_TO"}),
     ]
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
@@ -404,8 +405,9 @@ async def test_map_vector_distances_partial_edge_coverage(setup_graph):
     graph.add_edge(edge1)
     graph.add_edge(edge2)
 
+    edge_1_text = "CONNECTS_TO"
     edge_distances = [
-        MockScoredResult("e1", 0.92, payload={"text": "CONNECTS_TO"}),
+        MockScoredResult(generate_edge_id(edge_1_text), 0.92, payload={"text": edge_1_text}),
     ]
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
@@ -431,8 +433,9 @@ async def test_map_vector_distances_edges_fallback_to_relationship_type(setup_gr
     )
     graph.add_edge(edge)
 
+    edge_text = "KNOWS"
     edge_distances = [
-        MockScoredResult("e1", 0.85, payload={"text": "KNOWS"}),
+        MockScoredResult(generate_edge_id(edge_text), 0.85, payload={"text": edge_text}),
     ]
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
@@ -457,8 +460,9 @@ async def test_map_vector_distances_no_edge_matches(setup_graph):
     )
     graph.add_edge(edge)
 
+    edge_text = "SOME_OTHER_EDGE"
     edge_distances = [
-        MockScoredResult("e1", 0.92, payload={"text": "SOME_OTHER_EDGE"}),
+        MockScoredResult(generate_edge_id(edge_text), 0.92, payload={"text": edge_text}),
     ]
 
     await graph.map_vector_distances_to_graph_edges(edge_distances=edge_distances)
@@ -511,9 +515,15 @@ async def test_map_vector_distances_to_graph_edges_multi_query(setup_graph):
     graph.add_edge(edge1)
     graph.add_edge(edge2)
 
+    edge_1_text = "A"
+    edge_2_text = "B"
     edge_distances = [
-        [MockScoredResult("e1", 0.1, payload={"text": "A"})],  # query 0
-        [MockScoredResult("e2", 0.2, payload={"text": "B"})],  # query 1
+        [
+            MockScoredResult(generate_edge_id(edge_1_text), 0.1, payload={"text": edge_1_text})
+        ],  # query 0
+        [
+            MockScoredResult(generate_edge_id(edge_2_text), 0.2, payload={"text": edge_2_text})
+        ],  # query 1
     ]
 
     await graph.map_vector_distances_to_graph_edges(
@@ -541,8 +551,11 @@ async def test_map_vector_distances_to_graph_edges_preserves_unmapped_indices(se
     graph.add_edge(edge1)
     graph.add_edge(edge2)
 
+    edge_1_text = "A"
     edge_distances = [
-        [MockScoredResult("e1", 0.1, payload={"text": "A"})],  # query 0: only edge1 mapped
+        [
+            MockScoredResult(generate_edge_id(edge_1_text), 0.1, payload={"text": edge_1_text})
+        ],  # query 0: only edge1 mapped
         [],  # query 1: no edges mapped
     ]
 
@@ -718,3 +731,49 @@ async def test_calculate_top_triplet_importances_raises_on_missing_attribute(set
 
     with pytest.raises(ValueError):
         await graph.calculate_top_triplet_importances(k=1, query_list_length=1)
+
+
+def test_normalize_query_distance_lists_flat_list_single_query(setup_graph):
+    """Test that flat list is normalized to list-of-lists with length 1 for single-query mode."""
+    graph = setup_graph
+    flat_list = [MockScoredResult("node1", 0.95), MockScoredResult("node2", 0.87)]
+
+    result = graph._normalize_query_distance_lists(flat_list, query_list_length=None, name="test")
+
+    assert len(result) == 1
+    assert result[0] == flat_list
+
+
+def test_normalize_query_distance_lists_nested_list_batch_mode(setup_graph):
+    """Test that nested list is used as-is when query_list_length matches."""
+    graph = setup_graph
+    nested_list = [
+        [MockScoredResult("node1", 0.95)],
+        [MockScoredResult("node2", 0.87)],
+    ]
+
+    result = graph._normalize_query_distance_lists(nested_list, query_list_length=2, name="test")
+
+    assert len(result) == 2
+    assert result == nested_list
+
+
+def test_normalize_query_distance_lists_raises_on_length_mismatch(setup_graph):
+    """Test that ValueError is raised when nested list length doesn't match query_list_length."""
+    graph = setup_graph
+    nested_list = [
+        [MockScoredResult("node1", 0.95)],
+        [MockScoredResult("node2", 0.87)],
+    ]
+
+    with pytest.raises(ValueError, match="test has 2 query lists, but query_list_length is 3"):
+        graph._normalize_query_distance_lists(nested_list, query_list_length=3, name="test")
+
+
+def test_normalize_query_distance_lists_empty_list(setup_graph):
+    """Test that empty list returns empty list."""
+    graph = setup_graph
+
+    result = graph._normalize_query_distance_lists([], query_list_length=None, name="test")
+
+    assert result == []
