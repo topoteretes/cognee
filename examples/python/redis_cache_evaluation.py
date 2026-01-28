@@ -36,7 +36,7 @@ async def main(knowledge_graph_creation: bool, evaluation: bool):
 if __name__ == "__main__":
     logger = setup_logging(log_level=INFO)
 
-    knowledge_graph_creation = False
+    knowledge_graph_creation = True
     evaluation = True
 
     loop = asyncio.new_event_loop()
