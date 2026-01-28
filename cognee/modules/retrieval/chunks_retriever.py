@@ -61,9 +61,7 @@ class ChunksRetriever(BaseRetriever):
         logger.info(f"Returning {len(chunk_payloads)} chunk payloads")
         return chunk_payloads
 
-    async def get_completion(
-        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
-    ) -> Any:
+    async def get_completion(self, query: str, context: Optional[Any] = None) -> Any:
         """
         Generates a completion using document chunks context.
 

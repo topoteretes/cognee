@@ -116,8 +116,6 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         query: str,
         retrieved_objects: List[Edge],
         context: str,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
     ) -> List[Any]:
         """
         Returns a human readable answer based on the provided query and extended context derived from the retrieved objects.
@@ -136,7 +134,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         session_save = user_id and cache_config.caching
 
         if session_save:
-            conversation_history = await get_conversation_history(session_id=session_id)
+            conversation_history = await get_conversation_history(session_id=self.session_id)
 
             context_summary, completion = await asyncio.gather(
                 summarize_text(context),
@@ -147,7 +145,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                     system_prompt_path=self.system_prompt_path,
                     system_prompt=self.system_prompt,
                     conversation_history=conversation_history,
-                    response_model=response_model,
+                    response_model=self.response_model,
                 ),
             )
         else:
@@ -157,7 +155,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
-                response_model=response_model,
+                response_model=self.response_model,
             )
 
         if self.save_interaction and context and retrieved_objects and completion:
@@ -170,7 +168,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                 query=query,
                 context_summary=context_summary,
                 answer=completion,
-                session_id=session_id,
+                session_id=self.session_id,
             )
 
         return [completion]
