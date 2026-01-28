@@ -6,6 +6,7 @@ import numpy as np
 
 import cognee
 from cognee.api.v1.search import SearchType
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.logging_utils import get_logger, setup_logging, INFO
 
 from redis_cache_dashboard import build_html_dashboard
@@ -104,8 +105,24 @@ async def main(knowledge_graph_creation: bool, evaluation: bool):
 
     if evaluation:
         stats, per_query_stats = await run_speed_evaluation(QUERIES, N_RUNS)
+        graph_size = None
+        try:
+            graph_engine = await get_graph_engine()
+            metrics = await graph_engine.get_graph_metrics()
+            graph_size = {"num_nodes": metrics.get("num_nodes"), "num_edges": metrics.get("num_edges")}
+        except Exception as e:
+            logger.debug("Could not get graph size for dashboard: %s", e)
         out_path = Path(__file__).resolve().parent / "redis_cache_evaluation_dashboard.html"
-        build_html_dashboard(stats, per_query_stats, QUERIES, out_path, title=DASHBOARD_TITLE)
+        executions_per_query = N_RUNS * len(SEARCH_TYPES_TO_COMPARE)
+        build_html_dashboard(
+            stats,
+            per_query_stats,
+            QUERIES,
+            out_path,
+            title=DASHBOARD_TITLE,
+            graph_size=graph_size,
+            executions_per_query=executions_per_query,
+        )
         logger.info("Dashboard written to %s", out_path)
 
 

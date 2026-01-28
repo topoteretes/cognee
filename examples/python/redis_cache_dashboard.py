@@ -18,8 +18,14 @@ def build_html_dashboard(
     queries: list[str],
     output_path: Path,
     title: str = "Redis cache evaluation",
+    graph_size: dict | None = None,
+    executions_per_query: int | None = None,
 ) -> None:
-    """Generate an HTML dashboard with summary table, per-query table, and figures."""
+    """Generate an HTML dashboard with summary table, per-query table, and figures.
+
+    graph_size: optional dict with 'num_nodes' and 'num_edges' to show graph size (e.g. from get_graph_metrics).
+    executions_per_query: optional total number of times each query was run (e.g. n_runs * num_search_types).
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -97,6 +103,22 @@ def build_html_dashboard(
         query_rows += f"<tr>{cells}</tr>"
     th_cols = "".join(f"<th colspan=\"2\">{t}</th>" for t in type_names)
     sub_th = "".join("<th>p50</th><th>p95</th>" for _ in type_names)
+    if graph_size is not None and ("num_nodes" in graph_size or "num_edges" in graph_size):
+        n_nodes = int(graph_size.get("num_nodes") or 0)
+        n_edges = int(graph_size.get("num_edges") or 0)
+        graph_card = f"""
+    <div class="card">
+        <h2>Graph size</h2>
+        <p><strong>{n_nodes:,}</strong> nodes &nbsp; · &nbsp; <strong>{n_edges:,}</strong> edges</p>
+    </div>"""
+    else:
+        graph_card = ""
+    if executions_per_query is not None and executions_per_query > 0:
+        query_heading = f"Queries executed (each run {executions_per_query:,} times)"
+        query_items = "".join(f"<li>{q} <span class=\"muted\">({executions_per_query:,} runs)</span></li>" for q in queries)
+    else:
+        query_heading = "Queries executed"
+        query_items = "".join(f"<li>{q}</li>" for q in queries)
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -109,6 +131,7 @@ def build_html_dashboard(
         body {{ font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 2rem; line-height: 1.5; }}
         h1 {{ font-size: 1.75rem; margin-bottom: 0.5rem; }}
         .subtitle {{ color: var(--muted); margin-bottom: 2rem; }}
+        .muted {{ color: var(--muted); font-size: 0.9em; }}
         .card {{ background: var(--card); border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }}
         .card h2 {{ margin-top: 0; font-size: 1.25rem; color: var(--accent); }}
         table {{ width: 100%; border-collapse: collapse; }}
@@ -122,11 +145,12 @@ def build_html_dashboard(
 <body>
     <h1>{title}</h1>
     <p class="subtitle">Search speed comparison: TRIPLET_COMPLETION, TRIPLET_COMPLETION_CACHE, GRAPH_COMPLETION</p>
+    {graph_card}
 
     <div class="card">
-        <h2>Queries executed</h2>
+        <h2>{query_heading}</h2>
         <ol>
-            {"".join(f"<li>{q}</li>" for q in queries)}
+            {query_items}
         </ol>
     </div>
 
