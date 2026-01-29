@@ -49,8 +49,11 @@ class ChunksRetriever(BaseRetriever):
             - List[dict]: A list of payloads of found chunks.
         """
         # TODO: Do we want to generate a completion using LLM here?
-        chunk_payloads = [found_chunk.payload for found_chunk in retrieved_objects]
-        return chunk_payloads
+        if retrieved_objects:
+            chunk_payloads = [found_chunk.payload for found_chunk in retrieved_objects]
+            return chunk_payloads
+        else:
+            return None
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
         """
@@ -68,8 +71,11 @@ class ChunksRetriever(BaseRetriever):
             - str: A string containing the combined text of the retrieved chunks, or an
               empty string if none are found.
         """
-        chunk_payload_texts = [found_chunk.payload["text"] for found_chunk in retrieved_objects]
-        return "\n".join(chunk_payload_texts)
+        if retrieved_objects:
+            chunk_payload_texts = [found_chunk.payload["text"] for found_chunk in retrieved_objects]
+            return "\n".join(chunk_payload_texts)
+        else:
+            return None
 
     async def get_retrieved_objects(self, query: str) -> Any:
         """
