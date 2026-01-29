@@ -15,11 +15,6 @@ from cognee.modules.users.tenants.methods import add_user_to_tenant
 from cognee.modules.engine.operations.setup import setup
 from cognee.shared.logging_utils import setup_logging, CRITICAL
 
-# ENABLE PERMISSIONS FEATURE
-# Note: When ENABLE_BACKEND_ACCESS_CONTROL is enabled vector provider is automatically set to use LanceDB
-# and graph provider is set to use Kuzu.
-os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "True"
-
 logger = get_logger()
 
 explanation_file_path = os.path.join(
@@ -223,6 +218,9 @@ async def main():
     # Note: All of these function calls and permission system is available through our backend endpoints as well
 
 
+# Please set ENABLE_BACKEND_ACCESS_CONTROL=True in .env file
+# Note: When ENABLE_BACKEND_ACCESS_CONTROL is enabled vector provider is automatically set to use LanceDB
+# and graph provider is set to use Kuzu.
 if __name__ == "__main__":
     import asyncio
 
