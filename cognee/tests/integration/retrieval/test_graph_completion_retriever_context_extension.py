@@ -216,7 +216,7 @@ async def test_get_graph_completion_extension_context_on_empty_graph(setup_test_
     triplets = await retriever.get_retrieved_objects(query)
 
     context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
-    assert context == [], "Context should be empty on an empty graph"
+    assert context == "", "Context should be empty on an empty graph"
 
     answer = await retriever.get_completion_from_context(
         query=query, retrieved_objects=triplets, context=context
