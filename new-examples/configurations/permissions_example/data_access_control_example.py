@@ -61,7 +61,7 @@ async def data_access_control_example():
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="What is in the document?",
         user=user_1,
-        datasets=[ai_dataset_id],
+        dataset_ids=[ai_dataset_id],
     )
     print("\nSearch results as user_1 on dataset owned by user_1:")
     for result in search_results:
@@ -74,7 +74,7 @@ async def data_access_control_example():
             query_type=SearchType.GRAPH_COMPLETION,
             query_text="What is in the document?",
             user=user_1,
-            datasets=[quantum_dataset_id],
+            dataset_ids=[quantum_dataset_id],
         )
     except PermissionDeniedError:
         print(f"User: {user_1} does not have permission to read from dataset: QUANTUM")

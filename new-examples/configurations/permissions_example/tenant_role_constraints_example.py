@@ -89,7 +89,7 @@ async def tenant_and_role_constraints_example():
         )
     except PermissionDeniedError:
         print(
-            "User 2 could not give permission to the role as the QUANTUM dataset is not part of the CogneeLab tenant"
+            "User 1 could not give permission to the role as the QUANTUM dataset is not part of the CogneeLab tenant"
         )
 
     # We can re-create the QUANTUM dataset in the CogneeLab tenant. The old QUANTUM dataset is still owned by user_1 personally
