@@ -15,7 +15,8 @@ async def has_user_management_permission(requester_id: UUID, tenant_id: UUID) ->
         True if requester has permission
 
     Raises:
-        PermissionDeniedError: If requester is not authorized
+        PermissionDeniedError: If requester is not authorized.
+        TenantNotFoundError: If the tenant does not exist.
     """
     tenant = await get_tenant(tenant_id)
 
