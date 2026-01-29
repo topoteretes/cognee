@@ -132,8 +132,11 @@ class LexicalRetriever(BaseRetriever):
             - str: A string containing the combined text of the retrieved chunk payloads, or an
               empty string if none are found.
         """
-        payload_texts = [payload["text"] for payload in retrieved_objects]
-        return "\n".join(payload_texts)
+        if retrieved_objects:
+            payload_texts = [payload["text"] for payload in retrieved_objects]
+            return "\n".join(payload_texts)
+        else:
+            return ""
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any

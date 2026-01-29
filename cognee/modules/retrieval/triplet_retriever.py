@@ -83,9 +83,13 @@ class TripletRetriever(BaseRetriever):
             raise NoDataError("No data found in the system, please add data first.") from error
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
-        triplets_payload = [found_triplet.payload["text"] for found_triplet in retrieved_objects]
-        combined_context = "\n".join(triplets_payload)
-        return combined_context
+        if retrieved_objects:
+            triplets_payload = [
+                found_triplet.payload["text"] for found_triplet in retrieved_objects
+            ]
+            combined_context = "\n".join(triplets_payload)
+            return combined_context
+        return ""
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any

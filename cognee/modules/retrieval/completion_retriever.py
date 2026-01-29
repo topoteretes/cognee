@@ -72,10 +72,12 @@ class CompletionRetriever(BaseRetriever):
             - str: A string containing the combined text of the retrieved document chunks, or an
               empty string if none are found.
         """
-        # Combine all chunks text returned from vector search (number of chunks is determined by top_k)
-        chunks_payload = [found_chunk.payload["text"] for found_chunk in retrieved_objects]
-        combined_context = "\n".join(chunks_payload)
-        return combined_context
+        if retrieved_objects:
+            # Combine all chunks text returned from vector search (number of chunks is determined by top_k)
+            chunks_payload = [found_chunk.payload["text"] for found_chunk in retrieved_objects]
+            combined_context = "\n".join(chunks_payload)
+            return combined_context
+        return ""
 
     async def get_completion_from_context(
         self,

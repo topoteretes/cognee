@@ -82,8 +82,11 @@ class SummariesRetriever(BaseRetriever):
             - str: A string containing the combined text of the retrieved summaries, or an
               empty string if none are found.
         """
-        summary_payload_texts = [summary.payload["text"] for summary in retrieved_objects]
-        return "\n".join(summary_payload_texts)
+        if retrieved_objects:
+            summary_payload_texts = [summary.payload["text"] for summary in retrieved_objects]
+            return "\n".join(summary_payload_texts)
+        else:
+            return ""
 
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
@@ -106,6 +109,9 @@ class SummariesRetriever(BaseRetriever):
             - List[dict]: A list of payloads of found summaries.
         """
         # TODO: Do we want to generate a completion using LLM here?
-        summary_payloads = [summary.payload for summary in retrieved_objects]
-        logger.info(f"Returning {len(summary_payloads)} summary payloads")
-        return summary_payloads
+        if retrieved_objects:
+            summary_payloads = [summary.payload for summary in retrieved_objects]
+            logger.info(f"Returning {len(summary_payloads)} summary payloads")
+            return summary_payloads
+        else:
+            return [""]

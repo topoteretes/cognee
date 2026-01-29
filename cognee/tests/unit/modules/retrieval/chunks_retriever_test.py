@@ -152,4 +152,4 @@ async def test_get_context_empty_payload(mock_vector_engine):
             "test query", retrieved_objects=retrieved_objects
         )
 
-    assert context is None
+    assert context == ""

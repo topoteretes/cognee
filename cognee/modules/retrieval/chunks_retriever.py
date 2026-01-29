@@ -53,7 +53,7 @@ class ChunksRetriever(BaseRetriever):
             chunk_payloads = [found_chunk.payload for found_chunk in retrieved_objects]
             return chunk_payloads
         else:
-            return None
+            return [""]
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
         """
@@ -75,7 +75,7 @@ class ChunksRetriever(BaseRetriever):
             chunk_payload_texts = [found_chunk.payload["text"] for found_chunk in retrieved_objects]
             return "\n".join(chunk_payload_texts)
         else:
-            return None
+            return ""
 
     async def get_retrieved_objects(self, query: str) -> Any:
         """
