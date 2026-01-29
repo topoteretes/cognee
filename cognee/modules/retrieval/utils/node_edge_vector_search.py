@@ -169,6 +169,7 @@ class NodeEdgeVectorSearch:
                 collection_name=collection_name,
                 query_vector=self.query_vector,
                 limit=wide_search_limit,
+                include_payload=False,
             )
         except CollectionNotFoundError:
             return []

@@ -13,30 +13,34 @@ from redis_cache_dashboard import build_html_dashboard
 
 logger = get_logger("redis_cache_evaluation")
 
-# Data
-text_1 = "Cognee is an AI memory platform that turns raw data into knowledge graphs for agents."
-text_2 = "Redis can be used as a cache vector store for fast semantic search over embeddings."
-text_3 = "The cache triplet retriever reads from the cache collection instead of the main vector DB."
+DATA_INPUT = "/Users/laszlohajdu/Desktop/S3"
 
-# Evaluation config: list of queries to run for each search type
+# Evaluation config: 20 questions related to the PDFs (10 short, 10 medium length)
 QUERIES = [
-    "What is Cognee and how does the cache retriever work?",
-    "What is Redis used for in this context?",
-    "How does the cache collection differ from the main vector DB?",
+    # Short (10)
+    "What is MVTec AD?",
+    "How does PifPaf work?",
+    "What is CollaGAN used for?",
+    "What does R3 do for face recognition?",
+    "What is DeepMapping?",
+    "What is TextureNet?",
+    "What is ContextDesc?",
+    "What is ADCrowdNet?",
+    "What does Shape Unicode do?",
+    "What is Detect-To-Retrieve?",
 ]
 SEARCH_TYPES_TO_COMPARE = [
     SearchType.TRIPLET_COMPLETION,
-    SearchType.TRIPLET_COMPLETION_CACHE,
     SearchType.GRAPH_COMPLETION,
 ]
-N_RUNS = 1  # number of timed runs per (search_type, query) pair
-DASHBOARD_TITLE = "Redis cache evaluation (Pgvector (local) - Neo4j (Local) - RedisVectorCache (local))"
+N_RUNS = 10 # number of timed runs per (search_type, query) pair
+DASHBOARD_TITLE = "Redis cache evaluation (Pgvector (Azure) - Neo4j (Azure) - RedisVectorCache (local))"
 
 
 async def timed_search(search_type: SearchType, query_text: str) -> tuple[float, list]:
     """Run a single search and return (latency_seconds, results)."""
     start = time.perf_counter()
-    results = await cognee.search(query_type=search_type, query_text=query_text, only_context=True)
+    results = await cognee.search(query_type=search_type, query_text=query_text, only_context=True, top_k=5)
     elapsed = time.perf_counter() - start
     return elapsed, results
 
@@ -96,12 +100,10 @@ async def main(knowledge_graph_creation: bool, evaluation: bool):
     if knowledge_graph_creation:
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
-        text_list = [text_1, text_2, text_3]
-        for text in text_list:
-            await cognee.add(text)
-            print(f"Added text: {text[:35]}...")
+        logger.info("Adding data from: %s", DATA_INPUT)
+        await cognee.add(DATA_INPUT)
         await cognee.cognify()
-        print("Knowledge graph created.")
+        logger.info("Knowledge graph created.")
 
     if evaluation:
         stats, per_query_stats = await run_speed_evaluation(QUERIES, N_RUNS)
