@@ -85,7 +85,7 @@ async def get_search_type_retriever_instance(
                 "system_prompt_path": system_prompt_path,
                 "top_k": top_k,
                 "system_prompt": system_prompt,
-                "session_id": retriever_specific_config.get("session_id", None),
+                "session_id": session_id,
                 "response_model": retriever_specific_config.get("response_model", str),
             },
         ),
@@ -161,6 +161,10 @@ async def get_search_type_retriever_instance(
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
+                "session_id": session_id,
+                "summarize_prompt_path": retriever_specific_config.get(
+                    "summarize_prompt_path", "summarize_search_results.txt"
+                ),
             },
         ),
         SearchType.CYPHER: (
