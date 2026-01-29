@@ -253,13 +253,14 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     ):
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
-            [
-                IndexSchema(
-                    id=data_point.id,
-                    text=DataPoint.get_embeddable_data(data_point),
-                )
-                for data_point in data_points
-            ],
+            data_points,
+            # [
+            #     IndexSchema(
+            #         id=data_point.id,
+            #         text=DataPoint.get_embeddable_data(data_point),
+            #     )
+            #     for data_point in data_points
+            # ],
         )
 
     async def get_table(self, collection_name: str) -> Table:
@@ -302,6 +303,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         limit: Optional[int] = 15,
         with_vector: bool = False,
         include_payload: bool = False,
+        belongs_to_nodesets: List[str] = None,
     ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
@@ -333,10 +335,24 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
         # Use async session to connect to the database
         async with self.get_async_session() as session:
-            query = select(
-                *select_columns,
-                PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
-            ).order_by("similarity")
+            if belongs_to_nodesets:
+                query = (
+                    select(
+                        *select_columns,
+                        PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
+                            "similarity"
+                        ),
+                    )
+                    .where(
+                        PGVectorDataPoint.c.payload["belongs_to_set"].contains(belongs_to_nodesets)
+                    )
+                    .order_by("similarity")
+                )
+            else:
+                query = select(
+                    *select_columns,
+                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
+                ).order_by("similarity")
 
             if limit > 0:
                 query = query.limit(limit)
