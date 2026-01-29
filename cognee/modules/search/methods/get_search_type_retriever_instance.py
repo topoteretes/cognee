@@ -232,14 +232,21 @@ async def get_search_type_retriever_instance(
     )
 
     if query_type in registered_community_retrievers:
-        retriever = registered_community_retrievers[query_type]
-        # TODO: Fix community retrievers so they get all input parameters properly
+        retriever = registered_community_retrievers.get(query_type)
+
+        if not retriever:
+            raise UnsupportedSearchTypeError(str(query_type))
+        # TODO: Fix community retrievers on the community side so they get all input parameters properly
         retriever_instance = retriever(**kwargs)
     else:
-        retriever_cls, retriever_args = search_core_registry.get(query_type)
-        retriever_instance = retriever_cls(**retriever_args)
+        retriever_info = search_core_registry.get(query_type)
+        # Check if retriever info is found for the given query type
+        if not retriever_info:
+            raise UnsupportedSearchTypeError(str(query_type))
 
-    if not retriever_instance:
-        raise UnsupportedSearchTypeError(str(query_type))
+        # If it exists unpack the retriever class and its initialization arguments
+        retriever_cls, retriever_args = retriever_info
+
+        retriever_instance = retriever_cls(**retriever_args)
 
     return retriever_instance
