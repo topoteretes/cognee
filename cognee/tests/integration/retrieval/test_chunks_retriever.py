@@ -10,7 +10,6 @@ from cognee.tasks.storage import add_data_points
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.processing.document_types import Document
