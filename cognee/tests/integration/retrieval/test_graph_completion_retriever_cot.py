@@ -158,13 +158,18 @@ async def setup_test_environment_empty():
 async def test_graph_completion_cot_context_simple(setup_test_environment_simple):
     """Integration test: verify GraphCompletionCotRetriever can retrieve context (simple)."""
     retriever = GraphCompletionCotRetriever()
+    query = "Who works at Canva?"
 
-    context = await resolve_edges_to_text(await retriever.get_context("Who works at Canva?"))
+    triplets = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     assert "Mike Broski --[works_for]--> Canva" in context, "Failed to get Mike Broski"
     assert "Christina Mayer --[works_for]--> Canva" in context, "Failed to get Christina Mayer"
 
-    answer = await retriever.get_completion("Who works at Canva?")
+    answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
+    )
 
     assert isinstance(answer, list), f"Expected list, got {type(answer).__name__}"
     assert all(isinstance(item, str) and item.strip() for item in answer), (
@@ -176,14 +181,19 @@ async def test_graph_completion_cot_context_simple(setup_test_environment_simple
 async def test_graph_completion_cot_context_complex(setup_test_environment_complex):
     """Integration test: verify GraphCompletionCotRetriever can retrieve context (complex)."""
     retriever = GraphCompletionCotRetriever(top_k=20)
+    query = "Who works at Figma?"
 
-    context = await resolve_edges_to_text(await retriever.get_context("Who works at Figma?"))
+    triplets = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     assert "Mike Rodger --[works_for]--> Figma" in context, "Failed to get Mike Rodger"
     assert "Ike Loma --[works_for]--> Figma" in context, "Failed to get Ike Loma"
     assert "Jason Statham --[works_for]--> Figma" in context, "Failed to get Jason Statham"
 
-    answer = await retriever.get_completion("Who works at Figma?")
+    answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
+    )
 
     assert isinstance(answer, list), f"Expected list, got {type(answer).__name__}"
     assert all(isinstance(item, str) and item.strip() for item in answer), (
@@ -195,24 +205,18 @@ async def test_graph_completion_cot_context_complex(setup_test_environment_compl
 async def test_get_graph_completion_cot_context_on_empty_graph(setup_test_environment_empty):
     """Integration test: verify GraphCompletionCotRetriever handles empty graph correctly."""
     retriever = GraphCompletionCotRetriever()
+    query = "Who works at Figma?"
 
-    context = await retriever.get_context("Who works at Figma?")
+    triplets = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
     assert context == [], "Context should be empty on an empty graph"
 
-    answer = await retriever.get_completion("Who works at Figma?")
+    answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
+    )
 
     assert isinstance(answer, list), f"Expected list, got {type(answer).__name__}"
     assert all(isinstance(item, str) and item.strip() for item in answer), (
         "Answer must contain only non-empty strings"
     )
-
-
-@pytest.mark.asyncio
-async def test_graph_completion_cot_get_triplets_empty(setup_test_environment_empty):
-    """Integration test: verify GraphCompletionCotRetriever get_triplets handles empty graph."""
-    retriever = GraphCompletionCotRetriever()
-
-    triplets = await retriever.get_triplets("Who works at Figma?")
-
-    assert isinstance(triplets, list), "Triplets should be a list"
-    assert len(triplets) == 0, "Should return empty list on empty graph"
