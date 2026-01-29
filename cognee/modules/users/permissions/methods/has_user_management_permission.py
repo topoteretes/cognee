@@ -9,7 +9,7 @@ async def has_user_management_permission(
     tenant_id: UUID
 ) -> bool:
     """
-        Check if requester is allowed to manage users for a tenant.
+    Check if requester is allowed to manage users for a tenant.
     Args:
         requester_id: Id of the user making the request
         tenant_id: Id of the tenant
