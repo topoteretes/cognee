@@ -119,6 +119,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             conversation_history=conversation_history,
         )
 
+        # Note: completion info is stored to reduce the need to call LLM again in get_completion_from_context
         self.completion = completion
 
         if self.save_interaction and context_text and triplets and completion:
@@ -249,5 +250,4 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             - List[str]: A list containing the generated answer to the user's query.
         """
         completion = self.completion
-
         return [completion]
