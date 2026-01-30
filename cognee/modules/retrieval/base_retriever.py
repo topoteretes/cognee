@@ -61,3 +61,18 @@ class BaseRetriever(ABC):
             List[Any]: A list containing the generated completions or response objects.
         """
         pass
+
+    async def get_completion(self, query: str) -> Union[List[str], List[dict]]:
+        """
+        Generates a final output or answer based on the query and retrieved context.
+
+        Args:
+            query (str): The original user query.
+
+        Returns:
+            List[Any]: A list containing the generated completions or response objects.
+        """
+        retrieved_objects = await self.get_retrieved_objects(query)
+        context = await self.get_context_from_objects(query, retrieved_objects)
+        completion = await self.get_completion_from_context(query, retrieved_objects, context)
+        return completion
