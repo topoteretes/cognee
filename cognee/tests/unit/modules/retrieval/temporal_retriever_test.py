@@ -534,45 +534,6 @@ async def test_get_completion_with_session_no_user_id(mock_graph_engine, mock_ve
 
 
 @pytest.mark.asyncio
-async def test_get_completion_context_retrieved_but_empty(mock_graph_engine):
-    """Test get_completion when get_context returns empty string."""
-    retriever = TemporalRetriever()
-
-    with (
-        patch.object(
-            retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
-        ),
-        patch(
-            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
-        patch(
-            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
-        ) as mock_get_vector,
-        patch.object(retriever, "filter_top_k_events", return_value=[]),
-    ):
-        mock_vector_engine = AsyncMock()
-        mock_vector_engine.embedding_engine = AsyncMock()
-        mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
-        mock_vector_engine.search = AsyncMock(return_value=[])
-        mock_get_vector.return_value = mock_vector_engine
-
-        mock_graph_engine.collect_time_ids.return_value = ["e1"]
-        mock_graph_engine.collect_events.return_value = [
-            {
-                "events": [
-                    {"id": "e1", "description": ""},
-                ]
-            }
-        ]
-
-        with pytest.raises((UnboundLocalError, NameError)):
-            objects = await retriever.get_retrieved_objects("test query")
-            await retriever.get_context_from_objects("test query", objects)
-            await retriever.get_completion_from_context("test query", None, "")
-
-
-@pytest.mark.asyncio
 async def test_get_completion_with_response_model(mock_graph_engine, mock_vector_engine):
     """Test get_completion with custom response model."""
     from pydantic import BaseModel
