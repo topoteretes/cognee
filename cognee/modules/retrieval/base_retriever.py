@@ -13,12 +13,13 @@ class BaseRetriever(ABC):
     """
 
     @abstractmethod
-    async def get_retrieved_objects(self, query: str) -> Any:
+    async def get_retrieved_objects(self, query: Optional[str], query_batch: Optional[str]) -> Any:
         """
         Retrieves the raw data points from the underlying storage (Graph or Vector DB).
 
         Args:
             query (str): The search query or input string.
+            query_batch (List[str]): The batch of search queries.
 
         Returns:
             List[Any]: A list of raw objects (e.g., Edge objects, Document chunks)
@@ -27,12 +28,15 @@ class BaseRetriever(ABC):
         pass
 
     @abstractmethod
-    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
+    async def get_context_from_objects(
+        self, retrieved_objects: Any, query: Optional[str] = None, query_batch: Optional[str] = None
+    ) -> Union[str, List[str]]:
         """
         Transforms raw retrieved objects into a structured context for the LLM.
 
         Args:
             query (str): The search query or input string.
+            query_batch (List[str]): The batch of search queries.
             retrieved_objects (List[Any]): The output from get_retrieved_objects.
 
         Returns:
@@ -44,15 +48,17 @@ class BaseRetriever(ABC):
     @abstractmethod
     async def get_completion_from_context(
         self,
-        query: str,
         retrieved_objects: Any,
         context: Any,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
     ) -> Union[List[str], List[dict]]:
         """
         Generates a final output or answer based on the query and retrieved context.
 
         Args:
             query (str): The original user query.
+            query_batch (List[str]): The batch of original user queries.
             retrieved_objects (List[Any]): The output from get_retrieved_objects.
             context (Optional[Any]): The formatted context string/data used to
                 augment the generation. Output from get_context_from_objects.

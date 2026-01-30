@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Optional, List, Type, Any
+from typing import Optional, List, Type, Any, Union
 from pydantic import BaseModel
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
@@ -94,7 +94,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         self.max_iter = max_iter
 
     async def get_retrieved_objects(
-        self, query: Optional[str], query_batch: Optional[str]
+        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
     ) -> List[Edge]:
         """
         Run chain-of-thought completion with optional structured output.
@@ -156,16 +156,17 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
     async def _run_cot_completion(
         self,
-        query: Optional[str],
-        query_batch: Optional[List[str]],
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
         conversation_history: str = "",
-    ) -> tuple[Any, str, List[Edge]]:
+    ) -> Union[tuple[Any, str, List[Edge]], tuple[List[Any], List[str], List[List[Edge]]]]:
         """
         Run chain-of-thought completion with optional structured output.
 
         Parameters:
         -----------
             - query: User query
+            - query_batch: Batch of user queries
             - context: Optional pre-fetched context edges
             - conversation_history: Optional conversation history string
             - max_iter: Maximum CoT iterations
@@ -180,6 +181,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         followup_question_batch = []
         completion_batch = []
         context_text_batch = []
+        triplets_batch = []
 
         if query:
             # Treat a single query as a batch of queries, mainly avoiding massive code duplication
@@ -251,6 +253,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             ):
                 query_state_tracker[batched_query].completion = batched_completion
 
+            # TODO: Remove this if
             if round_idx == self.max_iter:
                 # When we finish all iterations:
                 # Make sure answers are returned for duplicate queries, in the order they were asked.
@@ -328,15 +331,25 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                     f"Chain-of-thought: round {round_idx} - follow-up questions: {followup_question_batch}"
                 )
 
-        # return completion_batch, context_text_batch, triplets_batch
-        return triplets_batch
+        # Make sure we don't lose any duplicate queries
+        final_completion = [
+            query_state_tracker[batched_query].completion for batched_query in query_batch
+        ]
+        final_context = [
+            query_state_tracker[batched_query].context_text for batched_query in query_batch
+        ]
+        final_triplets = [
+            query_state_tracker[batched_query].triplets for batched_query in query_batch
+        ]
+
+        return final_completion, final_context, final_triplets
 
     async def get_completion_from_context(
         self,
-        query: Optional[str],
-        query_batch: Optional[List[str]],
-        retrieved_objects: List[Edge],
-        context: str,
+        retrieved_objects: List[Edge] | List[List[Edge]],
+        context: str | List[str],
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
     ) -> List[Any]:
         """
         Generate completion responses based on a user query and contextual information.
@@ -376,14 +389,52 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         if session_save:
             conversation_history = await get_conversation_history(session_id=self.session_id)
 
-        completion = await generate_completion(
-            query=query,
-            context=context,
-            user_prompt_path=self.user_prompt_path,
-            system_prompt_path=self.system_prompt_path,
-            system_prompt=self.system_prompt,
-            conversation_history=conversation_history if conversation_history else None,
-            response_model=self.response_model,
-        )
+        if query_batch:
+            completion = await asyncio.gather(
+                *[
+                    generate_completion(
+                        query=batched_query,
+                        context=batched_context,
+                        user_prompt_path=self.user_prompt_path,
+                        system_prompt_path=self.system_prompt_path,
+                        system_prompt=self.system_prompt,
+                        conversation_history=conversation_history if conversation_history else None,
+                        response_model=self.response_model,
+                    )
+                    for batched_query, batched_context in zip(query_batch, context)
+                ]
+            )
+        else:
+            completion = await generate_completion(
+                query=query,
+                context=context,
+                user_prompt_path=self.user_prompt_path,
+                system_prompt_path=self.system_prompt_path,
+                system_prompt=self.system_prompt,
+                conversation_history=conversation_history if conversation_history else None,
+                response_model=self.response_model,
+            )
 
-        return [completion]
+        return completion if query_batch else [completion]
+
+    async def get_context_from_objects(
+        self,
+        retrieved_objects,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
+    ) -> str | List[str]:
+        triplets = retrieved_objects
+        if query:
+            query_batch = [query]
+
+        # Check if all triplets are empty, in case of batch queries
+        if query_batch and all(len(batched_triplets) == 0 for batched_triplets in triplets):
+            logger.warning("Empty context was provided to the completion")
+            return ["" for _ in query_batch]
+
+        return await asyncio.gather(
+            *[
+                self.resolve_edges_to_text(batched_triplets)
+                for batched_triplets in retrieved_objects
+            ]
+        )

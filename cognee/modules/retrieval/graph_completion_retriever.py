@@ -68,18 +68,38 @@ class GraphCompletionRetriever(BaseRetriever):
         self.response_model = response_model
 
     async def get_retrieved_objects(
-        self, query: Optional[str], query_batch: Optional[List[str]]
+        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
     ) -> List[Edge]:
         """
         Performs a brute-force triplet search on the graph and updates access timestamps.
 
         Args:
             query (str): The search query to find relevant graph triplets.
+            query_batch (str): The batch of search queries to find relevant graph triplets.
 
         Returns:
             List[Edge]: A list of retrieved Edge objects (triplets).
                        Returns an empty list if the graph is empty or no results are found.
         """
+
+        cache_config = CacheConfig()
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+        session_save = user_id and cache_config.caching
+
+        if query_batch and session_save:
+            raise QueryValidationError(
+                message="You cannot use batch queries with session saving currently."
+            )
+        if query_batch and self.save_interaction:
+            raise QueryValidationError(
+                message="Cannot use batch queries with interaction saving currently."
+            )
+
+        is_query_valid, msg = validate_queries(query, query_batch)
+        if not is_query_valid:
+            raise QueryValidationError(message=msg)
+
         graph_engine = await get_graph_engine()
         is_empty = await graph_engine.is_empty()
 
@@ -163,13 +183,17 @@ class GraphCompletionRetriever(BaseRetriever):
         return found_triplets
 
     async def get_context_from_objects(
-        self, query: Optional[str], query_batch: Optional[List[str]], retrieved_objects
+        self,
+        retrieved_objects,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
     ) -> str | List[str]:
         """
         Transforms raw retrieved graph triplets into a textual context string.
 
         Args:
             query (str): The original search query.
+            query_batch (List[str]): The batch of original search queries.
             retrieved_objects (List[Edge]): The raw triplets returned from the search.
                                             Output of the get_retrieved_objects method.
 
@@ -186,8 +210,7 @@ class GraphCompletionRetriever(BaseRetriever):
         # Check if all triplets are empty, in case of batch queries
         if query_batch and all(len(batched_triplets) == 0 for batched_triplets in triplets):
             logger.warning("Empty context was provided to the completion")
-            # TODO: Return list of empty strings
-            return ""
+            return ["" for _ in query_batch]
 
         if len(triplets) == 0:
             logger.warning("Empty context was provided to the completion")
@@ -202,10 +225,10 @@ class GraphCompletionRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self,
-        query: Optional[str],
-        query_batch: Optional[List[str]],
         retrieved_objects: Optional[List[Edge]],
         context: str,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
     ) -> List[Any]:
         """
         Generates an LLM response based on the query, context, and conversation history.
@@ -213,6 +236,7 @@ class GraphCompletionRetriever(BaseRetriever):
 
         Args:
             query (str): The user's question or prompt.
+            query_batch (List[str]): The batch of user queries.
             retrieved_objects (Optional[List[Edge]]): Raw triplets used for interaction mapping.
                                                      Output of get_retrieved_objects method.
             context (str): The text-resolved graph context.
@@ -224,24 +248,10 @@ class GraphCompletionRetriever(BaseRetriever):
         Note: To avoid duplicate retrievals, ensure that retrieved_objects and context
               are provided from previous method calls.
         """
-
         cache_config = CacheConfig()
         user = session_user.get()
         user_id = getattr(user, "id", None)
         session_save = user_id and cache_config.caching
-
-        if query_batch and session_save:
-            raise QueryValidationError(
-                message="You cannot use batch queries with session saving currently."
-            )
-        if query_batch and self.save_interaction:
-            raise QueryValidationError(
-                message="Cannot use batch queries with interaction saving currently."
-            )
-
-        is_query_valid, msg = validate_queries(query, query_batch)
-        if not is_query_valid:
-            raise QueryValidationError(message=msg)
 
         if session_save:
             conversation_history = await get_conversation_history(session_id=self.session_id)

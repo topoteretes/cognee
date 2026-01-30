@@ -1,5 +1,5 @@
 import asyncio
-from typing import Optional, List, Type, Any
+from typing import Optional, List, Type, Any, Union
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
 from cognee.modules.retrieval.utils.query_state import QueryState
@@ -57,8 +57,8 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         self.context_extension_rounds = context_extension_rounds
 
     async def get_retrieved_objects(
-        self, query: Optional[str], query_batch: Optional[List[str]]
-    ) -> List[Edge]:
+        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
+    ) -> Union[List[Edge], List[List[Edge]]]:
         """
         Extends the context for a given query by retrieving related triplets and generating new
         completions based on them.
@@ -198,17 +198,17 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
             round_idx += 1
 
-        return [query_state.triplets for query_state in finished_queries_states.values()]
+        return [finished_queries_states[batched_query].triplets for batched_query in query_batch]
 
     async def get_completion_from_context(
         self,
-        query: Optional[str],
-        query_batch: Optional[List[str]],
         retrieved_objects: List[Edge] | List[List[Edge]],
         context: str | List[str],
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
     ) -> List[Any]:
         """
-        Returns a human readable answer based on the provided query and extended context derived from the retrieved objects.
+        Returns a human-readable answer based on the provided query and extended context derived from the retrieved objects.
 
         Returns:
         --------
@@ -277,3 +277,25 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             )
 
         return completion if query_batch else [completion]
+
+    async def get_context_from_objects(
+        self,
+        retrieved_objects,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
+    ) -> str | List[str]:
+        triplets = retrieved_objects
+        if query:
+            query_batch = [query]
+
+        # Check if all triplets are empty, in case of batch queries
+        if query_batch and all(len(batched_triplets) == 0 for batched_triplets in triplets):
+            logger.warning("Empty context was provided to the completion")
+            return ["" for _ in query_batch]
+
+        return await asyncio.gather(
+            *[
+                self.resolve_edges_to_text(batched_triplets)
+                for batched_triplets in retrieved_objects
+            ]
+        )
