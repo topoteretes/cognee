@@ -18,6 +18,7 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.exceptions.exceptions import CogneeValidationError
 
 logger = get_logger()
 
@@ -249,5 +250,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
             - List[str]: A list containing the generated answer to the user's query.
         """
+        if not retrieved_objects:
+            raise CogneeValidationError("No context retrieved to generate completion.")
         completion = self.completion
         return [completion]
