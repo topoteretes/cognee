@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from uuid import UUID
 
+from cognee.exceptions import CogneeValidationError
 from cognee.modules.retrieval.graph_completion_cot_retriever import (
     GraphCompletionCotRetriever,
     _as_answer_text,
@@ -333,9 +334,12 @@ async def test_get_completion_without_context(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        context = await retriever.get_context_from_objects("test query")
+        mock_edge = MagicMock()
+
+        objects = await retriever.get_retrieved_objects("test query")
+        context = await retriever.get_context_from_objects("test query", objects)
         completion = await retriever.get_completion_from_context(
-            "test query", None, context=context
+            "test query", [mock_edge], context=context
         )
 
     assert isinstance(completion, list)
@@ -365,8 +369,12 @@ async def test_get_completion_with_provided_context(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
+        mock_edge = MagicMock()
+
+        objects = await retriever.get_retrieved_objects("test query")
+        await retriever.get_context_from_objects("test query", objects)
         completion = await retriever.get_completion_from_context(
-            "test query", None, context="mock_edge"
+            "test query", [mock_edge], context="test"
         )
 
     assert isinstance(completion, list)
@@ -551,7 +559,13 @@ async def test_get_completion_with_response_model(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion_from_context("test query", None, "mock_edge")
+        mock_edge = MagicMock()
+
+        objects = await retriever.get_retrieved_objects("test query")
+        await retriever.get_context_from_objects("test query", objects)
+        completion = await retriever.get_completion_from_context(
+            "test query", [mock_edge], "mock_edge"
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -596,7 +610,7 @@ async def test_get_completion_with_session_no_user_id(mock_edge):
         mock_session_user.get.return_value = None  # No user
 
         completion = await retriever.get_completion_from_context(
-            "test query", None, context="mock_edge"
+            "test query", [mock_edge], context="mock_edge"
         )
 
     assert isinstance(completion, list)
@@ -646,10 +660,8 @@ async def test_get_completion_with_save_interaction_no_context(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion_from_context("test query", None, context=None)
-
-    assert isinstance(completion, list)
-    assert len(completion) == 1
+        with pytest.raises(CogneeValidationError):
+            await retriever.get_completion_from_context("test query", None, context=None)
 
 
 @pytest.mark.asyncio
