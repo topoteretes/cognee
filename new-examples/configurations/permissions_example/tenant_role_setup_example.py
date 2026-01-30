@@ -34,7 +34,6 @@ async def tenant_and_role_setup_example():
     # Add document for user_1, add it under dataset name QUANTUM
     print("\nCreating user_1: user_1@example.com")
     user_1 = await create_user("user_1@example.com", "example")
-    await cognee.add([text], dataset_name="QUANTUM", user=user_1)
 
     # Users can also be added to Roles and Tenants and then permission can be assigned on a Role/Tenant level as well
     # To create a Role a user first must be an owner of a Tenant

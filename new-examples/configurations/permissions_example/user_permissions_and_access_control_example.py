@@ -17,26 +17,66 @@ from cognee.shared.logging_utils import setup_logging, CRITICAL
 
 logger = get_logger()
 
-explanation_file_path = os.path.join(
-    pathlib.Path(__file__).parent, "data/artificial_intelligence.pdf"
-)
 
-text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
-At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages
-this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the
-preparation and manipulation of quantum states.
-"""
+async def main():
+    # ENABLE PERMISSIONS FEATURE
+    # Note: When ENABLE_BACKEND_ACCESS_CONTROL is enabled vector provider is automatically set to use LanceDB
+    # and graph provider is set to use Kuzu.
+    os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "True"
 
+    # Set the rest of your environment variables as needed. By default OpenAI is used as the LLM provider
+    # Reference the .env.tempalte file for available option and how to change LLM provider: https://github.com/topoteretes/cognee/blob/main/.env.template
+    # For example to set your OpenAI LLM API key use:
+    # os.environ["LLM_API_KEY"] = "your-api-key"
 
-# Extract dataset_ids from cognify results
-def extract_dataset_id_from_cognify(cognify_result):
-    """Extract dataset_id from cognify output dictionary"""
-    for dataset_id, pipeline_result in cognify_result.items():
-        return dataset_id  # Return the first dataset_id
-    return None
+    # Create a clean slate for cognee -- reset data and system state
+    print("Resetting cognee data...")
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    print("Data reset complete.\n")
 
+    # Set up the necessary databases and tables for user management.
+    await setup()
 
-async def access_check_example(user_1, user_2, ai_dataset_id, quantum_dataset_id):
+    # NOTE: When a document is added in Cognee with permissions enabled only the owner of the document has permissions
+    # to work with the document initially.
+    # Add document for user_1, add it under dataset name AI
+    explanation_file_path = os.path.join(
+        pathlib.Path(__file__).parent, "data/artificial_intelligence.pdf"
+    )
+
+    print("Creating user_1: user_1@example.com")
+    user_1 = await create_user("user_1@example.com", "example")
+    await cognee.add([explanation_file_path], dataset_name="AI", user=user_1)
+
+    # Add document for user_2, add it under dataset name QUANTUM
+    text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
+    At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages
+    this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the
+    preparation and manipulation of quantum states.
+    """
+    print("\nCreating user_2: user_2@example.com")
+    user_2 = await create_user("user_2@example.com", "example")
+    await cognee.add([text], dataset_name="QUANTUM", user=user_2)
+
+    # Run cognify for both datasets as the appropriate user/owner
+    print("\nCreating different datasets for user_1 (AI dataset) and user_2 (QUANTUM dataset)")
+    ai_cognify_result = await cognee.cognify(["AI"], user=user_1)
+    quantum_cognify_result = await cognee.cognify(["QUANTUM"], user=user_2)
+
+    # Extract dataset_ids from cognify results
+    def extract_dataset_id_from_cognify(cognify_result):
+        """Extract dataset_id from cognify output dictionary"""
+        for dataset_id, pipeline_result in cognify_result.items():
+            return dataset_id  # Return the first dataset_id
+        return None
+
+    # Get dataset IDs from cognify results
+    # Note: When we want to work with datasets from other users (search, add, cognify and etc.) we must supply dataset
+    # information through dataset_id using dataset name only looks for datasets owned by current user
+    ai_dataset_id = extract_dataset_id_from_cognify(ai_cognify_result)
+    quantum_dataset_id = extract_dataset_id_from_cognify(quantum_cognify_result)
+
     # We can see here that user_1 can read his own dataset (AI dataset)
     search_results = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
@@ -98,8 +138,6 @@ async def access_check_example(user_1, user_2, ai_dataset_id, quantum_dataset_id
     # If we'd like for user_1 to add new documents to the QUANTUM dataset owned by user_2, user_1 would have to get
     # "write" access permission, which user_1 currently does not have
 
-
-async def tenant_and_role_example(user_2, quantum_dataset_id):
     # Users can also be added to Roles and Tenants and then permission can be assigned on a Role/Tenant level as well
     # To create a Role a user first must be an owner of a Tenant
     print("User 2 is creating CogneeLab tenant/organization")
@@ -180,47 +218,9 @@ async def tenant_and_role_example(user_2, quantum_dataset_id):
     for result in search_results:
         print(f"{result}\n")
 
-
-async def main():
-    # Create a clean slate for cognee -- reset data and system state and
-    # set up the necessary databases and tables for user management.
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-    await setup()
-
-    # NOTE: When a document is added in Cognee with permissions enabled only the owner of the document has permissions
-    # to work with the document initially.
-    # Add document for user_1, add it under dataset name AI
-    print("Creating user_1: user_1@example.com")
-    user_1 = await create_user("user_1@example.com", "example")
-    await cognee.add([explanation_file_path], dataset_name="AI", user=user_1)
-
-    # Add document for user_2, add it under dataset name QUANTUM
-    print("\nCreating user_2: user_2@example.com")
-    user_2 = await create_user("user_2@example.com", "example")
-    await cognee.add([text], dataset_name="QUANTUM", user=user_2)
-
-    # Run cognify for both datasets as the appropriate user/owner
-    print("\nCreating different datasets for user_1 (AI dataset) and user_2 (QUANTUM dataset)")
-    ai_cognify_result = await cognee.cognify(["AI"], user=user_1)
-    quantum_cognify_result = await cognee.cognify(["QUANTUM"], user=user_2)
-
-    # Get dataset IDs from cognify results
-    # Note: When we want to work with datasets from other users (search, add, cognify and etc.) we must supply dataset
-    # information through dataset_id using dataset name only looks for datasets owned by current user
-    ai_dataset_id = extract_dataset_id_from_cognify(ai_cognify_result)
-    quantum_dataset_id = extract_dataset_id_from_cognify(quantum_cognify_result)
-
-    await access_check_example(user_1, user_2, ai_dataset_id, quantum_dataset_id)
-
-    await tenant_and_role_example(user_2, quantum_dataset_id)
-
     # Note: All of these function calls and permission system is available through our backend endpoints as well
 
 
-# Please set ENABLE_BACKEND_ACCESS_CONTROL=True in .env file
-# Note: When ENABLE_BACKEND_ACCESS_CONTROL is enabled vector provider is automatically set to use LanceDB
-# and graph provider is set to use Kuzu.
 if __name__ == "__main__":
     import asyncio
 
