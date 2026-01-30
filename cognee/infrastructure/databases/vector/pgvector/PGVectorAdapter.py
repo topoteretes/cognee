@@ -336,6 +336,10 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Use async session to connect to the database
         async with self.get_async_session() as session:
             if belongs_to_nodesets:
+                from sqlalchemy import cast, bindparam
+                from sqlalchemy.dialects.postgresql import JSONB
+
+                target = bindparam("target", value=belongs_to_nodesets, type_=JSONB)
                 query = (
                     select(
                         *select_columns,
@@ -344,7 +348,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                         ),
                     )
                     .where(
-                        PGVectorDataPoint.c.payload["belongs_to_set"].contains(belongs_to_nodesets)
+                        cast(PGVectorDataPoint.c.payload, JSONB)
+                        .op("->")("belongs_to_set")
+                        .op("@>")(target)
                     )
                     .order_by("similarity")
                 )
