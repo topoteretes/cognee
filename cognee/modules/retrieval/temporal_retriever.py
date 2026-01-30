@@ -152,7 +152,9 @@ class TemporalRetriever(GraphCompletionRetriever):
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> Any:
         """Retrieves context based on the query."""
-        if retrieved_objects.get("relevant_events", None):
+        if retrieved_objects.get("relevant_events", None) and retrieved_objects.get(
+            "vector_search_results", None
+        ):
             top_k_events = await self.filter_top_k_events(
                 retrieved_objects.get("relevant_events"),
                 retrieved_objects.get("vector_search_results", None),

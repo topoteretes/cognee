@@ -66,6 +66,12 @@ async def test_get_context_success(mock_edge):
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
+    mock_node1 = MagicMock()
+    mock_node2 = MagicMock()
+    mock_edge.node1 = mock_node1
+    mock_edge.node2 = mock_node2
+    mock_edge.attributes = {"text": "mock edge"}
+
     with (
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
@@ -76,11 +82,9 @@ async def test_get_context_success(mock_edge):
             return_value=[mock_edge],
         ),
     ):
-        context = await retriever.get_context("test query")
+        context = await retriever.get_context_from_objects("test query", [mock_edge])
 
-    assert isinstance(context, list)
-    assert len(context) == 1
-    assert context[0] == mock_edge
+    assert isinstance(context, str)
 
 
 @pytest.mark.asyncio
@@ -101,9 +105,9 @@ async def test_get_context_empty_results():
             return_value=[],
         ),
     ):
-        context = await retriever.get_context("test query")
+        context = await retriever.get_context_from_objects("test query", [])
 
-    assert context == []
+    assert context == ""
 
 
 @pytest.mark.asyncio
@@ -118,9 +122,9 @@ async def test_get_context_empty_graph():
         "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
         return_value=mock_graph_engine,
     ):
-        context = await retriever.get_context("test query")
+        context = await retriever.get_context_from_objects("test query", [])
 
-    assert context == []
+    assert context == ""
 
 
 @pytest.mark.asyncio
@@ -185,21 +189,6 @@ async def test_init_none_top_k():
 
 
 @pytest.mark.asyncio
-async def test_convert_retrieved_objects_to_context(mock_edge):
-    """Test convert_retrieved_objects_to_context method."""
-    retriever = GraphCompletionRetriever()
-
-    with patch(
-        "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
-        return_value="Resolved text",
-    ) as mock_resolve:
-        result = await retriever.convert_retrieved_objects_to_context([mock_edge])
-
-    assert result == "Resolved text"
-    mock_resolve.assert_awaited_once_with([mock_edge])
-
-
-@pytest.mark.asyncio
 async def test_get_completion_without_context(mock_edge):
     """Test get_completion retrieves context when not provided."""
     mock_graph_engine = AsyncMock()
@@ -232,7 +221,7 @@ async def test_get_completion_without_context(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query")
+        completion = await retriever.get_completion_from_context("test query", None, None)
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -261,7 +250,9 @@ async def test_get_completion_with_provided_context(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query", context=[mock_edge])
+        completion = await retriever.get_completion_from_context(
+            "test query", None, context="mock edge"
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -274,7 +265,7 @@ async def test_get_completion_with_session(mock_edge):
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
-    retriever = GraphCompletionRetriever()
+    retriever = GraphCompletionRetriever(session_id="test_session")
 
     mock_user = MagicMock()
     mock_user.id = "test-user-id"
@@ -319,7 +310,7 @@ async def test_get_completion_with_session(mock_edge):
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = mock_user
 
-        completion = await retriever.get_completion("test query", session_id="test_session")
+        completion = await retriever.get_completion_from_context("test query", None, None)
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -338,7 +329,7 @@ async def test_get_completion_with_response_model(mock_edge):
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
-    retriever = GraphCompletionRetriever()
+    retriever = GraphCompletionRetriever(response_model=TestModel)
 
     with (
         patch(
@@ -365,7 +356,7 @@ async def test_get_completion_with_response_model(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query", response_model=TestModel)
+        completion = await retriever.get_completion_from_context("test query", None, None)
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -405,7 +396,7 @@ async def test_get_completion_empty_context(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query")
+        completion = await retriever.get_completion_from_context("test query", None, None)
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -546,7 +537,7 @@ async def test_get_completion_with_save_interaction_no_completion(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query")
+        completion = await retriever.get_completion_from_context("test query", None, None)
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -586,7 +577,7 @@ async def test_get_completion_with_save_interaction_no_context(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query", context=None)
+        completion = await retriever.get_completion_from_context("test query", None, context=None)
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -640,7 +631,10 @@ async def test_get_completion_with_save_interaction_all_conditions_met(mock_edge
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query", context=[mock_edge])
+        objects = await retriever.get_retrieved_objects("test query")
+        completion = await retriever.get_completion_from_context(
+            "test query", objects, context="mock_edge"
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1

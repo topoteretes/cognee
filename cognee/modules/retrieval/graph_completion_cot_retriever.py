@@ -21,6 +21,7 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.exceptions.exceptions import CogneeValidationError
 
 logger = get_logger()
 
@@ -91,6 +92,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         self.validation_user_prompt_path = validation_user_prompt_path
         self.followup_system_prompt_path = followup_system_prompt_path
         self.followup_user_prompt_path = followup_user_prompt_path
+        self.completion = []
         self.max_iter = max_iter
 
     async def get_retrieved_objects(
@@ -136,6 +138,9 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             query_batch=query_batch,
             conversation_history=conversation_history,
         )
+
+        # Note: completion info is stored to reduce the need to call LLM again in get_completion_from_context
+        self.completion = completion
 
         if self.save_interaction and context_text and triplets and completion:
             await self.save_qa(
@@ -378,44 +383,10 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             - List[str]: A list containing the generated answer to the user's query.
         """
 
-        # Check if session saving is enabled
-        cache_config = CacheConfig()
-        user = session_user.get()
-        user_id = getattr(user, "id", None)
-        session_save = user_id and cache_config.caching
-
-        # Load conversation history if enabled
-        conversation_history = ""
-        if session_save:
-            conversation_history = await get_conversation_history(session_id=self.session_id)
-
-        if query_batch:
-            completion = await asyncio.gather(
-                *[
-                    generate_completion(
-                        query=batched_query,
-                        context=batched_context,
-                        user_prompt_path=self.user_prompt_path,
-                        system_prompt_path=self.system_prompt_path,
-                        system_prompt=self.system_prompt,
-                        conversation_history=conversation_history if conversation_history else None,
-                        response_model=self.response_model,
-                    )
-                    for batched_query, batched_context in zip(query_batch, context)
-                ]
-            )
-        else:
-            completion = await generate_completion(
-                query=query,
-                context=context,
-                user_prompt_path=self.user_prompt_path,
-                system_prompt_path=self.system_prompt_path,
-                system_prompt=self.system_prompt,
-                conversation_history=conversation_history if conversation_history else None,
-                response_model=self.response_model,
-            )
-
-        return completion if query_batch else [completion]
+        if not retrieved_objects:
+            raise CogneeValidationError("No context retrieved to generate completion.")
+        completion = self.completion
+        return [completion]
 
     async def get_context_from_objects(
         self,

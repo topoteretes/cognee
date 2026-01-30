@@ -56,6 +56,7 @@ async def _test_get_structured_graph_completion_cot():
 
     retriever.response_model = TestAnswer
     # Test with structured response model
+    triplets = await retriever.get_retrieved_objects(query)
     structured_answer = await retriever.get_completion_from_context(
         query=query, retrieved_objects=triplets, context=context
     )

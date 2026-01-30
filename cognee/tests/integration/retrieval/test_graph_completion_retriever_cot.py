@@ -3,9 +3,9 @@ import pathlib
 import pytest_asyncio
 from typing import Optional, Union
 import cognee
+from cognee.exceptions import CogneeValidationError
 
 from cognee.low_level import setup, DataPoint
-from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.tasks.storage import add_data_points
 from cognee.modules.retrieval.graph_completion_cot_retriever import GraphCompletionCotRetriever
 
@@ -211,11 +211,7 @@ async def test_get_graph_completion_cot_context_on_empty_graph(setup_test_enviro
     context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
     assert context == "", "Context should be empty on an empty graph"
 
-    answer = await retriever.get_completion_from_context(
-        query=query, retrieved_objects=triplets, context=context
-    )
-
-    assert isinstance(answer, list), f"Expected list, got {type(answer).__name__}"
-    assert all(isinstance(item, str) and item.strip() for item in answer), (
-        "Answer must contain only non-empty strings"
-    )
+    with pytest.raises(CogneeValidationError):
+        await retriever.get_completion_from_context(
+            query=query, retrieved_objects=triplets, context=context
+        )
