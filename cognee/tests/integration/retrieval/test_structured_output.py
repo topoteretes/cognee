@@ -43,84 +43,127 @@ def _assert_structured_answer(answer: list[TestAnswer]):
 
 async def _test_get_structured_graph_completion_cot():
     retriever = GraphCompletionCotRetriever()
+    query = "Who works at Figma?"
+
+    triplets = await retriever.get_retrieved_objects(query)
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     # Test with string response model (default)
-    string_answer = await retriever.get_completion("Who works at Figma?")
+    string_answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
+    )
     _assert_string_answer(string_answer)
 
+    retriever.response_model = TestAnswer
     # Test with structured response model
-    structured_answer = await retriever.get_completion(
-        "Who works at Figma?", response_model=TestAnswer
+    structured_answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
     )
     _assert_structured_answer(structured_answer)
 
 
 async def _test_get_structured_graph_completion():
     retriever = GraphCompletionRetriever()
+    query = "Who works at Figma?"
+
+    triplets = await retriever.get_retrieved_objects(query)
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     # Test with string response model (default)
-    string_answer = await retriever.get_completion("Who works at Figma?")
+    string_answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
+    )
     _assert_string_answer(string_answer)
 
+    retriever.response_model = TestAnswer
     # Test with structured response model
-    structured_answer = await retriever.get_completion(
-        "Who works at Figma?", response_model=TestAnswer
+    structured_answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
     )
     _assert_structured_answer(structured_answer)
 
 
 async def _test_get_structured_graph_completion_temporal():
     retriever = TemporalRetriever()
+    query = "When did Steve start working at Figma?"
 
     # Test with string response model (default)
-    string_answer = await retriever.get_completion("When did Steve start working at Figma?")
+    triplets = await retriever.get_retrieved_objects(query)
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
+
+    # Test with string response model (default)
+    string_answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
+    )
     _assert_string_answer(string_answer)
 
+    retriever.response_model = TestAnswer
     # Test with structured response model
-    structured_answer = await retriever.get_completion(
-        "When did Steve start working at Figma??", response_model=TestAnswer
+    structured_answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
     )
     _assert_structured_answer(structured_answer)
 
 
 async def _test_get_structured_graph_completion_rag():
     retriever = CompletionRetriever()
+    query = "Where does Steve work?"
+
+    triplets = await retriever.get_retrieved_objects(query)
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     # Test with string response model (default)
-    string_answer = await retriever.get_completion("Where does Steve work?")
+    string_answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
+    )
     _assert_string_answer(string_answer)
 
+    retriever.response_model = TestAnswer
     # Test with structured response model
-    structured_answer = await retriever.get_completion(
-        "Where does Steve work?", response_model=TestAnswer
+    structured_answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
     )
     _assert_structured_answer(structured_answer)
 
 
 async def _test_get_structured_graph_completion_context_extension():
     retriever = GraphCompletionContextExtensionRetriever()
+    query = "Who works at Figma?"
+
+    triplets = await retriever.get_retrieved_objects(query)
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     # Test with string response model (default)
-    string_answer = await retriever.get_completion("Who works at Figma?")
+    string_answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
+    )
     _assert_string_answer(string_answer)
 
+    retriever.response_model = TestAnswer
     # Test with structured response model
-    structured_answer = await retriever.get_completion(
-        "Who works at Figma?", response_model=TestAnswer
+    structured_answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
     )
     _assert_structured_answer(structured_answer)
 
 
 async def _test_get_structured_entity_completion():
     retriever = EntityCompletionRetriever(DummyEntityExtractor(), DummyContextProvider())
+    query = "Who is Albert Einstein?"
+
+    entities = await retriever.get_retrieved_objects(query)
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=entities)
 
     # Test with string response model (default)
-    string_answer = await retriever.get_completion("Who is Albert Einstein?")
+    string_answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=entities, context=context
+    )
     _assert_string_answer(string_answer)
 
+    retriever.response_model = TestAnswer
     # Test with structured response model
-    structured_answer = await retriever.get_completion(
-        "Who is Albert Einstein?", response_model=TestAnswer
+    structured_answer = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=entities, context=context
     )
     _assert_structured_answer(structured_answer)
 

@@ -70,6 +70,7 @@ jobs:
       LLM_ENDPOINT: https://api.openai.com/v1
       LLM_API_KEY: ${{ secrets.OPENAI_API_KEY  }}
       LLM_API_VERSION: "2024-02-01"
+      EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
       EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -111,6 +112,7 @@ jobs:
       LLM_ENDPOINT: https://api.openai.com/v1
       LLM_API_KEY: ${{ secrets.OPENAI_API_KEY  }}
       LLM_API_VERSION: "2024-02-01"
+      EMBEDDING_DIMENSIONS: 300
       EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
       EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
