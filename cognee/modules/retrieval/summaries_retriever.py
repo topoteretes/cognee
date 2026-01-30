@@ -23,9 +23,10 @@ class SummariesRetriever(BaseRetriever):
     - top_k: int - Number of top summaries to retrieve.
     """
 
-    def __init__(self, top_k: int = 5):
+    def __init__(self, top_k: int = 5, session_id: Optional[str] = None):
         """Initialize retriever with search parameters."""
         self.top_k = top_k
+        self.session_id = session_id
 
     async def get_retrieved_objects(self, query: str) -> Any:
         """

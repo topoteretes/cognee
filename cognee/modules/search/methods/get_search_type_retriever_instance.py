@@ -64,7 +64,7 @@ async def get_search_type_retriever_instance(
 
     # Registry mapping search types to their corresponding retriever classes and input parameters
     search_core_registry: dict[SearchType, Tuple[BaseRetriever, dict]] = {
-        SearchType.SUMMARIES: (SummariesRetriever, {"top_k": top_k}),
+        SearchType.SUMMARIES: (SummariesRetriever, {"top_k": top_k, "session_id": session_id}),
         SearchType.CHUNKS: (
             ChunksRetriever,
             {"top_k": top_k},
