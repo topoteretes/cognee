@@ -502,7 +502,9 @@ def get_datasets_router() -> APIRouter:
                 headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
             )
 
-        if parsed_uri.scheme in ("file", "") or (len(parsed_uri.scheme) == 1 and parsed_uri.scheme.isalpha()):
+        if parsed_uri.scheme in ("file", "") or (
+            len(parsed_uri.scheme) == 1 and parsed_uri.scheme.isalpha()
+        ):
             from cognee.infrastructure.files.utils.get_data_file_path import get_data_file_path
 
             file_path = get_data_file_path(raw_location)
