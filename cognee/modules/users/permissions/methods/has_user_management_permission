@@ -16,3 +16,5 @@ def has_user_management_permission(tenant_id: UUID, role_name: str):
 
     if role_name in accepted_roles:
         return True
+    else:
+        return False
