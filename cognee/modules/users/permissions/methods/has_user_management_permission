@@ -1,5 +1,7 @@
-def has_user_management_permission(role_name: str):
-    """Check if the given role has user management permissions for the given tenant.
+USER_MANAGEMENT_ROLES = {tenant_owner}
+
+def has_user_management_permission(role_name: str) -> bool:
+    """Check if the given role has user management permissions.
      Args:
         role_name: Name of the role to check permissions for
 
@@ -10,7 +12,4 @@ def has_user_management_permission(role_name: str):
         "tenant_owner"
     ]  # Creates a list of roles with user management permissions. Easily extendable.
 
-    if role_name in accepted_roles:
-        return True
-    else:
-        return False
+    return role_name in USER_MANAGEMENT_ROLES
