@@ -19,3 +19,4 @@ class SearchResult(BaseModel):
     search_result: Any
     dataset_id: Optional[UUID]
     dataset_name: Optional[str]
+    citations: Optional[List[Dict[str, Any]]] = None
