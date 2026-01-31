@@ -1,0 +1,18 @@
+from uuid import UUID
+
+
+def has_user_management_permission(tenant_id: UUID, role_name: str):
+    """Check if the given role has user management permissions for the given tenant.
+     Args:
+        tenant_id: Id of the tenant
+        role_name: Name of the role to check permissions for
+
+    Returns: Boolean indicating if the role has user management permissions.
+    """
+
+    accepted_roles = [
+        "tenant_owner"
+    ]  # Creates a list of roles with user management permissions. Easily extendable.
+
+    if role_name in accepted_roles:
+        return True
