@@ -96,10 +96,26 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         embeddings = await asyncio.gather(*[self._get_embedding(prompt) for prompt in text])
         return embeddings
 
+    def _truncate_text_to_token_limit(self, text: str, max_tokens: int = 2048) -> str:
+        """
+        Truncate text to fit within the embedding model's context length.
+        Uses character-based truncation for reliability, with a conservative limit.
+        Most embedding models have 8K context but we use 2K tokens (~8K chars) to be safe.
+        """
+        # Use character-based truncation (roughly 4 chars per token)
+        # This is more reliable than tokenizer-based truncation which may fail
+        char_limit = max_tokens * 4  # ~8192 characters for 2048 tokens
+        if len(text) > char_limit:
+            logger.warning(
+                f"Text exceeds character limit ({len(text)} > {char_limit}), truncating..."
+            )
+            return text[:char_limit]
+        return text
+
     @retry(
         stop=stop_after_delay(128),
         wait=wait_exponential_jitter(8, 128),
-        retry=retry_if_not_exception_type(litellm.exceptions.NotFoundError),
+        retry=retry_if_not_exception_type((litellm.exceptions.NotFoundError, ValueError)),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
@@ -107,7 +123,10 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
         """
         Internal method to call the Ollama embeddings endpoint for a single prompt.
         """
-        payload = {"model": self.model, "prompt": prompt, "input": prompt}
+        # Truncate text to fit within model's context length
+        truncated_prompt = self._truncate_text_to_token_limit(prompt)
+
+        payload = {"model": self.model, "input": truncated_prompt}
 
         headers = {}
         api_key = os.getenv("LLM_API_KEY")
@@ -122,10 +141,24 @@ class OllamaEmbeddingEngine(EmbeddingEngine):
                     self.endpoint, json=payload, headers=headers, timeout=60.0
                 ) as response:
                     data = await response.json()
+
+                    # Check for error responses from Ollama
+                    if "error" in data:
+                        error_msg = data["error"]
+                        logger.error(f"Ollama embedding error: {error_msg}")
+                        # Don't retry on context length errors
+                        if "context length" in error_msg or "input length" in error_msg:
+                            raise ValueError(f"Text too long for embedding model: {error_msg}")
+                        raise RuntimeError(f"Ollama embedding API error: {error_msg}")
+
                     if "embeddings" in data:
                         return data["embeddings"][0]
-                    else:
+                    elif "embedding" in data:
+                        return data["embedding"]
+                    elif "data" in data and len(data["data"]) > 0:
                         return data["data"][0]["embedding"]
+                    else:
+                        raise ValueError(f"Unexpected response format from Ollama: {data}")
 
     def get_vector_size(self) -> int:
         """
