@@ -79,6 +79,18 @@ async def test_update_invalid_raises(adapter):
 
 
 @pytest.mark.asyncio
+async def test_clear_feedback(adapter):
+    """clear_feedback sets feedback_text and feedback_score to None."""
+    await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
+    await adapter.update_qa_entry("u1", "s1", "id1", feedback_text="good", feedback_score=5)
+    ok = await adapter.clear_feedback("u1", "s1", "id1")
+    assert ok
+    entries = await adapter.get_all_qa_entries("u1", "s1")
+    e = entries[0]
+    assert e.get("feedback_text") is None and e.get("feedback_score") is None
+
+
+@pytest.mark.asyncio
 async def test_delete_entry(adapter):
     """Delete a single QA entry by qa_id."""
     await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
