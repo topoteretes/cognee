@@ -160,7 +160,7 @@ class SessionQAEntryValidationError(CogneeValidationError):
 
     def __init__(
         self,
-        message: str = "Session QA entry validation failed. Wrong SessionQAEntry schema is passed to update_qa_entry.",
+        message: str = "Session QA entry validation failed. Wrong SessionQAEntry is used during session CRUD operations.",
         name: str = "SessionQAEntryValidationError",
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
