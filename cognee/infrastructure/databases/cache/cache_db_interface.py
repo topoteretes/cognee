@@ -137,6 +137,14 @@ class CacheDBInterface(ABC):
         pass
 
     @abstractmethod
+    async def prune(self) -> None:
+        """
+        Delete the entire cache (flush Redis db or delete FS cache directory).
+        In Cognee, prune means wiping the whole cache storage.
+        """
+        pass
+
+    @abstractmethod
     async def close(self):
         """
         Gracefully close any async connections.
