@@ -404,8 +404,5 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             return ["" for _ in query_batch]
 
         return await asyncio.gather(
-            *[
-                self.resolve_edges_to_text(batched_triplets)
-                for batched_triplets in retrieved_objects
-            ]
+            *[self.resolve_edges_to_text(batched_triplets) for batched_triplets in triplets]
         )

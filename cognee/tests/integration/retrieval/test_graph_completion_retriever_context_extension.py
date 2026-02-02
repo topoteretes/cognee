@@ -170,8 +170,8 @@ async def test_graph_completion_extension_context_simple(setup_test_environment_
 
     context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
-    assert "Mike Broski --[works_for]--> Canva" in context, "Failed to get Mike Broski"
-    assert "Christina Mayer --[works_for]--> Canva" in context, "Failed to get Christina Mayer"
+    assert "Mike Broski --[works_for]--> Canva" in context[0], "Failed to get Mike Broski"
+    assert "Christina Mayer --[works_for]--> Canva" in context[0], "Failed to get Christina Mayer"
 
     answer = await retriever.get_completion_from_context(
         query=query, retrieved_objects=triplets, context=context
@@ -193,9 +193,9 @@ async def test_graph_completion_extension_context_complex(setup_test_environment
 
     context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
-    assert "Mike Rodger --[works_for]--> Figma" in context, "Failed to get Mike Rodger"
-    assert "Ike Loma --[works_for]--> Figma" in context, "Failed to get Ike Loma"
-    assert "Jason Statham --[works_for]--> Figma" in context, "Failed to get Jason Statham"
+    assert "Mike Rodger --[works_for]--> Figma" in context[0], "Failed to get Mike Rodger"
+    assert "Ike Loma --[works_for]--> Figma" in context[0], "Failed to get Ike Loma"
+    assert "Jason Statham --[works_for]--> Figma" in context[0], "Failed to get Jason Statham"
 
     answer = await retriever.get_completion_from_context(
         query=query, retrieved_objects=triplets, context=context
@@ -216,7 +216,7 @@ async def test_get_graph_completion_extension_context_on_empty_graph(setup_test_
     triplets = await retriever.get_retrieved_objects(query)
 
     context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
-    assert context == "", "Context should be empty on an empty graph"
+    assert context == [""], "Context should be empty on an empty graph"
 
     answer = await retriever.get_completion_from_context(
         query=query, retrieved_objects=triplets, context=context
