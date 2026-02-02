@@ -292,6 +292,22 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
+    async def prune(self) -> None:
+        """
+        Flush the Redis database. In Cognee, prune means deleting the whole cache.
+        """
+        try:
+            await self.async_redis.flushdb()
+
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while pruning: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while pruning Redis: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
     async def log_usage(
         self,
         user_id: str,
