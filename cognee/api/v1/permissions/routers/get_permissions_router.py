@@ -266,4 +266,45 @@ def get_permissions_router() -> APIRouter:
             content={"message": "Tenant selected.", "tenant_id": str(payload.tenant_id)},
         )
 
+    @permissions_router.get("/tenants/{tenant_id}/roles")  
+    async def get_tenant_roles(  
+        tenant_id: UUID,  
+        user: User = Depends(get_authenticated_user),  
+    ):  
+        from cognee.modules.users.permissions.methods import get_tenant
+        from cognee.modules.users.exceptions import PermissionDeniedError  
+        from cognee.infrastructure.databases.relational import get_relational_engine  
+        from sqlalchemy import select  
+        from sqlalchemy.orm import selectinload  
+          
+        tenant = await get_tenant(tenant_id)  
+        if tenant.owner_id != user.id:  
+            raise PermissionDeniedError("Only tenant owners can view roles")  
+          
+        db_engine = get_relational_engine()  
+        async with db_engine.get_async_session() as session:  
+            from cognee.modules.users.models import Role  
+              
+            roles_result = await session.execute(  
+                select(Role)  
+                .options(selectinload(Role.users))  
+                .where(Role.tenant_id == tenant_id)  
+            )  
+            roles = roles_result.scalars().all()  
+              
+            # Format response  
+            role_list = []  
+            for role in roles:  
+                role_list.append({  
+                    "id": str(role.id),  
+                    "name": role.name,  
+                    "description": getattr(role, 'description', None),  
+                    "user_count": len(role.users) if role.users else 0  
+                })  
+              
+            return JSONResponse(  
+                status_code=200,  
+                content={"roles": role_list}  
+            )
+
     return permissions_router
