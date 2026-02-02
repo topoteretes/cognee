@@ -71,3 +71,39 @@ async def test_prune(adapter):
     await adapter.create_qa_entry("u1", "s1", "Q", "C", "A", qa_id="id1")
     await adapter.prune()
     assert await adapter.get_all_qa_entries("u1", "s1") == []
+
+
+# Backward-compatibility tests (add_qa, get_latest_qa, get_all_qas):TODO: Can be deleted after session manager integration into retrievers
+
+
+@pytest.mark.asyncio
+async def test_add_qa_backward_compat(adapter):
+    """Legacy add_qa stores entry with auto-generated qa_id."""
+    await adapter.add_qa("u1", "s1", "Q", "C", "A")
+    entries = await adapter.get_all_qa_entries("u1", "s1")
+    assert len(entries) == 1
+    assert "qa_id" in entries[0]
+    assert entries[0]["question"] == "Q" and entries[0]["answer"] == "A"
+
+
+@pytest.mark.asyncio
+async def test_get_all_qas_backward_compat(adapter):
+    """Legacy get_all_qas returns same as get_all_qa_entries."""
+    await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
+    await adapter.create_qa_entry("u1", "s1", "Q2", "C2", "A2", qa_id="id2")
+    via_legacy = await adapter.get_all_qas("u1", "s1")
+    via_new = await adapter.get_all_qa_entries("u1", "s1")
+    assert via_legacy == via_new
+    assert len(via_legacy) == 2
+
+
+@pytest.mark.asyncio
+async def test_get_latest_qa_backward_compat(adapter):
+    """Legacy get_latest_qa returns same as get_latest_qa_entries."""
+    await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
+    await adapter.create_qa_entry("u1", "s1", "Q2", "C2", "A2", qa_id="id2")
+    await adapter.create_qa_entry("u1", "s1", "Q3", "C3", "A3", qa_id="id3")
+    via_legacy = await adapter.get_latest_qa("u1", "s1", last_n=2)
+    via_new = await adapter.get_latest_qa_entries("u1", "s1", last_n=2)
+    assert via_legacy == via_new
+    assert len(via_legacy) == 2
