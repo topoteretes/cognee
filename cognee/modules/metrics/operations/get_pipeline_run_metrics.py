@@ -1,4 +1,3 @@
-
 import time
 import traceback
 from sqlalchemy import select
@@ -14,6 +13,7 @@ from cognee.shared.logging_utils import get_logger
 
 
 logger = get_logger(__name__)
+
 
 async def fetch_token_count(db_engine) -> int:
     """
@@ -48,7 +48,9 @@ async def get_pipeline_run_metrics(pipeline_run: PipelineRunInfo, include_option
                 metrics_for_pipeline_runs.append(existing_metrics)
                 logger.info(f"Cache hit for pipeline run ID: {pipeline_run.pipeline_run_id}")
             else:
-                logger.info(f"Cache miss for pipeline run ID: {pipeline_run.pipeline_run_id}. Computing metrics.")
+                logger.info(
+                    f"Cache miss for pipeline run ID: {pipeline_run.pipeline_run_id}. Computing metrics."
+                )
                 graph_metrics = await graph_engine.get_graph_metrics(include_optional)
                 metrics = GraphMetrics(
                     id=pipeline_run.pipeline_run_id,
@@ -67,15 +69,15 @@ async def get_pipeline_run_metrics(pipeline_run: PipelineRunInfo, include_option
                 metrics_for_pipeline_runs.append(metrics)
                 session.add(metrics)
             await session.commit()
-    except Exception as e:
-        response_time = (time.time() - start_time)
+    except Exception:
+        response_time = time.time() - start_time
         logger.error(
             "Error computing metrics for pipeline run ID %s after %.2fs",
             pipeline_run.pipeline_run_id,
             response_time,
         )
         logger.error(traceback.format_exc())
-    response_time = (time.time() - start_time)
+    response_time = time.time() - start_time
     logger.info(
         "Computed metrics for pipeline run ID %s in %.2fs",
         pipeline_run.pipeline_run_id,
