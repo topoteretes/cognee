@@ -152,7 +152,7 @@ class FSCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
-    async def clear_feedback(self, user_id: str, session_id: str, qa_id: str) -> bool:
+    async def delete_feedback(self, user_id: str, session_id: str, qa_id: str) -> bool:
         """
         Set feedback_text and feedback_score to None for a QA entry.
         """
