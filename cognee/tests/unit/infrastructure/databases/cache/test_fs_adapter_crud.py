@@ -18,7 +18,9 @@ def adapter():
                 FSCacheAdapter,
             )
 
-            yield FSCacheAdapter()
+            inst = FSCacheAdapter()
+            yield inst
+            inst.cache.close()
 
 
 @pytest.mark.asyncio
