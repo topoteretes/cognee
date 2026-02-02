@@ -1,7 +1,5 @@
 import asyncio
-
 import cognee
-from cognee.api.v1.search import SearchType
 
 from os import path
 from cognee.api.v1.visualize.visualize import visualize_graph
@@ -12,6 +10,13 @@ Extract only people and cities as entities.
 Connect people to cities with the relationship "lives_in".
 Ignore all other entities.
 """
+
+graph_visualization_path_before_enrichment = path.join(
+    path.dirname(__file__), "before_enrichment.html"
+)
+graph_visualization_path_after_enrichment = path.join(
+    path.dirname(__file__), "after_enrichment.html"
+)
 
 
 async def main():
@@ -26,18 +31,11 @@ async def main():
     )
     await cognee.cognify(custom_prompt=custom_prompt)
 
-    await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="Where does Alice live?",
-    )
-
-    graph_visualization_path = path.join(path.dirname(__file__), "before_enrichment.html")
-    await visualize_graph(graph_visualization_path)
+    await visualize_graph(graph_visualization_path_before_enrichment)
 
     await consolidate_entity_descriptions()
 
-    graph_visualization_path = path.join(path.dirname(__file__), "after_enrichment.html")
-    await visualize_graph(graph_visualization_path)
+    await visualize_graph(graph_visualization_path_after_enrichment)
 
 
 if __name__ == "__main__":
