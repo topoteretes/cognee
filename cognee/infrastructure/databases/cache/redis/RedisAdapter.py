@@ -144,9 +144,7 @@ class RedisAdapter(CacheDBInterface):
                 feedback_text=feedback_text,
                 feedback_score=feedback_score,
             )
-            await self.async_redis.rpush(
-                session_key, json.dumps(entry.model_dump())
-            )
+            await self.async_redis.rpush(session_key, json.dumps(entry.model_dump()))
 
             if ttl is not None:
                 await self.async_redis.expire(session_key, ttl)
@@ -222,9 +220,7 @@ class RedisAdapter(CacheDBInterface):
                         raise SessionQAEntryValidationError(
                             message=f"Session QA entry validation failed during update_qa_entry operation: {e!s}"
                         ) from e
-                    await self.async_redis.lset(
-                        session_key, i, json.dumps(validated.model_dump())
-                    )
+                    await self.async_redis.lset(session_key, i, json.dumps(validated.model_dump()))
                     return True
             return False
 
@@ -256,9 +252,7 @@ class RedisAdapter(CacheDBInterface):
                     entries.pop(i)
                     await self.async_redis.delete(session_key)
                     for e in entries:
-                        await self.async_redis.rpush(
-                            session_key, json.dumps(e)
-                        )
+                        await self.async_redis.rpush(session_key, json.dumps(e))
                     return True
             return False
 
@@ -286,9 +280,7 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
         except Exception as e:
-            error_msg = (
-                f"Unexpected error while deleting session from Redis: {str(e)}"
-            )
+            error_msg = f"Unexpected error while deleting session from Redis: {str(e)}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 

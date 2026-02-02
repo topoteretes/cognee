@@ -25,16 +25,12 @@ class FSCacheAdapter(CacheDBInterface):
 
         storage_config = get_storage_config()
         data_root_directory = storage_config["data_root_directory"]
-        self.cache_directory = os.path.join(
-            data_root_directory, ".cognee_fs_cache", default_key
-        )
+        self.cache_directory = os.path.join(data_root_directory, ".cognee_fs_cache", default_key)
         os.makedirs(self.cache_directory, exist_ok=True)
         self.cache = dc.Cache(directory=self.cache_directory)
         self.cache.expire()
 
-        logger.debug(
-            f"FSCacheAdapter initialized with cache directory: {self.cache_directory}"
-        )
+        logger.debug(f"FSCacheAdapter initialized with cache directory: {self.cache_directory}")
 
     def acquire_lock(self):
         """Lock acquisition is not available for filesystem cache backend."""

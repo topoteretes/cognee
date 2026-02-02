@@ -56,8 +56,13 @@ class CacheDBInterface(ABC):
     ):
         """Backward-compatibility: delegates to create_qa_entry with generated qa_id. :TODO: delete when retrievers are updated"""
         return await self.create_qa_entry(
-            user_id, session_id, question, context, answer,
-            qa_id=str(uuid.uuid4()), ttl=ttl,
+            user_id,
+            session_id,
+            question,
+            context,
+            answer,
+            qa_id=str(uuid.uuid4()),
+            ttl=ttl,
         )
 
     @abstractmethod
