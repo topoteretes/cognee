@@ -365,3 +365,10 @@ class RedisAdapter(CacheDBInterface):
             error_msg = f"Unexpected error while retrieving usage logs from Redis: {str(e)}"
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
+
+    async def close(self):
+        """Close Redis connections."""
+        try:
+            await self.async_redis.aclose()
+        except Exception as e:
+            logger.debug("Error closing Redis async connection: %s", e)
