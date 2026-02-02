@@ -388,9 +388,11 @@ async def test_e2e_search_results_and_wrappers(e2e_state):
             )
             assert wrapper.get("dataset_id"), f"{name}: missing dataset_id in wrapper"
             assert wrapper.get("dataset_name") == "test_dataset"
-            result_payload = wrapper.get("search_result")
+            result_payload = wrapper.get("text_result")
         else:
-            result_payload = search_results[0]
+            entry = search_results[0]
+            assert isinstance(entry, dict), f"{name}: expected dict entries"
+            result_payload = entry.get("text_result")
 
         text_blob = str(result_payload)
         assert text_blob.strip()
