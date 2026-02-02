@@ -239,7 +239,7 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
-    async def delete_qa_entries(self, user_id: str, session_id: str, qa_id: str) -> bool:
+    async def delete_qa_entry(self, user_id: str, session_id: str, qa_id: str) -> bool:
         """
         Delete a single QA entry by qa_id.
         Returns True if deleted, False if qa_id not found.
