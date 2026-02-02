@@ -106,16 +106,16 @@ class CacheDBInterface(ABC):
         self,
         user_id: str,
         session_id: str,
-        question: str | None,
-        context: str | None,
-        answer: str | None,
         qa_id: str,
+        question: str | None = None,
+        context: str | None = None,
+        answer: str | None = None,
         feedback_text: str | None = None,
         feedback_score: int | None = None,
     ) -> bool:
         """
         Update a QA entry by qa_id. Same QA fields as create_qa_entry.
-        question/context/answer=None preserve existing values.
+        Only passed fields are updated; None/default preserves existing values.
         Returns True if updated, False if qa_id not found.
         """
         pass
