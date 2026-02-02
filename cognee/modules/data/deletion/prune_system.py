@@ -10,8 +10,6 @@ from cognee.infrastructure.databases.utils import (
     get_vector_dataset_database_handler,
 )
 from cognee.shared.cache import delete_cache
-from cognee.infrastructure.databases.cache import get_cache_config, get_cache_engine
-from cognee.modules.users.models import DatasetDatabase
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -70,8 +68,3 @@ async def prune_system(graph=True, vector=True, metadata=True, cache=True):
 
     if cache:
         await delete_cache()
-        cache_config = get_cache_config()
-        if cache_config.caching or cache_config.usage_logging:
-            cache_engine = get_cache_engine()
-            if cache_engine:
-                await cache_engine.prune()
