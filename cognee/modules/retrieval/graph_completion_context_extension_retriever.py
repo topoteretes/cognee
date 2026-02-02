@@ -202,10 +202,10 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
     async def get_completion_from_context(
         self,
-        retrieved_objects: List[Edge] | List[List[Edge]],
-        context: str | List[str],
         query: Optional[str] = None,
         query_batch: Optional[List[str]] = None,
+        retrieved_objects: List[Edge] | List[List[Edge]] = None,
+        context: str | List[str] = None,
     ) -> List[Any]:
         """
         Returns a human-readable answer based on the provided query and extended context derived from the retrieved objects.
@@ -265,7 +265,10 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
         if self.save_interaction and context and retrieved_objects and completion:
             await self.save_qa(
-                question=query, answer=completion, context=context, triplets=retrieved_objects
+                question=query,
+                answer=completion[0],
+                context=context[0],
+                triplets=retrieved_objects[0],
             )
 
         if session_save:
@@ -280,9 +283,9 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
     async def get_context_from_objects(
         self,
-        retrieved_objects,
         query: Optional[str] = None,
         query_batch: Optional[List[str]] = None,
+        retrieved_objects: List[Edge] | List[List[Edge]] = None,
     ) -> str | List[str]:
         triplets = retrieved_objects
         if query:
@@ -294,8 +297,5 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             return ["" for _ in query_batch]
 
         return await asyncio.gather(
-            *[
-                self.resolve_edges_to_text(batched_triplets)
-                for batched_triplets in retrieved_objects
-            ]
+            *[self.resolve_edges_to_text(batched_triplets) for batched_triplets in triplets]
         )

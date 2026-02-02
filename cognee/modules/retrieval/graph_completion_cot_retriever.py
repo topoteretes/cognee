@@ -144,7 +144,10 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
         if self.save_interaction and context_text and triplets and completion:
             await self.save_qa(
-                question=query, answer=str(completion), context=context_text, triplets=triplets
+                question=query,
+                answer=str(completion[0]),
+                context=context_text[0],
+                triplets=triplets[0],
             )
 
         # Save to session cache if enabled
@@ -184,9 +187,6 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             - triplets: The list of triplets used
         """
         followup_question_batch = []
-        completion_batch = []
-        context_text_batch = []
-        triplets_batch = []
 
         if query:
             # Treat a single query as a batch of queries, mainly avoiding massive code duplication
@@ -351,10 +351,10 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
     async def get_completion_from_context(
         self,
-        retrieved_objects: List[Edge] | List[List[Edge]],
-        context: str | List[str],
         query: Optional[str] = None,
         query_batch: Optional[List[str]] = None,
+        retrieved_objects: List[Edge] | List[List[Edge]] = None,
+        context: str | List[str] = None,
     ) -> List[Any]:
         """
         Generate completion responses based on a user query and contextual information.
@@ -386,13 +386,13 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         if not retrieved_objects:
             raise CogneeValidationError("No context retrieved to generate completion.")
         completion = self.completion
-        return [completion]
+        return completion
 
     async def get_context_from_objects(
         self,
-        retrieved_objects,
         query: Optional[str] = None,
         query_batch: Optional[List[str]] = None,
+        retrieved_objects=None,
     ) -> str | List[str]:
         triplets = retrieved_objects
         if query:

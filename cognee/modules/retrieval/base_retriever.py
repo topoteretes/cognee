@@ -29,7 +29,10 @@ class BaseRetriever(ABC):
 
     @abstractmethod
     async def get_context_from_objects(
-        self, retrieved_objects: Any, query: Optional[str] = None, query_batch: Optional[str] = None
+        self,
+        query: Optional[str] = None,
+        query_batch: Optional[str] = None,
+        retrieved_objects: Any = None,
     ) -> Union[str, List[str]]:
         """
         Transforms raw retrieved objects into a structured context for the LLM.
@@ -48,10 +51,10 @@ class BaseRetriever(ABC):
     @abstractmethod
     async def get_completion_from_context(
         self,
-        retrieved_objects: Any,
-        context: Any,
         query: Optional[str] = None,
         query_batch: Optional[List[str]] = None,
+        retrieved_objects: Any = None,
+        context: Any = None,
     ) -> Union[List[str], List[dict]]:
         """
         Generates a final output or answer based on the query and retrieved context.

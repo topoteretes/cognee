@@ -82,7 +82,9 @@ async def test_get_context_success(mock_edge):
             return_value=[mock_edge],
         ),
     ):
-        context = await retriever.get_context_from_objects("test query", [mock_edge])
+        context = await retriever.get_context_from_objects(
+            query="test query", retrieved_objects=[mock_edge]
+        )
 
     assert isinstance(context, str)
 
@@ -105,7 +107,7 @@ async def test_get_context_empty_results():
             return_value=[],
         ),
     ):
-        context = await retriever.get_context_from_objects("test query", [])
+        context = await retriever.get_context_from_objects(query="test query", retrieved_objects=[])
 
     assert context == ""
 
@@ -122,7 +124,7 @@ async def test_get_context_empty_graph():
         "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
         return_value=mock_graph_engine,
     ):
-        context = await retriever.get_context_from_objects("test query", [])
+        context = await retriever.get_context_from_objects(query="test query", retrieved_objects=[])
 
     assert context == ""
 
@@ -221,7 +223,9 @@ async def test_get_completion_without_context(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion_from_context("test query", None, None)
+        completion = await retriever.get_completion_from_context(
+            query="test query", retrieved_objects=None, context=None
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -251,7 +255,7 @@ async def test_get_completion_with_provided_context(mock_edge):
         mock_cache_config.return_value = mock_config
 
         completion = await retriever.get_completion_from_context(
-            "test query", None, context="mock edge"
+            query="test query", retrieved_objects=None, context="mock edge"
         )
 
     assert isinstance(completion, list)
@@ -310,7 +314,9 @@ async def test_get_completion_with_session(mock_edge):
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = mock_user
 
-        completion = await retriever.get_completion_from_context("test query", None, None)
+        completion = await retriever.get_completion_from_context(
+            query="test query", retrieved_objects=None, context=None
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -356,7 +362,9 @@ async def test_get_completion_with_response_model(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion_from_context("test query", None, None)
+        completion = await retriever.get_completion_from_context(
+            query="test query", retrieved_objects=None, context=None
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -396,7 +404,9 @@ async def test_get_completion_empty_context(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion_from_context("test query", None, None)
+        completion = await retriever.get_completion_from_context(
+            query="test query", retrieved_objects=None, context=None
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -537,7 +547,9 @@ async def test_get_completion_with_save_interaction_no_completion(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion_from_context("test query", None, None)
+        completion = await retriever.get_completion_from_context(
+            query="test query", retrieved_objects=None, context=None
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -577,7 +589,9 @@ async def test_get_completion_with_save_interaction_no_context(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion_from_context("test query", None, context=None)
+        completion = await retriever.get_completion_from_context(
+            query="test query", retrieved_objects=None, context=None
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -633,7 +647,7 @@ async def test_get_completion_with_save_interaction_all_conditions_met(mock_edge
 
         objects = await retriever.get_retrieved_objects("test query")
         completion = await retriever.get_completion_from_context(
-            "test query", objects, context="mock_edge"
+            query="test query", retrieved_objects=objects, context="mock_edge"
         )
 
     assert isinstance(completion, list)
@@ -664,8 +678,8 @@ async def test_get_completion_batch_queries_with_context(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion(
-            query_batch=["test query 1", "test query 2"], context=[[mock_edge], [mock_edge]]
+        completion = await retriever.get_completion_from_context(
+            query_batch=["test query 1", "test query 2"], context="mock context"
         )
 
     assert isinstance(completion, list)
@@ -705,7 +719,15 @@ async def test_get_completion_batch_queries_without_context(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion(query_batch=["test query 1", "test query 2"])
+        objects = await retriever.get_retrieved_objects(
+            query_batch=["test query 1", "test query 2"]
+        )
+        context = await retriever.get_context_from_objects(
+            query_batch=["test query 1", "test query 2"], retrieved_objects=objects
+        )
+        completion = await retriever.get_completion_from_context(
+            query_batch=["test query 1", "test query 2"], retrieved_objects=objects, context=context
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 2
@@ -723,7 +745,7 @@ async def test_get_completion_batch_queries_with_response_model(mock_edge):
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
-    retriever = GraphCompletionRetriever()
+    retriever = GraphCompletionRetriever(response_model=TestModel)
 
     with (
         patch(
@@ -750,8 +772,14 @@ async def test_get_completion_batch_queries_with_response_model(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion(
-            query_batch=["test query 1", "test query 2"], response_model=TestModel
+        objects = await retriever.get_retrieved_objects(
+            query_batch=["test query 1", "test query 2"]
+        )
+        context = await retriever.get_context_from_objects(
+            query_batch=["test query 1", "test query 2"], retrieved_objects=objects
+        )
+        completion = await retriever.get_completion_from_context(
+            query_batch=["test query 1", "test query 2"], retrieved_objects=objects, context=context
         )
 
     assert isinstance(completion, list)
@@ -792,7 +820,15 @@ async def test_get_completion_batch_queries_empty_context(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion(query_batch=["test query 1", "test query 2"])
+        objects = await retriever.get_retrieved_objects(
+            query_batch=["test query 1", "test query 2"]
+        )
+        context = await retriever.get_context_from_objects(
+            query_batch=["test query 1", "test query 2"], retrieved_objects=objects
+        )
+        completion = await retriever.get_completion_from_context(
+            query_batch=["test query 1", "test query 2"], retrieved_objects=objects, context=context
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 2
@@ -831,7 +867,15 @@ async def test_get_completion_batch_queries_duplicate_queries(mock_edge):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion(query_batch=["test query 1", "test query 1"])
+        objects = await retriever.get_retrieved_objects(
+            query_batch=["test query 1", "test query 1"]
+        )
+        context = await retriever.get_context_from_objects(
+            query_batch=["test query 1", "test query 1"], retrieved_objects=objects
+        )
+        completion = await retriever.get_completion_from_context(
+            query_batch=["test query 1", "test query 1"], retrieved_objects=objects, context=context
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 2

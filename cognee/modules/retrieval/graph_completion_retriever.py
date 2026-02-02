@@ -184,9 +184,9 @@ class GraphCompletionRetriever(BaseRetriever):
 
     async def get_context_from_objects(
         self,
-        retrieved_objects,
         query: Optional[str] = None,
         query_batch: Optional[List[str]] = None,
+        retrieved_objects=None,
     ) -> str | List[str]:
         """
         Transforms raw retrieved graph triplets into a textual context string.
@@ -225,10 +225,10 @@ class GraphCompletionRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self,
-        retrieved_objects: Optional[List[Edge]],
-        context: str,
         query: Optional[str] = None,
         query_batch: Optional[List[str]] = None,
+        retrieved_objects: Optional[List[Edge]] = None,
+        context: str = None,
     ) -> List[Any]:
         """
         Generates an LLM response based on the query, context, and conversation history.
