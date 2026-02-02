@@ -126,6 +126,14 @@ class CacheDBInterface(ABC):
         pass
 
     @abstractmethod
+    async def clear_feedback(self, user_id: str, session_id: str, qa_id: str) -> bool:
+        """
+        Set feedback_text and feedback_score to None for a QA entry.
+        Returns True if updated, False if qa_id not found.
+        """
+        pass
+
+    @abstractmethod
     async def delete_qa_entry(self, user_id: str, session_id: str, qa_id: str) -> bool:
         """
         Delete a single QA entry by qa_id.

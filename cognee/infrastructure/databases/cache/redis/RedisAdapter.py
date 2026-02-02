@@ -235,6 +235,41 @@ class RedisAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
+    async def clear_feedback(self, user_id: str, session_id: str, qa_id: str) -> bool:
+        """
+        Set feedback_text and feedback_score to None for a QA entry.
+        """
+        try:
+            session_key = f"agent_sessions:{user_id}:{session_id}"
+            entries_raw = await self.async_redis.lrange(session_key, 0, -1)
+            if not entries_raw:
+                return False
+
+            entries = [json.loads(e) for e in entries_raw]
+            for i, entry in enumerate(entries):
+                if entry.get("qa_id") == qa_id:
+                    merged = {**entry, "feedback_text": None, "feedback_score": None}
+                    try:
+                        validated = SessionQAEntry.model_validate(merged)
+                    except ValidationError as e:
+                        raise SessionQAEntryValidationError(
+                            message=f"Session QA entry validation failed: {e!s}"
+                        ) from e
+                    await self.async_redis.lset(session_key, i, json.dumps(validated.model_dump()))
+                    return True
+            return False
+
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while clearing feedback: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except SessionQAEntryValidationError:
+            raise
+        except Exception as e:
+            error_msg = f"Unexpected error while clearing feedback: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
     async def delete_qa_entry(self, user_id: str, session_id: str, qa_id: str) -> bool:
         """
         Delete a single QA entry by qa_id.

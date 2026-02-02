@@ -152,6 +152,38 @@ class FSCacheAdapter(CacheDBInterface):
             logger.error(error_msg)
             raise CacheConnectionError(error_msg) from e
 
+    async def clear_feedback(self, user_id: str, session_id: str, qa_id: str) -> bool:
+        """
+        Set feedback_text and feedback_score to None for a QA entry.
+        """
+        try:
+            session_key = f"agent_sessions:{user_id}:{session_id}"
+            value = self.cache.get(session_key)
+            if value is None:
+                return False
+
+            entries = json.loads(value)
+            for i, entry in enumerate(entries):
+                if entry.get("qa_id") == qa_id:
+                    merged = {**entry, "feedback_text": None, "feedback_score": None}
+                    try:
+                        validated = SessionQAEntry.model_validate(merged)
+                    except ValidationError as e:
+                        raise SessionQAEntryValidationError(
+                            message=f"Session QA entry validation failed: {e!s}"
+                        ) from e
+                    entries[i] = validated.model_dump()
+                    self.cache.set(session_key, json.dumps(entries), expire=86400)
+                    return True
+            return False
+
+        except SessionQAEntryValidationError:
+            raise
+        except Exception as e:
+            error_msg = f"Unexpected error while clearing feedback: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
     async def delete_qa_entry(self, user_id: str, session_id: str, qa_id: str) -> bool:
         """
         Delete a single QA entry by qa_id.
