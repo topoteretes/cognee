@@ -258,14 +258,6 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             ):
                 query_state_tracker[batched_query].completion = batched_completion
 
-            # TODO: Remove this if
-            if round_idx == self.max_iter:
-                # When we finish all iterations:
-                # Make sure answers are returned for duplicate queries, in the order they were asked.
-                completion_batch = []
-                for batched_query in query_batch:
-                    completion_batch.append(query_state_tracker[batched_query].completion)
-
             logger.info(f"Chain-of-thought: round {round_idx} - answers: {completion_batch}")
 
             if round_idx < self.max_iter:
@@ -369,6 +361,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         -----------
 
             - query (str): The user's query to be processed and answered.
+            - query_batch (list[str]): The list of queries to be processed and answered.
             - context (Optional[Any]): Optional context that may assist in answering the query.
               If not provided, it will be fetched based on the query. (default None)
             - session_id (Optional[str]): Optional session identifier for caching. If None,
@@ -383,7 +376,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             - List[str]: A list containing the generated answer to the user's query.
         """
 
-        if not retrieved_objects:
+        if not retrieved_objects or all(len(triplet) == 0 for triplet in retrieved_objects):
             raise CogneeValidationError("No context retrieved to generate completion.")
         completion = self.completion
         return completion
