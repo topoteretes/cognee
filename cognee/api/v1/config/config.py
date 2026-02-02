@@ -176,3 +176,33 @@ class config:
     def set_vector_db_url(db_url: str):
         vector_db_config = get_vectordb_config()
         vector_db_config.vector_db_url = db_url
+
+    @staticmethod
+    def set(key: str, value):
+        """
+        Generic setter method that maps keys to appropriate setter methods.
+        """
+        key_to_method = {
+            "llm_provider": "set_llm_provider",
+            "llm_model": "set_llm_model",
+            "llm_api_key": "set_llm_api_key",
+            "llm_endpoint": "set_llm_endpoint",
+            "graph_database_provider": "set_graph_database_provider",
+            "vector_db_provider": "set_vector_db_provider",
+            "vector_db_url": "set_vector_db_url",
+            "vector_db_key": "set_vector_db_key",
+            "chunk_size": "set_chunk_size",
+            "chunk_overlap": "set_chunk_overlap",
+            "chunk_strategy": "set_chunk_strategy",
+            "chunk_engine": "set_chunk_engine",
+            "classification_model": "set_classification_model",
+            "summarization_model": "set_summarization_model",
+            "graph_model": "set_graph_model",
+        }
+
+        if key in key_to_method:
+            method_name = key_to_method[key]
+            method = getattr(config, method_name)
+            method(value)
+        else:
+            raise InvalidConfigAttributeError(attribute=key)
