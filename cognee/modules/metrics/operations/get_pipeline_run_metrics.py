@@ -1,3 +1,6 @@
+
+import time
+import traceback
 from sqlalchemy import select
 from sqlalchemy.sql import func
 
@@ -7,6 +10,10 @@ from cognee.modules.pipelines.models import PipelineRunInfo
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import get_relational_engine
 
+from cognee.shared.logging_utils import get_logger
+
+
+logger = get_logger(__name__)
 
 async def fetch_token_count(db_engine) -> int:
     """
@@ -24,38 +31,54 @@ async def fetch_token_count(db_engine) -> int:
 
 
 async def get_pipeline_run_metrics(pipeline_run: PipelineRunInfo, include_optional: bool):
-    db_engine = get_relational_engine()
-    graph_engine = await get_graph_engine()
+    logger.debug(f"Computing metrics for pipeline run ID: {pipeline_run.pipeline_run_id}")
+    start_time = time.time()
+    try:
+        db_engine = get_relational_engine()
+        graph_engine = await get_graph_engine()
 
-    metrics_for_pipeline_runs = []
-
-    async with db_engine.get_async_session() as session:
-        existing_metrics = await session.execute(
-            select(GraphMetrics).where(GraphMetrics.id == pipeline_run.pipeline_run_id)
-        )
-        existing_metrics = existing_metrics.scalars().first()
-
-        if existing_metrics:
-            metrics_for_pipeline_runs.append(existing_metrics)
-        else:
-            graph_metrics = await graph_engine.get_graph_metrics(include_optional)
-            metrics = GraphMetrics(
-                id=pipeline_run.pipeline_run_id,
-                num_tokens=await fetch_token_count(db_engine),
-                num_nodes=graph_metrics["num_nodes"],
-                num_edges=graph_metrics["num_edges"],
-                mean_degree=graph_metrics["mean_degree"],
-                edge_density=graph_metrics["edge_density"],
-                num_connected_components=graph_metrics["num_connected_components"],
-                sizes_of_connected_components=graph_metrics["sizes_of_connected_components"],
-                num_selfloops=graph_metrics["num_selfloops"],
-                diameter=graph_metrics["diameter"],
-                avg_shortest_path_length=graph_metrics["avg_shortest_path_length"],
-                avg_clustering=graph_metrics["avg_clustering"],
+        metrics_for_pipeline_runs = []
+        async with db_engine.get_async_session() as session:
+            existing_metrics = await session.execute(
+                select(GraphMetrics).where(GraphMetrics.id == pipeline_run.pipeline_run_id)
             )
-            metrics_for_pipeline_runs.append(metrics)
-            session.add(metrics)
+            existing_metrics = existing_metrics.scalars().first()
 
-        await session.commit()
-
+            if existing_metrics:
+                metrics_for_pipeline_runs.append(existing_metrics)
+                logger.info(f"Cache hit for pipeline run ID: {pipeline_run.pipeline_run_id}")
+            else:
+                logger.info(f"Cache miss for pipeline run ID: {pipeline_run.pipeline_run_id}. Computing metrics.")
+                graph_metrics = await graph_engine.get_graph_metrics(include_optional)
+                metrics = GraphMetrics(
+                    id=pipeline_run.pipeline_run_id,
+                    num_tokens=await fetch_token_count(db_engine),
+                    num_nodes=graph_metrics["num_nodes"],
+                    num_edges=graph_metrics["num_edges"],
+                    mean_degree=graph_metrics["mean_degree"],
+                    edge_density=graph_metrics["edge_density"],
+                    num_connected_components=graph_metrics["num_connected_components"],
+                    sizes_of_connected_components=graph_metrics["sizes_of_connected_components"],
+                    num_selfloops=graph_metrics["num_selfloops"],
+                    diameter=graph_metrics["diameter"],
+                    avg_shortest_path_length=graph_metrics["avg_shortest_path_length"],
+                    avg_clustering=graph_metrics["avg_clustering"],
+                )
+                metrics_for_pipeline_runs.append(metrics)
+                session.add(metrics)
+            await session.commit()
+    except Exception as e:
+        response_time = (time.time() - start_time)
+        logger.error(
+            "Error computing metrics for pipeline run ID %s after %.2fs",
+            pipeline_run.pipeline_run_id,
+            response_time,
+        )
+        logger.error(traceback.format_exc())
+    response_time = (time.time() - start_time)
+    logger.info(
+        "Computed metrics for pipeline run ID %s in %.2fs",
+        pipeline_run.pipeline_run_id,
+        response_time,
+    )
     return metrics_for_pipeline_runs
