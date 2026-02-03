@@ -8,7 +8,7 @@ logger = get_logger("SessionManager")
 
 class SessionManager:
     """
-    Manages session QA entries. Wraps the cache engine with a domain-focused API.
+    Manages session QA entries.
     """
 
     def __init__(self, cache_engine, default_session_id: str = "default_session"):
@@ -224,91 +224,3 @@ class SessionManager:
             user_id=user_id,
             session_id=session_id,
         )
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    from cognee.infrastructure.databases.cache.config import get_cache_config
-    from cognee.infrastructure.session.get_session_manager import get_session_manager
-
-    async def main():
-        config = get_cache_config()
-        backend = config.cache_backend
-        print(f"Cache backend: {backend} (set CACHE_BACKEND=redis or fs to switch)")
-
-        sm = get_session_manager()
-        user_id, session_id = "test_user", "test_session"
-        print("is_available:", sm.is_available)
-
-        if not sm.is_available:
-            print("Cache disabled, exiting")
-            return
-
-        sid = sm.normalize_session_id(None)
-        assert sid == "default_session"
-        print("normalize_session_id(None):", sid)
-
-        qa_id1 = await sm.add_qa(user_id, session_id, "Q1?", "ctx1", "A1.")
-        print("add_qa(qa_id=id1):", qa_id1)
-
-        qa_id2 = await sm.add_qa(user_id, session_id, "Q2?", "ctx2", "A2.")
-        print("add_qa(auto):", qa_id2)
-
-        qa_id3 = await sm.add_qa(
-            user_id, session_id, "Q3?", "ctx3", "A3.", feedback_text="good", feedback_score=4
-        )
-        print("add_qa(with feedback):", qa_id3)
-
-        entries = await sm.get_session(user_id, session_id)
-        print("get_session (all):", len(entries), "entries")
-
-        last2 = await sm.get_session(user_id, session_id, last_n=2)
-        print("get_session(last_n=2):", len(last2), "entries")
-
-        formatted = await sm.get_session(user_id, session_id, last_n=2, formatted=True)
-        print("get_session(formatted=True) len:", len(formatted))
-        assert "Previous conversation" in formatted and "Q2?" in formatted
-
-        raw = await sm.get_session(user_id, session_id, last_n=2, formatted=False)
-        print("get_session(formatted=False):", len(raw), "entries")
-        assert isinstance(raw, list) and len(raw) == 2
-
-        ok = await sm.update_qa(
-            user_id, session_id, qa_id1, question="Q1 updated?", answer="A1 updated."
-        )
-        print("update_qa(id1):", ok)
-        entries = await sm.get_session(user_id, session_id)
-        e1 = next(e for e in entries if e["qa_id"] == qa_id1)
-        assert e1["question"] == "Q1 updated?"
-
-        ok = await sm.add_feedback(user_id, session_id, qa_id1, feedback_score=5)
-        print("add_feedback(id1, score=5):", ok)
-        entries = await sm.get_session(user_id, session_id)
-        e1 = next(e for e in entries if e["qa_id"] == qa_id1)
-        assert e1["feedback_score"] == 5
-
-        ok = await sm.delete_feedback(user_id, session_id, qa_id1)
-        print("delete_feedback(id1):", ok)
-        entries = await sm.get_session(user_id, session_id)
-        e1 = next(e for e in entries if e["qa_id"] == qa_id1)
-        assert e1.get("feedback_score") is None and e1.get("feedback_text") is None
-
-        ok = await sm.delete_qa(user_id, session_id, qa_id2)
-        print("delete_qa(qa_id2):", ok)
-        entries = await sm.get_session(user_id, session_id)
-        print("after delete_qa:", len(entries), "entries")
-
-        ok = await sm.delete_session(user_id, session_id)
-        print("delete_session:", ok)
-        entries = await sm.get_session(user_id, session_id)
-        assert len(entries) == 0
-        print("after delete_session:", len(entries), "entries")
-
-        fmt = sm.format_entries([])
-        assert fmt == ""
-        print("format_entries([]): empty")
-
-        print()
-
-    asyncio.run(main())
