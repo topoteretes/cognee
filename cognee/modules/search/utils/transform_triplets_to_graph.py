@@ -3,11 +3,11 @@ from typing import List
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 
 
-def transform_context_to_graph(context: List[Edge]):
+def transform_triplets_to_graph(input_triplets: List[Edge]):
     nodes = {}
     edges = {}
 
-    for triplet in context:
+    for triplet in input_triplets:
         nodes[triplet.node1.id] = {
             "id": triplet.node1.id,
             "label": triplet.node1.attributes["name"]

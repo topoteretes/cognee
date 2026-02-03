@@ -6,7 +6,6 @@ from typing import Optional, Union
 import cognee
 
 from cognee.low_level import setup, DataPoint
-from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.tasks.storage import add_data_points
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 
@@ -174,8 +173,11 @@ async def setup_test_environment_empty():
 async def test_graph_completion_context_simple(setup_test_environment_simple):
     """Integration test: verify GraphCompletionRetriever can retrieve context (simple)."""
     retriever = GraphCompletionRetriever()
+    query = "Who works at Canva?"
 
-    context = await resolve_edges_to_text(await retriever.get_context("Who works at Canva?"))
+    triplets = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     # Ensure the top-level sections are present
     assert "Nodes:" in context, "Missing 'Nodes:' section in context"
@@ -240,8 +242,11 @@ async def test_graph_completion_context_simple(setup_test_environment_simple):
 async def test_graph_completion_context_complex(setup_test_environment_complex):
     """Integration test: verify GraphCompletionRetriever can retrieve context (complex)."""
     retriever = GraphCompletionRetriever(top_k=20)
+    query = "Who works at Figma?"
 
-    context = await resolve_edges_to_text(await retriever.get_context("Who works at Figma?"))
+    triplets = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     assert "Mike Rodger --[works_for]--> Figma" in context, "Failed to get Mike Rodger"
     assert "Ike Loma --[works_for]--> Figma" in context, "Failed to get Ike Loma"
@@ -252,9 +257,12 @@ async def test_graph_completion_context_complex(setup_test_environment_complex):
 async def test_get_graph_completion_context_on_empty_graph(setup_test_environment_empty):
     """Integration test: verify GraphCompletionRetriever handles empty graph correctly."""
     retriever = GraphCompletionRetriever()
+    query = "Who works at Figma?"
 
-    context = await retriever.get_context("Who works at Figma?")
-    assert context == [], "Context should be empty on an empty graph"
+    triplets = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
+    assert context == "", "Context should be empty on an empty graph"
 
 
 @pytest.mark.asyncio
