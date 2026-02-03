@@ -52,7 +52,6 @@ class CacheDBInterface(ABC):
         question: str,
         context: str,
         answer: str,
-        ttl: int | None = 86400,
     ):
         """Backward-compatibility: delegates to create_qa_entry with generated qa_id. :TODO: delete when retrievers are updated"""
         return await self.create_qa_entry(
@@ -62,7 +61,6 @@ class CacheDBInterface(ABC):
             context,
             answer,
             qa_id=str(uuid.uuid4()),
-            ttl=ttl,
         )
 
     @abstractmethod
@@ -76,7 +74,6 @@ class CacheDBInterface(ABC):
         qa_id: str,
         feedback_text: str | None = None,
         feedback_score: int | None = None,
-        ttl: int | None = 86400,
     ):
         """
         Add a Q/A/context triplet to a cache session.

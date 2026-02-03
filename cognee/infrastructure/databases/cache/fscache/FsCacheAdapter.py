@@ -54,7 +54,6 @@ class FSCacheAdapter(CacheDBInterface):
         qa_id: str | None = None,
         feedback_text: str | None = None,
         feedback_score: int | None = None,
-        ttl: int | None = 86400,
     ):
         try:
             session_key = f"agent_sessions:{user_id}:{session_id}"
