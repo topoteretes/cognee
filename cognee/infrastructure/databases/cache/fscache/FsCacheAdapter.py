@@ -77,7 +77,7 @@ class FSCacheAdapter(CacheDBInterface):
             else:
                 value = [qa_entry]
 
-            self.cache.set(session_key, json.dumps(value), expire=ttl)
+            self.cache.set(session_key, json.dumps(value))
         except Exception as e:
             error_msg = f"Unexpected error while adding Q&A to diskcache: {str(e)}"
             logger.error(error_msg)
@@ -141,7 +141,7 @@ class FSCacheAdapter(CacheDBInterface):
                             message=f"Session QA entry validation failed during update_qa_entry operation: {e!s}"
                         ) from e
                     entries[i] = validated.model_dump()
-                    self.cache.set(session_key, json.dumps(entries), expire=86400)
+                    self.cache.set(session_key, json.dumps(entries))
                     return True
             return False
 
@@ -173,7 +173,7 @@ class FSCacheAdapter(CacheDBInterface):
                             message=f"Session QA entry validation failed: {e!s}"
                         ) from e
                     entries[i] = validated.model_dump()
-                    self.cache.set(session_key, json.dumps(entries), expire=86400)
+                    self.cache.set(session_key, json.dumps(entries))
                     return True
             return False
 
@@ -200,7 +200,7 @@ class FSCacheAdapter(CacheDBInterface):
                 if entry.get("qa_id") == qa_id:
                     entries.pop(i)
                     if entries:
-                        self.cache.set(session_key, json.dumps(entries), expire=86400)
+                        self.cache.set(session_key, json.dumps(entries))
                     else:
                         self.cache.delete(session_key)
                     return True
