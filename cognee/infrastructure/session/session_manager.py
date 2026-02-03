@@ -62,6 +62,7 @@ class SessionManager:
 
     async def add_qa(
         self,
+        *,
         user_id: str,
         question: str,
         context: str,
@@ -111,6 +112,7 @@ class SessionManager:
 
     async def get_session(
         self,
+        *,
         user_id: str,
         last_n: Optional[int] = None,
         formatted: bool = False,
@@ -147,6 +149,7 @@ class SessionManager:
 
     async def update_qa(
         self,
+        *,
         user_id: str,
         qa_id: str,
         question: Optional[str] = None,
@@ -181,6 +184,7 @@ class SessionManager:
 
     async def add_feedback(
         self,
+        *,
         user_id: str,
         qa_id: str,
         feedback_text: Optional[str] = None,
@@ -203,6 +207,7 @@ class SessionManager:
 
     async def delete_feedback(
         self,
+        *,
         user_id: str,
         qa_id: str,
         session_id: Optional[str] = None,
@@ -226,6 +231,7 @@ class SessionManager:
 
     async def delete_qa(
         self,
+        *,
         user_id: str,
         qa_id: str,
         session_id: Optional[str] = None,
@@ -248,7 +254,7 @@ class SessionManager:
         )
 
     async def delete_session(
-        self, user_id: str, session_id: Optional[str] = None
+        self, *, user_id: str, session_id: Optional[str] = None
     ) -> bool:
         """
         Delete the entire session and all its QA entries.
