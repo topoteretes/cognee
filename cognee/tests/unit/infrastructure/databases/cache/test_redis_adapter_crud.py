@@ -34,6 +34,10 @@ class _InMemoryRedisList:
     async def expire(self, key: str, ttl: int):
         pass
 
+    async def ttl(self, key: str):
+        """Return remaining TTL; -1 = no expiry, -2 = key missing. Mock returns -1."""
+        return -1 if key in self.data else -2
+
     async def flushdb(self):
         self.data.clear()
 
