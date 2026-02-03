@@ -253,39 +253,3 @@ class SessionManager:
             user_id=user_id,
             session_id=session_id,
         )
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    from cognee.infrastructure.session.get_session_manager import get_session_manager
-
-    async def main():
-        sm = get_session_manager()
-        user_id, session_id = "test_user", "test_session"
-        print("is_available:", sm.is_available)
-
-        if not sm.is_available:
-            print("Cache disabled, exiting")
-            return
-
-        qa_id1 = await sm.add_qa(user_id, session_id, "Q1?", "ctx1", "A1.")
-        qa_id2 = await sm.add_qa(user_id, session_id, "Q2?", "ctx2", "A2.")
-        print("added 2 entries:", qa_id1, qa_id2)
-
-        entry = await sm.get_single_entry(user_id, session_id, qa_id1)
-        print("get_single_entry(qa_id1):", entry)
-        assert entry is not None and entry.get("question") == "Q1?"
-
-        entry = await sm.get_single_entry(user_id, session_id, qa_id2)
-        print("get_single_entry(qa_id2):", entry)
-        assert entry is not None and entry.get("answer") == "A2."
-
-        entry = await sm.get_single_entry(user_id, session_id, "nonexistent-id")
-        print("get_single_entry(nonexistent):", entry)
-        assert entry is None
-
-        await sm.delete_session(user_id, session_id)
-        print("get_single_entry tests OK.")
-
-    asyncio.run(main())
