@@ -51,6 +51,10 @@ class SessionManager:
         self._cache = cache_engine
         self.default_session_id = default_session_id
 
+    def _resolve_session_id(self, session_id: Optional[str]) -> str:
+        """Return session_id if provided, otherwise default_session_id."""
+        return session_id if session_id is not None else self.default_session_id
+
     @property
     def is_available(self) -> bool:
         """Return True if the cache engine is available."""
@@ -59,10 +63,10 @@ class SessionManager:
     async def add_qa(
         self,
         user_id: str,
-        session_id: str,
         question: str,
         context: str,
         answer: str,
+        session_id: Optional[str] = None,
         feedback_text: Optional[str] = None,
         feedback_score: Optional[int] = None,
         ttl: Optional[int] = 86400,
@@ -70,6 +74,7 @@ class SessionManager:
         """
         Add a QA to the session. Returns qa_id, or None if cache unavailable.
         """
+        session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping add_qa")
@@ -107,23 +112,24 @@ class SessionManager:
     async def get_session(
         self,
         user_id: str,
-        session_id: str,
         last_n: Optional[int] = None,
         formatted: bool = False,
+        session_id: Optional[str] = None,
     ) -> Union[list[dict], str]:
         """
         Get session QAs by (user_id, session_id).
 
         Args:
             user_id: User identifier.
-            session_id: Session identifier.
             last_n: If set, return only the last N entries. Otherwise return all.
             formatted: If True, return prompt-formatted string; if False, return list of entry dicts.
+            session_id: Session identifier. Defaults to default_session_id if None.
 
         Returns:
             List of QA entry dicts, or formatted string if formatted=True.
             Empty list or empty string if cache unavailable or session not found.
         """
+        session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id, last_n=last_n)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty session")
@@ -142,13 +148,13 @@ class SessionManager:
     async def update_qa(
         self,
         user_id: str,
-        session_id: str,
         qa_id: str,
         question: Optional[str] = None,
         context: Optional[str] = None,
         answer: Optional[str] = None,
         feedback_text: Optional[str] = None,
         feedback_score: Optional[int] = None,
+        session_id: Optional[str] = None,
     ) -> bool:
         """
         Update a QA entry by qa_id.
@@ -156,6 +162,7 @@ class SessionManager:
         Only passed fields are updated; None preserves existing values.
         Returns True if updated, False if not found or cache unavailable.
         """
+        session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping update_qa")
@@ -175,10 +182,10 @@ class SessionManager:
     async def add_feedback(
         self,
         user_id: str,
-        session_id: str,
         qa_id: str,
         feedback_text: Optional[str] = None,
         feedback_score: Optional[int] = None,
+        session_id: Optional[str] = None,
     ) -> bool:
         """
         Add or update feedback for a QA entry.
@@ -188,23 +195,24 @@ class SessionManager:
         """
         return await self.update_qa(
             user_id=user_id,
-            session_id=session_id,
             qa_id=qa_id,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
+            session_id=session_id,
         )
 
     async def delete_feedback(
         self,
         user_id: str,
-        session_id: str,
         qa_id: str,
+        session_id: Optional[str] = None,
     ) -> bool:
         """
         Clear feedback for a QA entry (sets feedback_text and feedback_score to None).
 
         Returns True if updated, False if not found or cache unavailable.
         """
+        session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_feedback")
@@ -219,14 +227,15 @@ class SessionManager:
     async def delete_qa(
         self,
         user_id: str,
-        session_id: str,
         qa_id: str,
+        session_id: Optional[str] = None,
     ) -> bool:
         """
         Delete a single QA entry by qa_id.
 
         Returns True if deleted, False if not found or cache unavailable.
         """
+        session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_qa")
@@ -238,12 +247,15 @@ class SessionManager:
             qa_id=qa_id,
         )
 
-    async def delete_session(self, user_id: str, session_id: str) -> bool:
+    async def delete_session(
+        self, user_id: str, session_id: Optional[str] = None
+    ) -> bool:
         """
         Delete the entire session and all its QA entries.
 
         Returns True if deleted, False if session did not exist or cache unavailable.
         """
+        session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_session")
