@@ -87,6 +87,21 @@ class SessionManager:
             qa_id=qa_id,
         )
 
+    async def delete_session(self, user_id: str, session_id: str) -> bool:
+        """
+        Delete the entire session and all its QA entries.
+
+        Returns True if deleted, False if session did not exist or cache unavailable.
+        """
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping delete_session")
+            return False
+
+        return await self._cache.delete_session(
+            user_id=user_id,
+            session_id=session_id,
+        )
+
 
 if __name__ == "__main__":
     import asyncio
@@ -122,7 +137,19 @@ if __name__ == "__main__":
         )
         print("add_qa(with feedback):", qa_id3)
 
+
+        qa_id4 = await sm.add_qa('something_else', 'test_session', "Q4?", "ctx4", 'This is my answer')
+
         ok = await sm.delete_qa(user_id, session_id, qa_id2)
-        print("delete_qa(qa_id2):", ok)
+
+
+        ok = await sm.delete_session(user_id, session_id)
+
+        not_ok = await sm.delete_qa(user_id, session_id, 'non_existent')
+
+        not_ok = await sm.delete_session('non_exister', 'non_existent')
+
+
+        print("All operations OK.")
 
     asyncio.run(main())
