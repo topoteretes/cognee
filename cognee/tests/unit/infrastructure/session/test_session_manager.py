@@ -95,9 +95,17 @@ class TestSessionManager:
         assert sm_unavailable.is_available is False
 
     @pytest.mark.asyncio
+    async def test_add_qa_session_id_none_uses_default(self, sm, mock_cache):
+        """add_qa with session_id=None uses default_session_id."""
+        qa_id = await sm.add_qa("u1", "Q", "C", "A")
+        assert qa_id is not None
+        call_kw = mock_cache.create_qa_entry.call_args.kwargs
+        assert call_kw["session_id"] == "default_session"
+
+    @pytest.mark.asyncio
     async def test_add_qa_returns_qa_id(self, sm, mock_cache):
         """add_qa returns generated qa_id and calls cache."""
-        qa_id = await sm.add_qa("u1", "s1", "Q", "C", "A")
+        qa_id = await sm.add_qa("u1", "Q", "C", "A", session_id="s1")
         assert qa_id is not None
         mock_cache.create_qa_entry.assert_called_once()
         call_kw = mock_cache.create_qa_entry.call_args.kwargs
@@ -110,23 +118,23 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_add_qa_unavailable_returns_none(self, sm_unavailable):
         """add_qa returns None when cache unavailable."""
-        assert await sm_unavailable.add_qa("u1", "s1", "Q", "C", "A") is None
+        assert await sm_unavailable.add_qa("u1", "Q", "C", "A", session_id="s1") is None
 
     @pytest.mark.asyncio
     async def test_add_qa_invalid_params_raises(self, sm):
         """add_qa raises on invalid user_id or session_id."""
         with pytest.raises(SessionParameterValidationError):
-            await sm.add_qa("", "s1", "Q", "C", "A")
+            await sm.add_qa("", "Q", "C", "A", session_id="s1")
         with pytest.raises(SessionParameterValidationError):
-            await sm.add_qa("u1", "", "Q", "C", "A")
+            await sm.add_qa("u1", "Q", "C", "A", session_id="")
 
     @pytest.mark.asyncio
     async def test_get_session_invalid_last_n_raises(self, sm):
         """get_session raises on invalid last_n."""
         with pytest.raises(SessionParameterValidationError):
-            await sm.get_session("u1", "s1", last_n=0)
+            await sm.get_session("u1", last_n=0, session_id="s1")
         with pytest.raises(SessionParameterValidationError):
-            await sm.get_session("u1", "s1", last_n=-1)
+            await sm.get_session("u1", last_n=-1, session_id="s1")
 
     def test_format_entries_empty(self):
         """format_entries returns empty string for empty list."""
@@ -147,7 +155,7 @@ class TestSessionManager:
         mock_cache.get_all_qa_entries.return_value = [
             {"qa_id": "1", "question": "Q", "context": "C", "answer": "A", "time": "t"}
         ]
-        entries = await sm.get_session("u1", "s1")
+        entries = await sm.get_session("u1", session_id="s1")
         assert len(entries) == 1
         assert entries[0]["question"] == "Q"
         mock_cache.get_all_qa_entries.assert_called_once_with("u1", "s1")
@@ -158,20 +166,20 @@ class TestSessionManager:
         mock_cache.get_all_qa_entries.return_value = [
             {"qa_id": "1", "question": "Q", "context": "C", "answer": "A", "time": "t"}
         ]
-        out = await sm.get_session("u1", "s1", formatted=True)
+        out = await sm.get_session("u1", formatted=True, session_id="s1")
         assert isinstance(out, str)
         assert "Previous conversation" in out and "Q" in out
 
     @pytest.mark.asyncio
     async def test_get_session_unavailable_returns_empty(self, sm_unavailable):
         """get_session returns empty list when cache unavailable."""
-        assert await sm_unavailable.get_session("u1", "s1") == []
-        assert await sm_unavailable.get_session("u1", "s1", formatted=True) == ""
+        assert await sm_unavailable.get_session("u1", session_id="s1") == []
+        assert await sm_unavailable.get_session("u1", formatted=True, session_id="s1") == ""
 
     @pytest.mark.asyncio
     async def test_update_qa_calls_cache(self, sm, mock_cache):
         """update_qa delegates to cache."""
-        ok = await sm.update_qa("u1", "s1", "q1", question="Q2")
+        ok = await sm.update_qa("u1", "q1", question="Q2", session_id="s1")
         assert ok is True
         mock_cache.update_qa_entry.assert_called_once_with(
             user_id="u1",
@@ -187,7 +195,7 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_delete_feedback_calls_cache(self, sm, mock_cache):
         """delete_feedback delegates to cache."""
-        ok = await sm.delete_feedback("u1", "s1", "q1")
+        ok = await sm.delete_feedback("u1", "q1", session_id="s1")
         assert ok is True
         mock_cache.delete_feedback.assert_called_once_with(
             user_id="u1", session_id="s1", qa_id="q1"
@@ -196,7 +204,7 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_delete_qa_calls_cache(self, sm, mock_cache):
         """delete_qa delegates to cache."""
-        ok = await sm.delete_qa("u1", "s1", "q1")
+        ok = await sm.delete_qa("u1", "q1", session_id="s1")
         assert ok is True
         mock_cache.delete_qa_entry.assert_called_once_with(
             user_id="u1", session_id="s1", qa_id="q1"
@@ -205,6 +213,6 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_delete_session_calls_cache(self, sm, mock_cache):
         """delete_session delegates to cache."""
-        ok = await sm.delete_session("u1", "s1")
+        ok = await sm.delete_session("u1", session_id="s1")
         assert ok is True
         mock_cache.delete_session.assert_called_once_with(user_id="u1", session_id="s1")

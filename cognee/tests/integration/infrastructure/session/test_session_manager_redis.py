@@ -61,10 +61,10 @@ def session_manager(redis_adapter):
 @pytest.mark.asyncio
 async def test_add_qa_and_get_session(session_manager):
     """Add QA via SessionManager and retrieve via get_session."""
-    qa_id = await session_manager.add_qa("u1", "s1", "Q1?", "ctx1", "A1.")
+    qa_id = await session_manager.add_qa("u1", "Q1?", "ctx1", "A1.", session_id="s1")
     assert qa_id is not None
 
-    entries = await session_manager.get_session("u1", "s1")
+    entries = await session_manager.get_session("u1", session_id="s1")
     assert len(entries) == 1
     assert entries[0]["question"] == "Q1?"
     assert entries[0]["answer"] == "A1."
@@ -74,8 +74,8 @@ async def test_add_qa_and_get_session(session_manager):
 @pytest.mark.asyncio
 async def test_get_session_formatted(session_manager):
     """get_session with formatted=True returns prompt string."""
-    await session_manager.add_qa("u1", "s1", "Q?", "C", "A")
-    formatted = await session_manager.get_session("u1", "s1", formatted=True)
+    await session_manager.add_qa("u1", "Q?", "C", "A", session_id="s1")
+    formatted = await session_manager.get_session("u1", formatted=True, session_id="s1")
     assert isinstance(formatted, str)
     assert "Previous conversation" in formatted and "Q?" in formatted
 
@@ -83,22 +83,22 @@ async def test_get_session_formatted(session_manager):
 @pytest.mark.asyncio
 async def test_update_qa(session_manager):
     """update_qa updates entry via RedisAdapter."""
-    qa_id = await session_manager.add_qa("u1", "s1", "Q", "C", "A")
-    ok = await session_manager.update_qa("u1", "s1", qa_id, question="Q updated?")
+    qa_id = await session_manager.add_qa("u1", "Q", "C", "A", session_id="s1")
+    ok = await session_manager.update_qa("u1", qa_id, question="Q updated?", session_id="s1")
     assert ok
 
-    entries = await session_manager.get_session("u1", "s1")
+    entries = await session_manager.get_session("u1", session_id="s1")
     assert entries[0]["question"] == "Q updated?"
 
 
 @pytest.mark.asyncio
 async def test_add_feedback(session_manager):
     """add_feedback sets feedback on entry."""
-    qa_id = await session_manager.add_qa("u1", "s1", "Q", "C", "A")
-    ok = await session_manager.add_feedback("u1", "s1", qa_id, feedback_score=5)
+    qa_id = await session_manager.add_qa("u1", "Q", "C", "A", session_id="s1")
+    ok = await session_manager.add_feedback("u1", qa_id, feedback_score=5, session_id="s1")
     assert ok
 
-    entries = await session_manager.get_session("u1", "s1")
+    entries = await session_manager.get_session("u1", session_id="s1")
     assert entries[0]["feedback_score"] == 5
 
 
@@ -106,12 +106,13 @@ async def test_add_feedback(session_manager):
 async def test_delete_feedback(session_manager):
     """delete_feedback clears feedback."""
     qa_id = await session_manager.add_qa(
-        "u1", "s1", "Q", "C", "A", feedback_text="good", feedback_score=4
+        "u1", "Q", "C", "A", session_id="s1",
+        feedback_text="good", feedback_score=4
     )
-    ok = await session_manager.delete_feedback("u1", "s1", qa_id)
+    ok = await session_manager.delete_feedback("u1", qa_id, session_id="s1")
     assert ok
 
-    entries = await session_manager.get_session("u1", "s1")
+    entries = await session_manager.get_session("u1", session_id="s1")
     assert entries[0].get("feedback_score") is None
     assert entries[0].get("feedback_text") is None
 
@@ -119,12 +120,12 @@ async def test_delete_feedback(session_manager):
 @pytest.mark.asyncio
 async def test_delete_qa(session_manager):
     """delete_qa removes single entry."""
-    qa1 = await session_manager.add_qa("u1", "s1", "Q1", "C1", "A1")
-    await session_manager.add_qa("u1", "s1", "Q2", "C2", "A2")
-    ok = await session_manager.delete_qa("u1", "s1", qa1)
+    qa1 = await session_manager.add_qa("u1", "Q1", "C1", "A1", session_id="s1")
+    await session_manager.add_qa("u1", "Q2", "C2", "A2", session_id="s1")
+    ok = await session_manager.delete_qa("u1", qa1, session_id="s1")
     assert ok
 
-    entries = await session_manager.get_session("u1", "s1")
+    entries = await session_manager.get_session("u1", session_id="s1")
     assert len(entries) == 1
     assert entries[0]["question"] == "Q2"
 
@@ -132,9 +133,9 @@ async def test_delete_qa(session_manager):
 @pytest.mark.asyncio
 async def test_delete_session(session_manager):
     """delete_session clears all entries."""
-    await session_manager.add_qa("u1", "s1", "Q", "C", "A")
-    ok = await session_manager.delete_session("u1", "s1")
+    await session_manager.add_qa("u1", "Q", "C", "A", session_id="s1")
+    ok = await session_manager.delete_session("u1", session_id="s1")
     assert ok
 
-    entries = await session_manager.get_session("u1", "s1")
+    entries = await session_manager.get_session("u1", session_id="s1")
     assert entries == []
