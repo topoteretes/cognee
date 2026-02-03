@@ -55,10 +55,10 @@ class SessionManager:
         await self._cache.create_qa_entry(
             user_id=user_id,
             session_id=session_id,
+            qa_id=qa_id,
             question=question,
             context=context,
             answer=answer,
-            qa_id=qa_id,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
             ttl=ttl,
@@ -146,6 +146,49 @@ class SessionManager:
             feedback_score=feedback_score,
         )
 
+    async def add_feedback(
+        self,
+        user_id: str,
+        session_id: str,
+        qa_id: str,
+        feedback_text: Optional[str] = None,
+        feedback_score: Optional[int] = None,
+    ) -> bool:
+        """
+        Add or update feedback for a QA entry.
+
+        Convenience method that updates only feedback fields.
+        Returns True if updated, False if not found or cache unavailable.
+        """
+        return await self.update_qa(
+            user_id=user_id,
+            session_id=session_id,
+            qa_id=qa_id,
+            feedback_text=feedback_text,
+            feedback_score=feedback_score,
+        )
+
+    async def delete_feedback(
+        self,
+        user_id: str,
+        session_id: str,
+        qa_id: str,
+    ) -> bool:
+        """
+        Clear feedback for a QA entry (sets feedback_text and feedback_score to None).
+
+        Returns True if updated, False if not found or cache unavailable.
+        """
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping delete_feedback")
+            return False
+
+        return await self._cache.delete_feedback(
+            user_id=user_id,
+            session_id=session_id,
+            qa_id=qa_id,
+        )
+
     async def delete_qa(
         self,
         user_id: str,
@@ -231,12 +274,22 @@ if __name__ == "__main__":
         print("get_session(formatted=False):", len(raw), "entries")
         assert isinstance(raw, list) and len(raw) == 2
 
-        ok = await sm.update_qa(user_id, session_id, qa_id1, question="Q1 updated?", answer="A1 updated.")
+        ok = await sm.update_qa(
+            user_id, session_id, qa_id1, question="Q1 updated?", answer="A1 updated."
+        )
         print("update_qa(id1):", ok)
         entries = await sm.get_session(user_id, session_id)
         e1 = next(e for e in entries if e["qa_id"] == qa_id1)
         assert e1["question"] == "Q1 updated?"
 
+        ok = await sm.add_feedback(user_id, session_id, qa_id1, feedback_score=5)
+        print("add_feedback(id1, score=5):", ok)
+        entries = await sm.get_session(user_id, session_id)
+        e1 = next(e for e in entries if e["qa_id"] == qa_id1)
+        assert e1["feedback_score"] == 5
+
+        ok = await sm.delete_feedback(user_id, session_id, qa_id1)
+        print("delete_feedback(id1):", ok)
         entries = await sm.get_session(user_id, session_id)
         e1 = next(e for e in entries if e["qa_id"] == qa_id1)
         assert e1.get("feedback_score") is None and e1.get("feedback_text") is None
