@@ -12,10 +12,14 @@ def _validate_session_params(
     user_id: Optional[str] = None,
     session_id: Optional[str] = None,
     qa_id: Optional[str] = None,
+    last_n: Optional[int] = None,
 ) -> None:
     """
     Validate session parameters. Raises SessionParameterValidationError if any
-    provided parameter is empty or whitespace-only.
+    provided parameter is invalid.
+
+    - user_id, session_id, qa_id: must be non-empty strings when provided.
+    - last_n: when provided, must be a positive integer.
     """
     checks = (
         (user_id, "user_id"),
@@ -24,7 +28,13 @@ def _validate_session_params(
     )
     for value, name in checks:
         if value is not None and (not str(value).strip()):
-            raise SessionParameterValidationError(message=f"{name} must be a non-empty string")
+            raise SessionParameterValidationError(
+                message=f"{name} must be a non-empty string"
+            )
+    if last_n is not None and (not isinstance(last_n, int) or last_n < 1):
+        raise SessionParameterValidationError(
+            message="last_n must be a positive integer"
+        )
 
 
 class SessionManager:
@@ -122,7 +132,9 @@ class SessionManager:
             List of QA entry dicts, or formatted string if formatted=True.
             Empty list or empty string if cache unavailable or session not found.
         """
-        _validate_session_params(user_id=user_id, session_id=session_id)
+        _validate_session_params(
+            user_id=user_id, session_id=session_id, last_n=last_n
+        )
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty session")
             return "" if formatted else []

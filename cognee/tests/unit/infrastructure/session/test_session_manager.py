@@ -39,6 +39,29 @@ class TestValidateSessionParams:
             _validate_session_params(user_id="u1", session_id="s1", qa_id="")
         assert "qa_id" in exc_info.value.message
 
+    def test_valid_last_n(self):
+        """Valid last_n (positive int or None) does not raise."""
+        _validate_session_params(user_id="u1", session_id="s1", last_n=5)
+        _validate_session_params(user_id="u1", session_id="s1", last_n=1)
+
+    def test_invalid_last_n_zero_raises(self):
+        """last_n=0 raises SessionParameterValidationError."""
+        with pytest.raises(SessionParameterValidationError) as exc_info:
+            _validate_session_params(user_id="u1", session_id="s1", last_n=0)
+        assert "last_n" in exc_info.value.message
+
+    def test_invalid_last_n_negative_raises(self):
+        """last_n negative raises."""
+        with pytest.raises(SessionParameterValidationError) as exc_info:
+            _validate_session_params(user_id="u1", session_id="s1", last_n=-1)
+        assert "last_n" in exc_info.value.message
+
+    def test_invalid_last_n_not_int_raises(self):
+        """last_n not an int raises."""
+        with pytest.raises(SessionParameterValidationError) as exc_info:
+            _validate_session_params(user_id="u1", session_id="s1", last_n="5")
+        assert "last_n" in exc_info.value.message
+
 
 class TestSessionManager:
     """Unit tests for SessionManager with mocked cache."""
@@ -101,6 +124,14 @@ class TestSessionManager:
             await sm.add_qa("", "s1", "Q", "C", "A")
         with pytest.raises(SessionParameterValidationError):
             await sm.add_qa("u1", "", "Q", "C", "A")
+
+    @pytest.mark.asyncio
+    async def test_get_session_invalid_last_n_raises(self, sm):
+        """get_session raises on invalid last_n."""
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session("u1", "s1", last_n=0)
+        with pytest.raises(SessionParameterValidationError):
+            await sm.get_session("u1", "s1", last_n=-1)
 
     def test_format_entries_empty(self):
         """format_entries returns empty string for empty list."""
