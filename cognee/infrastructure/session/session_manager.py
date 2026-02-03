@@ -87,6 +87,7 @@ class SessionManager:
             qa_id=qa_id,
         )
 
+
 if __name__ == "__main__":
     import asyncio
 
@@ -123,6 +124,5 @@ if __name__ == "__main__":
 
         ok = await sm.delete_qa(user_id, session_id, qa_id2)
         print("delete_qa(qa_id2):", ok)
-
 
     asyncio.run(main())
