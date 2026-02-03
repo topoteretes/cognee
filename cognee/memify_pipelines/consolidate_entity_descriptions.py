@@ -22,27 +22,40 @@ class NodeDescription(BaseModel):
     description: str
 
 
-async def _fetch_entity_neighbors(args) -> List[Dict[str, Any]]:
+async def fetch_entity_neighbors(args) -> List[Dict[str, Any]]:
     """Iterate through all Entity nodes and fetch their edges and neighbor nodes."""
     graph_engine = await get_graph_engine()
     entity_nodes, _ = await graph_engine.get_filtered_graph_data([{"type": ["Entity"]}])
 
-    async def fetch_one(node_id, props):
+    async def fetch_neighbour_entities(node_id, props):
+        """Fetches neighboring nodes and edges from node with node_id"""
         edges, neighbors = await asyncio.gather(
             graph_engine.get_edges(node_id),
             graph_engine.get_neighbors(node_id),
         )
+        filtered_neighbors = []
+        selected_fields = ["id", "name", "description", "text"]
+        for neighbor in neighbors:
+            filtered_neighbor = {}
+            for selected_field in selected_fields:
+                if selected_field in neighbor:
+                    filtered_neighbor[selected_field] = neighbor[selected_field]
+            # if filtered_neighbor contains more fields than just id
+            if len(filtered_neighbor.keys()) > 1:
+                filtered_neighbors.append(filtered_neighbor)
+
         return {
-            "id": node_id,
             "properties": props,
             "edges": edges,
-            "neighbors": neighbors,
+            "neighbors": filtered_neighbors,
         }
 
-    return await asyncio.gather(*(fetch_one(node_id, props) for node_id, props in entity_nodes))
+    return await asyncio.gather(
+        *(fetch_neighbour_entities(node_id, props) for node_id, props in entity_nodes)
+    )
 
 
-async def _consolidate_entity_descriptions(param) -> List[DataPoint]:
+async def consolidate_entity_descriptions(param) -> List[DataPoint]:
     system_prompt = render_prompt(prompt_name, {})
 
     enriched_data = []
@@ -80,11 +93,11 @@ async def _consolidate_entity_descriptions(param) -> List[DataPoint]:
     return enriched_data
 
 
-async def consolidate_entity_descriptions():
-    extraction_tasks = [Task(_fetch_entity_neighbors)]
+async def consolidate_entity_descriptions_pipeline():
+    extraction_tasks = [Task(fetch_entity_neighbors)]
 
     enrichment_tasks = [
-        Task(_consolidate_entity_descriptions),
+        Task(consolidate_entity_descriptions),
         Task(add_data_points),
     ]
 

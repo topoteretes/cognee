@@ -3,7 +3,9 @@ import cognee
 
 from os import path
 from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.memify_pipelines.consolidate_entity_descriptions import consolidate_entity_descriptions
+from cognee.memify_pipelines.consolidate_entity_descriptions import (
+    consolidate_entity_descriptions_pipeline,
+)
 
 custom_prompt = """
 Extract only people and cities as entities.
@@ -33,7 +35,7 @@ async def main():
 
     await visualize_graph(graph_visualization_path_before_enrichment)
 
-    await consolidate_entity_descriptions()
+    await consolidate_entity_descriptions_pipeline()
 
     await visualize_graph(graph_visualization_path_after_enrichment)
 
