@@ -36,16 +36,21 @@ async def fetch_entity_neighbors(args) -> List[Dict[str, Any]]:
         filtered_neighbors = []
         selected_fields = ["id", "name", "description", "text"]
         for neighbor in neighbors:
-            filtered_neighbor = {}
-            for selected_field in selected_fields:
-                if selected_field in neighbor:
-                    filtered_neighbor[selected_field] = neighbor[selected_field]
+            filtered_neighbor = {k: v for k, v in neighbor.items() if k in selected_fields}
             # if filtered_neighbor contains more fields than just id
             if len(filtered_neighbor.keys()) > 1:
                 filtered_neighbors.append(filtered_neighbor)
+        allowed_props_keys = {
+            "id",
+            "description",
+            "name",
+            "type",
+            "ontology_valid",
+        }
+        filtered_props = {k: v for k, v in props.items() if k in allowed_props_keys}
 
         return {
-            "properties": props,
+            "properties": filtered_props,
             "edges": edges,
             "neighbors": filtered_neighbors,
         }
@@ -55,11 +60,11 @@ async def fetch_entity_neighbors(args) -> List[Dict[str, Any]]:
     )
 
 
-async def consolidate_entity_descriptions(param) -> List[DataPoint]:
+async def consolidate_entity_descriptions(nodes) -> List[DataPoint]:
     system_prompt = render_prompt(prompt_name, {})
 
     enriched_data = []
-    for node in param:
+    for node in nodes:
         props = node["properties"]
         text = json.dumps(
             {
@@ -74,20 +79,13 @@ async def consolidate_entity_descriptions(param) -> List[DataPoint]:
             system_prompt=system_prompt,  # no format()
             response_model=NodeDescription,
         )
+
         entity = Entity(
             id=UUID(props["id"]),
             name=props["name"],
+            is_a=props.get("type"),
             description=result.description,
-            created_at=props.get("created_at"),
-            updated_at=props.get("updated_at"),
-            version=props.get("version", 1),
-            topological_rank=props.get("topological_rank", 0),
             ontology_valid=props.get("ontology_valid", False),
-            metadata=(
-                json.loads(props["metadata"])
-                if isinstance(props.get("metadata"), str)
-                else {"index_fields": ["name"]}
-            ),
         )
         enriched_data.append(entity)
     return enriched_data
