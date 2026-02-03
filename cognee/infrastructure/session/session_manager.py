@@ -40,7 +40,6 @@ class SessionManager:
         question: str,
         context: str,
         answer: str,
-        qa_id: Optional[str] = None,
         feedback_text: Optional[str] = None,
         feedback_score: Optional[int] = None,
         ttl: Optional[int] = 86400,
@@ -52,7 +51,7 @@ class SessionManager:
             logger.debug("SessionManager: cache unavailable, skipping add_qa")
             return None
 
-        resolved_qa_id = qa_id or str(uuid.uuid4())
+        resolved_qa_id = str(uuid.uuid4())
         await self._cache.create_qa_entry(
             user_id=user_id,
             session_id=session_id,
@@ -65,6 +64,38 @@ class SessionManager:
             ttl=ttl,
         )
         return resolved_qa_id
+
+    async def update_qa(
+        self,
+        user_id: str,
+        session_id: str,
+        qa_id: str,
+        question: Optional[str] = None,
+        context: Optional[str] = None,
+        answer: Optional[str] = None,
+        feedback_text: Optional[str] = None,
+        feedback_score: Optional[int] = None,
+    ) -> bool:
+        """
+        Update a QA entry by qa_id.
+
+        Only passed fields are updated; None preserves existing values.
+        Returns True if updated, False if not found or cache unavailable.
+        """
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, skipping update_qa")
+            return False
+
+        return await self._cache.update_qa_entry(
+            user_id=user_id,
+            session_id=session_id,
+            qa_id=qa_id,
+            question=question,
+            context=context,
+            answer=answer,
+            feedback_text=feedback_text,
+            feedback_score=feedback_score,
+        )
 
     async def delete_qa(
         self,
@@ -126,7 +157,7 @@ if __name__ == "__main__":
         assert sid == "default_session"
         print("normalize_session_id(None):", sid)
 
-        qa_id1 = await sm.add_qa(user_id, session_id, "Q1?", "ctx1", "A1.", qa_id="id1")
+        qa_id1 = await sm.add_qa(user_id, session_id, "Q1?", "ctx1", "A1.")
         print("add_qa(qa_id=id1):", qa_id1)
 
         qa_id2 = await sm.add_qa(user_id, session_id, "Q2?", "ctx2", "A2.")
@@ -138,18 +169,9 @@ if __name__ == "__main__":
         print("add_qa(with feedback):", qa_id3)
 
 
-        qa_id4 = await sm.add_qa('something_else', 'test_session', "Q4?", "ctx4", 'This is my answer')
-
-        ok = await sm.delete_qa(user_id, session_id, qa_id2)
+        ok = await sm.update_qa(user_id, session_id, qa_id1, answer="A1 updated.")
 
 
-        ok = await sm.delete_session(user_id, session_id)
-
-        not_ok = await sm.delete_qa(user_id, session_id, 'non_existent')
-
-        not_ok = await sm.delete_session('non_exister', 'non_existent')
-
-
-        print("All operations OK.")
+        print()
 
     asyncio.run(main())
