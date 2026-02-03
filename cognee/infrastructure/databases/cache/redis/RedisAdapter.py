@@ -285,9 +285,12 @@ class RedisAdapter(CacheDBInterface):
             for i, entry in enumerate(entries):
                 if entry.get("qa_id") == qa_id:
                     entries.pop(i)
+                    ttl = await self.async_redis.ttl(session_key)
                     await self.async_redis.delete(session_key)
                     for e in entries:
                         await self.async_redis.rpush(session_key, json.dumps(e))
+                    if ttl > 0:
+                        await self.async_redis.expire(session_key, ttl)
                     return True
             return False
 
