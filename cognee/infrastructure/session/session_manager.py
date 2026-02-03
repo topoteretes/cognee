@@ -66,6 +66,7 @@ class SessionManager:
         )
         return resolved_qa_id
 
+
 if __name__ == "__main__":
     import asyncio
 
