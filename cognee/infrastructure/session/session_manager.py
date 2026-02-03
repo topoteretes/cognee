@@ -51,19 +51,68 @@ class SessionManager:
             logger.debug("SessionManager: cache unavailable, skipping add_qa")
             return None
 
-        resolved_qa_id = str(uuid.uuid4())
+        qa_id = str(uuid.uuid4())
         await self._cache.create_qa_entry(
             user_id=user_id,
             session_id=session_id,
             question=question,
             context=context,
             answer=answer,
-            qa_id=resolved_qa_id,
+            qa_id=qa_id,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
             ttl=ttl,
         )
-        return resolved_qa_id
+        return qa_id
+
+    @staticmethod
+    def format_entries(entries: list[dict]) -> str:
+        """
+        Format QA entries as a string for LLM prompt context.
+        """
+        if not entries:
+            return ""
+        lines = ["Previous conversation:\n\n"]
+        for entry in entries:
+            lines.append(f"[{entry.get('time', 'Unknown time')}]\n")
+            lines.append(f"QUESTION: {entry.get('question', '')}\n")
+            lines.append(f"CONTEXT: {entry.get('context', '')}\n")
+            lines.append(f"ANSWER: {entry.get('answer', '')}\n\n")
+        return "".join(lines)
+
+    async def get_session(
+        self,
+        user_id: str,
+        session_id: str,
+        last_n: Optional[int] = None,
+        formatted: bool = False,
+    ) -> Union[list[dict], str]:
+        """
+        Get session QAs by (user_id, session_id).
+
+        Args:
+            user_id: User identifier.
+            session_id: Session identifier.
+            last_n: If set, return only the last N entries. Otherwise return all.
+            formatted: If True, return prompt-formatted string; if False, return list of entry dicts.
+
+        Returns:
+            List of QA entry dicts, or formatted string if formatted=True.
+            Empty list or empty string if cache unavailable or session not found.
+        """
+        if not self.is_available:
+            logger.debug("SessionManager: cache unavailable, returning empty session")
+            return "" if formatted else []
+
+        if last_n is not None:
+            entries = await self._cache.get_latest_qa_entries(user_id, session_id, last_n=last_n)
+        else:
+            entries = await self._cache.get_all_qa_entries(user_id, session_id)
+
+        if entries is None:
+            return "" if formatted else []
+        entries_list = list(entries)
+        return self.format_entries(entries_list) if formatted else entries_list
 
     async def update_qa(
         self,
@@ -168,7 +217,44 @@ if __name__ == "__main__":
         )
         print("add_qa(with feedback):", qa_id3)
 
-        ok = await sm.update_qa(user_id, session_id, qa_id1, answer="A1 updated.")
+        entries = await sm.get_session(user_id, session_id)
+        print("get_session (all):", len(entries), "entries")
+
+        last2 = await sm.get_session(user_id, session_id, last_n=2)
+        print("get_session(last_n=2):", len(last2), "entries")
+
+        formatted = await sm.get_session(user_id, session_id, last_n=2, formatted=True)
+        print("get_session(formatted=True) len:", len(formatted))
+        assert "Previous conversation" in formatted and "Q2?" in formatted
+
+        raw = await sm.get_session(user_id, session_id, last_n=2, formatted=False)
+        print("get_session(formatted=False):", len(raw), "entries")
+        assert isinstance(raw, list) and len(raw) == 2
+
+        ok = await sm.update_qa(user_id, session_id, qa_id1, question="Q1 updated?", answer="A1 updated.")
+        print("update_qa(id1):", ok)
+        entries = await sm.get_session(user_id, session_id)
+        e1 = next(e for e in entries if e["qa_id"] == qa_id1)
+        assert e1["question"] == "Q1 updated?"
+
+        entries = await sm.get_session(user_id, session_id)
+        e1 = next(e for e in entries if e["qa_id"] == qa_id1)
+        assert e1.get("feedback_score") is None and e1.get("feedback_text") is None
+
+        ok = await sm.delete_qa(user_id, session_id, qa_id2)
+        print("delete_qa(qa_id2):", ok)
+        entries = await sm.get_session(user_id, session_id)
+        print("after delete_qa:", len(entries), "entries")
+
+        ok = await sm.delete_session(user_id, session_id)
+        print("delete_session:", ok)
+        entries = await sm.get_session(user_id, session_id)
+        assert len(entries) == 0
+        print("after delete_session:", len(entries), "entries")
+
+        fmt = sm.format_entries([])
+        assert fmt == ""
+        print("format_entries([]): empty")
 
         print()
 
