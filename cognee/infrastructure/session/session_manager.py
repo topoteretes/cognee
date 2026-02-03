@@ -253,9 +253,7 @@ class SessionManager:
             qa_id=qa_id,
         )
 
-    async def delete_session(
-        self, *, user_id: str, session_id: Optional[str] = None
-    ) -> bool:
+    async def delete_session(self, *, user_id: str, session_id: Optional[str] = None) -> bool:
         """
         Delete the entire session and all its QA entries.
 

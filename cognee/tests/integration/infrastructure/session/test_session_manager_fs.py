@@ -49,9 +49,7 @@ async def test_get_session_formatted(session_manager):
     await session_manager.add_qa(
         user_id="u1", question="Q?", context="C", answer="A", session_id="s1"
     )
-    formatted = await session_manager.get_session(
-        user_id="u1", formatted=True, session_id="s1"
-    )
+    formatted = await session_manager.get_session(user_id="u1", formatted=True, session_id="s1")
     assert isinstance(formatted, str)
     assert "Previous conversation" in formatted and "Q?" in formatted
 
@@ -98,9 +96,7 @@ async def test_delete_feedback(session_manager):
         feedback_text="good",
         feedback_score=4,
     )
-    ok = await session_manager.delete_feedback(
-        user_id="u1", qa_id=qa_id, session_id="s1"
-    )
+    ok = await session_manager.delete_feedback(user_id="u1", qa_id=qa_id, session_id="s1")
     assert ok
 
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
@@ -117,9 +113,7 @@ async def test_delete_qa(session_manager):
     await session_manager.add_qa(
         user_id="u1", question="Q2", context="C2", answer="A2", session_id="s1"
     )
-    ok = await session_manager.delete_qa(
-        user_id="u1", qa_id=qa1, session_id="s1"
-    )
+    ok = await session_manager.delete_qa(user_id="u1", qa_id=qa1, session_id="s1")
     assert ok
 
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
