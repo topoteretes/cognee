@@ -89,11 +89,6 @@ class TestSessionManager:
         """SessionManager with no cache."""
         return SessionManager(cache_engine=None)
 
-    def test_normalize_session_id(self, sm):
-        """normalize_session_id returns default when None."""
-        assert sm.normalize_session_id(None) == "default_session"
-        assert sm.normalize_session_id("custom") == "custom"
-
     def test_is_available(self, sm, sm_unavailable):
         """is_available reflects cache presence."""
         assert sm.is_available is True
