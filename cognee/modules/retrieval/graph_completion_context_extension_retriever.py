@@ -288,11 +288,12 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         retrieved_objects: List[Edge] | List[List[Edge]] = None,
     ) -> str | List[str]:
         triplets = retrieved_objects
+
         if query:
             query_batch = [query]
 
         # Check if all triplets are empty, in case of batch queries
-        if query_batch and all(len(batched_triplets) == 0 for batched_triplets in triplets):
+        if not triplets or all(len(batched_triplets) == 0 for batched_triplets in triplets):
             logger.warning("Empty context was provided to the completion")
             return ["" for _ in query_batch]
 

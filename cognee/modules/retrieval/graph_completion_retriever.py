@@ -207,19 +207,19 @@ class GraphCompletionRetriever(BaseRetriever):
 
         triplets = retrieved_objects
 
-        # Check if all triplets are empty, in case of batch queries
-        if query_batch and all(len(batched_triplets) == 0 for batched_triplets in triplets):
-            logger.warning("Empty context was provided to the completion")
-            return ["" for _ in query_batch]
-
-        if len(triplets) == 0:
-            logger.warning("Empty context was provided to the completion")
-            return ""
-
         if query_batch:
+            # Check if all triplets are empty, in case of batch queries
+            if not triplets or all(len(batched_triplets) == 0 for batched_triplets in triplets):
+                logger.warning("Empty context was provided to the completion")
+                return ["" for _ in query_batch]
+
             return await asyncio.gather(
                 *[self.resolve_edges_to_text(batched_triplets) for batched_triplets in triplets]
             )
+
+        if not triplets:
+            logger.warning("Empty context was provided to the completion")
+            return ""
 
         return await self.resolve_edges_to_text(triplets)
 
