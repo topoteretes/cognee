@@ -168,9 +168,7 @@ if __name__ == "__main__":
         )
         print("add_qa(with feedback):", qa_id3)
 
-
         ok = await sm.update_qa(user_id, session_id, qa_id1, answer="A1 updated.")
-
 
         print()
 
