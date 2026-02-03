@@ -6,12 +6,24 @@ permissions:
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches:
-      - main
+  release:
+    types: [published]
 
 jobs:
+  get-version:
+    runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ steps.get_version.outputs.release_version }}
+    steps:
+      - name: Get Version
+        id: get_version
+        run: |
+          echo "Testing Release: ${{ github.event.release.tag_name }}"
+          VERSION=${{ github.event.release.tag_name }}
+          echo "RELEASE_VERSION=${VERSION#v}" >> $GITHUB_ENV
+
   load-tests:
+    needs: get-version
     name: Load Tests
     uses: ./.github/workflows/load_tests.yml
     secrets: inherit

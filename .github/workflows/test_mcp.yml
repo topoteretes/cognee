@@ -2,7 +2,12 @@ name: test | mcp
 
 on:
   workflow_call:
-
+    inputs:
+      cognee_version:
+        required: true
+        type: string
+        default: "local" # local - Installing Cognee from local source
+        description: "The version of cognee to use"
 jobs:
   test-mcp:
     name: Run MCP Test
@@ -21,6 +26,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install uv
+
+      - name: Install Cognee
+        shell: bash
+        working-directory: cognee-mcp
+        run: |
+          if [ "${{ inputs.cognee_version }}" = "local" ]; then
+            echo "Installing Cognee from local source ..."
+            uv pip install --force-reinstall -e ../
+          else
+            echo "Installing Cognee version ${{ inputs.cognee_version }} from PyPI..."
+            uv pip install --force-reinstall "cognee==${{ inputs.cognee_version }}"
+          fi
+
 
       # This will install all dependencies along with Cognee version deployed on PIP
       - name: Install dependencies
