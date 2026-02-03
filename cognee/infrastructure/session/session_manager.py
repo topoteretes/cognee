@@ -1,9 +1,32 @@
 import uuid
 from typing import Optional, Union
 
+from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("SessionManager")
+
+
+def _validate_session_params(
+    *,
+    user_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    qa_id: Optional[str] = None,
+) -> None:
+    """
+    Validate session parameters. Raises SessionParameterValidationError if any
+    provided parameter is empty or whitespace-only.
+    """
+    checks = (
+        (user_id, "user_id"),
+        (session_id, "session_id"),
+        (qa_id, "qa_id"),
+    )
+    for value, name in checks:
+        if value is not None and (not str(value).strip()):
+            raise SessionParameterValidationError(
+                message=f"{name} must be a non-empty string"
+            )
 
 
 class SessionManager:
@@ -47,6 +70,7 @@ class SessionManager:
         """
         Add a QA to the session. Returns qa_id, or None if cache unavailable.
         """
+        _validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping add_qa")
             return None
@@ -100,6 +124,7 @@ class SessionManager:
             List of QA entry dicts, or formatted string if formatted=True.
             Empty list or empty string if cache unavailable or session not found.
         """
+        _validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, returning empty session")
             return "" if formatted else []
@@ -113,35 +138,6 @@ class SessionManager:
             return "" if formatted else []
         entries_list = list(entries)
         return self.format_entries(entries_list) if formatted else entries_list
-
-    async def get_single_entry(
-        self,
-        user_id: str,
-        session_id: str,
-        qa_id: str,
-    ) -> Optional[dict]:
-        """
-        Get a single QA entry by qa_id.
-
-        Args:
-            user_id: User identifier.
-            session_id: Session identifier.
-            qa_id: QA entry identifier.
-
-        Returns:
-            The QA entry dict if found, None if not found or cache unavailable.
-        """
-        if not self.is_available:
-            logger.debug("SessionManager: cache unavailable, returning None for get_single_entry")
-            return None
-
-        entries = await self._cache.get_all_qa_entries(user_id, session_id)
-        if entries is None:
-            return None
-        for entry in entries:
-            if entry.get("qa_id") == qa_id:
-                return entry
-        return None
 
     async def update_qa(
         self,
@@ -160,6 +156,7 @@ class SessionManager:
         Only passed fields are updated; None preserves existing values.
         Returns True if updated, False if not found or cache unavailable.
         """
+        _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping update_qa")
             return False
@@ -208,6 +205,7 @@ class SessionManager:
 
         Returns True if updated, False if not found or cache unavailable.
         """
+        _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_feedback")
             return False
@@ -229,6 +227,7 @@ class SessionManager:
 
         Returns True if deleted, False if not found or cache unavailable.
         """
+        _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_qa")
             return False
@@ -245,6 +244,7 @@ class SessionManager:
 
         Returns True if deleted, False if session did not exist or cache unavailable.
         """
+        _validate_session_params(user_id=user_id, session_id=session_id)
         if not self.is_available:
             logger.debug("SessionManager: cache unavailable, skipping delete_session")
             return False

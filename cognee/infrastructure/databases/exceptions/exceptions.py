@@ -167,6 +167,23 @@ class SessionQAEntryValidationError(CogneeValidationError):
         super().__init__(message, name, status_code)
 
 
+class SessionParameterValidationError(CogneeValidationError):
+    """
+    Raised when SessionManager receives invalid parameters (user_id, session_id, qa_id).
+
+    This error indicates that one or more required session parameters are empty
+    or invalid (e.g., empty string, whitespace-only).
+    """
+
+    def __init__(
+        self,
+        message: str = "Invalid session parameter. user_id, session_id, and qa_id must be non-empty strings.",
+        name: str = "SessionParameterValidationError",
+        status_code: int = status.HTTP_400_BAD_REQUEST,
+    ):
+        super().__init__(message, name, status_code)
+
+
 class SharedKuzuLockRequiresRedisError(CogneeConfigurationError):
     """
     Raised when shared Kuzu locking is requested without configuring the Redis backend.
