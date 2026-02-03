@@ -196,7 +196,8 @@ async def test_get_context_with_time_range(mock_graph_engine, mock_vector_engine
             return_value=mock_vector_engine,
         ),
     ):
-        context = await retriever.get_context("What happened in 2024?")
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
 
     assert isinstance(context, str)
     assert len(context) > 0
@@ -226,7 +227,8 @@ async def test_get_context_fallback_to_triplets_no_time(mock_graph_engine):
 
         retriever.extract_time_from_query = mock_extract_time
 
-        context = await retriever.get_context("test query")
+        objects = await retriever.get_retrieved_objects("test query")
+        context = await retriever.get_context_from_objects("test query", objects)
 
     assert context == "triplet text"
     mock_get_triplets.assert_awaited_once_with("test query")
@@ -258,7 +260,8 @@ async def test_get_context_no_events_found(mock_graph_engine):
 
         retriever.extract_time_from_query = mock_extract_time
 
-        context = await retriever.get_context("test query")
+        objects = await retriever.get_retrieved_objects("test query")
+        context = await retriever.get_context_from_objects("test query", objects)
 
     assert context == "triplet text"
     mock_get_triplets.assert_awaited_once_with("test query")
@@ -293,7 +296,8 @@ async def test_get_context_time_from_only(mock_graph_engine, mock_vector_engine)
             return_value=mock_vector_engine,
         ),
     ):
-        context = await retriever.get_context("What happened after 2024?")
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
 
     assert isinstance(context, str)
     assert "Event 1" in context
@@ -327,7 +331,8 @@ async def test_get_context_time_to_only(mock_graph_engine, mock_vector_engine):
             return_value=mock_vector_engine,
         ),
     ):
-        context = await retriever.get_context("What happened before 2024?")
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
 
     assert isinstance(context, str)
     assert "Event 1" in context
@@ -372,7 +377,11 @@ async def test_get_completion_without_context(mock_graph_engine, mock_vector_eng
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("What happened in 2024?")
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
+        completion = await retriever.get_completion_from_context(
+            "What happened in 2024?", objects, context=context
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -395,7 +404,11 @@ async def test_get_completion_with_provided_context():
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query", context="Provided context")
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        await retriever.get_context_from_objects("What happened in 2024?", objects)
+        completion = await retriever.get_completion_from_context(
+            "test query", objects, context="Provided context"
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -405,7 +418,7 @@ async def test_get_completion_with_provided_context():
 @pytest.mark.asyncio
 async def test_get_completion_with_session(mock_graph_engine, mock_vector_engine):
     """Test get_completion with session caching enabled."""
-    retriever = TemporalRetriever()
+    retriever = TemporalRetriever(session_id="test_session")
 
     mock_graph_engine.collect_time_ids.return_value = ["e1"]
     mock_graph_engine.collect_events.return_value = [
@@ -457,8 +470,10 @@ async def test_get_completion_with_session(mock_graph_engine, mock_vector_engine
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = mock_user
 
-        completion = await retriever.get_completion(
-            "What happened in 2024?", session_id="test_session"
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
+        completion = await retriever.get_completion_from_context(
+            "What happened in 2024?", objects, context
         )
 
     assert isinstance(completion, list)
@@ -508,47 +523,14 @@ async def test_get_completion_with_session_no_user_id(mock_graph_engine, mock_ve
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = None  # No user
 
-        completion = await retriever.get_completion("What happened in 2024?")
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
+        completion = await retriever.get_completion_from_context(
+            "What happened in 2024?", objects, context
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
-
-
-@pytest.mark.asyncio
-async def test_get_completion_context_retrieved_but_empty(mock_graph_engine):
-    """Test get_completion when get_context returns empty string."""
-    retriever = TemporalRetriever()
-
-    with (
-        patch.object(
-            retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
-        ),
-        patch(
-            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
-        patch(
-            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
-        ) as mock_get_vector,
-        patch.object(retriever, "filter_top_k_events", return_value=[]),
-    ):
-        mock_vector_engine = AsyncMock()
-        mock_vector_engine.embedding_engine = AsyncMock()
-        mock_vector_engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
-        mock_vector_engine.search = AsyncMock(return_value=[])
-        mock_get_vector.return_value = mock_vector_engine
-
-        mock_graph_engine.collect_time_ids.return_value = ["e1"]
-        mock_graph_engine.collect_events.return_value = [
-            {
-                "events": [
-                    {"id": "e1", "description": ""},
-                ]
-            }
-        ]
-
-        with pytest.raises((UnboundLocalError, NameError)):
-            await retriever.get_completion("test query")
 
 
 @pytest.mark.asyncio
@@ -595,8 +577,10 @@ async def test_get_completion_with_response_model(mock_graph_engine, mock_vector
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion(
-            "What happened in 2024?", response_model=TestModel
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
+        completion = await retriever.get_completion_from_context(
+            "What happened in 2024?", objects, context
         )
 
     assert isinstance(completion, list)

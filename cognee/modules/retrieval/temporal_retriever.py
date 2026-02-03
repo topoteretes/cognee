@@ -5,6 +5,7 @@ from datetime import datetime
 
 from operator import itemgetter
 from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
 from cognee.modules.retrieval.utils.session_cache import (
     save_conversation_history,
@@ -49,6 +50,8 @@ class TemporalRetriever(GraphCompletionRetriever):
         node_name: Optional[List[str]] = None,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -58,6 +61,8 @@ class TemporalRetriever(GraphCompletionRetriever):
             node_name=node_name,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
+            session_id=session_id,
+            response_model=response_model,
         )
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
@@ -109,9 +114,7 @@ class TemporalRetriever(GraphCompletionRetriever):
 
         return events_with_scores[: self.top_k]
 
-    async def get_context(self, query: str) -> Any:
-        """Retrieves context based on the query."""
-
+    async def get_retrieved_objects(self, query: str) -> dict:
         time_from, time_to = await self.extract_time_from_query(query)
 
         graph_engine = await get_graph_engine()
@@ -127,7 +130,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                 "No timestamps identified based on the query, performing retrieval using triplet search on events and entities."
             )
             triplets = await self.get_triplets(query)
-            return await self.resolve_edges_to_text(triplets)
+            return {"triplets": triplets}
 
         if ids:
             relevant_events = await graph_engine.collect_events(ids=ids)
@@ -136,7 +139,7 @@ class TemporalRetriever(GraphCompletionRetriever):
                 "No events identified based on timestamp filtering, performing retrieval using triplet search on events and entities."
             )
             triplets = await self.get_triplets(query)
-            return await self.resolve_edges_to_text(triplets)
+            return {"triplets": triplets}
 
         vector_engine = get_vector_engine()
         query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
@@ -145,16 +148,26 @@ class TemporalRetriever(GraphCompletionRetriever):
             collection_name="Event_name", query_vector=query_vector, limit=None
         )
 
-        top_k_events = await self.filter_top_k_events(relevant_events, vector_search_results)
+        return {"relevant_events": relevant_events, "vector_search_results": vector_search_results}
 
-        return self.descriptions_to_string(top_k_events)
+    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> Any:
+        """Retrieves context based on the query."""
+        if retrieved_objects.get("relevant_events", None) and retrieved_objects.get(
+            "vector_search_results", None
+        ):
+            top_k_events = await self.filter_top_k_events(
+                retrieved_objects.get("relevant_events"),
+                retrieved_objects.get("vector_search_results", None),
+            )
+            return self.descriptions_to_string(top_k_events)
+        else:
+            # In case no events were found, fall back to triplet context
+            triplets = retrieved_objects.get("triplets", [])
+            context_text = await self.resolve_edges_to_text(triplets)
+            return context_text
 
-    async def get_completion(
-        self,
-        query: str,
-        context: Optional[str] = None,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
+    async def get_completion_from_context(
+        self, query: str, retrieved_objects: Any = None, context: Optional[str] = None
     ) -> List[Any]:
         """
         Generates a response using the query and optional context.
@@ -174,45 +187,42 @@ class TemporalRetriever(GraphCompletionRetriever):
 
             - List[str]: A list containing the generated completion.
         """
-        if not context:
-            context = await self.get_context(query=query)
 
-        if context:
-            # Check if we need to generate context summary for caching
-            cache_config = CacheConfig()
-            user = session_user.get()
-            user_id = getattr(user, "id", None)
-            session_save = user_id and cache_config.caching
+        # Check if we need to generate context summary for caching
+        cache_config = CacheConfig()
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+        session_save = user_id and cache_config.caching
 
-            if session_save:
-                conversation_history = await get_conversation_history(session_id=session_id)
+        if session_save:
+            conversation_history = await get_conversation_history(session_id=self.session_id)
 
-                context_summary, completion = await asyncio.gather(
-                    summarize_text(context),
-                    generate_completion(
-                        query=query,
-                        context=context,
-                        user_prompt_path=self.user_prompt_path,
-                        system_prompt_path=self.system_prompt_path,
-                        conversation_history=conversation_history,
-                        response_model=response_model,
-                    ),
-                )
-            else:
-                completion = await generate_completion(
+            context_summary, completion = await asyncio.gather(
+                summarize_text(context),
+                generate_completion(
                     query=query,
                     context=context,
                     user_prompt_path=self.user_prompt_path,
                     system_prompt_path=self.system_prompt_path,
-                    response_model=response_model,
-                )
+                    conversation_history=conversation_history,
+                    response_model=self.response_model,
+                ),
+            )
+        else:
+            completion = await generate_completion(
+                query=query,
+                context=context,
+                user_prompt_path=self.user_prompt_path,
+                system_prompt_path=self.system_prompt_path,
+                response_model=self.response_model,
+            )
 
-            if session_save:
-                await save_conversation_history(
-                    query=query,
-                    context_summary=context_summary,
-                    answer=completion,
-                    session_id=session_id,
-                )
+        if session_save:
+            await save_conversation_history(
+                query=query,
+                context_summary=context_summary,
+                answer=completion,
+                session_id=self.session_id,
+            )
 
         return [completion]

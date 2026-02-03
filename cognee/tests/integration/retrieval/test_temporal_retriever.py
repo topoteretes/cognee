@@ -197,8 +197,11 @@ async def setup_test_environment_empty():
 async def test_temporal_retriever_context_with_time_range(setup_test_environment_with_events):
     """Integration test: verify TemporalRetriever can retrieve events within time range."""
     retriever = TemporalRetriever(top_k=5)
+    query = "What happened in January 2021?"
 
-    context = await retriever.get_context("What happened in January 2021?")
+    triplets = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     assert isinstance(context, str), "Context should be a string"
     assert len(context) > 0, "Context should not be empty"
@@ -211,8 +214,11 @@ async def test_temporal_retriever_context_with_time_range(setup_test_environment
 async def test_temporal_retriever_context_with_single_time(setup_test_environment_with_events):
     """Integration test: verify TemporalRetriever can retrieve events at specific time."""
     retriever = TemporalRetriever(top_k=5)
+    query = "What happened in July 2021?"
 
-    context = await retriever.get_context("What happened in July 2021?")
+    triplets = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     assert isinstance(context, str), "Context should be a string"
     assert len(context) > 0, "Context should not be empty"
@@ -227,8 +233,11 @@ async def test_temporal_retriever_context_fallback_to_triplets(
 ):
     """Integration test: verify TemporalRetriever falls back to triplets when no time extracted."""
     retriever = TemporalRetriever(top_k=5)
+    query = "Who works at Figma?"
 
-    context = await retriever.get_context("Who works at Figma?")
+    triplets = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     assert isinstance(context, str), "Context should be a string"
     assert len(context) > 0, "Context should not be empty"
@@ -241,8 +250,11 @@ async def test_temporal_retriever_context_fallback_to_triplets(
 async def test_temporal_retriever_context_empty_graph(setup_test_environment_empty):
     """Integration test: verify TemporalRetriever handles empty graph correctly."""
     retriever = TemporalRetriever()
+    query = "What happened?"
 
-    context = await retriever.get_context("What happened?")
+    triplets = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     assert isinstance(context, str), "Context should be a string"
     assert len(context) >= 0, "Context should be a string (possibly empty)"
@@ -252,8 +264,14 @@ async def test_temporal_retriever_context_empty_graph(setup_test_environment_emp
 async def test_temporal_retriever_get_completion(setup_test_environment_with_events):
     """Integration test: verify TemporalRetriever can generate completions."""
     retriever = TemporalRetriever()
+    query = "What happened in January 2021?"
 
-    completion = await retriever.get_completion("What happened in January 2021?")
+    triplets = await retriever.get_retrieved_objects(query)
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
+
+    completion = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
+    )
 
     assert isinstance(completion, list), "Completion should be a list"
     assert len(completion) > 0, "Completion should not be empty"
@@ -266,8 +284,14 @@ async def test_temporal_retriever_get_completion(setup_test_environment_with_eve
 async def test_temporal_retriever_get_completion_fallback(setup_test_environment_with_graph_data):
     """Integration test: verify TemporalRetriever get_completion works with triplet fallback."""
     retriever = TemporalRetriever()
+    query = "Who works at Figma?"
 
-    completion = await retriever.get_completion("Who works at Figma?")
+    triplets = await retriever.get_retrieved_objects(query)
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
+
+    completion = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=triplets, context=context
+    )
 
     assert isinstance(completion, list), "Completion should be a list"
     assert len(completion) > 0, "Completion should not be empty"
@@ -280,8 +304,11 @@ async def test_temporal_retriever_get_completion_fallback(setup_test_environment
 async def test_temporal_retriever_top_k_limit(setup_test_environment_with_events):
     """Integration test: verify TemporalRetriever respects top_k parameter."""
     retriever = TemporalRetriever(top_k=2)
+    query = "What happened in 2021?"
 
-    context = await retriever.get_context("What happened in 2021?")
+    triplets = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     assert isinstance(context, str), "Context should be a string"
     separator_count = context.count("#####################")
@@ -292,8 +319,11 @@ async def test_temporal_retriever_top_k_limit(setup_test_environment_with_events
 async def test_temporal_retriever_multiple_events(setup_test_environment_with_events):
     """Integration test: verify TemporalRetriever can retrieve multiple events."""
     retriever = TemporalRetriever(top_k=10)
+    query = "What events occurred in 2021?"
 
-    context = await retriever.get_context("What events occurred in 2021?")
+    triplets = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
     assert isinstance(context, str), "Context should be a string"
     assert len(context) > 0, "Context should not be empty"

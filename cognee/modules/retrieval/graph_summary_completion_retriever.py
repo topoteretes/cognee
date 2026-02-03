@@ -28,6 +28,7 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
         save_interaction: bool = False,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
+        session_id: Optional[str] = None,
     ):
         """Initialize retriever with default prompt paths and search parameters."""
         super().__init__(
@@ -40,6 +41,7 @@ class GraphSummaryCompletionRetriever(GraphCompletionRetriever):
             system_prompt=system_prompt,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
+            session_id=session_id,
         )
         self.summarize_prompt_path = summarize_prompt_path
 
