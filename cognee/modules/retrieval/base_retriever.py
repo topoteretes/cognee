@@ -81,7 +81,11 @@ class BaseRetriever(ABC):
         Returns:
             List[Any]: A list containing the generated completions or response objects.
         """
-        retrieved_objects = await self.get_retrieved_objects(query)
-        context = await self.get_context_from_objects(query, retrieved_objects)
-        completion = await self.get_completion_from_context(query, retrieved_objects, context)
+        retrieved_objects = await self.get_retrieved_objects(query=query)
+        context = await self.get_context_from_objects(
+            query=query, retrieved_objects=retrieved_objects
+        )
+        completion = await self.get_completion_from_context(
+            query=query, retrieved_objects=retrieved_objects, context=context
+        )
         return completion
