@@ -24,9 +24,7 @@ def _validate_session_params(
     )
     for value, name in checks:
         if value is not None and (not str(value).strip()):
-            raise SessionParameterValidationError(
-                message=f"{name} must be a non-empty string"
-            )
+            raise SessionParameterValidationError(message=f"{name} must be a non-empty string")
 
 
 class SessionManager:
