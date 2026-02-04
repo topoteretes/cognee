@@ -30,20 +30,6 @@ from .serialize_data import serialize_data
 logger = get_logger("PGVectorAdapter")
 
 
-class IndexSchema(DataPoint):
-    """
-    Define a schema for indexing data points with a text field.
-
-    This class inherits from the DataPoint class and specifies the structure of a single
-    data point that includes a text attribute. It also includes a metadata field that
-    indicates which fields should be indexed.
-    """
-
-    text: str
-
-    metadata: dict = {"index_fields": ["text"]}
-
-
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
     def __init__(
         self,
@@ -245,7 +231,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             await session.execute(insert_statement)
             await session.commit()
 
-    async def create_vector_index(self, index_name: str, index_property_name: str):
+    async def create_vector_index(
+        self, index_name: str, index_property_name: str, payload_schema=None
+    ):
         await self.create_collection(f"{index_name}_{index_property_name}")
 
     async def index_data_points(
@@ -254,13 +242,6 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         await self.create_data_points(
             f"{index_name}_{index_property_name}",
             data_points,
-            # [
-            #     IndexSchema(
-            #         id=data_point.id,
-            #         text=DataPoint.get_embeddable_data(data_point),
-            #     )
-            #     for data_point in data_points
-            # ],
         )
 
     async def get_table(self, collection_name: str) -> Table:

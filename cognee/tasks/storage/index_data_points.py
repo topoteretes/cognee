@@ -39,7 +39,7 @@ async def index_data_points(data_points: list[DataPoint]):
                 data_points_by_type[type_name] = {}
 
             if field_name not in data_points_by_type[type_name]:
-                await vector_engine.create_vector_index(type_name, field_name)
+                await vector_engine.create_vector_index(type_name, field_name, data_point_type)
                 data_points_by_type[type_name][field_name] = []
 
             indexed_data_point = data_point.model_copy()

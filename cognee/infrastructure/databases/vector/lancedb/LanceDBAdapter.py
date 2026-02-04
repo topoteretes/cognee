@@ -13,27 +13,10 @@ from cognee.modules.storage.utils import copy_model, get_own_properties
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
 from ..embeddings.EmbeddingEngine import EmbeddingEngine
+from ..exceptions.exceptions import MissingPayloadSchemaError
 from ..models.ScoredResult import ScoredResult
 from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
-
-
-class IndexSchema(DataPoint):
-    """
-    Represents a schema for an index data point containing an ID and text.
-
-    Attributes:
-
-    - id: A string representing the unique identifier for the data point.
-    - text: A string representing the content of the data point.
-    - metadata: A dictionary with default index fields for the schema, currently configured
-    to include 'text'.
-    """
-
-    id: str
-    text: str
-
-    metadata: dict = {"index_fields": ["text"]}
 
 
 class LanceDBAdapter(VectorDBInterface):
@@ -232,6 +215,7 @@ class LanceDBAdapter(VectorDBInterface):
         with_vector: bool = False,
         normalized: bool = True,
         include_payload: bool = False,
+        belongs_to_nodesets: List[str] = None,
     ):
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
@@ -256,6 +240,9 @@ class LanceDBAdapter(VectorDBInterface):
         )
         result_values = (
             await collection.vector_search(query_vector)
+            .where(
+                f"array_has_all(payload.belongs_to_set, {belongs_to_nodesets if belongs_to_nodesets else []})"
+            )
             .select(select_columns)
             .limit(limit)
             .to_list()
@@ -304,24 +291,21 @@ class LanceDBAdapter(VectorDBInterface):
         for data_point_id in data_point_ids:
             await collection.delete(f"id = '{data_point_id}'")
 
-    async def create_vector_index(self, index_name: str, index_property_name: str):
+    async def create_vector_index(
+        self, index_name: str, index_property_name: str, payload_schema: BaseModel = None
+    ):
+        if not payload_schema:
+            raise MissingPayloadSchemaError(
+                "Payload schema is required to correctly create a lancedb collection"
+            )
         await self.create_collection(
-            f"{index_name}_{index_property_name}", payload_schema=IndexSchema
+            f"{index_name}_{index_property_name}", payload_schema=payload_schema
         )
 
     async def index_data_points(
         self, index_name: str, index_property_name: str, data_points: list[DataPoint]
     ):
-        await self.create_data_points(
-            f"{index_name}_{index_property_name}",
-            [
-                IndexSchema(
-                    id=str(data_point.id),
-                    text=getattr(data_point, data_point.metadata["index_fields"][0]),
-                )
-                for data_point in data_points
-            ],
-        )
+        await self.create_data_points(f"{index_name}_{index_property_name}", data_points)
 
     async def prune(self):
         connection = await self.get_connection()
@@ -369,6 +353,8 @@ class LanceDBAdapter(VectorDBInterface):
             model_type,
             include_fields={
                 "id": (str, ...),
+                # Explicitly include belongs_to_set to avoid complicating code in this function
+                "belongs_to_set": (Optional[List[str]], None),
             },
             exclude_fields=["metadata"] + related_models_fields,
         )

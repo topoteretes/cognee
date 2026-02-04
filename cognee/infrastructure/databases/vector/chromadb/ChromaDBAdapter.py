@@ -3,6 +3,7 @@ import asyncio
 from uuid import UUID
 from typing import List, Optional
 from chromadb import AsyncHttpClient, Settings
+from pydantic import BaseModel
 
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.storage.utils import get_own_properties
@@ -282,7 +283,9 @@ class ChromaDBAdapter(VectorDBInterface):
             ids=ids, embeddings=embeddings, metadatas=metadatas, documents=texts
         )
 
-    async def create_vector_index(self, index_name: str, index_property_name: str):
+    async def create_vector_index(
+        self, index_name: str, index_property_name: str, payload_schema: BaseModel = None
+    ):
         """
         Create a vector index as a ChromaDB collection based on provided names.
 
