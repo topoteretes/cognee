@@ -419,6 +419,6 @@ async def test_e2e_graph_side_effects_and_node_fields(e2e_state):
 
     type_counts = Counter(node_data[1].get("type", {}) for node_data in nodes)
 
-    assert type_counts.get("NodeSet", 0) >= 1
+    assert type_counts.get("Entity", 0) >= 1, "expected at least one Entity from cognify"
     assert len(nodes) >= 1
     assert len(edges) >= 1
