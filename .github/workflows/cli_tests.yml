@@ -137,32 +137,32 @@ jobs:
 
       - name: Test CLI Help Commands
         run: |
-          cognee.cli._cognee --help
-          cognee.cli._cognee --version
-          cognee.cli._cognee add --help
-          cognee.cli._cognee search --help
-          cognee.cli._cognee cognify --help
-          cognee.cli._cognee delete --help
-          cognee.cli._cognee config --help
+          uv run python -m cognee.cli._cognee --help
+          uv run python -m cognee.cli._cognee --version
+          uv run python -m cognee.cli._cognee add --help
+          uv run python -m cognee.cli._cognee search --help
+          uv run python -m cognee.cli._cognee cognify --help
+          uv run python -m cognee.cli._cognee delete --help
+          uv run python -m cognee.cli._cognee config --help
 
       - name: Test CLI Config Subcommands
         run: |
-          cognee.cli._cognee config get --help
-          cognee.cli._cognee config set --help
-          cognee.cli._cognee config list --help
-          cognee.cli._cognee config unset --help
-          cognee.cli._cognee config reset --help
+          uv run python -m cognee.cli._cognee config get --help
+          uv run python -m cognee.cli._cognee config set --help
+          uv run python -m cognee.cli._cognee config list --help
+          uv run python -m cognee.cli._cognee config unset --help
+          uv run python -m cognee.cli._cognee config reset --help
 
       - name: Test CLI Error Handling
         run: |
           # Test invalid command (should fail gracefully)
-          ! cognee.cli._cognee invalid_command
+          ! uv run python -m cognee.cli._cognee invalid_command
 
           # Test missing required arguments (should fail gracefully)
-          ! cognee.cli._cognee search
+          ! uv run python -m cognee.cli._cognee search
 
           # Test invalid search type (should fail gracefully)
-          ! cognee.cli._cognee search "test" --query-type INVALID_TYPE
+          ! uv run python -m cognee.cli._cognee search "test" --query-type INVALID_TYPE
 
           # Test invalid chunker (should fail gracefully)
-          ! cognee.cli._cognee cognify --chunker InvalidChunker
+          ! uv run python -m cognee.cli._cognee cognify --chunker InvalidChunker
