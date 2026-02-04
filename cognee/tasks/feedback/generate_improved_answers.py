@@ -105,7 +105,6 @@ async def generate_improved_answers(
 
     retriever = GraphCompletionCotRetriever(
         top_k=top_k,
-        save_interaction=False,
         user_prompt_path="graph_context_for_question.txt",
         system_prompt_path="answer_simple_question.txt",
     )
