@@ -51,7 +51,7 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=es">Español</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=fr">Français</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ja">日本語</a> |
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ko">한국어</a> |
+  <a href="README_ko.md">한국어</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=pt">Português</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ru">Русский</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=zh">中文</a>
