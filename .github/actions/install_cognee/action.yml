@@ -37,3 +37,5 @@ runs:
           echo "Installing Cognee version ${{ inputs.cognee_version }} from PyPI..."
           uv pip install --force-reinstall "cognee==${{ inputs.cognee_version }}"
         fi
+        echo "Installed Cognee version:"
+        uv pip show cognee | grep Version
