@@ -45,14 +45,16 @@ async def fetch_entity_neighbors(args) -> List[Dict[str, Any]]:
             "id",
             "description",
             "name",
-            "type",
             "ontology_valid",
         }
         filtered_props = {k: v for k, v in props.items() if k in allowed_props_keys}
+        filtered_edges = {}
+        for edge in edges:
+            filtered_edges[edge[1]] = edge[2]["relationship_name"]
 
         return {
             "properties": filtered_props,
-            "edges": edges,
+            "edges": filtered_edges,
             "neighbors": filtered_neighbors,
         }
 
@@ -77,14 +79,20 @@ async def consolidate_entity_descriptions(nodes) -> List[DataPoint]:
     enriched_data = []
     for node in nodes:
         props = node["properties"]
-        text = json.dumps(
-            {
-                "current_description": props.get("description"),
-                "neighbors": node["neighbors"],
-                "edges": node["edges"],
-            },
-            default=str,
+
+        text = (
+            "This node's description is the following: "
+            + props["name"]
+            + " - "
+            + props["description"]
+            + ". It is connected to it's neighbors in the following way:"
         )
+        for neighbor in node["neighbors"]:
+            edge_label = node.get("edges", {}).get(neighbor.get("id"), "related to")
+            neighbor_name = neighbor.get("name", "")
+            neighbor_desc = neighbor.get("description", neighbor.get("text", ""))
+            text += f"\n- {edge_label}: {neighbor_name} - {neighbor_desc}"
+
         result = await LLMGateway.acreate_structured_output(
             text_input=text,
             system_prompt=system_prompt,  # no format()
