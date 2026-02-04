@@ -4,10 +4,10 @@ on:
   workflow_call:
     inputs:
       cognee_version:
-        required: true
+        required: false
         type: string
         default: "local" # local - Installing Cognee from local source
-        description: "The version of cognee to use"
+        description: "Pypi-compatible version of cognee to use. For example, 0.5.2.dev0. `local` (default) - Installing Cognee from local source"
 jobs:
   test-mcp:
     name: Run MCP Test
@@ -27,10 +27,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install uv
 
-      - name: Install Cognee
+      - name: Install dependencies
+        shell: bash
+        working-directory: cognee-mcp
+        run: uv sync
+
+      - name: (Re)Install Cognee
         shell: bash
         working-directory: cognee-mcp
         run: |
+          uv pip uninstall cognee
           if [ "${{ inputs.cognee_version }}" = "local" ]; then
             echo "Installing Cognee from local source ..."
             uv pip install --force-reinstall -e ../
@@ -38,22 +44,6 @@ jobs:
             echo "Installing Cognee version ${{ inputs.cognee_version }} from PyPI..."
             uv pip install --force-reinstall "cognee==${{ inputs.cognee_version }}"
           fi
-
-
-      # This will install all dependencies along with Cognee version deployed on PIP
-      - name: Install dependencies
-        shell: bash
-        working-directory: cognee-mcp
-        run: uv sync
-
-      # NEW: swap in current local cognee branch version
-      - name: Override with cognee branch checkout
-        working-directory: cognee-mcp
-        run: |
-         # Remove Cognee wheel that came from PyPI
-         uv pip uninstall cognee
-         # Install of the freshly-checked-out Cognee branch
-         uv pip install --force-reinstall -e ../
 
       - name: Run MCP test
         env:
@@ -68,4 +58,7 @@ jobs:
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         working-directory: cognee-mcp
-        run: uv run --no-sync python ./src/test_client.py
+        run: |
+          echo "Cognee Version:"
+          uv pip show cognee | grep Version
+          uv run --no-sync python ./src/test_client.py

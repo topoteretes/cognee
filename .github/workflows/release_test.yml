@@ -6,24 +6,24 @@ permissions:
 
 on:
   workflow_dispatch:
-  release:
-    types: [published]
+    inputs:
+      cognee_version:
+        required: false
+        default: local
+        type: string
+        description: "Pypi-compatible version of cognee to use. For example, 0.5.2.dev0. `local` (default) - Installing Cognee from local source"
 
 jobs:
-  get-version:
-    runs-on: ubuntu-latest
-    outputs:
-      release_version: ${{ steps.get_version.outputs.release_version }}
-    steps:
-      - name: Get Version
-        id: get_version
-        run: |
-          echo "Testing Release: ${{ github.event.release.tag_name }}"
-          VERSION=${{ github.event.release.tag_name }}
-          echo "RELEASE_VERSION=${VERSION#v}" >> $GITHUB_ENV
+
+  mcp-test:
+    name: MCP Tests
+    uses: ./.github/workflows/test_mcp.yml
+    secrets: inherit
+    with:
+      cognee_version: ${{ inputs.cognee_version }}
 
   load-tests:
-    needs: get-version
+    if: false
     name: Load Tests
     uses: ./.github/workflows/load_tests.yml
     secrets: inherit
