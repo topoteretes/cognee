@@ -5,7 +5,7 @@ metadata:
   labels:
     app: {{ .Release.Name }}-cognee
 spec:
-  type: NodePort
+  type: ClusterIP
   ports:
     - port: {{ .Values.cognee.port }}
       targetPort: {{ .Values.cognee.port }}

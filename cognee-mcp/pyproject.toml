@@ -8,7 +8,6 @@ requires-python = ">=3.10"
 dependencies = [
     # For local cognee repo usage remove comment bellow and add absolute path to cognee. Then run `uv sync --reinstall` in the mcp folder on local cognee changes.
     #"cognee[postgres,codegraph,gemini,huggingface,docs,neo4j] @ file:/Users/igorilic/Desktop/cognee",
-    # TODO: Remove gemini from optional dependecnies for new Cognee version after 0.3.4
     "cognee[postgres,docs,neo4j]==0.5.0",
     "fastmcp>=2.10.0,<3.0.0",
     "mcp>=1.12.0,<2.0.0",

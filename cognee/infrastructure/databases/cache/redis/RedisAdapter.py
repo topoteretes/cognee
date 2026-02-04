@@ -17,13 +17,14 @@ class RedisAdapter(CacheDBInterface):
         host,
         port,
         lock_name="default_lock",
+        log_key="usage_logs",
         username=None,
         password=None,
         timeout=240,
         blocking_timeout=300,
         connection_timeout=30,
     ):
-        super().__init__(host, port, lock_name)
+        super().__init__(host, port, lock_name, log_key)
 
         self.host = host
         self.port = port
@@ -176,6 +177,64 @@ class RedisAdapter(CacheDBInterface):
         session_key = f"agent_sessions:{user_id}:{session_id}"
         entries = await self.async_redis.lrange(session_key, 0, -1)
         return [json.loads(e) for e in entries]
+
+    async def log_usage(
+        self,
+        user_id: str,
+        log_entry: dict,
+        ttl: int | None = 604800,
+    ):
+        """
+        Log usage information (API endpoint calls, MCP tool invocations) to Redis.
+
+        Args:
+            user_id: The user ID.
+            log_entry: Dictionary containing usage log information.
+            ttl: Optional time-to-live (seconds). If provided, the log list expires after this time.
+
+        Raises:
+            CacheConnectionError: If Redis connection fails or times out.
+        """
+        try:
+            usage_logs_key = f"{self.log_key}:{user_id}"
+
+            await self.async_redis.rpush(usage_logs_key, json.dumps(log_entry))
+
+            if ttl is not None:
+                await self.async_redis.expire(usage_logs_key, ttl)
+
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while logging usage: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while logging usage to Redis: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+
+    async def get_usage_logs(self, user_id: str, limit: int = 100):
+        """
+        Retrieve usage logs for a given user.
+
+        Args:
+            user_id: The user ID.
+            limit: Maximum number of logs to retrieve (default: 100).
+
+        Returns:
+            List of usage log entries, most recent first.
+        """
+        try:
+            usage_logs_key = f"{self.log_key}:{user_id}"
+            entries = await self.async_redis.lrange(usage_logs_key, -limit, -1)
+            return [json.loads(e) for e in reversed(entries)] if entries else []
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            error_msg = f"Redis connection error while retrieving usage logs: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error while retrieving usage logs from Redis: {str(e)}"
+            logger.error(error_msg)
+            raise CacheConnectionError(error_msg) from e
 
     async def close(self):
         """
