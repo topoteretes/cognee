@@ -50,7 +50,6 @@ async def test_init_custom_params():
         system_prompt="Custom prompt",
         node_type=str,
         node_name=["node1"],
-        save_interaction=True,
         wide_search_top_k=200,
         triplet_distance_penalty=5.0,
     )
@@ -61,7 +60,6 @@ async def test_init_custom_params():
     assert retriever.system_prompt == "Custom prompt"
     assert retriever.node_type is str
     assert retriever.node_name == ["node1"]
-    assert retriever.save_interaction is True
     assert retriever.wide_search_top_k == 200
     assert retriever.triplet_distance_penalty == 5.0
 
@@ -304,69 +302,6 @@ async def test_get_completion_with_session(mock_edge):
     assert len(completion) == 1
     assert completion[0] == "Generated answer"
     mock_save.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_get_completion_with_save_interaction(mock_edge):
-    """Test get_completion with save_interaction enabled."""
-    mock_graph_engine = AsyncMock()
-    mock_graph_engine.is_empty = AsyncMock(return_value=False)
-    mock_graph_engine.add_edges = AsyncMock()
-
-    retriever = GraphCompletionContextExtensionRetriever(
-        context_extension_rounds=1, save_interaction=True
-    )
-
-    mock_node1 = MagicMock()
-    mock_node2 = MagicMock()
-    mock_edge.node1 = mock_node1
-    mock_edge.node2 = mock_node2
-
-    with (
-        patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
-        patch.object(
-            retriever, "get_context_from_objects", new_callable=AsyncMock, return_value="mock_edge"
-        ),
-        patch(
-            "cognee.modules.retrieval.graph_completion_retriever.resolve_edges_to_text",
-            return_value="Resolved context",
-        ),
-        patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
-            side_effect=[
-                "Extension query",
-                "Generated answer",
-            ],  # Extension query, then final answer
-        ),
-        patch(
-            "cognee.modules.retrieval.graph_completion_retriever.extract_uuid_from_node",
-            side_effect=[
-                UUID("550e8400-e29b-41d4-a716-446655440000"),
-                UUID("550e8400-e29b-41d4-a716-446655440001"),
-            ],
-        ),
-        patch(
-            "cognee.modules.retrieval.graph_completion_retriever.add_data_points",
-        ) as mock_add_data,
-        patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
-        ) as mock_cache_config,
-    ):
-        mock_config = MagicMock()
-        mock_config.caching = False
-        mock_cache_config.return_value = mock_config
-
-        context = await retriever.get_context_from_objects("test query", [mock_edge])
-        completion = await retriever.get_completion_from_context(
-            "test query", [mock_edge], context=context
-        )
-
-    assert isinstance(completion, list)
-    assert len(completion) == 1
-    mock_add_data.assert_awaited_once()
 
 
 @pytest.mark.asyncio
