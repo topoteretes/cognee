@@ -397,4 +397,3 @@ async def test_get_completion_empty_context(mock_edge):
 
     assert isinstance(completion, list)
     assert len(completion) == 1
-
