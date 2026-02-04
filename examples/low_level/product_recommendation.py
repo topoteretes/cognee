@@ -165,8 +165,8 @@ async def main():
             // If a stored preference exists and it does not match the new value,
             // raise an error using APOC's utility procedure.
             CALL apoc.util.validate(
-              preference IS NOT NULL AND preference.value <> new_size, 
-              "Conflicting shoe size preference: existing size is " + preference.value + " and new size is " + new_size, 
+              preference IS NOT NULL AND preference.value <> new_size,
+              "Conflicting shoe size preference: existing size is " + preference.value + " and new size is " + new_size,
               []
             )
 

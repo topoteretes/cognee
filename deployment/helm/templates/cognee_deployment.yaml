@@ -20,12 +20,35 @@ spec:
           ports:
             - containerPort: {{ .Values.cognee.port }}
           env:
+            - name: ENABLE_BACKEND_ACCESS_CONTROL
+              value: "false"
             - name: HOST
               value: {{ .Values.cognee.env.HOST }}
             - name: ENVIRONMENT
               value: {{ .Values.cognee.env.ENVIRONMENT }}
             - name: PYTHONPATH
               value: {{ .Values.cognee.env.PYTHONPATH }}
+            - name: VECTOR_DB_PROVIDER
+              value: pgvector
+            - name: DB_HOST
+              value: {{ .Release.Name }}-postgres
+            - name: DB_PORT
+              value: "{{ .Values.postgres.port }}"
+            - name: DB_NAME
+              value: {{ .Values.postgres.env.POSTGRES_DB }}
+            - name: DB_USERNAME
+              value: {{ .Values.postgres.env.POSTGRES_USER }}
+            - name: DB_PASSWORD
+              value: {{ .Values.postgres.env.POSTGRES_PASSWORD }}
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-llm-api-key
+                  key: LLM_API_KEY
+            - name: LLM_MODEL
+              value: {{ .Values.cognee.env.LLM_MODEL }}
+            - name: LLM_PROVIDER
+              value: {{ .Values.cognee.env.LLM_PROVIDER }}
           resources:
             limits:
               cpu: {{ .Values.cognee.resources.cpu }}

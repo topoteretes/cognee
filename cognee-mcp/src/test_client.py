@@ -627,8 +627,7 @@ class TestModel:
         print(f"Failed: {failed}")
         print(f"Success Rate: {(passed / total_tests * 100):.1f}%")
 
-        if failed > 0:
-            print(f"\n ⚠️ {failed} test(s) failed - review results above for details")
+        assert failed == 0, f"\n ⚠️ {failed} test(s) failed - review results above for details"
 
 
 async def main():
