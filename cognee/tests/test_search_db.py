@@ -418,7 +418,6 @@ async def test_e2e_graph_side_effects_and_node_fields(e2e_state):
     nodes, edges = graph
 
     type_counts = Counter(node_data[1].get("type", {}) for node_data in nodes)
-    edge_type_counts = Counter(edge_type[2] for edge_type in edges)
 
     assert type_counts.get("NodeSet", 0) >= 1
     assert len(nodes) >= 1
