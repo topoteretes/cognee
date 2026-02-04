@@ -32,18 +32,11 @@ jobs:
         working-directory: cognee-mcp
         run: uv sync
 
-      - name: (Re)Install Cognee
-        shell: bash
-        working-directory: cognee-mcp
-        run: |
-          uv pip uninstall cognee
-          if [ "${{ inputs.cognee_version }}" = "local" ]; then
-            echo "Installing Cognee from local source ..."
-            uv pip install --force-reinstall -e ../
-          else
-            echo "Installing Cognee version ${{ inputs.cognee_version }} from PyPI..."
-            uv pip install --force-reinstall "cognee==${{ inputs.cognee_version }}"
-          fi
+      - name: Install Cognee
+        uses: ./.github/actions/install_cognee
+        with:
+          python-version: ${{ inputs.python-version }}
+          cognee_version: ${{ inputs.cognee_version }}
 
       - name: Run MCP test
         env:

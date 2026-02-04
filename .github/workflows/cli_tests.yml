@@ -1,4 +1,4 @@
-name: CLI Tests
+name: test | cli
 
 on:
   workflow_call:
@@ -7,6 +7,11 @@ on:
         required: false
         type: string
         default: '3.11.x'
+      cognee_version:
+        required: false
+        type: string
+        default: "local"
+        description: "Pypi-compatible version of cognee to use. For example, 0.5.2.dev0. `local` (default) - Installing Cognee from local source"
     secrets:
       LLM_PROVIDER:
         required: true
@@ -29,7 +34,6 @@ on:
       EMBEDDING_API_VERSION:
         required: true
 
-
 env:
   RUNTIME__LOG_LEVEL: ERROR
   ENV: 'dev'
@@ -37,6 +41,7 @@ env:
 jobs:
   cli-unit-tests:
     name: CLI Unit Tests
+    if: ${{ inputs.cognee_version == 'local' }}
     runs-on: ubuntu-22.04
     env:
       ENV: 'dev'
@@ -89,6 +94,12 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Install Cognee
+        uses: ./.github/actions/install_cognee
+        with:
+          python-version: ${{ inputs.python-version }}
+          cognee_version: ${{ inputs.cognee_version }}
+
       - name: Run CLI Integration Tests
         run: uv run pytest cognee/tests/cli_tests/cli_integration_tests/ -v
 
@@ -118,34 +129,40 @@ jobs:
         with:
           python-version: ${{ inputs.python-version }}
 
+      - name: Install Cognee
+        uses: ./.github/actions/install_cognee
+        with:
+          python-version: ${{ inputs.python-version }}
+          cognee_version: ${{ inputs.cognee_version }}
+
       - name: Test CLI Help Commands
         run: |
-          uv run python -m cognee.cli._cognee --help
-          uv run python -m cognee.cli._cognee --version
-          uv run python -m cognee.cli._cognee add --help
-          uv run python -m cognee.cli._cognee search --help
-          uv run python -m cognee.cli._cognee cognify --help
-          uv run python -m cognee.cli._cognee delete --help
-          uv run python -m cognee.cli._cognee config --help
+          cognee-cli --help
+          cognee-cli --version
+          cognee-cli add --help
+          cognee-cli search --help
+          cognee-cli cognify --help
+          cognee-cli delete --help
+          cognee-cli config --help
 
       - name: Test CLI Config Subcommands
         run: |
-          uv run python -m cognee.cli._cognee config get --help
-          uv run python -m cognee.cli._cognee config set --help
-          uv run python -m cognee.cli._cognee config list --help
-          uv run python -m cognee.cli._cognee config unset --help
-          uv run python -m cognee.cli._cognee config reset --help
+          cognee-cli config get --help
+          cognee-cli config set --help
+          cognee-cli config list --help
+          cognee-cli config unset --help
+          cognee-cli config reset --help
 
       - name: Test CLI Error Handling
         run: |
           # Test invalid command (should fail gracefully)
-          ! uv run python -m cognee.cli._cognee invalid_command
+          ! cognee-cli invalid_command
 
           # Test missing required arguments (should fail gracefully)
-          ! uv run python -m cognee.cli._cognee search
+          ! cognee-cli search
 
           # Test invalid search type (should fail gracefully)
-          ! uv run python -m cognee.cli._cognee search "test" --query-type INVALID_TYPE
+          ! cognee-cli search "test" --query-type INVALID_TYPE
 
           # Test invalid chunker (should fail gracefully)
-          ! uv run python -m cognee.cli._cognee cognify --chunker InvalidChunker
+          ! cognee-cli cognify --chunker InvalidChunker
