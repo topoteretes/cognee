@@ -50,7 +50,7 @@ Each of these companies has significantly impacted the technology landscape, dri
 """
 
 
-async def main():
+async def main(use_poc):
     # Step 1: Reset data and system state
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -72,7 +72,13 @@ async def main():
         }
     }
 
-    await cognify(config=config)
+    if use_poc:
+        await cognify(config=config)
+        graph_visualization_path = path.join(path.dirname(__file__), "poc_cognify_result.html")
+    else:
+        await cognee.cognify(config=config)
+        graph_visualization_path = path.join(path.dirname(__file__), "cofnigy_result.html")
+
     print("Knowledge with ontology created.")
 
     # Step 4: Query insights
@@ -81,7 +87,6 @@ async def main():
         query_text="What are the exact cars and their types produced by Audi?",
     )
     pprint(search_results)
-    graph_visualization_path = path.join(path.dirname(__file__), "poc_result.html")
 
     await visualize_graph(graph_visualization_path)
 
@@ -92,6 +97,7 @@ if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        loop.run_until_complete(main())
+        loop.run_until_complete(main(use_poc=False))
+        loop.run_until_complete(main(use_poc=True))
     finally:
         loop.run_until_complete(loop.shutdown_asyncgens())
