@@ -30,7 +30,8 @@ async def test_get_context_success(mock_vector_engine):
         "cognee.modules.retrieval.completion_retriever.get_vector_engine",
         return_value=mock_vector_engine,
     ):
-        context = await retriever.get_context("test query")
+        objects = await retriever.get_retrieved_objects("test query")
+        context = await retriever.get_context_from_objects("test query", objects)
 
     assert context == "Steve Rodger\nMike Broski"
     mock_vector_engine.search.assert_awaited_once_with(
@@ -50,7 +51,7 @@ async def test_get_context_collection_not_found_error(mock_vector_engine):
         return_value=mock_vector_engine,
     ):
         with pytest.raises(NoDataError, match="No data found"):
-            await retriever.get_context("test query")
+            await retriever.get_retrieved_objects("test query")
 
 
 @pytest.mark.asyncio
@@ -64,7 +65,7 @@ async def test_get_context_empty_results(mock_vector_engine):
         "cognee.modules.retrieval.completion_retriever.get_vector_engine",
         return_value=mock_vector_engine,
     ):
-        context = await retriever.get_context("test query")
+        context = await retriever.get_context_from_objects("test query", [])
 
     assert context == ""
 
@@ -84,7 +85,8 @@ async def test_get_context_top_k_limit(mock_vector_engine):
         "cognee.modules.retrieval.completion_retriever.get_vector_engine",
         return_value=mock_vector_engine,
     ):
-        context = await retriever.get_context("test query")
+        objects = await retriever.get_retrieved_objects("test query")
+        context = await retriever.get_context_from_objects("test query", objects)
 
     assert context == "Chunk 0\nChunk 1"
     mock_vector_engine.search.assert_awaited_once_with(
@@ -105,7 +107,8 @@ async def test_get_context_single_chunk(mock_vector_engine):
         "cognee.modules.retrieval.completion_retriever.get_vector_engine",
         return_value=mock_vector_engine,
     ):
-        context = await retriever.get_context("test query")
+        objects = await retriever.get_retrieved_objects("test query")
+        context = await retriever.get_context_from_objects("test query", objects)
 
     assert context == "Single chunk text"
 
@@ -134,7 +137,7 @@ async def test_get_completion_without_session(mock_vector_engine):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query")
+        completion = await retriever.get_completion_from_context("test query", None, "")
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -157,7 +160,9 @@ async def test_get_completion_with_provided_context(mock_vector_engine):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query", context="Provided context")
+        completion = await retriever.get_completion_from_context(
+            "test query", None, context="Provided context"
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -171,7 +176,7 @@ async def test_get_completion_with_session(mock_vector_engine):
     mock_result.payload = {"text": "Chunk text"}
     mock_vector_engine.search.return_value = [mock_result]
 
-    retriever = CompletionRetriever()
+    retriever = CompletionRetriever(session_id="test_session")
 
     mock_user = MagicMock()
     mock_user.id = "test-user-id"
@@ -204,7 +209,9 @@ async def test_get_completion_with_session(mock_vector_engine):
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = mock_user
 
-        completion = await retriever.get_completion("test query", session_id="test_session")
+        completion = await retriever.get_completion_from_context(
+            "test query", [mock_result], "test"
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -238,7 +245,7 @@ async def test_get_completion_with_session_no_user_id(mock_vector_engine):
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = None  # No user
 
-        completion = await retriever.get_completion("test query")
+        completion = await retriever.get_completion_from_context("test query", None, "")
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -256,7 +263,7 @@ async def test_get_completion_with_response_model(mock_vector_engine):
     mock_result.payload = {"text": "Chunk text"}
     mock_vector_engine.search.return_value = [mock_result]
 
-    retriever = CompletionRetriever()
+    retriever = CompletionRetriever(response_model=TestModel)
 
     with (
         patch(
@@ -273,7 +280,7 @@ async def test_get_completion_with_response_model(mock_vector_engine):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query", response_model=TestModel)
+        completion = await retriever.get_completion_from_context("test query", None, None)
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -322,4 +329,6 @@ async def test_get_context_missing_text_key(mock_vector_engine):
         return_value=mock_vector_engine,
     ):
         with pytest.raises(KeyError):
-            await retriever.get_context("test query")
+            objects = await retriever.get_retrieved_objects("test query")
+            context = await retriever.get_context_from_objects("test query", objects)
+            await retriever.get_completion_from_context("test query", objects, context)

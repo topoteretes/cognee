@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Optional, List, Type
+from typing import Any, Optional, List, Type, Union
 from cognee.shared.logging_utils import get_logger
 
 from cognee.infrastructure.entities.BaseEntityExtractor import BaseEntityExtractor
@@ -40,19 +40,21 @@ class EntityCompletionRetriever(BaseRetriever):
         context_provider: BaseContextProvider,
         user_prompt_path: str = "context_for_question.txt",
         system_prompt_path: str = "answer_simple_question.txt",
+        session_id: Optional[str] = None,
+        response_model: Type = str,
     ):
         self.extractor = extractor
         self.context_provider = context_provider
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
+        self.session_id = session_id
+        self.response_model = response_model
 
-    async def get_context(self, query: str) -> Any:
+    async def get_retrieved_objects(self, query: str) -> Any:
         """
-        Get context using entity extraction and context provider.
+        Get relevant objects from the provided query.
 
-        Logs the processing of the query and retrieves entities. If entities are extracted, it
-        attempts to retrieve the corresponding context using the context provider. Returns None
-        if no entities or context are found, or logs the error if an exception occurs.
+        Extracts and returns entities from the provided query, returning None if no entities are found.
 
         Parameters:
         -----------
@@ -62,8 +64,8 @@ class EntityCompletionRetriever(BaseRetriever):
         Returns:
         --------
 
-            - Any: The context retrieved from the context provider or None if not found or an
-              error occurred.
+            - Any: The extracted entities, or None if no entities are found.
+
         """
         try:
             logger.info(f"Processing query: {query[:100]}")
@@ -73,40 +75,57 @@ class EntityCompletionRetriever(BaseRetriever):
                 logger.info("No entities extracted")
                 return None
 
-            context = await self.context_provider.get_context(entities, query)
-            if not context:
-                logger.info("No context retrieved")
-                return None
-
-            return context
+            return entities
 
         except Exception as e:
             logger.error(f"Context retrieval failed: {str(e)}")
             return None
 
-    async def get_completion(
-        self,
-        query: str,
-        context: Optional[Any] = None,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
-    ) -> List[Any]:
+    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
         """
-        Generate completion using provided context or fetch new context.
+        Get context using the extracted entities and a context provider.
 
-        If context is not provided, it fetches context using the query. If no context is
-        available, it returns an error message. Logs an error if completion generation fails due
-        to an exception.
+        Retrieves the context corresponding to the retrieved entities in retrieved_objects.
+        Returns and empty string if no context is retrieved.
+
+        Parameters:
+        -----------
+
+            - query (str): The query string for which context is being retrieved.
+            - retrieved_objects (Any): The retrieved entities extracted from the query.
+
+        Returns:
+        --------
+
+            - str: The context retrieved from the context provider or an empty string
+            if not found or an error occurred.
+        """
+        try:
+            logger.info(f"Processing query: {query[:100]}")
+
+            context = await self.context_provider.get_context(retrieved_objects, query)
+            if not context:
+                logger.info("No context retrieved")
+                return ""
+
+            return context
+
+        except Exception as e:
+            logger.error(f"Context retrieval failed: {str(e)}")
+            return ""
+
+    async def get_completion_from_context(
+        self, query: str, retrieved_objects: Any, context: Any
+    ) -> Union[List[str], List[dict]]:
+        """
+        Generate completion using provided context.
 
         Parameters:
         -----------
 
             - query (str): The query string for which completion is being generated.
-            - context (Optional[Any]): Optional context to be used for generating completion;
-              fetched if not provided. (default None)
-            - session_id (Optional[str]): Optional session identifier for caching. If None,
-              defaults to 'default_session'. (default None)
-            - response_model (Type): The Pydantic model type for structured output. (default str)
+            - retrieved_objects (Any): The retrieved objects extracted from the query.
+            - context (Any): Optional context to be used for generating completion.
 
         Returns:
         --------
@@ -115,12 +134,6 @@ class EntityCompletionRetriever(BaseRetriever):
               relevant entities were found.
         """
         try:
-            if context is None:
-                context = await self.get_context(query)
-
-            if context is None:
-                return ["No relevant entities found for the query."]
-
             # Check if we need to generate context summary for caching
             cache_config = CacheConfig()
             user = session_user.get()
@@ -128,7 +141,7 @@ class EntityCompletionRetriever(BaseRetriever):
             session_save = user_id and cache_config.caching
 
             if session_save:
-                conversation_history = await get_conversation_history(session_id=session_id)
+                conversation_history = await get_conversation_history(session_id=self.session_id)
 
                 context_summary, completion = await asyncio.gather(
                     summarize_text(str(context)),
@@ -138,7 +151,7 @@ class EntityCompletionRetriever(BaseRetriever):
                         user_prompt_path=self.user_prompt_path,
                         system_prompt_path=self.system_prompt_path,
                         conversation_history=conversation_history,
-                        response_model=response_model,
+                        response_model=self.response_model,
                     ),
                 )
             else:
@@ -147,7 +160,7 @@ class EntityCompletionRetriever(BaseRetriever):
                     context=context,
                     user_prompt_path=self.user_prompt_path,
                     system_prompt_path=self.system_prompt_path,
-                    response_model=response_model,
+                    response_model=self.response_model,
                 )
 
             if session_save:
@@ -155,7 +168,7 @@ class EntityCompletionRetriever(BaseRetriever):
                     query=query,
                     context_summary=context_summary,
                     answer=completion,
-                    session_id=session_id,
+                    session_id=self.session_id,
                 )
 
             return [completion]

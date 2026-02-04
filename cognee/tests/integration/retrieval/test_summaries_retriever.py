@@ -158,27 +158,38 @@ async def setup_test_environment_empty():
 
 
 @pytest.mark.asyncio
-async def test_summaries_retriever_context(setup_test_environment_with_summaries):
+async def test_summaries_retriever(setup_test_environment_with_summaries):
     """Integration test: verify SummariesRetriever can retrieve summary context."""
     retriever = SummariesRetriever(top_k=20)
+    query = "Christina"
+    summaries = await retriever.get_retrieved_objects(query)
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=summaries)
 
-    context = await retriever.get_context("Christina")
+    completion = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=summaries, context=context
+    )
 
-    assert isinstance(context, list), "Context should be a list"
-    assert len(context) > 0, "Context should not be empty"
-    assert context[0]["text"] == "C.M.", "Failed to get Christina Mayer"
+    assert isinstance(completion, list), "Context should be a list"
+    assert len(completion) > 0, "Context should not be empty"
+    assert completion[0]["text"] == "C.M.", "Failed to get Christina Mayer"
 
 
 @pytest.mark.asyncio
-async def test_summaries_retriever_context_on_empty_graph(setup_test_environment_empty):
+async def test_summaries_retriever_on_empty_graph(setup_test_environment_empty):
     """Integration test: verify SummariesRetriever handles empty graph correctly."""
     retriever = SummariesRetriever()
+    query = "Christina Mayer"
 
     with pytest.raises(NoDataError):
-        await retriever.get_context("Christina Mayer")
+        await retriever.get_retrieved_objects(query)
 
     vector_engine = get_vector_engine()
     await vector_engine.create_collection("TextSummary_text", payload_schema=TextSummary)
 
-    context = await retriever.get_context("Christina Mayer")
-    assert context == [], "Returned context should be empty on an empty graph"
+    summaries = await retriever.get_retrieved_objects(query)
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=summaries)
+    completion = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=summaries, context=context
+    )
+
+    assert completion == [], "Returned context should be empty on an empty graph"
