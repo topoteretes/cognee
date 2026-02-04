@@ -70,7 +70,6 @@ class SessionManager:
         session_id: Optional[str] = None,
         feedback_text: Optional[str] = None,
         feedback_score: Optional[int] = None,
-        ttl: Optional[int] = 86400,
     ) -> Optional[str]:
         """
         Add a QA to the session. Returns qa_id, or None if cache unavailable.
@@ -91,7 +90,6 @@ class SessionManager:
             answer=answer,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
-            ttl=ttl,
         )
         return qa_id
 
