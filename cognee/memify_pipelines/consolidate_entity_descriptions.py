@@ -90,8 +90,11 @@ async def consolidate_entity_descriptions(nodes) -> List[DataPoint]:
         for neighbor in node["neighbors"]:
             edge_label = node.get("edges", {}).get(neighbor.get("id"), "related to")
             neighbor_name = neighbor.get("name", "")
-            neighbor_desc = neighbor.get("description", neighbor.get("text", ""))
-            text += f"\n- {edge_label}: {neighbor_name} - {neighbor_desc}"
+            neighbor_desc = neighbor.get("description", "")
+            if neighbor_desc:
+                text += f"\n- {edge_label}: {neighbor_name} - {neighbor_desc}"
+            else:
+                text += f"\n- {edge_label} - {neighbor.get('text', '')}"
 
         result = await LLMGateway.acreate_structured_output(
             text_input=text,
