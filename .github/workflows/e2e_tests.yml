@@ -4,11 +4,6 @@ permissions:
 
 on:
   workflow_call:
-    inputs:
-      python-version:
-        required: false
-        type: string
-        default: '3.11.x'
     secrets:
       LLM_MODEL:
         required: true
@@ -45,8 +40,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Run Server Tests
         env:
@@ -71,8 +64,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Run Telemetry Tests
         env:
@@ -96,8 +87,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Add telemetry identifier
         run: |
@@ -144,7 +133,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
           extra-dependencies: "postgres"
 
       - name: Run Deduplication Example
@@ -170,7 +158,6 @@ jobs:
         - name: Cognee Setup
           uses: ./.github/actions/cognee_setup
           with:
-            python-version: '3.11.x'
             extra-dependencies: "aws"
 
         - name: Run S3 Bucket Test
@@ -198,8 +185,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
@@ -227,8 +212,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Run dataset databases handler test
         env:
@@ -253,8 +236,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Run dataset databases deletion test
         env:
@@ -279,8 +260,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
@@ -308,8 +287,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Run multi tenancy test
         env:
@@ -334,8 +311,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Run custom data label test
         env:
@@ -360,8 +335,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
@@ -418,7 +391,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
           extra-dependencies: "postgres redis"
 
       - name: Run Concurrent subprocess access test (Kuzu/Lancedb/Postgres/Redis)
@@ -454,8 +426,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
@@ -483,8 +453,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
@@ -542,7 +510,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
           extra-dependencies: "postgres redis"
 
       - name: Run Conversation session tests (Redis)
@@ -596,7 +563,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
           extra-dependencies: "postgres"
 
       - name: Run Conversation session tests (FS)
@@ -633,8 +599,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Run Pipeline Cache Test
         env:
@@ -674,7 +638,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
           extra-dependencies: "redis"
 
       - name: Install cognee-mcp (local version)

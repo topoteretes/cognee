@@ -1,12 +1,13 @@
-name: CLI Tests
+name: test | cli
 
 on:
   workflow_call:
     inputs:
-      python-version:
+      cognee_version:
         required: false
         type: string
-        default: '3.11.x'
+        default: "local"
+        description: "Pypi-compatible version of cognee to use. For example, 0.5.2.dev0. `local` (default) - Installing Cognee from local source"
     secrets:
       LLM_PROVIDER:
         required: true
@@ -28,7 +29,6 @@ on:
         required: true
       EMBEDDING_API_VERSION:
         required: true
-
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
@@ -57,8 +57,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: ${{ inputs.python-version }}
 
       - name: Run CLI Unit Tests
         run: uv run pytest cognee/tests/cli_tests/cli_unit_tests/ -v
@@ -86,8 +84,11 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
+
+      - name: Install Cognee
+        uses: ./.github/actions/install_cognee
         with:
-          python-version: ${{ inputs.python-version }}
+          cognee_version: ${{ inputs.cognee_version }}
 
       - name: Run CLI Integration Tests
         run: uv run pytest cognee/tests/cli_tests/cli_integration_tests/ -v
@@ -115,8 +116,11 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
+
+      - name: Install Cognee
+        uses: ./.github/actions/install_cognee
         with:
-          python-version: ${{ inputs.python-version }}
+          cognee_version: ${{ inputs.cognee_version }}
 
       - name: Test CLI Help Commands
         run: |

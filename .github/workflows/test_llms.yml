@@ -20,8 +20,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Run Gemini Simple Example
         env:
@@ -44,8 +42,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Run Fastembed Simple Example
         env:
@@ -69,8 +65,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Run OpenRouter Simple Example
         env:
@@ -95,7 +89,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
           extra-dependencies: "aws"
 
       - name: Run Bedrock API Key Simple Example
@@ -122,7 +115,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
           extra-dependencies: "aws"
 
       - name: Run Bedrock AWS Credentials Simple Example
@@ -150,7 +142,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
           extra-dependencies: "aws"
 
       - name: Configure AWS Profile

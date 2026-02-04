@@ -16,8 +16,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
 
       - name: Install torch dependency
         run: |
