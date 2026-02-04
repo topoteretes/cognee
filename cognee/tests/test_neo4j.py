@@ -111,21 +111,29 @@ async def main():
 
     await cognee.cognify([dataset_name])
 
-    context_nonempty = await GraphCompletionRetriever(
+    graph_retriever = GraphCompletionRetriever(
         node_type=NodeSet,
         node_name=["first"],
-    ).get_context("What is in the context?")
+    )
+    objects = await graph_retriever.get_retrieved_objects("What is in the context?")
+    context_nonempty = await graph_retriever.get_context_from_objects(
+        "What is in the context?", objects
+    )
 
-    context_empty = await GraphCompletionRetriever(
+    graph_retriever = GraphCompletionRetriever(
         node_type=NodeSet,
         node_name=["nonexistent"],
-    ).get_context("What is in the context?")
+    )
+    objects = await graph_retriever.get_retrieved_objects("What is in the context?")
+    context_empty = await graph_retriever.get_context_from_objects(
+        "What is in the context?", objects
+    )
 
-    assert isinstance(context_nonempty, list) and context_nonempty != [], (
+    assert isinstance(context_nonempty, str) and context_nonempty != "", (
         f"Nodeset_search_test:Expected non-empty string for context_nonempty, got: {context_nonempty!r}"
     )
 
-    assert context_empty == [], (
+    assert context_empty == "", (
         f"Nodeset_search_test:Expected empty string for context_empty, got: {context_empty!r}"
     )
 
