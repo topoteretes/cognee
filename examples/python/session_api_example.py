@@ -30,23 +30,21 @@ async def main():
         query_text=question,
         query_type=SearchType.GRAPH_COMPLETION,
         user=user,
-        session_id="my_example_session")
+        session_id="my_example_session",
+    )
     print(f"Answer: {results}\n")
 
     question = "How are sessions related to Cognee?"
     print(f"Searching: {question}")
     results = await cognee.search(
-        query_text=question,
-        query_type=SearchType.GRAPH_COMPLETION,
-        user=user)
+        query_text=question, query_type=SearchType.GRAPH_COMPLETION, user=user
+    )
     print(f"Answer: {results}\n")
 
     session_id = "my_example_session"
-    qas = await cognee.session.get_session(session_id='my_example_session',
-                                           user=user)
+    qas = await cognee.session.get_session(session_id="my_example_session", user=user)
 
-    default_qas = await cognee.session.get_session(session_id="default_session",
-                                           user=user)
+    default_qas = await cognee.session.get_session(session_id="default_session", user=user)
     print(f"First session {session_id!r} has {len(qas)} QA(s).")
 
     print(f"Search call without sesion {default_qas!r} has {len(default_qas)} QA(s).")
@@ -62,7 +60,7 @@ async def main():
     )
 
     feedback_status_2 = await cognee.session.add_feedback(
-        session_id='default_session',
+        session_id="default_session",
         qa_id=latest_default.qa_id,
         feedback_text="Not that helpful, thanks!",
         feedback_score=2,
@@ -84,7 +82,6 @@ async def main():
     )
     print(f"delete_feedback (my_example_session): {deleted_1!r}.")
     print(f"delete_feedback (default_session): {deleted_2!r}.")
-
 
 
 if __name__ == "__main__":
