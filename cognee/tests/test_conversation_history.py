@@ -304,9 +304,7 @@ async def main():
     ######E2E: NEW SESSION SDK (get_session, add_feedback, delete_feedback) ######
     logger.info("Starting e2e tests for session SDK: get_session, add_feedback, delete_feedback")
     session_id_sdk = "test_session_graph"  # reuse session that has Q&As from above
-    entries = await cognee.session.get_session(
-        session_id=session_id_sdk, user=user, last_n=10
-    )
+    entries = await cognee.session.get_session(session_id=session_id_sdk, user=user, last_n=10)
     assert len(entries) >= 2, (
         f"Expected at least 2 entries for session {session_id_sdk!r}, got {len(entries)}"
     )
@@ -339,9 +337,7 @@ async def main():
     entries_after_del = await cognee.session.get_session(
         session_id=session_id_sdk, user=user, last_n=10
     )
-    latest_after_del = next(
-        (e for e in entries_after_del if e.qa_id == qa_id_for_feedback), None
-    )
+    latest_after_del = next((e for e in entries_after_del if e.qa_id == qa_id_for_feedback), None)
     assert latest_after_del is not None, "Entry should still exist after delete_feedback"
     assert latest_after_del.feedback_text is None, "feedback_text should be cleared"
     assert latest_after_del.feedback_score is None, "feedback_score should be cleared"
