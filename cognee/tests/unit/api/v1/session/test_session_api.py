@@ -42,6 +42,7 @@ def sm():
 
 # Resolving the user (explicit, context, or default)
 
+
 class TestResolveUser:
     """User resolution: explicit user, context user, default user, and failures."""
 
