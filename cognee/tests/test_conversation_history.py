@@ -1,14 +1,22 @@
 """
 End-to-end integration test for conversation history feature.
 
-Tests all retrievers that save conversation history to Redis cache:
-1. GRAPH_COMPLETION
-2. RAG_COMPLETION
-3. GRAPH_COMPLETION_COT
-4. GRAPH_COMPLETION_CONTEXT_EXTENSION
-5. GRAPH_SUMMARY_COMPLETION
-6. TEMPORAL
-7. TRIPLET_COMPLETION
+NOTE (COG-3881): The test body below uses OLD session functionality (cache_engine.get_latest_qa,
+get_conversation_history, etc.). It should be updated/removed and the whole test converted to
+pytest. For now it is left as-is with comments; e2e coverage for the NEW session SDK
+(get_session, add_feedback, delete_feedback) is added at the end of this file. In COG-3881
+the entire test will be replaced with the new logic and migrated to pytest.
+
+Old behaviour covered here:
+- Tests all retrievers that save conversation history to Redis cache:
+  1. GRAPH_COMPLETION
+  2. RAG_COMPLETION
+  3. GRAPH_COMPLETION_COT
+  4. GRAPH_COMPLETION_CONTEXT_EXTENSION
+  5. GRAPH_SUMMARY_COMPLETION
+  6. TEMPORAL
+  7. TRIPLET_COMPLETION
+- Uses cache_engine.get_latest_qa and get_conversation_history (legacy).
 """
 
 import os
@@ -26,6 +34,7 @@ logger = get_logger()
 
 
 async def main():
+    ######BEGIN: OLD SESSION FUNCTIONALITY (to be updated/removed in COG-3881; prefer pytest) ######
     data_directory_path = str(
         pathlib.Path(
             os.path.join(
@@ -290,6 +299,54 @@ async def main():
     assert len(collection_size) == 4, (
         f"DocumentChunk_text collection should have exactly 4 embeddings, found {len(collection_size)}"
     )
+    ######END: OLD SESSION FUNCTIONALITY######
+
+    ######E2E: NEW SESSION SDK (get_session, add_feedback, delete_feedback) ######
+    logger.info("Starting e2e tests for session SDK: get_session, add_feedback, delete_feedback")
+    session_id_sdk = "test_session_graph"  # reuse session that has Q&As from above
+    entries = await cognee.session.get_session(
+        session_id=session_id_sdk, user=user, last_n=10
+    )
+    assert len(entries) >= 2, (
+        f"Expected at least 2 entries for session {session_id_sdk!r}, got {len(entries)}"
+    )
+    latest = entries[-1]
+    assert latest.qa_id, "Latest entry should have qa_id"
+    qa_id_for_feedback = latest.qa_id
+
+    ok_add = await cognee.session.add_feedback(
+        session_id=session_id_sdk,
+        qa_id=qa_id_for_feedback,
+        feedback_text="E2E test feedback",
+        feedback_score=5,
+        user=user,
+    )
+    assert ok_add is True, "add_feedback should return True"
+
+    entries_after_add = await cognee.session.get_session(
+        session_id=session_id_sdk, user=user, last_n=10
+    )
+    latest_after = next((e for e in entries_after_add if e.qa_id == qa_id_for_feedback), None)
+    assert latest_after is not None, "Entry with qa_id should exist after add_feedback"
+    assert latest_after.feedback_text == "E2E test feedback", "feedback_text should be set"
+    assert latest_after.feedback_score == 5, "feedback_score should be 5"
+
+    ok_del = await cognee.session.delete_feedback(
+        session_id=session_id_sdk, qa_id=qa_id_for_feedback, user=user
+    )
+    assert ok_del is True, "delete_feedback should return True"
+
+    entries_after_del = await cognee.session.get_session(
+        session_id=session_id_sdk, user=user, last_n=10
+    )
+    latest_after_del = next(
+        (e for e in entries_after_del if e.qa_id == qa_id_for_feedback), None
+    )
+    assert latest_after_del is not None, "Entry should still exist after delete_feedback"
+    assert latest_after_del.feedback_text is None, "feedback_text should be cleared"
+    assert latest_after_del.feedback_score is None, "feedback_score should be cleared"
+    logger.info("Session SDK e2e tests (get_session, add_feedback, delete_feedback) passed")
+    ###### END E2E: NEW SESSION SDK #####
 
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
