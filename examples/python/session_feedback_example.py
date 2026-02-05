@@ -54,9 +54,7 @@ async def main():
     print(f"  get_session({session_id!r}) → {len(all_qas)} Q&A(s)\n")
 
     # Show only the last 2 interactions
-    recent = await cognee.session.get_session(
-        session_id=session_id, user=user, last_n=2
-    )
+    recent = await cognee.session.get_session(session_id=session_id, user=user, last_n=2)
     print("  Last 2 turns (last_n=2):")
     for i, e in enumerate(recent, 1):
         print(f"    {i}. Q: {e.question[:50]}... → A: {e.answer[:40] if e.answer else ''}...")
@@ -109,7 +107,9 @@ async def main():
 
     after_del = await cognee.session.get_session(session_id=session_id, user=user)
     entry_after = next(e for e in after_del if e.qa_id == latest.qa_id)
-    print(f"  After retract:  feedback_text={entry_after.feedback_text!r}, score={entry_after.feedback_score}\n")
+    print(
+        f"  After retract:  feedback_text={entry_after.feedback_text!r}, score={entry_after.feedback_score}\n"
+    )
 
     print("Done. Session API: get_session (full / last_n), add_feedback, delete_feedback.")
 
