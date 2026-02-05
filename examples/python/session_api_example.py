@@ -72,7 +72,18 @@ async def main():
     print(f"Non-default-feedback success: {feedback_status_1!r}.")
     print(f"default-feedback success: {feedback_status_2!r}.")
 
-    print()
+    deleted_1 = await cognee.session.delete_feedback(
+        session_id=session_id,
+        qa_id=latest.qa_id,
+        user=user,
+    )
+    deleted_2 = await cognee.session.delete_feedback(
+        session_id="default_session",
+        qa_id=latest_default.qa_id,
+        user=user,
+    )
+    print(f"delete_feedback (my_example_session): {deleted_1!r}.")
+    print(f"delete_feedback (default_session): {deleted_2!r}.")
 
 
 

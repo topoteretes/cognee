@@ -96,3 +96,36 @@ async def add_feedback(
     except Exception as e:
         logger.warning("add_feedback: error from SessionManager: %s", e)
         return False
+
+
+async def delete_feedback(
+    session_id: str,
+    qa_id: str,
+    user: Optional[User] = None,
+) -> bool:
+    """
+    Clear feedback for a QA entry (sets feedback_text and feedback_score to None).
+
+    When user is None, uses session context or default user.
+
+    Args:
+        session_id: Session identifier.
+        qa_id: QA entry identifier to clear feedback for.
+        user: User that owns the session. If None, uses session/context user or default user.
+
+    Returns:
+        True if feedback was cleared, False if QA not found or cache unavailable.
+    """
+    resolved_user = await _resolve_user(user)
+    user_id = str(resolved_user.id)
+
+    try:
+        sm = get_session_manager()
+        return await sm.delete_feedback(
+            user_id=user_id,
+            session_id=session_id,
+            qa_id=qa_id,
+        )
+    except Exception as e:
+        logger.warning("delete_feedback: error from SessionManager: %s", e)
+        return False
