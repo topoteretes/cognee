@@ -7,7 +7,7 @@ from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.tasks.storage import add_data_points
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
-from cognee.modules.retrieval.base_graph_retriever import BaseGraphRetriever
+from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
 from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
 from cognee.modules.retrieval.utils.session_cache import (
@@ -27,17 +27,13 @@ from cognee.modules.graph.utils import get_entity_nodes_from_triplets
 logger = get_logger("GraphCompletionRetriever")
 
 
-class GraphCompletionRetriever(BaseGraphRetriever):
+class GraphCompletionRetriever(BaseRetriever):
     """
     Retriever for handling graph-based completion searches.
 
-    This class provides methods to retrieve graph nodes and edges, resolve them into a
-    human-readable format, and generate completions based on graph context. Public methods
-    include:
-    - resolve_edges_to_text
-    - get_triplets
-    - get_context
-    - get_completion
+    This class implements the retrieval pipeline by searching for graph triplets (get_retrieved_objects function),
+    resolving those triplets into human-readable text context (get_context_from_objects function), and generating
+    LLM completions using the retrieved graph data (get_completion_from_context function).
     """
 
     def __init__(
@@ -51,6 +47,8 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         save_interaction: bool = False,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
     ):
         """Initialize retriever with prompt paths and search parameters."""
         self.save_interaction = save_interaction
@@ -62,6 +60,39 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         self.node_type = node_type
         self.node_name = node_name
         self.triplet_distance_penalty = triplet_distance_penalty
+        # session_id (Optional[str]): Identifier for managing conversation history.
+        self.session_id = session_id
+        # response_model (Type): The Pydantic model or type for the expected response.
+        self.response_model = response_model
+
+    async def get_retrieved_objects(self, query: str) -> List[Edge]:
+        """
+        Performs a brute-force triplet search on the graph and updates access timestamps.
+
+        Args:
+            query (str): The search query to find relevant graph triplets.
+
+        Returns:
+            List[Edge]: A list of retrieved Edge objects (triplets).
+                       Returns an empty list if the graph is empty or no results are found.
+        """
+        graph_engine = await get_graph_engine()
+        is_empty = await graph_engine.is_empty()
+
+        if is_empty:
+            logger.warning("Search attempt on an empty knowledge graph")
+            return []
+
+        triplets = await self.get_triplets(query)
+
+        if len(triplets) == 0:
+            logger.warning("Empty context was provided to the completion")
+            return []
+        # TODO: Remove when refactor of timestamps tracking is merged
+        entity_nodes = get_entity_nodes_from_triplets(triplets)
+        await update_node_access_timestamps(entity_nodes)
+
+        return triplets
 
     async def resolve_edges_to_text(self, retrieved_edges: list) -> str:
         """
@@ -117,75 +148,54 @@ class GraphCompletionRetriever(BaseGraphRetriever):
 
         return found_triplets
 
-    async def get_context(self, query: str) -> List[Edge]:
+    async def get_context_from_objects(self, query, retrieved_objects) -> str:
         """
-        Retrieves and resolves graph triplets into context based on a query.
+        Transforms raw retrieved graph triplets into a textual context string.
 
-        Parameters:
-        -----------
-
-            - query (str): The query string used to retrieve context from the graph triplets.
+        Args:
+            query (str): The original search query.
+            retrieved_objects (List[Edge]): The raw triplets returned from the search.
+                                            Output of the get_retrieved_objects method.
 
         Returns:
-        --------
+            str: A string representing the resolved graph context.
+                 Returns an empty list (as string) if no triplets are provided.
 
-            - str: A string representing the resolved context from the retrieved triplets, or an
-              empty string if no triplets are found.
+        Note: To avoid duplicate retrievals, ensure that retrieved_objects
+              are provided from get_retrieved_objects method call.
         """
-        graph_engine = await get_graph_engine()
-        is_empty = await graph_engine.is_empty()
 
-        if is_empty:
-            logger.warning("Search attempt on an empty knowledge graph")
-            return []
-
-        triplets = await self.get_triplets(query)
+        triplets = retrieved_objects
 
         if len(triplets) == 0:
             logger.warning("Empty context was provided to the completion")
-            return []
+            return ""
 
-        # context = await self.resolve_edges_to_text(triplets)
+        return await self.resolve_edges_to_text(triplets)
 
-        entity_nodes = get_entity_nodes_from_triplets(triplets)
-
-        await update_node_access_timestamps(entity_nodes)
-        return triplets
-
-    async def convert_retrieved_objects_to_context(self, triplets: List[Edge]):
-        context = await self.resolve_edges_to_text(triplets)
-        return context
-
-    async def get_completion(
+    async def get_completion_from_context(
         self,
         query: str,
-        context: Optional[List[Edge]] = None,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
+        retrieved_objects: Optional[List[Edge]],
+        context: str,
     ) -> List[Any]:
         """
-        Generates a completion using graph connections context based on a query.
+        Generates an LLM response based on the query, context, and conversation history.
+        Optionally saves the interaction and updates the session cache.
 
-        Parameters:
-        -----------
-
-            - query (str): The query string for which a completion is generated.
-            - context (Optional[Any]): Optional context to use for generating the completion; if
-              not provided, context is retrieved based on the query. (default None)
-            - session_id (Optional[str]): Optional session identifier for caching. If None,
-              defaults to 'default_session'. (default None)
+        Args:
+            query (str): The user's question or prompt.
+            retrieved_objects (Optional[List[Edge]]): Raw triplets used for interaction mapping.
+                                                     Output of get_retrieved_objects method.
+            context (str): The text-resolved graph context.
+                           Output of the get_context_from_objects method.
 
         Returns:
-        --------
+            List[Any]: A list containing the generated response (completion).
 
-            - Any: A generated completion based on the query and context provided.
+        Note: To avoid duplicate retrievals, ensure that retrieved_objects and context
+              are provided from previous method calls.
         """
-        triplets = context
-
-        if triplets is None:
-            triplets = await self.get_context(query)
-
-        context_text = await resolve_edges_to_text(triplets)
 
         cache_config = CacheConfig()
         user = session_user.get()
@@ -193,33 +203,33 @@ class GraphCompletionRetriever(BaseGraphRetriever):
         session_save = user_id and cache_config.caching
 
         if session_save:
-            conversation_history = await get_conversation_history(session_id=session_id)
+            conversation_history = await get_conversation_history(session_id=self.session_id)
 
             context_summary, completion = await asyncio.gather(
-                summarize_text(context_text),
+                summarize_text(context),
                 generate_completion(
                     query=query,
-                    context=context_text,
+                    context=context,
                     user_prompt_path=self.user_prompt_path,
                     system_prompt_path=self.system_prompt_path,
                     system_prompt=self.system_prompt,
                     conversation_history=conversation_history,
-                    response_model=response_model,
+                    response_model=self.response_model,
                 ),
             )
         else:
             completion = await generate_completion(
                 query=query,
-                context=context_text,
+                context=context,
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
-                response_model=response_model,
+                response_model=self.response_model,
             )
 
-        if self.save_interaction and context and triplets and completion:
+        if self.save_interaction and retrieved_objects and completion:
             await self.save_qa(
-                question=query, answer=completion, context=context_text, triplets=triplets
+                question=query, answer=completion, context=context, triplets=retrieved_objects
             )
 
         if session_save:
@@ -227,7 +237,7 @@ class GraphCompletionRetriever(BaseGraphRetriever):
                 query=query,
                 context_summary=context_summary,
                 answer=completion,
-                session_id=session_id,
+                session_id=self.session_id,
             )
 
         return [completion]

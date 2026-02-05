@@ -8,7 +8,7 @@ from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import NoResultFound
-from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect
+from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect, URL
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.modules.data.models.Data import Data
@@ -549,6 +549,7 @@ class SQLAlchemyAdapter:
                             )
                             await connection.execute(drop_table_query)
                         metadata.clear()
+
         except Exception as e:
             logger.error(f"Error deleting database: {e}")
             raise e
