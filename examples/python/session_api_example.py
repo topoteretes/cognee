@@ -30,17 +30,50 @@ async def main():
         query_text=question,
         query_type=SearchType.GRAPH_COMPLETION,
         user=user,
-        session_id="my_example_session",
-    )
+        session_id="my_example_session")
+    print(f"Answer: {results}\n")
+
+    question = "How are sessions related to Cognee?"
+    print(f"Searching: {question}")
+    results = await cognee.search(
+        query_text=question,
+        query_type=SearchType.GRAPH_COMPLETION,
+        user=user)
     print(f"Answer: {results}\n")
 
     session_id = "my_example_session"
-    qas = await cognee.session.get_session(session_id=session_id, user=user)
+    qas = await cognee.session.get_session(session_id='my_example_session',
+                                           user=user)
 
-    if qas:
-        print(f"Found {len(qas)} sessions.\n")
+    default_qas = await cognee.session.get_session(session_id="default_session",
+                                           user=user)
+    print(f"First session {session_id!r} has {len(qas)} QA(s).")
 
-    assert len(qas) == 1
+    print(f"Search call without sesion {default_qas!r} has {len(default_qas)} QA(s).")
+
+    latest = qas[-1]
+    latest_default = default_qas[-1]
+    feedback_status_1 = await cognee.session.add_feedback(
+        session_id=session_id,
+        qa_id=latest.qa_id,
+        feedback_text="Very helpful, thanks!",
+        feedback_score=5,
+        user=user,
+    )
+
+    feedback_status_2 = await cognee.session.add_feedback(
+        session_id='default_session',
+        qa_id=latest_default.qa_id,
+        feedback_text="Not that helpful, thanks!",
+        feedback_score=2,
+        user=user,
+    )
+
+    print(f"Non-default-feedback success: {feedback_status_1!r}.")
+    print(f"default-feedback success: {feedback_status_2!r}.")
+
+    print()
+
 
 
 if __name__ == "__main__":
