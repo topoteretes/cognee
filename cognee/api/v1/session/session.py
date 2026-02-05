@@ -72,3 +72,27 @@ async def get_session(
         else:
             logger.warning("get_session: skip non-dict non-SessionQAEntry entry: %s", type(entry))
     return result
+
+
+async def add_feedback(
+    session_id: str,
+    qa_id: str,
+    feedback_text: Optional[str] = None,
+    feedback_score: Optional[int] = None,
+    user: Optional[User] = None,
+) -> bool:
+    resolved_user = await _resolve_user(user)
+    user_id = str(resolved_user.id)
+
+    try:
+        sm = get_session_manager()
+        return await sm.add_feedback(
+            user_id=user_id,
+            session_id=session_id,
+            qa_id=qa_id,
+            feedback_text=feedback_text,
+            feedback_score=feedback_score,
+        )
+    except Exception as e:
+        logger.warning("add_feedback: error from SessionManager: %s", e)
+        return False
