@@ -30,7 +30,7 @@ async def main():
         query_text=question,
         query_type=SearchType.GRAPH_COMPLETION,
         user=user,
-        session_id='my_example_session'
+        session_id="my_example_session",
     )
     print(f"Answer: {results}\n")
 
@@ -41,7 +41,6 @@ async def main():
         print(f"Found {len(qas)} sessions.\n")
 
     assert len(qas) == 1
-
 
 
 if __name__ == "__main__":
