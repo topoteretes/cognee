@@ -1,3 +1,4 @@
+import sys
 import tempfile
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -7,6 +8,12 @@ import pytest
 import cognee
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
 from cognee.infrastructure.session.session_manager import SessionManager
+
+
+def _session_module():
+    """Real session.py module (package __init__ replaces session with a SimpleNamespace)."""
+    import cognee.api.v1.session  # noqa: F401
+    return sys.modules["cognee.api.v1.session.session"]
 
 
 def _user(id_: str):
@@ -65,8 +72,9 @@ def sdk_uses_session_manager(request):
 
                 adapter = FSCacheAdapter()
                 session_manager = SessionManager(cache_engine=adapter)
-                with patch(
-                    "cognee.api.v1.session.session.get_session_manager",
+                with patch.object(
+                    _session_module(),
+                    "get_session_manager",
                     return_value=session_manager,
                 ):
                     yield session_manager
@@ -84,8 +92,9 @@ def sdk_uses_session_manager(request):
 
             adapter = RedisAdapter(host="localhost", port=6379)
             session_manager = SessionManager(cache_engine=adapter)
-            with patch(
-                "cognee.api.v1.session.session.get_session_manager",
+            with patch.object(
+                _session_module(),
+                "get_session_manager",
                 return_value=session_manager,
             ):
                 yield session_manager
