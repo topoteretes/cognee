@@ -1,9 +1,12 @@
+import sys
+
 import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.databases.cache.models import SessionQAEntry
+from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
 
 
@@ -12,18 +15,29 @@ def _user(id_: str):
     return SimpleNamespace(id=id_)
 
 
+def _session_module():
+    """The real session.py module (package __init__ replaces session with a SimpleNamespace)."""
+    import cognee.api.v1.session  # noqa: F401 - ensures session.py is in sys.modules
+    return sys.modules["cognee.api.v1.session.session"]
+
+
 @pytest.fixture
 def session_user_none():
     """session_user.get() returns None."""
-    with patch("cognee.api.v1.session.session.session_user", SimpleNamespace(get=lambda: None)):
+    with patch.object(
+        _session_module(),
+        "session_user",
+        SimpleNamespace(get=lambda: None),
+    ):
         yield
 
 
 @pytest.fixture
 def session_user_ctx():
     """session_user.get() returns a context user."""
-    with patch(
-        "cognee.api.v1.session.session.session_user",
+    with patch.object(
+        _session_module(),
+        "session_user",
         SimpleNamespace(get=lambda: _user("ctx-user-id")),
     ):
         yield
@@ -36,7 +50,7 @@ def sm():
     s.get_session = AsyncMock(return_value=[])
     s.add_feedback = AsyncMock(return_value=True)
     s.delete_feedback = AsyncMock(return_value=True)
-    with patch("cognee.api.v1.session.session.get_session_manager", return_value=s):
+    with patch.object(_session_module(), "get_session_manager", return_value=s):
         yield s
 
 
@@ -73,8 +87,10 @@ class TestResolveUser:
     async def test_get_session_uses_default_user_when_no_context(self, session_user_none, sm):
         from cognee.api.v1.session.session import get_session
 
-        with patch(
-            "cognee.api.v1.session.session.get_default_user",
+        with patch.object(
+            _session_module(),
+            "get_default_user",
+            new_callable=AsyncMock,
             return_value=_user("default-id"),
         ):
             await get_session(session_id="s1")
@@ -84,13 +100,51 @@ class TestResolveUser:
     async def test_get_session_raises_when_default_user_fails(self, session_user_none, sm):
         from cognee.api.v1.session.session import get_session
 
-        with patch(
-            "cognee.api.v1.session.session.get_default_user",
+        with patch.object(
+            _session_module(),
+            "get_default_user",
+            new_callable=AsyncMock,
             side_effect=UserNotFoundError(),
         ):
             with pytest.raises(CogneeValidationError) as exc_info:
                 await get_session(session_id="s1")
         assert "Session prerequisites" in exc_info.value.message
+
+    @pytest.mark.asyncio
+    async def test_get_session_raises_when_default_user_raises_database_not_created(
+        self, session_user_none, sm
+    ):
+        from cognee.api.v1.session.session import get_session
+
+        with patch.object(
+            _session_module(),
+            "get_default_user",
+            new_callable=AsyncMock,
+            side_effect=DatabaseNotCreatedError(),
+        ):
+            with pytest.raises(CogneeValidationError) as exc_info:
+                await get_session(session_id="s1")
+        assert "Session prerequisites" in exc_info.value.message
+
+    @pytest.mark.asyncio
+    async def test_get_session_uses_default_user_when_context_user_has_no_id(
+        self, session_user_none, sm
+    ):
+        """When session_user.get() returns a user with id=None, fall back to get_default_user."""
+        from cognee.api.v1.session.session import get_session
+
+        with patch.object(
+            _session_module(),
+            "session_user",
+            SimpleNamespace(get=lambda: SimpleNamespace(id=None)),
+        ), patch.object(
+            _session_module(),
+            "get_default_user",
+            new_callable=AsyncMock,
+            return_value=_user("fallback-id"),
+        ):
+            await get_session(session_id="s1")
+        assert sm.get_session.call_args.kwargs["user_id"] == "fallback-id"
 
     @pytest.mark.asyncio
     async def test_add_feedback_uses_explicit_user(self, sm):
@@ -115,6 +169,14 @@ class TestResolveUser:
         sm.delete_feedback.assert_called_once_with(
             user_id="ctx-user-id", session_id="s1", qa_id="q1"
         )
+
+    @pytest.mark.asyncio
+    async def test_delete_feedback_raises_when_explicit_user_has_no_id(self, sm):
+        from cognee.api.v1.session.session import delete_feedback
+
+        with pytest.raises(CogneeValidationError) as exc_info:
+            await delete_feedback(session_id="s1", qa_id="q1", user=SimpleNamespace(id=None))
+        assert "must have an id" in exc_info.value.message
 
 
 # get_session
