@@ -5,7 +5,7 @@ import os
 from os import path
 
 from cognee import visualize_graph
-from poc_cognify import cognify
+from poc_cognify import cognify_single_add_datapoints
 # By default cognee uses OpenAI's gpt-5-mini LLM model
 # Provide your OpenAI LLM API KEY
 
@@ -22,7 +22,7 @@ async def cognee_demo():
 
     # Call Cognee to process document
     await cognee.add(file_path)
-    await cognify()
+    await cognify_single_add_datapoints()
 
     graph_visualization_path = path.join(path.dirname(__file__), "simple_example_result.html")
 

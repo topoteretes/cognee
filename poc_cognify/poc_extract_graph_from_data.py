@@ -1,10 +1,8 @@
 import asyncio
-from typing import Type, List, Optional, Any
-from pydantic import BaseModel, Field, SkipValidation
+from typing import Type, List, Optional
+from pydantic import BaseModel
 
-from cognee.modules.engine.models import Entity
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
-from cognee.tasks.storage.add_data_points import add_data_points
 from cognee.modules.ontology.ontology_config import Config
 from cognee.modules.ontology.get_default_ontology_resolver import (
     get_default_ontology_resolver,
@@ -23,11 +21,10 @@ from cognee.tasks.graph.exceptions import (
     InvalidChunkGraphInputError,
     InvalidOntologyAdapterError,
 )
-from cognee.modules.cognify.config import get_cognify_config
-from poc_expand_with_nodes_and_edges import expand_with_nodes_and_edges
+from poc_expand_with_nodes_and_edges import poc_expand_with_nodes_and_edges
 
 
-async def integrate_chunk_graphs(
+async def poc_integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
     graph_model: Type[BaseModel],
@@ -78,12 +75,14 @@ async def integrate_chunk_graphs(
         chunk_graphs,
     )
 
-    expand_with_nodes_and_edges(data_chunks, chunk_graphs, ontology_resolver, existing_edges_map)
+    poc_expand_with_nodes_and_edges(
+        data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
+    )
 
     return data_chunks
 
 
-async def extract_graph_from_data(
+async def poc_extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     graph_model: Type[BaseModel],
     config: Config = None,
@@ -138,4 +137,6 @@ async def extract_graph_from_data(
 
     ontology_resolver = config["ontology_config"]["ontology_resolver"]
 
-    return await integrate_chunk_graphs(data_chunks, chunk_graphs, graph_model, ontology_resolver)
+    return await poc_integrate_chunk_graphs(
+        data_chunks, chunk_graphs, graph_model, ontology_resolver
+    )

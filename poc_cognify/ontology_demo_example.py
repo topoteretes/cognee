@@ -1,15 +1,13 @@
 import asyncio
 import os
-from pprint import pprint
 
 import cognee
-from cognee.api.v1.search import SearchType
 from cognee.api.v1.visualize.visualize import visualize_graph
 from cognee.shared.logging_utils import setup_logging
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.ontology.ontology_config import Config
 from os import path
-from poc_cognify import cognify
+from poc_cognify import cognify_single_add_datapoints
 
 text_1 = """
 1. Audi
@@ -73,20 +71,13 @@ async def main(use_poc):
     }
 
     if use_poc:
-        await cognify(config=config)
+        await cognify_single_add_datapoints(config=config)
         graph_visualization_path = path.join(path.dirname(__file__), "poc_cognify_result.html")
     else:
         await cognee.cognify(config=config)
-        graph_visualization_path = path.join(path.dirname(__file__), "cofnigy_result.html")
+        graph_visualization_path = path.join(path.dirname(__file__), "cognify_result.html")
 
     print("Knowledge with ontology created.")
-
-    # Step 4: Query insights
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="What are the exact cars and their types produced by Audi?",
-    )
-    pprint(search_results)
 
     await visualize_graph(graph_visualization_path)
 

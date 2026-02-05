@@ -25,19 +25,14 @@ from cognee.tasks.documents import (
 )
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
-from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
-from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
-from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
-    extract_knowledge_graph_from_events,
-)
-from poc_extract_graph_from_data import extract_graph_from_data
+from poc_extract_graph_from_data import poc_extract_graph_from_data
 
 logger = get_logger("cognify")
 
 update_status_lock = asyncio.Lock()
 
 
-async def cognify(
+async def cognify_single_add_datapoints(
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
@@ -84,7 +79,7 @@ async def cognify(
             chunker=chunker,
         ),  # Extract text chunks based on the document type.
         Task(
-            extract_graph_from_data,
+            poc_extract_graph_from_data,
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,

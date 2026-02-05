@@ -46,7 +46,7 @@ def _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes):
         )
 
 
-def expand_with_nodes_and_edges(
+def poc_expand_with_nodes_and_edges(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list[KnowledgeGraph],
     ontology_resolver: BaseOntologyResolver = None,
@@ -130,6 +130,7 @@ def expand_with_nodes_and_edges(
         # Then process edges
         _process_graph_edges(graph, name_mapping, existing_edges_map, relationships)
 
+        # Create Graph Entity nodes from added_ontology_nodes_map
         graph_entity_nodes = {}
         for node in added_ontology_nodes_map.values():
             if isinstance(node, Entity):
@@ -137,6 +138,7 @@ def expand_with_nodes_and_edges(
                     **node.model_dump(), relations=getattr(node, "relations", [])
                 )
 
+        # Fill relations between each Graph Entity based off of relationships
         for edge in relationships:
             source_node_id, target_node_id = edge[0], edge[1]
             graph_entity = graph_entity_nodes.get(source_node_id)
@@ -144,6 +146,7 @@ def expand_with_nodes_and_edges(
                 continue
             graph_entity.relations.append([source_node_id, target_node_id])
 
+        # Link Graph Entities to their respective data_chunk using contains and reset maps
         _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes)
         added_ontology_nodes_map.clear()
         relationships.clear()
