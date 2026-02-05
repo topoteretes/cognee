@@ -78,7 +78,7 @@ async def main():
         query_type=SearchType.GRAPH_COMPLETION,
         user=user,
     )
-    print(f"  Q: How are sessions related to Cognee?")
+    print("  Q: How are sessions related to Cognee?")
     print(f"  A: {results_default[0] if results_default else '(no answer)'}\n")
 
     default_qas = await cognee.session.get_session(session_id="default_session", user=user)
