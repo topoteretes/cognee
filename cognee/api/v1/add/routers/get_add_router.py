@@ -10,6 +10,7 @@ from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
 
 logger = get_logger()
@@ -19,6 +20,7 @@ def get_add_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("", response_model=dict)
+    @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
     async def add(
         data: List[UploadFile] = File(default=None),
         datasetName: Optional[str] = Form(default=None),

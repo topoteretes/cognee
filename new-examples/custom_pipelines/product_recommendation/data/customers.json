@@ -1,0 +1,108 @@
+[{
+  "id": "customer_1",
+  "name": "John Doe",
+  "preferences": [{
+    "id": "preference_1",
+    "name": "ShoeSize",
+    "value": "40.5"
+  }, {
+    "id": "preference_2",
+    "name": "Color",
+    "value": "Navy Blue"
+  }, {
+    "id": "preference_3",
+    "name": "Color",
+    "value": "White"
+  }, {
+    "id": "preference_4",
+    "name": "ShoeType",
+    "value": "Regular Sneakers"
+  }],
+  "products": [{
+    "id": "product_1",
+    "name": "Sneakers",
+    "price": 79.99,
+    "colors": ["Blue", "Brown"],
+    "type": "Regular Sneakers",
+    "action": "purchased"
+  }, {
+    "id": "product_2",
+    "name": "Shirt",
+    "price": 19.99,
+    "colors": ["Black"],
+    "type": "T-Shirt",
+    "action": "liked"
+  }, {
+    "id": "product_3",
+    "name": "Jacket",
+    "price": 59.99,
+    "colors": ["Gray", "White"],
+    "type": "Jacket",
+    "action": "purchased"
+  }, {
+    "id": "product_4",
+    "name": "Shoes",
+    "price": 129.99,
+    "colors": ["Red", "Black"],
+    "type": "Formal Shoes",
+    "action": "liked"
+  }]
+}, {
+  "id": "customer_2",
+  "name": "Jane Smith",
+  "preferences": [{
+    "id": "preference_5",
+    "name": "ShoeSize",
+    "value": "38.5"
+  }, {
+    "id": "preference_6",
+    "name": "Color",
+    "value": "Black"
+  }, {
+    "id": "preference_7",
+    "name": "ShoeType",
+    "value": "Slip-On"
+  }],
+  "products": [{
+    "id": "product_5",
+    "name": "Sneakers",
+    "price": 69.99,
+    "colors": ["Blue", "White"],
+    "type": "Slip-On",
+    "action": "purchased"
+  }, {
+    "id": "product_6",
+    "name": "Shirt",
+    "price": 14.99,
+    "colors": ["Red", "Blue"],
+    "type": "T-Shirt",
+    "action": "purchased"
+  }, {
+    "id": "product_7",
+    "name": "Jacket",
+    "price": 49.99,
+    "colors": ["Gray", "Black"],
+    "type": "Jacket",
+    "action": "liked"
+  }]
+}, {
+  "id": "customer_3",
+  "name": "Michael Johnson",
+  "preferences": [{
+    "id": "preference_8",
+    "name": "Color",
+    "value": "Red"
+  }, {
+    "id": "preference_9",
+    "name": "ShoeType",
+    "value": "Boots"
+  }],
+  "products": [{
+    "id": "product_8",
+    "name": "Cowboy Boots",
+    "price": 299.99,
+    "colors": ["Red", "White"],
+    "type": "Cowboy Boots",
+    "action": "purchased"
+  }]
+}]
