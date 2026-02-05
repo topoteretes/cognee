@@ -66,7 +66,9 @@ async def get_session(
             try:
                 result.append(SessionQAEntry.model_validate(entry))
             except Exception as e:
-                logger.error("get_session: skip invalid entry: %s", e)
-        else:
+                logger.warning("get_session: skip invalid entry: %s", e)
+        elif isinstance(entry, SessionQAEntry):
             result.append(entry)
+        else:
+            logger.warning("get_session: skip non-dict non-SessionQAEntry entry: %s", type(entry))
     return result
