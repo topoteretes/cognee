@@ -18,6 +18,7 @@ def _user(id_: str):
 def _session_module():
     """The real session.py module (package __init__ replaces session with a SimpleNamespace)."""
     import cognee.api.v1.session  # noqa: F401 - ensures session.py is in sys.modules
+
     return sys.modules["cognee.api.v1.session.session"]
 
 
@@ -133,15 +134,18 @@ class TestResolveUser:
         """When session_user.get() returns a user with id=None, fall back to get_default_user."""
         from cognee.api.v1.session.session import get_session
 
-        with patch.object(
-            _session_module(),
-            "session_user",
-            SimpleNamespace(get=lambda: SimpleNamespace(id=None)),
-        ), patch.object(
-            _session_module(),
-            "get_default_user",
-            new_callable=AsyncMock,
-            return_value=_user("fallback-id"),
+        with (
+            patch.object(
+                _session_module(),
+                "session_user",
+                SimpleNamespace(get=lambda: SimpleNamespace(id=None)),
+            ),
+            patch.object(
+                _session_module(),
+                "get_default_user",
+                new_callable=AsyncMock,
+                return_value=_user("fallback-id"),
+            ),
         ):
             await get_session(session_id="s1")
         assert sm.get_session.call_args.kwargs["user_id"] == "fallback-id"
