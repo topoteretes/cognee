@@ -7,11 +7,11 @@ echo "Environment: $ENVIRONMENT"
 # Install optional dependencies if EXTRAS is set
 if [ -n "$EXTRAS" ]; then
     echo "Installing optional dependencies: $EXTRAS"
-    
+
     # Get the cognee version that's currently installed
     COGNEE_VERSION=$(uv pip show cognee | grep "Version:" | awk '{print $2}')
     echo "Current cognee version: $COGNEE_VERSION"
-    
+
     # Build the extras list for cognee
     IFS=',' read -ra EXTRA_ARRAY <<< "$EXTRAS"
     # Combine base extras from pyproject.toml with requested extras
@@ -28,11 +28,11 @@ if [ -n "$EXTRAS" ]; then
             fi
         fi
     done
-    
+
     echo "Installing cognee with extras: $ALL_EXTRAS"
     echo "Running: uv pip install 'cognee[$ALL_EXTRAS]==$COGNEE_VERSION'"
     uv pip install "cognee[$ALL_EXTRAS]==$COGNEE_VERSION"
-    
+
     # Verify installation
     echo ""
     echo "✓ Optional dependencies installation completed"
@@ -56,24 +56,22 @@ if [ -n "$API_URL" ]; then
     echo "Skipping database migrations (API server handles its own database)"
 else
     echo "Direct mode: Using local cognee instance"
-    # Run Alembic migrations with proper error handling.
-    # Note on UserAlreadyExists error handling:
-    # During database migrations, we attempt to create a default user. If this user
-    # already exists (e.g., from a previous deployment or migration), it's not a
-    # critical error and shouldn't prevent the application from starting. This is
-    # different from other migration errors which could indicate database schema
-    # inconsistencies and should cause the startup to fail. This check allows for
-    # smooth redeployments and container restarts while maintaining data integrity.
     echo "Running database migrations..."
 
-    MIGRATION_OUTPUT=$(alembic upgrade head)
+    set +e # Disable exit on error to handle specific migration errors
+    MIGRATION_OUTPUT=$(cd cognee && alembic upgrade head)
     MIGRATION_EXIT_CODE=$?
+    set -e
 
     if [[ $MIGRATION_EXIT_CODE -ne 0 ]]; then
-        if [[ "$MIGRATION_OUTPUT" == *"UserAlreadyExists"* ]] || [[ "$MIGRATION_OUTPUT" == *"User default_user@example.com already exists"* ]]; then
-            echo "Warning: Default user already exists, continuing startup..."
-        else
-            echo "Migration failed with unexpected error."
+
+        echo "Migration failed with unexpected error. Trying to run Cognee without migrations."
+        echo "Initializing database tables..."
+        python /app/src/run_cognee_database_setup.py
+        INIT_EXIT_CODE=$?
+
+        if [[ $INIT_EXIT_CODE -ne 0 ]]; then
+            echo "Database initialization failed!"
             exit 1
         fi
     fi
@@ -93,19 +91,19 @@ if [ -n "$API_URL" ]; then
     if echo "$API_URL" | grep -q "localhost" || echo "$API_URL" | grep -q "127.0.0.1"; then
         echo "⚠️  Warning: API_URL contains localhost/127.0.0.1"
         echo "   Original: $API_URL"
-        
+
         # Try to use host.docker.internal (works on Mac/Windows and recent Linux with Docker Desktop)
         FIXED_API_URL=$(echo "$API_URL" | sed 's/localhost/host.docker.internal/g' | sed 's/127\.0\.0\.1/host.docker.internal/g')
-        
+
         echo "   Converted to: $FIXED_API_URL"
         echo "   This will work on Mac/Windows/Docker Desktop."
         echo "   On Linux without Docker Desktop, you may need to:"
         echo "     - Use --network host, OR"
         echo "     - Set API_URL=http://172.17.0.1:8000 (Docker bridge IP)"
-        
+
         API_URL="$FIXED_API_URL"
     fi
-    
+
     API_ARGS="--api-url $API_URL"
     if [ -n "$API_TOKEN" ]; then
         API_ARGS="$API_ARGS --api-token $API_TOKEN"

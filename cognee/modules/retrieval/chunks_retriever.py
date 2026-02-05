@@ -1,10 +1,11 @@
-from typing import Any, Optional
-
+from typing import Any, Optional, List, Union
+from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
+from datetime import datetime, timezone
 
 logger = get_logger("ChunksRetriever")
 
@@ -27,22 +28,66 @@ class ChunksRetriever(BaseRetriever):
     ):
         self.top_k = top_k
 
-    async def get_context(self, query: str) -> Any:
+    async def get_completion_from_context(
+        self, query: str, retrieved_objects: Any, context: Any
+    ) -> Union[List[str], List[dict]]:
         """
-        Retrieves document chunks context based on the query.
-
-        Searches for document chunks relevant to the specified query using a vector engine.
-        Raises a NoDataError if no data is found in the system.
+        Generates a completion using document chunks context.
+        In case of the Chunks Retriever, we do not generate a completion, we just return
+        the payloads of found chunks.
 
         Parameters:
         -----------
 
-            - query (str): The query string to search for relevant document chunks.
+            - query (str): The query string to be used for generating a completion.
+            - retrieved_objects (Any): The retrieved objects to be used for generating a completion.
+            - context (Any): The context to be used for generating a completion.
 
         Returns:
         --------
 
-            - Any: A list of document chunk payloads retrieved from the search.
+            - List[dict]: A list of payloads of found chunks.
+        """
+        # TODO: Do we want to generate a completion using LLM here?
+        if retrieved_objects:
+            chunk_payloads = [found_chunk.payload for found_chunk in retrieved_objects]
+            return chunk_payloads
+        else:
+            return []
+
+    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
+        """
+        Retrieves context from retrieved chunks, in text form.
+
+        Parameters:
+        -----------
+
+            - query (str): The query string used to search for relevant document chunks.
+            - retrieved_objects (Any): The retrieved objects to be used for generating textual context.
+
+        Returns:
+        --------
+
+            - str: A string containing the combined text of the retrieved chunks, or an
+              empty string if none are found.
+        """
+        if retrieved_objects:
+            chunk_payload_texts = [found_chunk.payload["text"] for found_chunk in retrieved_objects]
+            return "\n".join(chunk_payload_texts)
+        else:
+            return ""
+
+    async def get_retrieved_objects(self, query: str) -> Any:
+        """
+        Retrieves document chunks context based on the query.
+        Searches for document chunks relevant to the specified query using a vector engine.
+        Raises a NoDataError if no data is found in the system.
+        Parameters:
+        -----------
+            - query (str): The query string to search for relevant document chunks.
+        Returns:
+        --------
+            - Any: A list of document chunks retrieved from the search.
         """
         logger.info(
             f"Starting chunk retrieval for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
@@ -51,51 +96,14 @@ class ChunksRetriever(BaseRetriever):
         vector_engine = get_vector_engine()
 
         try:
-            found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
+            found_chunks = await vector_engine.search(
+                "DocumentChunk_text", query, limit=self.top_k, include_payload=True
+            )
             logger.info(f"Found {len(found_chunks)} chunks from vector search")
+            await update_node_access_timestamps(found_chunks)
+
+            return found_chunks
+
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error
-
-        chunk_payloads = [result.payload for result in found_chunks]
-        logger.info(f"Returning {len(chunk_payloads)} chunk payloads")
-        return chunk_payloads
-
-    async def get_completion(
-        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None
-    ) -> Any:
-        """
-        Generates a completion using document chunks context.
-
-        If the context is not provided, it retrieves the context based on the query. Returns the
-        context, which can be used for further processing or generation of outputs.
-
-        Parameters:
-        -----------
-
-            - query (str): The query string to be used for generating a completion.
-            - context (Optional[Any]): Optional pre-fetched context to use for generating the
-              completion; if None, it retrieves the context for the query. (default None)
-            - session_id (Optional[str]): Optional session identifier for caching. If None,
-              defaults to 'default_session'. (default None)
-
-        Returns:
-        --------
-
-            - Any: The context used for the completion or the retrieved context if none was
-              provided.
-        """
-        logger.info(
-            f"Starting completion generation for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
-        )
-
-        if context is None:
-            logger.debug("No context provided, retrieving context from vector database")
-            context = await self.get_context(query)
-        else:
-            logger.debug("Using provided context")
-
-        logger.info(
-            f"Returning context with {len(context) if isinstance(context, list) else 1} item(s)"
-        )
-        return context

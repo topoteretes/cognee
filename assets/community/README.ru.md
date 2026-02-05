@@ -141,7 +141,7 @@ if __name__ == '__main__':
 2. Простая демонстрация GraphRAG
 [Видео](https://github.com/user-attachments/assets/d80b0776-4eb9-4b8e-aa22-3691e2d44b8f)
 
-3. Cognee с Ollama 
+3. Cognee с Ollama
 [Видео](https://github.com/user-attachments/assets/8621d3e8-ecb8-4860-afb2-5594f2ee17db)
 
 ## Правила поведения
