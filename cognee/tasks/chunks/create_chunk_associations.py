@@ -6,7 +6,7 @@ then applies LLM-based comparison to determine whether chunks should be
 linked with weighted "associated_with" edges in the knowledge graph.
 """
 
-from typing import List, Optional
+from typing import AsyncGenerator, List, Optional, Union
 from pydantic import BaseModel, Field
 
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -96,13 +96,13 @@ def _create_edge(chunk_1_id: str, chunk_2_id: str, similarity: ChunkSimilarity):
 
 
 async def create_chunk_associations(
-    chunks: List[str],
+    chunks: Union[List[str], str],
     similarity_threshold: float = 0.7,
     min_chunk_length: int = 10,
     top_k_candidates: Optional[int] = None,
     user_prompt_location: str = "chunk_association_user.txt",
     system_prompt_location: str = "chunk_association_system.txt",
-):
+) -> AsyncGenerator[str, None]:
     """Create semantic association edges between document chunks in the knowledge graph.
 
     For each valid chunk, performs a vector similarity search to find candidate
@@ -113,7 +113,7 @@ async def create_chunk_associations(
     allowing it to be composed in cognee pipelines.
 
     Args:
-        chunks: List of chunk text strings to evaluate.
+        chunks: List of chunk text strings, or a single string, to evaluate.
         similarity_threshold: Minimum LLM similarity score (0.0-1.0) required
             to create an association edge. (default 0.7)
         min_chunk_length: Minimum character length for a chunk to be considered.
