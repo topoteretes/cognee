@@ -1,16 +1,16 @@
 import os
+import sys
 import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
 from cognee.infrastructure.files import FileMetadata, get_file_metadata
 from cognee.infrastructure.utils import run_sync
-from cognee.shared.logging_utils import get_logger, setup_logging
+from cognee.shared.logging_utils import get_logger
 
 from .IngestionData import IngestionData
 
-setup_logging()
-logger = get_logger()
+logger = get_logger(__name__)
 
 # Threshold in seconds above which S3 operations are logged as slow
 S3_SLOW_OPERATION_THRESHOLD_SEC = 10.0
@@ -99,7 +99,7 @@ class S3BinaryData(IngestionData):
             )
             raise
 
-        if self.metadata.get("name") is None:
+        if self.metadata is not None and self.metadata.get("name") is None:
             self.metadata["name"] = self.name or file_path
 
     @asynccontextmanager
@@ -125,29 +125,6 @@ class S3BinaryData(IngestionData):
 
         try:
             file = await open_cm.__aenter__()
-            elapsed_open = time.perf_counter() - start_time
-            file_size = self.metadata.get("file_size") if self.metadata else None
-
-            logger.info(
-                "Opened S3 file for read",
-                extra={
-                    "s3_path": self.s3_path,
-                    "file_path": file_path,
-                    "file_size_bytes": file_size,
-                    "open_duration_seconds": round(elapsed_open, 3),
-                },
-            )
-
-            if elapsed_open > S3_SLOW_OPERATION_THRESHOLD_SEC:
-                logger.warning(
-                    "S3 file open slow",
-                    extra={
-                        "s3_path": self.s3_path,
-                        "duration_seconds": round(elapsed_open, 2),
-                        "threshold_seconds": S3_SLOW_OPERATION_THRESHOLD_SEC,
-                    },
-                )
-
         except Exception as error:
             logger.error(
                 "S3 file open failed",
@@ -161,8 +138,29 @@ class S3BinaryData(IngestionData):
             raise
 
         try:
+            elapsed_open = time.perf_counter() - start_time
+            file_size = self.metadata.get("file_size") if self.metadata else None
+            logger.info(
+                "Opened S3 file for read",
+                extra={
+                    "s3_path": self.s3_path,
+                    "file_path": file_path,
+                    "file_size_bytes": file_size,
+                    "open_duration_seconds": round(elapsed_open, 3),
+                },
+            )
+            if elapsed_open > S3_SLOW_OPERATION_THRESHOLD_SEC:
+                logger.warning(
+                    "S3 file open slow",
+                    extra={
+                        "s3_path": self.s3_path,
+                        "duration_seconds": round(elapsed_open, 2),
+                        "threshold_seconds": S3_SLOW_OPERATION_THRESHOLD_SEC,
+                    },
+                )
             yield file
         finally:
+            await open_cm.__aexit__(*sys.exc_info())
             total_elapsed = time.perf_counter() - start_time
             logger.debug(
                 "Closed S3 file after read",
@@ -171,4 +169,3 @@ class S3BinaryData(IngestionData):
                     "total_duration_seconds": round(total_elapsed, 3),
                 },
             )
-            await open_cm.__aexit__(None, None, None)
