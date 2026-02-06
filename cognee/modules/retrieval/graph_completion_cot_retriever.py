@@ -65,7 +65,6 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
-        save_interaction: bool = False,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
         max_iter: int = 4,
@@ -79,7 +78,6 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
-            save_interaction=save_interaction,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
             session_id=session_id,
@@ -122,11 +120,6 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
         # Note: completion info is stored to reduce the need to call LLM again in get_completion_from_context
         self.completion = completion
-
-        if self.save_interaction and context_text and triplets and completion:
-            await self.save_qa(
-                question=query, answer=str(completion), context=context_text, triplets=triplets
-            )
 
         # Save to session cache if enabled
         if session_save:
