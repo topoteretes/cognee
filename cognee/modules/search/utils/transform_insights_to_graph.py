@@ -1,11 +1,11 @@
 from typing import Dict, List, Tuple
 
 
-def transform_insights_to_graph(context: List[Tuple[Dict, Dict, Dict]]):
+def transform_insights_to_graph(input_triplets: List[Tuple[Dict, Dict, Dict]]):
     nodes = {}
     edges = {}
 
-    for triplet in context:
+    for triplet in input_triplets:
         nodes[triplet[0]["id"]] = {
             "id": triplet[0]["id"],
             "label": triplet[0]["name"] if "name" in triplet[0] else triplet[0]["id"],

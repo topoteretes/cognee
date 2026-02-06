@@ -1,7 +1,12 @@
 from types import SimpleNamespace
 import pytest
+import os
+from unittest.mock import AsyncMock, patch, MagicMock
+from datetime import datetime
 
 from cognee.modules.retrieval.temporal_retriever import TemporalRetriever
+from cognee.tasks.temporal_graph.models import QueryInterval, Timestamp
+from cognee.infrastructure.llm import LLMGateway
 
 
 # Test TemporalRetriever initialization defaults and overrides
@@ -58,8 +63,8 @@ async def test_filter_top_k_events_sorts_and_limits():
     ]
 
     scored_results = [
-        SimpleNamespace(payload={"id": "e2"}, score=0.10),
-        SimpleNamespace(payload={"id": "e1"}, score=0.20),
+        SimpleNamespace(id="e2", payload={"id": "e2"}, score=0.10),
+        SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.20),
     ]
 
     top = await tr.filter_top_k_events(relevant_events, scored_results)
@@ -86,8 +91,8 @@ async def test_filter_top_k_events_includes_unknown_as_infinite_but_not_in_top_k
     ]
 
     scored_results = [
-        SimpleNamespace(payload={"id": "known2"}, score=0.05),
-        SimpleNamespace(payload={"id": "known1"}, score=0.50),
+        SimpleNamespace(id="known2", payload={"id": "known2"}, score=0.05),
+        SimpleNamespace(id="known1", payload={"id": "known1"}, score=0.50),
     ]
 
     top = await tr.filter_top_k_events(relevant_events, scored_results)
@@ -114,8 +119,8 @@ async def test_filter_top_k_events_limits_when_top_k_exceeds_events():
     tr = TemporalRetriever(top_k=10)
     relevant_events = [{"events": [{"id": "a"}, {"id": "b"}]}]
     scored_results = [
-        SimpleNamespace(payload={"id": "a"}, score=0.1),
-        SimpleNamespace(payload={"id": "b"}, score=0.2),
+        SimpleNamespace(id="a", payload={"id": "a"}, score=0.1),
+        SimpleNamespace(id="b", payload={"id": "b"}, score=0.2),
     ]
     out = await tr.filter_top_k_events(relevant_events, scored_results)
     assert [e["id"] for e in out] == ["a", "b"]
@@ -140,85 +145,545 @@ async def test_filter_top_k_events_error_handling():
         await tr.filter_top_k_events([{}], [])
 
 
-class _FakeRetriever(TemporalRetriever):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._calls = []
+@pytest.fixture
+def mock_graph_engine():
+    """Create a mock graph engine."""
+    engine = AsyncMock()
+    engine.collect_time_ids = AsyncMock()
+    engine.collect_events = AsyncMock()
+    return engine
 
-    async def extract_time_from_query(self, query: str):
-        if "both" in query:
+
+@pytest.fixture
+def mock_vector_engine():
+    """Create a mock vector engine."""
+    engine = AsyncMock()
+    engine.embedding_engine = AsyncMock()
+    engine.embedding_engine.embed_text = AsyncMock(return_value=[[0.1, 0.2, 0.3]])
+    engine.search = AsyncMock()
+    return engine
+
+
+@pytest.mark.asyncio
+async def test_get_context_with_time_range(mock_graph_engine, mock_vector_engine):
+    """Test get_context when time range is extracted from query."""
+    retriever = TemporalRetriever(top_k=5)
+
+    mock_graph_engine.collect_time_ids.return_value = ["e1", "e2"]
+    mock_graph_engine.collect_events.return_value = [
+        {
+            "events": [
+                {"id": "e1", "description": "Event 1"},
+                {"id": "e2", "description": "Event 2"},
+            ]
+        }
+    ]
+
+    mock_result1 = SimpleNamespace(id="e2", payload={"id": "e2"}, score=0.05)
+    mock_result2 = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.10)
+    mock_vector_engine.search.return_value = [mock_result1, mock_result2]
+
+    with (
+        patch.object(
+            retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
+            return_value=mock_vector_engine,
+        ),
+    ):
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
+
+    assert isinstance(context, str)
+    assert len(context) > 0
+    assert "Event" in context
+
+
+@pytest.mark.asyncio
+async def test_get_context_fallback_to_triplets_no_time(mock_graph_engine):
+    """Test get_context falls back to triplets when no time is extracted."""
+    retriever = TemporalRetriever()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch.object(
+            retriever, "get_triplets", return_value=[{"s": "a", "p": "b", "o": "c"}]
+        ) as mock_get_triplets,
+        patch.object(
+            retriever, "resolve_edges_to_text", return_value="triplet text"
+        ) as mock_resolve,
+    ):
+
+        async def mock_extract_time(query):
+            return None, None
+
+        retriever.extract_time_from_query = mock_extract_time
+
+        objects = await retriever.get_retrieved_objects("test query")
+        context = await retriever.get_context_from_objects("test query", objects)
+
+    assert context == "triplet text"
+    mock_get_triplets.assert_awaited_once_with("test query")
+    mock_resolve.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_context_no_events_found(mock_graph_engine):
+    """Test get_context falls back to triplets when no events are found."""
+    retriever = TemporalRetriever()
+
+    mock_graph_engine.collect_time_ids.return_value = []
+
+    with (
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch.object(
+            retriever, "get_triplets", return_value=[{"s": "a", "p": "b", "o": "c"}]
+        ) as mock_get_triplets,
+        patch.object(
+            retriever, "resolve_edges_to_text", return_value="triplet text"
+        ) as mock_resolve,
+    ):
+
+        async def mock_extract_time(query):
             return "2024-01-01", "2024-12-31"
-        if "from_only" in query:
-            return "2024-01-01", None
-        if "to_only" in query:
-            return None, "2024-12-31"
-        return None, None
 
-    async def get_triplets(self, query: str):
-        self._calls.append(("get_triplets", query))
-        return [{"s": "a", "p": "b", "o": "c"}]
+        retriever.extract_time_from_query = mock_extract_time
 
-    async def resolve_edges_to_text(self, triplets):
-        self._calls.append(("resolve_edges_to_text", len(triplets)))
-        return "edges->text"
+        objects = await retriever.get_retrieved_objects("test query")
+        context = await retriever.get_context_from_objects("test query", objects)
 
-    async def _fake_graph_collect_ids(self, **kwargs):
-        return ["e1", "e2"]
+    assert context == "triplet text"
+    mock_get_triplets.assert_awaited_once_with("test query")
+    mock_resolve.assert_awaited_once()
 
-    async def _fake_graph_collect_events(self, ids):
-        return [
-            {
-                "events": [
-                    {"id": "e1", "description": "E1"},
-                    {"id": "e2", "description": "E2"},
-                    {"id": "e3", "description": "E3"},
-                ]
-            }
-        ]
 
-    async def _fake_vector_embed(self, texts):
-        assert isinstance(texts, list) and texts
-        return [[0.0, 1.0, 2.0]]
+@pytest.mark.asyncio
+async def test_get_context_time_from_only(mock_graph_engine, mock_vector_engine):
+    """Test get_context with only time_from."""
+    retriever = TemporalRetriever(top_k=5)
 
-    async def _fake_vector_search(self, **kwargs):
-        return [
-            SimpleNamespace(payload={"id": "e2"}, score=0.05),
-            SimpleNamespace(payload={"id": "e1"}, score=0.10),
-        ]
+    mock_graph_engine.collect_time_ids.return_value = ["e1"]
+    mock_graph_engine.collect_events.return_value = [
+        {
+            "events": [
+                {"id": "e1", "description": "Event 1"},
+            ]
+        }
+    ]
 
-    async def get_context(self, query: str):
-        time_from, time_to = await self.extract_time_from_query(query)
+    mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
+    mock_vector_engine.search.return_value = [mock_result]
 
-        if not (time_from or time_to):
-            triplets = await self.get_triplets(query)
-            return await self.resolve_edges_to_text(triplets)
+    with (
+        patch.object(retriever, "extract_time_from_query", return_value=("2024-01-01", None)),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
+            return_value=mock_vector_engine,
+        ),
+    ):
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
 
-        ids = await self._fake_graph_collect_ids(time_from=time_from, time_to=time_to)
-        relevant_events = await self._fake_graph_collect_events(ids)
+    assert isinstance(context, str)
+    assert "Event 1" in context
 
-        _ = await self._fake_vector_embed([query])
-        vector_search_results = await self._fake_vector_search(
-            collection_name="Event_name", query_vector=[0.0], limit=0
+
+@pytest.mark.asyncio
+async def test_get_context_time_to_only(mock_graph_engine, mock_vector_engine):
+    """Test get_context with only time_to."""
+    retriever = TemporalRetriever(top_k=5)
+
+    mock_graph_engine.collect_time_ids.return_value = ["e1"]
+    mock_graph_engine.collect_events.return_value = [
+        {
+            "events": [
+                {"id": "e1", "description": "Event 1"},
+            ]
+        }
+    ]
+
+    mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
+    mock_vector_engine.search.return_value = [mock_result]
+
+    with (
+        patch.object(retriever, "extract_time_from_query", return_value=(None, "2024-12-31")),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
+            return_value=mock_vector_engine,
+        ),
+    ):
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
+
+    assert isinstance(context, str)
+    assert "Event 1" in context
+
+
+@pytest.mark.asyncio
+async def test_get_completion_without_context(mock_graph_engine, mock_vector_engine):
+    """Test get_completion retrieves context when not provided."""
+    retriever = TemporalRetriever()
+
+    mock_graph_engine.collect_time_ids.return_value = ["e1"]
+    mock_graph_engine.collect_events.return_value = [
+        {
+            "events": [
+                {"id": "e1", "description": "Event 1"},
+            ]
+        }
+    ]
+
+    mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
+    mock_vector_engine.search.return_value = [mock_result]
+
+    with (
+        patch.object(
+            retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.generate_completion",
+            return_value="Generated answer",
+        ),
+        patch("cognee.modules.retrieval.temporal_retriever.CacheConfig") as mock_cache_config,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
+        completion = await retriever.get_completion_from_context(
+            "What happened in 2024?", objects, context=context
         )
-        top_k_events = await self.filter_top_k_events(relevant_events, vector_search_results)
-        return self.descriptions_to_string(top_k_events)
+
+    assert isinstance(completion, list)
+    assert len(completion) == 1
+    assert completion[0] == "Generated answer"
 
 
-# Test get_context fallback to triplets when no time is extracted
 @pytest.mark.asyncio
-async def test_fake_get_context_falls_back_to_triplets_when_no_time():
-    tr = _FakeRetriever(top_k=2)
-    ctx = await tr.get_context("no_time")
-    assert ctx == "edges->text"
-    assert tr._calls[0][0] == "get_triplets"
-    assert tr._calls[1][0] == "resolve_edges_to_text"
+async def test_get_completion_with_provided_context():
+    """Test get_completion uses provided context."""
+    retriever = TemporalRetriever()
+
+    with (
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.generate_completion",
+            return_value="Generated answer",
+        ),
+        patch("cognee.modules.retrieval.temporal_retriever.CacheConfig") as mock_cache_config,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        await retriever.get_context_from_objects("What happened in 2024?", objects)
+        completion = await retriever.get_completion_from_context(
+            "test query", objects, context="Provided context"
+        )
+
+    assert isinstance(completion, list)
+    assert len(completion) == 1
+    assert completion[0] == "Generated answer"
 
 
-# Test get_context when time is extracted and vector ranking is applied
 @pytest.mark.asyncio
-async def test_fake_get_context_with_time_filters_and_vector_ranking():
-    tr = _FakeRetriever(top_k=2)
-    ctx = await tr.get_context("both time")
-    assert ctx.startswith("E2")
-    assert "#####################" in ctx
-    assert "E1" in ctx and "E3" not in ctx
+async def test_get_completion_with_session(mock_graph_engine, mock_vector_engine):
+    """Test get_completion with session caching enabled."""
+    retriever = TemporalRetriever(session_id="test_session")
+
+    mock_graph_engine.collect_time_ids.return_value = ["e1"]
+    mock_graph_engine.collect_events.return_value = [
+        {
+            "events": [
+                {"id": "e1", "description": "Event 1"},
+            ]
+        }
+    ]
+
+    mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
+    mock_vector_engine.search.return_value = [mock_result]
+
+    mock_user = MagicMock()
+    mock_user.id = "test-user-id"
+
+    with (
+        patch.object(
+            retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_conversation_history",
+            return_value="Previous conversation",
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.summarize_text",
+            return_value="Context summary",
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.generate_completion",
+            return_value="Generated answer",
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.save_conversation_history",
+        ) as mock_save,
+        patch("cognee.modules.retrieval.temporal_retriever.CacheConfig") as mock_cache_config,
+        patch("cognee.modules.retrieval.temporal_retriever.session_user") as mock_session_user,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = True
+        mock_cache_config.return_value = mock_config
+        mock_session_user.get.return_value = mock_user
+
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
+        completion = await retriever.get_completion_from_context(
+            "What happened in 2024?", objects, context
+        )
+
+    assert isinstance(completion, list)
+    assert len(completion) == 1
+    assert completion[0] == "Generated answer"
+    mock_save.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_completion_with_session_no_user_id(mock_graph_engine, mock_vector_engine):
+    """Test get_completion with session config but no user ID."""
+    retriever = TemporalRetriever()
+
+    mock_graph_engine.collect_time_ids.return_value = ["e1"]
+    mock_graph_engine.collect_events.return_value = [
+        {
+            "events": [
+                {"id": "e1", "description": "Event 1"},
+            ]
+        }
+    ]
+
+    mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
+    mock_vector_engine.search.return_value = [mock_result]
+
+    with (
+        patch.object(
+            retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.generate_completion",
+            return_value="Generated answer",
+        ),
+        patch("cognee.modules.retrieval.temporal_retriever.CacheConfig") as mock_cache_config,
+        patch("cognee.modules.retrieval.temporal_retriever.session_user") as mock_session_user,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = True
+        mock_cache_config.return_value = mock_config
+        mock_session_user.get.return_value = None  # No user
+
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
+        completion = await retriever.get_completion_from_context(
+            "What happened in 2024?", objects, context
+        )
+
+    assert isinstance(completion, list)
+    assert len(completion) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_completion_with_response_model(mock_graph_engine, mock_vector_engine):
+    """Test get_completion with custom response model."""
+    from pydantic import BaseModel
+
+    class TestModel(BaseModel):
+        answer: str
+
+    retriever = TemporalRetriever()
+
+    mock_graph_engine.collect_time_ids.return_value = ["e1"]
+    mock_graph_engine.collect_events.return_value = [
+        {
+            "events": [
+                {"id": "e1", "description": "Event 1"},
+            ]
+        }
+    ]
+
+    mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
+    mock_vector_engine.search.return_value = [mock_result]
+
+    with (
+        patch.object(
+            retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
+            return_value=mock_graph_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
+            return_value=mock_vector_engine,
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.generate_completion",
+            return_value=TestModel(answer="Test answer"),
+        ),
+        patch("cognee.modules.retrieval.temporal_retriever.CacheConfig") as mock_cache_config,
+    ):
+        mock_config = MagicMock()
+        mock_config.caching = False
+        mock_cache_config.return_value = mock_config
+
+        objects = await retriever.get_retrieved_objects("What happened in 2024?")
+        context = await retriever.get_context_from_objects("What happened in 2024?", objects)
+        completion = await retriever.get_completion_from_context(
+            "What happened in 2024?", objects, context
+        )
+
+    assert isinstance(completion, list)
+    assert len(completion) == 1
+    assert isinstance(completion[0], TestModel)
+
+
+@pytest.mark.asyncio
+async def test_extract_time_from_query_relative_path():
+    """Test extract_time_from_query with relative prompt path."""
+    retriever = TemporalRetriever(time_extraction_prompt_path="extract_query_time.txt")
+
+    mock_timestamp_from = Timestamp(year=2024, month=1, day=1)
+    mock_timestamp_to = Timestamp(year=2024, month=12, day=31)
+    mock_interval = QueryInterval(starts_at=mock_timestamp_from, ends_at=mock_timestamp_to)
+
+    with (
+        patch("cognee.modules.retrieval.temporal_retriever.os.path.isabs", return_value=False),
+        patch("cognee.modules.retrieval.temporal_retriever.datetime") as mock_datetime,
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.render_prompt",
+            return_value="System prompt",
+        ),
+        patch.object(
+            LLMGateway,
+            "acreate_structured_output",
+            new_callable=AsyncMock,
+            return_value=mock_interval,
+        ),
+    ):
+        mock_datetime.now.return_value.strftime.return_value = "11-12-2024"
+
+        time_from, time_to = await retriever.extract_time_from_query("What happened in 2024?")
+
+    assert time_from == mock_timestamp_from
+    assert time_to == mock_timestamp_to
+
+
+@pytest.mark.asyncio
+async def test_extract_time_from_query_absolute_path():
+    """Test extract_time_from_query with absolute prompt path."""
+    retriever = TemporalRetriever(
+        time_extraction_prompt_path="/absolute/path/to/extract_query_time.txt"
+    )
+
+    mock_timestamp_from = Timestamp(year=2024, month=1, day=1)
+    mock_timestamp_to = Timestamp(year=2024, month=12, day=31)
+    mock_interval = QueryInterval(starts_at=mock_timestamp_from, ends_at=mock_timestamp_to)
+
+    with (
+        patch("cognee.modules.retrieval.temporal_retriever.os.path.isabs", return_value=True),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.os.path.dirname",
+            return_value="/absolute/path/to",
+        ),
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.os.path.basename",
+            return_value="extract_query_time.txt",
+        ),
+        patch("cognee.modules.retrieval.temporal_retriever.datetime") as mock_datetime,
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.render_prompt",
+            return_value="System prompt",
+        ),
+        patch.object(
+            LLMGateway,
+            "acreate_structured_output",
+            new_callable=AsyncMock,
+            return_value=mock_interval,
+        ),
+    ):
+        mock_datetime.now.return_value.strftime.return_value = "11-12-2024"
+
+        time_from, time_to = await retriever.extract_time_from_query("What happened in 2024?")
+
+    assert time_from == mock_timestamp_from
+    assert time_to == mock_timestamp_to
+
+
+@pytest.mark.asyncio
+async def test_extract_time_from_query_with_none_values():
+    """Test extract_time_from_query when interval has None values."""
+    retriever = TemporalRetriever(time_extraction_prompt_path="extract_query_time.txt")
+
+    mock_interval = QueryInterval(starts_at=None, ends_at=None)
+
+    with (
+        patch("cognee.modules.retrieval.temporal_retriever.os.path.isabs", return_value=False),
+        patch("cognee.modules.retrieval.temporal_retriever.datetime") as mock_datetime,
+        patch(
+            "cognee.modules.retrieval.temporal_retriever.render_prompt",
+            return_value="System prompt",
+        ),
+        patch.object(
+            LLMGateway,
+            "acreate_structured_output",
+            new_callable=AsyncMock,
+            return_value=mock_interval,
+        ),
+    ):
+        mock_datetime.now.return_value.strftime.return_value = "11-12-2024"
+
+        time_from, time_to = await retriever.extract_time_from_query("What happened?")
+
+    assert time_from is None
+    assert time_to is None

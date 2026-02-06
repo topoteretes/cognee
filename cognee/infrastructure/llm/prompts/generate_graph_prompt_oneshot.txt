@@ -42,10 +42,10 @@ You are an advanced algorithm designed to extract structured information from un
 - **Rule**: Resolve all aliases, acronyms, and pronouns to one canonical identifier.
 
 > **One-Shot Example**:
-> **Input**: "John Doe is an author. Later, Doe published a book. He is well-known."
+> **Input**: "X is an author. Later, Doe published a book. He is well-known."
 > **Output Node**:
 > ```
-> John Doe (Person)
+> X (Person)
 > ```
 
 ---

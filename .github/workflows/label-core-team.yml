@@ -72,5 +72,3 @@ jobs:
             } catch (error) {
               core.warning(`Failed to add label: ${error.message}`);
             }
-
-
