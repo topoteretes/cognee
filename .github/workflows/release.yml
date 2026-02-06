@@ -1,19 +1,10 @@
 name: release.yml
 on:
   workflow_dispatch:
-    inputs:
-      flavour:
-        required: true
-        default: dev
-        type: choice
-        options:
-          - dev
-          - main
-        description: Dev or Main release
 
 jobs:
   release-github:
-    name: Create GitHub Release from ${{ inputs.flavour }}
+    name: Create GitHub Release from ${{ github.ref_name }}
     outputs:
       tag: ${{ steps.create_tag.outputs.tag }}
       version: ${{ steps.create_tag.outputs.version }}
@@ -22,10 +13,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out ${{ inputs.flavour }}
+      - name: Check out ${{ github.ref_name }}
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.flavour }}
+          ref: ${{ github.ref_name }}
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
@@ -57,16 +48,16 @@ jobs:
 
   release-pypi-package:
     needs: release-github
-    name: Release PyPI Package from ${{ inputs.flavour }}
+    name: Release PyPI Package from ${{ github.ref_name }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out ${{ inputs.flavour }}
+      - name: Check out ${{ github.ref_name }}
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.flavour }}
+          ref: ${{ github.ref_name }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -80,23 +71,23 @@ jobs:
       - name: Build distributions
         run: uv build
 
-      - name: Publish ${{ inputs.flavour }} release to PyPI
+      - name: Publish ${{ github.ref_name }} release to PyPI
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: uv publish
 
   release-docker-image:
     needs: release-github
-    name: Release Docker Image from ${{ inputs.flavour }}
+    name: Release Docker Image from ${{ github.ref_name }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out ${{ inputs.flavour }}
+      - name: Check out ${{ github.ref_name }}
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.flavour }}
+          ref: ${{ github.ref_name }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -108,7 +99,7 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push Dev Docker Image
-        if: ${{ inputs.flavour == 'dev' }}
+        if: ${{ github.ref_name == 'dev' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -117,12 +108,12 @@ jobs:
           tags: cognee/cognee:${{ needs.release-github.outputs.version }}
           labels: |
             version=${{ needs.release-github.outputs.version }}
-            flavour=${{ inputs.flavour }}
+            flavour=${{ github.ref_name }}
           cache-from: type=registry,ref=cognee/cognee:buildcache
           cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
 
       - name: Build and push Main Docker Image
-        if: ${{ inputs.flavour == 'main' }}
+        if: ${{ github.ref_name == 'main' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -133,13 +124,13 @@ jobs:
             cognee/cognee:latest
           labels: |
             version=${{ needs.release-github.outputs.version }}
-            flavour=${{ inputs.flavour }}
+            flavour=${{ github.ref_name }}
           cache-from: type=registry,ref=cognee/cognee:buildcache
           cache-to: type=registry,ref=cognee/cognee:buildcache,mode=max
 
   trigger-docs-test-suite:
     needs: release-pypi-package
-    if: ${{ inputs.flavour == 'main' }}
+    if: ${{ github.ref_name == 'main' }}
     runs-on: ubuntu-22.04
     steps:
       - name: Trigger docs tests
@@ -153,7 +144,7 @@ jobs:
 
   trigger-community-test-suite:
     needs: release-pypi-package
-    if: ${{ inputs.flavour == 'main' }}
+    if: ${{ github.ref_name == 'main' }}
     runs-on: ubuntu-22.04
     steps:
       - name: Trigger community tests

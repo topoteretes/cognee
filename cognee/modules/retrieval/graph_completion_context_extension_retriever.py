@@ -31,7 +31,6 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
-        save_interaction: bool = False,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
         context_extension_rounds: int = 4,
@@ -44,7 +43,6 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
-            save_interaction=save_interaction,
             system_prompt=system_prompt,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
@@ -262,14 +260,6 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
                     system_prompt=self.system_prompt,
                     response_model=self.response_model,
                 )
-
-        if self.save_interaction and context and retrieved_objects and completion:
-            await self.save_qa(
-                question=query,
-                answer=completion[0],
-                context=context[0],
-                triplets=retrieved_objects[0],
-            )
 
         if session_save:
             await save_conversation_history(

@@ -1,6 +1,5 @@
 import asyncio
 from typing import Any, Optional, Type, List
-from uuid import NAMESPACE_OID, uuid5
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
@@ -17,10 +16,7 @@ from cognee.modules.retrieval.utils.session_cache import (
     get_conversation_history,
 )
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.retrieval.utils.extract_uuid_from_node import extract_uuid_from_node
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
-from cognee.modules.retrieval.utils.models import CogneeUserInteraction
-from cognee.modules.engine.models.node_set import NodeSet
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
@@ -46,14 +42,12 @@ class GraphCompletionRetriever(BaseRetriever):
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
-        save_interaction: bool = False,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
         session_id: Optional[str] = None,
         response_model: Type = str,
     ):
         """Initialize retriever with prompt paths and search parameters."""
-        self.save_interaction = save_interaction
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.system_prompt = system_prompt
@@ -293,11 +287,6 @@ class GraphCompletionRetriever(BaseRetriever):
                     response_model=self.response_model,
                 )
 
-        if self.save_interaction and retrieved_objects and completion:
-            await self.save_qa(
-                question=query, answer=completion, context=context, triplets=retrieved_objects
-            )
-
         if session_save:
             await save_conversation_history(
                 query=query,
@@ -307,69 +296,3 @@ class GraphCompletionRetriever(BaseRetriever):
             )
 
         return completion if query_batch else [completion]
-
-    async def save_qa(self, question: str, answer: str, context: str, triplets: List) -> None:
-        """
-        Saves a question and answer pair for later analysis or storage.
-        Parameters:
-        -----------
-            - question (str): The question text.
-            - answer (str): The answer text.
-            - context (str): The context text.
-            - triplets (List): A list of triples retrieved from the graph.
-        """
-        nodeset_name = "Interactions"
-        interactions_node_set = NodeSet(
-            id=uuid5(NAMESPACE_OID, name=nodeset_name), name=nodeset_name
-        )
-        source_id = uuid5(NAMESPACE_OID, name=(question + answer + context))
-
-        cognee_user_interaction = CogneeUserInteraction(
-            id=source_id,
-            question=question,
-            answer=answer,
-            context=context,
-            belongs_to_set=interactions_node_set,
-        )
-
-        await add_data_points(data_points=[cognee_user_interaction])
-
-        relationships = []
-        relationship_name = "used_graph_element_to_answer"
-        for triplet in triplets:
-            target_id_1 = extract_uuid_from_node(triplet.node1)
-            target_id_2 = extract_uuid_from_node(triplet.node2)
-            if target_id_1 and target_id_2:
-                relationships.append(
-                    (
-                        source_id,
-                        target_id_1,
-                        relationship_name,
-                        {
-                            "relationship_name": relationship_name,
-                            "source_node_id": source_id,
-                            "target_node_id": target_id_1,
-                            "ontology_valid": False,
-                            "feedback_weight": 0,
-                        },
-                    )
-                )
-
-                relationships.append(
-                    (
-                        source_id,
-                        target_id_2,
-                        relationship_name,
-                        {
-                            "relationship_name": relationship_name,
-                            "source_node_id": source_id,
-                            "target_node_id": target_id_2,
-                            "ontology_valid": False,
-                            "feedback_weight": 0,
-                        },
-                    )
-                )
-
-            if len(relationships) > 0:
-                graph_engine = await get_graph_engine()
-                await graph_engine.add_edges(relationships)

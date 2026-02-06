@@ -1,6 +1,7 @@
 from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.sql import delete as sql_delete
+from typing import Dict, Any
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -30,7 +31,7 @@ async def delete(
     dataset_id: UUID,
     mode: str = "soft",
     user: User = None,
-):
+) -> dict:
     """Delete data by its ID from the specified dataset.
 
     Args:
@@ -92,7 +93,7 @@ async def delete(
     return await delete_single_document(data_id, dataset.id, mode)
 
 
-async def delete_single_document(data_id: str, dataset_id: UUID = None, mode: str = "soft"):
+async def delete_single_document(data_id: str, dataset_id: UUID = None, mode: str = "soft") -> dict:
     """Delete a single document by its content hash."""
 
     # Delete from graph database
@@ -215,7 +216,7 @@ async def delete_single_document(data_id: str, dataset_id: UUID = None, mode: st
     }
 
 
-async def delete_document_subgraph(document_id: str, mode: str = "soft"):
+async def delete_document_subgraph(document_id: str, mode: str = "soft") -> dict:
     """Delete a document and all its related nodes in the correct order."""
     graph_db = await get_graph_engine()
     subgraph = await graph_db.get_document_subgraph(document_id)
