@@ -1,8 +1,11 @@
 import asyncio
-from typing import Any, Optional, Type, List
+from typing import Any, Optional, Type, List, Union
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
+from cognee.modules.retrieval.utils.validate_queries import validate_queries
+from cognee.tasks.storage import add_data_points
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -58,17 +61,35 @@ class GraphCompletionRetriever(BaseRetriever):
         # response_model (Type): The Pydantic model or type for the expected response.
         self.response_model = response_model
 
-    async def get_retrieved_objects(self, query: str) -> List[Edge]:
+    async def get_retrieved_objects(
+        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
+    ) -> Union[List[Edge], List[List[Edge]]]:
         """
         Performs a brute-force triplet search on the graph and updates access timestamps.
 
         Args:
             query (str): The search query to find relevant graph triplets.
+            query_batch (str): The batch of search queries to find relevant graph triplets.
 
         Returns:
             List[Edge]: A list of retrieved Edge objects (triplets).
                        Returns an empty list if the graph is empty or no results are found.
         """
+
+        cache_config = CacheConfig()
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+        session_save = user_id and cache_config.caching
+
+        if query_batch and session_save:
+            raise QueryValidationError(
+                message="You cannot use batch queries with session saving currently."
+            )
+
+        is_query_valid, msg = validate_queries(query, query_batch)
+        if not is_query_valid:
+            raise QueryValidationError(message=msg)
+
         graph_engine = await get_graph_engine()
         is_empty = await graph_engine.is_empty()
 
@@ -76,7 +97,12 @@ class GraphCompletionRetriever(BaseRetriever):
             logger.warning("Search attempt on an empty knowledge graph")
             return []
 
-        triplets = await self.get_triplets(query)
+        triplets = await self.get_triplets(query, query_batch)
+
+        # Check if all triplets are empty, in case of batch queries
+        if query_batch and all(len(batched_triplets) == 0 for batched_triplets in triplets):
+            logger.warning("Empty context was provided to the completion")
+            return []
 
         if len(triplets) == 0:
             logger.warning("Empty context was provided to the completion")
@@ -103,7 +129,11 @@ class GraphCompletionRetriever(BaseRetriever):
         """
         return await resolve_edges_to_text(retrieved_edges)
 
-    async def get_triplets(self, query: str) -> List[Edge]:
+    async def get_triplets(
+        self,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
+    ) -> Union[List[Edge], List[List[Edge]]]:
         """
         Retrieves relevant graph triplets based on a query string.
 
@@ -131,6 +161,7 @@ class GraphCompletionRetriever(BaseRetriever):
 
         found_triplets = await brute_force_triplet_search(
             query,
+            query_batch,
             top_k=self.top_k,
             collections=vector_index_collections or None,
             node_type=self.node_type,
@@ -141,12 +172,18 @@ class GraphCompletionRetriever(BaseRetriever):
 
         return found_triplets
 
-    async def get_context_from_objects(self, query, retrieved_objects) -> str:
+    async def get_context_from_objects(
+        self,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
+        retrieved_objects=None,
+    ) -> Union[str, List[str]]:
         """
         Transforms raw retrieved graph triplets into a textual context string.
 
         Args:
             query (str): The original search query.
+            query_batch (List[str]): The batch of original search queries.
             retrieved_objects (List[Edge]): The raw triplets returned from the search.
                                             Output of the get_retrieved_objects method.
 
@@ -160,7 +197,17 @@ class GraphCompletionRetriever(BaseRetriever):
 
         triplets = retrieved_objects
 
-        if len(triplets) == 0:
+        if query_batch:
+            # Check if all triplets are empty, in case of batch queries
+            if not triplets or all(len(batched_triplets) == 0 for batched_triplets in triplets):
+                logger.warning("Empty context was provided to the completion")
+                return ["" for _ in query_batch]
+
+            return await asyncio.gather(
+                *[self.resolve_edges_to_text(batched_triplets) for batched_triplets in triplets]
+            )
+
+        if not triplets:
             logger.warning("Empty context was provided to the completion")
             return ""
 
@@ -168,9 +215,10 @@ class GraphCompletionRetriever(BaseRetriever):
 
     async def get_completion_from_context(
         self,
-        query: str,
-        retrieved_objects: Optional[List[Edge]],
-        context: str,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
+        retrieved_objects: Optional[List[Edge]] = None,
+        context: str = None,
     ) -> List[Any]:
         """
         Generates an LLM response based on the query, context, and conversation history.
@@ -178,6 +226,7 @@ class GraphCompletionRetriever(BaseRetriever):
 
         Args:
             query (str): The user's question or prompt.
+            query_batch (List[str]): The batch of user queries.
             retrieved_objects (Optional[List[Edge]]): Raw triplets used for interaction mapping.
                                                      Output of get_retrieved_objects method.
             context (str): The text-resolved graph context.
@@ -189,7 +238,6 @@ class GraphCompletionRetriever(BaseRetriever):
         Note: To avoid duplicate retrievals, ensure that retrieved_objects and context
               are provided from previous method calls.
         """
-
         cache_config = CacheConfig()
         user = session_user.get()
         user_id = getattr(user, "id", None)
@@ -211,14 +259,29 @@ class GraphCompletionRetriever(BaseRetriever):
                 ),
             )
         else:
-            completion = await generate_completion(
-                query=query,
-                context=context,
-                user_prompt_path=self.user_prompt_path,
-                system_prompt_path=self.system_prompt_path,
-                system_prompt=self.system_prompt,
-                response_model=self.response_model,
-            )
+            if query_batch:
+                completion = await asyncio.gather(
+                    *[
+                        generate_completion(
+                            query=batched_query,
+                            context=batched_context,
+                            user_prompt_path=self.user_prompt_path,
+                            system_prompt_path=self.system_prompt_path,
+                            system_prompt=self.system_prompt,
+                            response_model=self.response_model,
+                        )
+                        for batched_query, batched_context in zip(query_batch, context)
+                    ]
+                )
+            else:
+                completion = await generate_completion(
+                    query=query,
+                    context=context,
+                    user_prompt_path=self.user_prompt_path,
+                    system_prompt_path=self.system_prompt_path,
+                    system_prompt=self.system_prompt,
+                    response_model=self.response_model,
+                )
 
         if session_save:
             await save_conversation_history(
@@ -228,4 +291,34 @@ class GraphCompletionRetriever(BaseRetriever):
                 session_id=self.session_id,
             )
 
-        return [completion]
+        return completion if query_batch else [completion]
+
+    async def get_completion(
+        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
+    ) -> List[Any]:
+        """
+        Generates a final output or answer based on the query and retrieved context.
+
+        Args:
+            query (str): The original user query.
+            query_batch (List[str]): The batch of user queries.
+
+        Returns:
+            List[Any]: A list containing the generated completions or response objects.
+        """
+        is_query_valid, msg = validate_queries(query, query_batch)
+        if not is_query_valid:
+            raise QueryValidationError(message=msg)
+
+        retrieved_objects = await self.get_retrieved_objects(query=query, query_batch=query_batch)
+        context = await self.get_context_from_objects(
+            query=query, query_batch=query_batch, retrieved_objects=retrieved_objects
+        )
+        completion = await self.get_completion_from_context(
+            query=query,
+            query_batch=query_batch,
+            retrieved_objects=retrieved_objects,
+            context=context,
+        )
+
+        return completion
