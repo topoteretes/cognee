@@ -22,7 +22,9 @@ async def test_answer_generation():
         retriever=mock_retriever,
     )
 
-    mock_retriever.get_context_from_objects.assert_any_await(qa_pairs[0]["question"], [])
+    mock_retriever.get_context_from_objects.assert_any_await(
+        query=qa_pairs[0]["question"], retrieved_objects=[]
+    )
 
     assert len(answers) == len(qa_pairs)
     assert answers[0]["question"] == qa_pairs[0]["question"], (

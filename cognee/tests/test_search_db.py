@@ -130,7 +130,9 @@ async def setup_test_environment():
 async def _get_retriever_context(retriever, query: str):
     """Retrieve objects and resolve context via the retriever API."""
     retrieved_objects = await retriever.get_retrieved_objects(query)
-    return await retriever.get_context_from_objects(query, retrieved_objects)
+    return await retriever.get_context_from_objects(
+        query=query, retrieved_objects=retrieved_objects
+    )
 
 
 @pytest_asyncio.fixture(scope="session")
