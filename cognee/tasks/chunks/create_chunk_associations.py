@@ -152,26 +152,24 @@ async def create_chunk_associations(
 
     vector_engine = get_vector_engine()
 
-    chunk_id_map = {}
+    id_to_text = {}
     for chunk_text in valid_chunks:
         try:
             results = await vector_engine.search("DocumentChunk_text", chunk_text, limit=1)
             if results:
-                chunk_id_map[chunk_text] = results[0].id
+                chunk_id = str(results[0].id)
+                id_to_text[chunk_id] = chunk_text
         except Exception as e:
             logger.warning(f"Failed to find chunk ID for text: {chunk_text[:50]}... Error: {e}")
 
-    logger.info(f"Found {len(chunk_id_map)} chunk IDs from vector search")
+    logger.info(f"Found {len(id_to_text)} chunk IDs from vector search")
 
     edges = []
     compared_pairs = set()
 
     search_limit = (top_k_candidates + 1) if top_k_candidates is not None else None
 
-    for chunk_text in valid_chunks:
-        if chunk_text not in chunk_id_map:
-            continue
-
+    for chunk_id, chunk_text in id_to_text.items():
         try:
             candidates = await vector_engine.search(
                 "DocumentChunk_text", chunk_text, limit=search_limit
@@ -181,21 +179,17 @@ async def create_chunk_associations(
             continue
 
         for candidate in candidates:
-            try:
-                candidate_text = candidate.payload.get("text", "")
-            except (AttributeError, KeyError):
+            candidate_id = str(candidate.id)
+
+            if candidate_id == chunk_id or candidate_id not in id_to_text:
                 continue
 
-            if not candidate_text or candidate_text == chunk_text:
-                continue
-
-            if candidate_text not in chunk_id_map:
-                continue
-
-            pair_key = tuple(sorted([chunk_text, candidate_text]))
+            pair_key = tuple(sorted([chunk_id, candidate_id]))
             if pair_key in compared_pairs:
                 continue
             compared_pairs.add(pair_key)
+
+            candidate_text = id_to_text[candidate_id]
 
             similarity = await _compare_chunks(
                 chunk_text, candidate_text, user_prompt_location, system_prompt_location
@@ -206,8 +200,6 @@ async def create_chunk_associations(
                 and similarity.are_similar
                 and similarity.similarity_score >= similarity_threshold
             ):
-                chunk_id = chunk_id_map[chunk_text]
-                candidate_id = chunk_id_map[candidate_text]
                 edges.append(_create_edge(chunk_id, candidate_id, similarity))
                 logger.info(
                     f"Association created: score={similarity.similarity_score:.2f}, type={similarity.association_type}"
