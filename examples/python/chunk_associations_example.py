@@ -37,9 +37,10 @@ async def main():
     await cognee.cognify()
     print("Cognify process complete.\n")
 
-    file_path = os.path.join(
-        pathlib.Path(__file__).parent, ".artifacts", "graph_visualization_before_associations.html"
-    )
+    artifacts_dir = os.path.join(pathlib.Path(__file__).parent, ".artifacts")
+    os.makedirs(artifacts_dir, exist_ok=True)
+
+    file_path = os.path.join(artifacts_dir, "graph_visualization_before_associations.html")
     await visualize_graph(file_path)
     print(f"Graph visualization before associations: {file_path}\n")
 
@@ -108,10 +109,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    logger = setup_logging(log_level=ERROR)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(main())
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
+    setup_logging(log_level=ERROR)
+    asyncio.run(main())

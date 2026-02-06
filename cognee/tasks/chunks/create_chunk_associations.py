@@ -1,3 +1,11 @@
+"""
+Chunk association task for creating semantic links between document chunks.
+
+This module uses vector similarity search to identify candidate chunk pairs,
+then applies LLM-based comparison to determine whether chunks should be
+linked with weighted "associated_with" edges in the knowledge graph.
+"""
+
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
@@ -12,6 +20,8 @@ logger = get_logger("chunk_associations")
 
 
 class ChunkSimilarity(BaseModel):
+    """LLM-structured output representing the semantic similarity between two chunks."""
+
     are_similar: bool = Field(description="Whether chunks are semantically related")
     similarity_score: float = Field(ge=0.0, le=1.0, description="Similarity score 0.0-1.0")
     reasoning: str = Field(description="Brief explanation of similarity assessment")
@@ -26,6 +36,21 @@ async def _compare_chunks(
     user_prompt_location: str,
     system_prompt_location: str,
 ) -> Optional[ChunkSimilarity]:
+    """Compare two text chunks for semantic similarity using an LLM.
+
+    Renders the user and system prompts with the chunk texts and calls the LLM
+    to produce a structured ChunkSimilarity response. Returns a fallback
+    ChunkSimilarity with are_similar=False on LLM failure.
+
+    Args:
+        chunk_1: Text content of the first chunk.
+        chunk_2: Text content of the second chunk.
+        user_prompt_location: Filename of the user prompt template.
+        system_prompt_location: Filename of the system prompt template.
+
+    Returns:
+        A ChunkSimilarity object, or a fallback with score 0.0 on error.
+    """
     context = {"chunk_1": chunk_1, "chunk_2": chunk_2}
     user_prompt = render_prompt(user_prompt_location, context)
     system_prompt = read_query_prompt(system_prompt_location)
@@ -44,6 +69,16 @@ async def _compare_chunks(
 
 
 def _create_edge(chunk_1_id: str, chunk_2_id: str, similarity: ChunkSimilarity):
+    """Build a graph edge tuple from two chunk IDs and their similarity result.
+
+    Args:
+        chunk_1_id: UUID of the source chunk node.
+        chunk_2_id: UUID of the target chunk node.
+        similarity: The LLM-produced similarity assessment.
+
+    Returns:
+        A tuple of (source_id, target_id, relationship_name, properties_dict).
+    """
     return (
         chunk_1_id,
         chunk_2_id,
@@ -68,6 +103,34 @@ async def create_chunk_associations(
     user_prompt_location: str = "chunk_association_user.txt",
     system_prompt_location: str = "chunk_association_system.txt",
 ):
+    """Create semantic association edges between document chunks in the knowledge graph.
+
+    For each valid chunk, performs a vector similarity search to find candidate
+    pairs, then uses an LLM to assess semantic relatedness. Pairs that meet the
+    similarity threshold are persisted as weighted "associated_with" edges.
+
+    This is an async generator that yields the original chunks after processing,
+    allowing it to be composed in cognee pipelines.
+
+    Args:
+        chunks: List of chunk text strings to evaluate.
+        similarity_threshold: Minimum LLM similarity score (0.0-1.0) required
+            to create an association edge. (default 0.7)
+        min_chunk_length: Minimum character length for a chunk to be considered.
+            Chunks shorter than this are skipped. (default 10)
+        top_k_candidates: Maximum number of vector search candidates per chunk.
+            None means no limit. (default None)
+        user_prompt_location: Filename of the user prompt template. (default
+            "chunk_association_user.txt")
+        system_prompt_location: Filename of the system prompt template. (default
+            "chunk_association_system.txt")
+
+    Yields:
+        Each chunk from the input list, unchanged.
+
+    Raises:
+        Exception: Re-raised if persisting edges to the graph database fails.
+    """
     if not isinstance(chunks, list):
         chunks = [chunks]
 
@@ -103,7 +166,7 @@ async def create_chunk_associations(
     edges = []
     compared_pairs = set()
 
-    search_limit = (top_k_candidates + 1) if top_k_candidates else None
+    search_limit = (top_k_candidates + 1) if top_k_candidates is not None else None
 
     for chunk_text in valid_chunks:
         if chunk_text not in chunk_id_map:

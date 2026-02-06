@@ -2,9 +2,10 @@
 Text chunking and chunk management tasks.
 
 This module provides functionality for splitting text into chunks using
-different strategies (word, sentence, paragraph, or row-based) and for
-cleaning up disconnected or obsolete chunks to support downstream
-processing and knowledge graph workflows.
+different strategies (word, sentence, paragraph, or row-based), cleaning
+up disconnected or obsolete chunks, and creating semantic association
+edges between related chunks to support downstream processing and
+knowledge graph workflows.
 """
 
 from .chunk_by_word import chunk_by_word

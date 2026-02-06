@@ -79,7 +79,7 @@ async def test_chunk_associations_creates_edges_between_similar_chunks(clean_tes
     for edge in association_edges:
         props = edge[3]
         weight = props.get("weight")
-        if weight:
+        if weight is not None:
             assert 0.0 <= weight <= 1.0, f"Weight should be between 0 and 1, got {weight}"
 
 
@@ -117,7 +117,7 @@ async def test_chunk_associations_respects_similarity_threshold(clean_test_envir
 
     for edge in association_edges:
         weight = edge[3].get("weight")
-        if weight:
+        if weight is not None:
             assert weight >= 0.9, f"All associations should meet threshold of 0.9, got {weight}"
 
 
@@ -150,12 +150,13 @@ async def test_chunk_associations_includes_metadata(clean_test_environment):
 
     association_edges = _get_association_edges(edges)
 
-    if len(association_edges) > 0:
-        props = association_edges[0][3]
-        assert "relationship_name" in props
-        assert "source_node_id" in props
-        assert "target_node_id" in props
-        assert "ontology_valid" in props
+    assert len(association_edges) > 0, "Should have created at least one association edge"
+
+    props = association_edges[0][3]
+    assert "relationship_name" in props
+    assert "source_node_id" in props
+    assert "target_node_id" in props
+    assert "ontology_valid" in props
 
 
 @pytest.mark.asyncio

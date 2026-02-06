@@ -12,7 +12,6 @@ Chunks should be associated if they:
 Chunks should NOT be associated if they:
 - Are completely unrelated in topic
 - Only share common words without semantic connection
-- Are identical or near-duplicates (similarity = 1.0 for duplicates)
 - Discuss different aspects with no meaningful connection
 
 Provide:
@@ -23,7 +22,7 @@ Provide:
 
 Similarity score ranges:
 - 0.0-0.3: Unrelated or minimal connection
-- 0.4-0.6: Loosely related
-- 0.7-0.8: Clearly related topics
-- 0.9-0.95: Very closely related
-- 0.96-1.0: Near-duplicate or identical content
+- 0.3-0.6: Loosely related
+- 0.6-0.8: Clearly related topics
+- 0.8-0.95: Very closely related
+- 0.95-1.0: Near-duplicate or identical content
