@@ -146,6 +146,8 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 session_id=self.session_id,
             )
 
+        if query:
+            return triplets[0]
         return triplets
 
     async def _run_cot_completion(
@@ -362,26 +364,9 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             - List[str]: A list containing the generated answer to the user's query.
         """
 
-        if not retrieved_objects or all(len(triplet) == 0 for triplet in retrieved_objects):
+        if not retrieved_objects or (
+            query_batch and all(len(triplet) == 0 for triplet in retrieved_objects)
+        ):
             raise CogneeValidationError("No context retrieved to generate completion.")
         completion = self.completion
         return completion
-
-    async def get_context_from_objects(
-        self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
-        retrieved_objects=None,
-    ) -> Union[str, List[str]]:
-        triplets = retrieved_objects
-
-        if query:
-            query_batch = [query]
-
-        if not triplets or all(len(batched_triplets) == 0 for batched_triplets in triplets):
-            logger.warning("Empty context was provided to the completion")
-            return ["" for _ in query_batch]
-
-        return await asyncio.gather(
-            *[self.resolve_edges_to_text(batched_triplets) for batched_triplets in triplets]
-        )

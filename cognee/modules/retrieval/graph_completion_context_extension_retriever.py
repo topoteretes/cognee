@@ -192,6 +192,8 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
 
             round_idx += 1
 
+        if query:
+            return finished_queries_states[query].triplets
         return [finished_queries_states[batched_query].triplets for batched_query in query_batch]
 
     async def get_completion_from_context(
@@ -266,23 +268,3 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
             )
 
         return completion if query_batch else [completion]
-
-    async def get_context_from_objects(
-        self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
-        retrieved_objects: List[Edge] | List[List[Edge]] = None,
-    ) -> Union[str, List[str]]:
-        triplets = retrieved_objects
-
-        if query:
-            query_batch = [query]
-
-        # Check if all triplets are empty, in case of batch queries
-        if not triplets or all(len(batched_triplets) == 0 for batched_triplets in triplets):
-            logger.warning("Empty context was provided to the completion")
-            return ["" for _ in query_batch]
-
-        return await asyncio.gather(
-            *[self.resolve_edges_to_text(batched_triplets) for batched_triplets in triplets]
-        )
