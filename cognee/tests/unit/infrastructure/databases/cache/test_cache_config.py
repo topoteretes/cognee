@@ -62,6 +62,8 @@ def test_cache_config_to_dict():
         "cache_password": None,
         "agentic_lock_expire": 100,
         "agentic_lock_timeout": 200,
+        "usage_logging": False,
+        "usage_logging_ttl": 604800,
     }
 
 

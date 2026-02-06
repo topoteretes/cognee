@@ -2,15 +2,17 @@
 
 import { v4 as uuid4 } from "uuid";
 import classNames from "classnames";
-import { Fragment, MouseEvent, RefObject, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, MouseEvent, MutableRefObject, useCallback, useEffect, useRef, useState, memo } from "react";
 
 import { useModal } from "@/ui/elements/Modal";
 import { CaretIcon, CloseIcon, PlusIcon } from "@/ui/Icons";
-import { IconButton, PopupMenu, TextArea, Modal, GhostButton, CTAButton } from "@/ui/elements";
+import PopupMenu from "@/ui/elements/PopupMenu";
+import { IconButton, TextArea, Modal, GhostButton, CTAButton } from "@/ui/elements";
 import { GraphControlsAPI } from "@/app/(graph)/GraphControls";
 import GraphVisualization, { GraphVisualizationAPI } from "@/app/(graph)/GraphVisualization";
 
 import NotebookCellHeader from "./NotebookCellHeader";
+import MarkdownPreview from "./MarkdownPreview";
 import { Cell, Notebook as NotebookType } from "./types";
 
 interface NotebookProps {
@@ -19,7 +21,186 @@ interface NotebookProps {
   updateNotebook: (updatedNotebook: NotebookType) => void;
 }
 
+interface NotebookCellProps {
+  cell: Cell;
+  index: number;
+  isOpen: boolean;
+  isMarkdownEditMode: boolean;
+  onToggleOpen: () => void;
+  onToggleMarkdownEdit: () => void;
+  onContentChange: (value: string) => void;
+  onCellRun: (cell: Cell, cogneeInstance: string) => Promise<void>;
+  onCellRename: (cell: Cell) => void;
+  onCellRemove: (cell: Cell) => void;
+  onCellUp: (cell: Cell) => void;
+  onCellDown: (cell: Cell) => void;
+  onCellAdd: (afterCellIndex: number, cellType: "markdown" | "code") => void;
+}
+
+const NotebookCell = memo(function NotebookCell({
+  cell,
+  index,
+  isOpen,
+  isMarkdownEditMode,
+  onToggleOpen,
+  onToggleMarkdownEdit,
+  onContentChange,
+  onCellRun,
+  onCellRename,
+  onCellRemove,
+  onCellUp,
+  onCellDown,
+  onCellAdd,
+}: NotebookCellProps) {
+  return (
+    <Fragment>
+      <div className="flex flex-row rounded-xl border-1 border-gray-100">
+        <div className="flex flex-col flex-1 relative">
+          {cell.type === "code" ? (
+            <>
+              <div className="absolute left-[-1.35rem] top-2.5">
+                <IconButton className="p-[0.25rem] m-[-0.25rem]" onClick={onToggleOpen}>
+                  <CaretIcon className={classNames("transition-transform", isOpen ? "rotate-0" : "rotate-180")} />
+                </IconButton>
+              </div>
+
+              <NotebookCellHeader
+                cell={cell}
+                runCell={onCellRun}
+                renameCell={onCellRename}
+                removeCell={onCellRemove}
+                moveCellUp={onCellUp}
+                moveCellDown={onCellDown}
+                className="rounded-tl-xl rounded-tr-xl"
+              />
+
+              {isOpen && (
+                <>
+                  <TextArea
+                    value={cell.content}
+                    onChange={onContentChange}
+                    isAutoExpanding
+                    name="cellInput"
+                    placeholder="Type your code here..."
+                    className="resize-none min-h-36 max-h-96 overflow-y-auto rounded-tl-none rounded-tr-none rounded-bl-xl rounded-br-xl border-0 !outline-0"
+                  />
+
+                  <div className="flex flex-col bg-gray-100 overflow-x-auto max-w-full">
+                    {cell.result && (
+                      <div className="px-2 py-2">
+                        output: <CellResult content={cell.result} />
+                      </div>
+                    )}
+                    {!!cell.error?.length && (
+                      <div className="px-2 py-2">
+                        error: {cell.error}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="absolute left-[-1.35rem] top-2.5">
+                <IconButton className="p-[0.25rem] m-[-0.25rem]" onClick={onToggleOpen}>
+                  <CaretIcon className={classNames("transition-transform", isOpen ? "rotate-0" : "rotate-180")} />
+                </IconButton>
+              </div>
+
+              <NotebookCellHeader
+                cell={cell}
+                renameCell={onCellRename}
+                removeCell={onCellRemove}
+                moveCellUp={onCellUp}
+                moveCellDown={onCellDown}
+                className="rounded-tl-xl rounded-tr-xl"
+              />
+
+              {isOpen && (
+                <div className="relative rounded-tl-none rounded-tr-none rounded-bl-xl rounded-br-xl border-0 overflow-hidden">
+                  <GhostButton
+                    onClick={onToggleMarkdownEdit}
+                    className="absolute top-2 right-2.5 text-xs leading-[1] !px-2 !py-1 !h-auto"
+                  >
+                    {isMarkdownEditMode ? "Preview" : "Edit"}
+                  </GhostButton>
+                  {isMarkdownEditMode ? (
+                    <TextArea
+                      value={cell.content}
+                      onChange={onContentChange}
+                      isAutoExpanding
+                      name="markdownInput"
+                      placeholder="Type your markdown here..."
+                      className="resize-none min-h-24 max-h-96 overflow-y-auto rounded-tl-none rounded-tr-none rounded-bl-xl rounded-br-xl border-0 !outline-0 !bg-gray-50"
+                    />
+                  ) : (
+                    <MarkdownPreview content={cell.content} className="!bg-gray-50" />
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      <div className="ml-[-1.35rem]">
+        <PopupMenu
+          openToRight={true}
+          triggerElement={<PlusIcon />}
+          triggerClassName="p-[0.25rem] m-[-0.25rem]"
+        >
+          <div className="flex flex-col gap-0.5">
+            <button
+              onClick={() => onCellAdd(index, "markdown")}
+              className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer"
+            >
+              <span>text</span>
+            </button>
+          </div>
+          <div
+            onClick={() => onCellAdd(index, "code")}
+            className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer"
+          >
+            <span>code</span>
+          </div>
+        </PopupMenu>
+      </div>
+    </Fragment>
+  );
+});
+
 export default function Notebook({ notebook, updateNotebook, runCell }: NotebookProps) {
+  const [openCells, setOpenCells] = useState(new Set(notebook.cells.map((c: Cell) => c.id)));
+  const [markdownEditMode, setMarkdownEditMode] = useState<Set<string>>(new Set());
+
+  const toggleCellOpen = useCallback((id: string) => {
+    setOpenCells((prev) => {
+      const newState = new Set(prev);
+
+      if (newState.has(id)) {
+        newState.delete(id)
+      } else {
+        newState.add(id);
+      }
+
+      return newState;
+    });
+  }, []);
+
+  const toggleMarkdownEditMode = useCallback((id: string) => {
+    setMarkdownEditMode((prev) => {
+      const newState = new Set(prev);
+
+      if (newState.has(id)) {
+        newState.delete(id);
+      } else {
+        newState.add(id);
+      }
+
+      return newState;
+    });
+  }, []);
+
   useEffect(() => {
     if (notebook.cells.length === 0) {
       const newCell: Cell = {
@@ -34,7 +215,7 @@ export default function Notebook({ notebook, updateNotebook, runCell }: Notebook
       });
       toggleCellOpen(newCell.id)
     }
-  }, [notebook, updateNotebook]);
+  }, [notebook, updateNotebook, toggleCellOpen]);
 
   const handleCellRun = useCallback((cell: Cell, cogneeInstance: string) => {
     return runCell(notebook, cell, cogneeInstance);
@@ -43,7 +224,7 @@ export default function Notebook({ notebook, updateNotebook, runCell }: Notebook
   const handleCellAdd = useCallback((afterCellIndex: number, cellType: "markdown" | "code") => {
     const newCell: Cell = {
       id: uuid4(),
-      name: "new cell",
+      name: cellType === "markdown" ? "Markdown Cell" : "Code Cell",
       type: cellType,
       content: "",
     };
@@ -59,7 +240,7 @@ export default function Notebook({ notebook, updateNotebook, runCell }: Notebook
 
     toggleCellOpen(newCell.id);
     updateNotebook(newNotebook);
-  }, [notebook, updateNotebook]);
+  }, [notebook, updateNotebook, toggleCellOpen]);
 
   const removeCell = useCallback((cell: Cell, event?: MouseEvent) => {
     event?.preventDefault();
@@ -81,14 +262,12 @@ export default function Notebook({ notebook, updateNotebook, runCell }: Notebook
     openCellRemoveConfirmModal(cell);
   }, [openCellRemoveConfirmModal]);
 
-  const handleCellInputChange = useCallback((notebook: NotebookType, cell: Cell, value: string) => {
-    const newCell = {...cell, content: value };
-
+  const handleCellInputChange = useCallback((cellId: string, value: string) => {
     updateNotebook({
       ...notebook,
-      cells: notebook.cells.map((cell: Cell) => (cell.id === newCell.id ? newCell : cell)),
+      cells: notebook.cells.map((cell: Cell) => (cell.id === cellId ? {...cell, content: value} : cell)),
     });
-  }, [updateNotebook]);
+  }, [notebook, updateNotebook]);
 
   const handleCellUp = useCallback((cell: Cell) => {
     const index = notebook.cells.indexOf(cell);
@@ -131,133 +310,28 @@ export default function Notebook({ notebook, updateNotebook, runCell }: Notebook
     }
   }, [notebook, updateNotebook]);
 
-  const [openCells, setOpenCells] = useState(new Set(notebook.cells.map((c: Cell) => c.id)));
-
-  const toggleCellOpen = (id: string) => {
-    setOpenCells((prev) => {
-      const newState = new Set(prev);
-
-      if (newState.has(id)) {
-        newState.delete(id)
-      } else {
-        newState.add(id);
-      }
-
-      return newState;
-    });
-  };
-
   return (
     <>
       <div className="bg-white rounded-xl flex flex-col gap-0.5 px-7 py-5 flex-1">
         <div className="mb-5">{notebook.name}</div>
 
         {notebook.cells.map((cell: Cell, index) => (
-          <Fragment key={cell.id}>
-            <div key={cell.id} className="flex flex-row rounded-xl border-1 border-gray-100">
-              <div className="flex flex-col flex-1 relative">
-                {cell.type === "code" ? (
-                  <>
-                    <div className="absolute left-[-1.35rem] top-2.5">
-                      <IconButton className="p-[0.25rem] m-[-0.25rem]" onClick={toggleCellOpen.bind(null, cell.id)}>
-                        <CaretIcon className={classNames("transition-transform", openCells.has(cell.id) ? "rotate-0" : "rotate-180")} />
-                      </IconButton>
-                    </div>
-
-                    <NotebookCellHeader
-                      cell={cell}
-                      runCell={handleCellRun}
-                      renameCell={handleCellRename}
-                      removeCell={handleCellRemove}
-                      moveCellUp={handleCellUp}
-                      moveCellDown={handleCellDown}
-                      className="rounded-tl-xl rounded-tr-xl"
-                    />
-
-                    {openCells.has(cell.id) && (
-                      <>
-                        <TextArea
-                          value={cell.content}
-                          onChange={handleCellInputChange.bind(null, notebook, cell)}
-                          // onKeyUp={handleCellRunOnEnter}
-                          isAutoExpanding
-                          name="cellInput"
-                          placeholder="Type your code here..."
-                          contentEditable={true}
-                          className="resize-none min-h-36 max-h-96 overflow-y-auto rounded-tl-none rounded-tr-none rounded-bl-xl rounded-br-xl border-0 !outline-0"
-                        />
-
-                        <div className="flex flex-col bg-gray-100 overflow-x-auto max-w-full">
-                          {cell.result && (
-                            <div className="px-2 py-2">
-                              output: <CellResult content={cell.result} />
-                            </div>
-                          )}
-                          {!!cell.error?.length && (
-                            <div className="px-2 py-2">
-                              error: {cell.error}
-                            </div>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <div className="absolute left-[-1.35rem] top-2.5">
-                      <IconButton className="p-[0.25rem] m-[-0.25rem]" onClick={toggleCellOpen.bind(null, cell.id)}>
-                        <CaretIcon className={classNames("transition-transform", openCells.has(cell.id) ? "rotate-0" : "rotate-180")} />
-                      </IconButton>
-                    </div>
-
-                    <NotebookCellHeader
-                      cell={cell}
-                      renameCell={handleCellRename}
-                      removeCell={handleCellRemove}
-                      moveCellUp={handleCellUp}
-                      moveCellDown={handleCellDown}
-                      className="rounded-tl-xl rounded-tr-xl"
-                    />
-
-                    {openCells.has(cell.id) && (
-                      <TextArea
-                        value={cell.content}
-                        onChange={handleCellInputChange.bind(null, notebook, cell)}
-                        // onKeyUp={handleCellRunOnEnter}
-                        isAutoExpanding
-                        name="cellInput"
-                        placeholder="Type your text here..."
-                        contentEditable={true}
-                        className="resize-none min-h-24 max-h-96 overflow-y-auto rounded-tl-none rounded-tr-none rounded-bl-xl rounded-br-xl border-0 !outline-0"
-                      />
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-            <div className="ml-[-1.35rem]">
-              <PopupMenu
-                openToRight={true}
-                triggerElement={<PlusIcon />}
-                triggerClassName="p-[0.25rem] m-[-0.25rem]"
-              >
-                <div className="flex flex-col gap-0.5">
-                  <button
-                    onClick={() => handleCellAdd(index, "markdown")}
-                    className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer"
-                  >
-                    <span>text</span>
-                  </button>
-                </div>
-                <div
-                  onClick={() => handleCellAdd(index, "code")}
-                  className="hover:bg-gray-100 w-full text-left px-2 cursor-pointer"
-                >
-                  <span>code</span>
-                </div>
-              </PopupMenu>
-            </div>
-          </Fragment>
+          <NotebookCell
+            key={cell.id}
+            cell={cell}
+            index={index}
+            isOpen={openCells.has(cell.id)}
+            isMarkdownEditMode={markdownEditMode.has(cell.id)}
+            onToggleOpen={() => toggleCellOpen(cell.id)}
+            onToggleMarkdownEdit={() => toggleMarkdownEditMode(cell.id)}
+            onContentChange={(value) => handleCellInputChange(cell.id, value)}
+            onCellRun={handleCellRun}
+            onCellRename={handleCellRename}
+            onCellRemove={handleCellRemove}
+            onCellUp={handleCellUp}
+            onCellDown={handleCellDown}
+            onCellAdd={handleCellAdd}
+          />
         ))}
       </div>
 
@@ -288,6 +362,10 @@ function CellResult({ content }: { content: [] }) {
     getSelectedNode: () => null,
   });
 
+  if (content.length === 0) {
+    return <span>OK</span>;
+  }
+
   for (const line of content) {
     try {
       if (Array.isArray(line)) {
@@ -298,7 +376,7 @@ function CellResult({ content }: { content: [] }) {
               <span className="text-sm pl-2 mb-4">reasoning graph</span>
               <GraphVisualization
                 data={transformInsightsGraphData(line)}
-                ref={graphRef as RefObject<GraphVisualizationAPI>}
+                ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
                 graphControls={graphControls}
                 className="min-h-80"
               />
@@ -346,7 +424,7 @@ function CellResult({ content }: { content: [] }) {
                   <span className="text-sm pl-2 mb-4">reasoning graph (datasets: {datasetName})</span>
                   <GraphVisualization
                     data={transformToVisualizationData(graph)}
-                    ref={graphRef as RefObject<GraphVisualizationAPI>}
+                    ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
                     graphControls={graphControls}
                     className="min-h-80"
                   />
@@ -356,8 +434,7 @@ function CellResult({ content }: { content: [] }) {
           }
         }
       }
-
-      if (typeof(line) === "object" && line["result"] && typeof(line["result"]) === "string") {
+      else if (typeof(line) === "object" && line["result"] && typeof(line["result"]) === "string") {
         const datasets = Array.from(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           new Set(Object.values(line["datasets"]).map((dataset: any) => dataset.name))
@@ -369,39 +446,46 @@ function CellResult({ content }: { content: [] }) {
             <span className="block px-2 py-2 whitespace-normal">{line["result"]}</span>
           </div>
         );
-      }
-      if (typeof(line) === "object" && line["graphs"]) {
-        Object.entries<{ nodes: []; edges: []; }>(line["graphs"]).forEach(([datasetName, graph]) => {
-          parsedContent.push(
-            <div key={datasetName} className="w-full h-full bg-white">
-              <span className="text-sm pl-2 mb-4">reasoning graph (datasets: {datasetName})</span>
-              <GraphVisualization
-                data={transformToVisualizationData(graph)}
-                ref={graphRef as RefObject<GraphVisualizationAPI>}
-                graphControls={graphControls}
-                className="min-h-80"
-              />
-            </div>
-          );
-        });
-      }
 
-      if (typeof(line) === "object" && line["result"] && typeof(line["result"]) === "object") {
+        if (line["graphs"]) {
+          Object.entries<{ nodes: []; edges: []; }>(line["graphs"]).forEach(([datasetName, graph]) => {
+            parsedContent.push(
+              <div key={datasetName} className="w-full h-full bg-white">
+                <span className="text-sm pl-2 mb-4">reasoning graph (datasets: {datasetName})</span>
+                <GraphVisualization
+                  data={transformToVisualizationData(graph)}
+                  ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
+                  graphControls={graphControls}
+                  className="min-h-80"
+                />
+              </div>
+            );
+          });
+        }
+      }
+      else if (typeof(line) === "object" && line["result"] && typeof(line["result"]) === "object") {
         parsedContent.push(
           <pre className="px-2 w-full h-full bg-white text-sm" key={String(line).slice(0, -10)}>
             {JSON.stringify(line["result"], null, 2)}
           </pre>
         )
       }
-      if (typeof(line) === "string") {
+      else if (typeof(line) === "object") {
+        parsedContent.push(
+          <pre className="px-2 w-full h-full bg-white text-sm" key={String(line).slice(0, -10)}>
+            {JSON.stringify(line, null, 2)}
+          </pre>
+        )
+      }
+      else if (typeof(line) === "string") {
         parsedContent.push(
           <pre className="px-2 w-full h-full bg-white text-sm whitespace-normal" key={String(line).slice(0, -10)}>
             {line}
           </pre>
         )
       }
-    } catch (error) {
-      console.error(error);
+    } catch {
+      // It is fine if we don't manage to parse the output line, we show it as it is.
       parsedContent.push(
         <pre className="px-2 w-full h-full bg-white text-sm whitespace-normal" key={String(line).slice(0, -10)}>
           {line}
@@ -415,7 +499,6 @@ function CellResult({ content }: { content: [] }) {
       {item}
     </div>
   ));
-
 };
 
 function transformToVisualizationData(graph: { nodes: [], edges: [] }) {
@@ -451,7 +534,7 @@ function transformInsightsGraphData(triplets: Triplet[]) {
       target: string,
       label: string,
     }
-  } = {};          
+  } = {};
 
   for (const triplet of triplets) {
     nodes[triplet[0].id] = {
@@ -471,7 +554,7 @@ function transformInsightsGraphData(triplets: Triplet[]) {
       label: triplet[1]["relationship_name"],
     };
   }
-  
+
   return {
     nodes: Object.values(nodes),
     links: Object.values(links),

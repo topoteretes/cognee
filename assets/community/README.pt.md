@@ -43,10 +43,10 @@ Saiba mais sobre os [casos de uso](https://docs.cognee.ai/use-cases) e [avaliaç
 
 ## Funcionalidades
 
-- Conecte e recupere suas conversas passadas, documentos, imagens e transcrições de áudio  
-- Reduza alucinações, esforço de desenvolvimento e custos  
-- Carregue dados em bancos de dados de grafos e vetores usando apenas Pydantic  
-- Transforme e organize seus dados enquanto os coleta de mais de 30 fontes diferentes  
+- Conecte e recupere suas conversas passadas, documentos, imagens e transcrições de áudio
+- Reduza alucinações, esforço de desenvolvimento e custos
+- Carregue dados em bancos de dados de grafos e vetores usando apenas Pydantic
+- Transforme e organize seus dados enquanto os coleta de mais de 30 fontes diferentes
 
 ## Primeiros Passos
 
@@ -108,7 +108,7 @@ if __name__ == '__main__':
 Exemplo do output:
 ```
   O Processamento de Linguagem Natural (NLP) é um campo interdisciplinar e transdisciplinar que envolve ciência da computação e recuperação de informações. Ele se concentra na interação entre computadores e a linguagem humana, permitindo que as máquinas compreendam e processem a linguagem natural.
-  
+
 ```
 
 Visualização do grafo:

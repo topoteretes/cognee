@@ -51,7 +51,7 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=es">Español</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=fr">Français</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ja">日本語</a> |
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ko">한국어</a> |
+  <a href="README_ko.md">한국어</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=pt">Português</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ru">Русский</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=zh">中文</a>
@@ -68,7 +68,7 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
 
 ## About Cognee
 
-Cognee is an open-source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your documents both searchable by meaning and connected by relationships. 
+Cognee is an open-source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your documents both searchable by meaning and connected by relationships.
 Cognee offers default memory creation and search which we describe bellow. But with Cognee you can build your own!
 
 
@@ -117,7 +117,7 @@ To integrate other LLM providers, see our [LLM Provider Documentation](https://d
 
 ### Step 3: Run the Pipeline
 
-Cognee will take your documents, generate a knowledge graph from them and then query the graph based on combined relationships. 
+Cognee will take your documents, generate a knowledge graph from them and then query the graph based on combined relationships.
 
 Now, run a minimal pipeline:
 
@@ -156,7 +156,7 @@ As you can see, the output is generated from the document we previously stored i
   Cognee turns documents into AI memory.
 ```
 
-### Use the Cognee CLI 
+### Use the Cognee CLI
 
 As an alternative, you can get started with these essential commands:
 

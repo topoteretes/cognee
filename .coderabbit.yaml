@@ -3,7 +3,7 @@
 language: en
 early_access: false
 enable_free_tier: true
-reviews:  
+reviews:
   profile: chill
   instructions: >-
     # Code Review Instructions
@@ -118,7 +118,7 @@ reviews:
           - E117
           - D208
         line_length: 100
-        dummy_variable_rgx: '^(_.*|junk|extra)$'  # Variables starting with '_' or named 'junk' or 'extras', are considered dummy variables        
+        dummy_variable_rgx: '^(_.*|junk|extra)$'  # Variables starting with '_' or named 'junk' or 'extras', are considered dummy variables
     markdownlint:
       enabled: true
     yamllint:
