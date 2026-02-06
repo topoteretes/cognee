@@ -4,6 +4,11 @@ from typing import List, Union
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from cognee.modules.users.permissions.methods import get_tenant
+from cognee.modules.users.exceptions import PermissionDeniedError
+from cognee.infrastructure.databases.relational import get_relational_engine
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from cognee.modules.users.models import User
 from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
@@ -271,12 +276,6 @@ def get_permissions_router() -> APIRouter:
         tenant_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):
-        from cognee.modules.users.permissions.methods import get_tenant
-        from cognee.modules.users.exceptions import PermissionDeniedError
-        from cognee.infrastructure.databases.relational import get_relational_engine
-        from sqlalchemy import select
-        from sqlalchemy.orm import selectinload
-
         tenant = await get_tenant(tenant_id)
         if tenant.owner_id != user.id:
             raise PermissionDeniedError("Only tenant owners can view roles")
