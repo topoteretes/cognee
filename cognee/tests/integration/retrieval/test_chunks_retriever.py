@@ -10,7 +10,6 @@ from cognee.tasks.storage import add_data_points
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.data.processing.document_types import TextDocument
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.data.processing.document_types import Document
@@ -267,15 +266,20 @@ async def setup_test_environment_empty():
 
 
 @pytest.mark.asyncio
-async def test_chunks_retriever_context_multiple_chunks(setup_test_environment_with_chunks_simple):
+async def test_chunks_retriever_multiple_chunks(setup_test_environment_with_chunks_simple):
     """Integration test: verify ChunksRetriever can retrieve multiple chunks."""
     retriever = ChunksRetriever()
+    query = "Steve"
+    chunks = await retriever.get_retrieved_objects("Steve")
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=chunks)
 
-    context = await retriever.get_context("Steve")
+    completion = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=chunks, context=context
+    )
 
-    assert isinstance(context, list), "Context should be a list"
-    assert len(context) > 0, "Context should not be empty"
-    assert any(chunk["text"] == "Steve Rodger" for chunk in context), (
+    assert isinstance(completion, list), "Retrieved objects should be a list"
+    assert len(completion) > 0, "Retrieved objects list should not be empty"
+    assert any(chunk["text"] == "Steve Rodger" for chunk in completion), (
         "Failed to get Steve Rodger chunk"
     )
 
@@ -284,35 +288,64 @@ async def test_chunks_retriever_context_multiple_chunks(setup_test_environment_w
 async def test_chunks_retriever_top_k_limit(setup_test_environment_with_chunks_complex):
     """Integration test: verify ChunksRetriever respects top_k parameter."""
     retriever = ChunksRetriever(top_k=2)
+    query = "Employee"
 
-    context = await retriever.get_context("Employee")
+    chunks = await retriever.get_retrieved_objects("Steve")
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=chunks)
 
-    assert isinstance(context, list), "Context should be a list"
-    assert len(context) <= 2, "Should respect top_k limit"
+    completion = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=chunks, context=context
+    )
+
+    assert isinstance(completion, list), "Context should be a list"
+    assert len(completion) <= 2, "Should respect top_k limit"
 
 
 @pytest.mark.asyncio
 async def test_chunks_retriever_context_complex(setup_test_environment_with_chunks_complex):
     """Integration test: verify ChunksRetriever can retrieve chunk context (complex)."""
     retriever = ChunksRetriever(top_k=20)
+    query = "Christina"
 
-    context = await retriever.get_context("Christina")
+    chunks = await retriever.get_retrieved_objects(query)
 
-    assert context[0]["text"] == "Christina Mayer", "Failed to get Christina Mayer"
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=chunks)
+
+    assert context[0:15] == "Christina Mayer", "Failed to get Christina Mayer"
 
 
 @pytest.mark.asyncio
-async def test_chunks_retriever_context_on_empty_graph(setup_test_environment_empty):
+async def test_chunks_retriever_on_empty_graph(setup_test_environment_empty):
     """Integration test: verify ChunksRetriever handles empty graph correctly."""
     retriever = ChunksRetriever()
-
-    with pytest.raises(NoDataError):
-        await retriever.get_context("Christina Mayer")
+    query = "Christina Mayer"
 
     vector_engine = get_vector_engine()
     await vector_engine.create_collection(
         "DocumentChunk_text", payload_schema=DocumentChunkWithEntities
     )
 
-    context = await retriever.get_context("Christina Mayer")
-    assert len(context) == 0, "Found chunks when none should exist"
+    chunks = await retriever.get_retrieved_objects(query)
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=chunks)
+
+    completion = await retriever.get_completion_from_context(
+        query=query, retrieved_objects=chunks, context=context
+    )
+    assert isinstance(completion, list), "Retrieved objects should be a list"
+    assert len(completion) == 0, "Found chunks when none should exist"
+
+
+@pytest.mark.asyncio
+async def test_chunks_retriever_context_on_empty_graph(setup_test_environment_empty):
+    """Integration test: verify ChunksRetriever context handles empty graph correctly."""
+    retriever = ChunksRetriever()
+    query = "Christina Mayer"
+
+    vector_engine = get_vector_engine()
+    await vector_engine.create_collection(
+        "DocumentChunk_text", payload_schema=DocumentChunkWithEntities
+    )
+
+    chunks = await retriever.get_retrieved_objects(query)
+    context = await retriever.get_context_from_objects(query=query, retrieved_objects=chunks)
+    assert context == "", "Found chunks when none should exist"
