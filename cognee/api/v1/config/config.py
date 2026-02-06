@@ -204,6 +204,7 @@ class config:
             else:
                 raise InvalidConfigAttributeError(attribute=key)
 
+    @staticmethod
     def set(key: str, value):
         """
         Generic setter that maps configuration keys to their specific setter methods.
