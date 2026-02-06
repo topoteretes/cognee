@@ -238,15 +238,21 @@ class LanceDBAdapter(VectorDBInterface):
             if include_payload
             else ["id", "vector", "_distance"]
         )
-        result_values = (
-            await collection.vector_search(query_vector)
-            .where(
-                f"array_has_all(payload.belongs_to_set, {belongs_to_nodesets if belongs_to_nodesets else []})"
+        if belongs_to_nodesets:
+            result_values = (
+                await collection.vector_search(query_vector)
+                .where(f"array_has_any(payload.belongs_to_set, {belongs_to_nodesets})")
+                .select(select_columns)
+                .limit(limit)
+                .to_list()
             )
-            .select(select_columns)
-            .limit(limit)
-            .to_list()
-        )
+        else:
+            result_values = (
+                await collection.vector_search(query_vector)
+                .select(select_columns)
+                .limit(limit)
+                .to_list()
+            )
 
         if not result_values:
             return []

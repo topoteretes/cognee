@@ -106,6 +106,47 @@ async def test_vector_engine_search_none_limit():
     assert len(result) > 15
 
 
+async def test_vector_engine_search_with_nodeset_filtering():
+    file_path_quantum = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
+    )
+
+    file_path_nlp = os.path.join(
+        pathlib.Path(__file__).parent,
+        "test_data/Natural_language_processing.txt",
+    )
+
+    node_set_a = ["NLP"]
+    node_set_b = ["Quantum", "Computers"]
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    await cognee.add(file_path_quantum, node_set=node_set_b)
+
+    await cognee.add(file_path_nlp, node_set=node_set_a)
+
+    await cognee.cognify()
+
+    query_text = "Tell me about Quantum computers"
+
+    from cognee.infrastructure.databases.vector import get_vector_engine
+
+    vector_engine = get_vector_engine()
+    query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
+
+    result = await vector_engine.search(
+        collection_name="DocumentChunk_text",
+        query_vector=query_vector,
+        include_payload=True,
+        belongs_to_nodesets=node_set_a,
+    )
+
+    assert all(nodeset in node_set_a for nodeset in result[0].payload["belongs_to_set"]), (
+        "Only results from relevant nodesets should be returned"
+    )
+
+
 async def main():
     cognee.config.set_vector_db_config(
         {"vector_db_url": "", "vector_db_key": "", "vector_db_provider": "pgvector"}
@@ -164,7 +205,7 @@ async def main():
 
     vector_engine = get_vector_engine()
     random_node = (
-        await vector_engine.search("Entity_name", "Quantum computer", include_payload=True)
+        await vector_engine.search("DocumentChunk_text", "Quantum computer", include_payload=True)
     )[0]
     random_node_name = random_node.payload["text"]
 
@@ -215,6 +256,8 @@ async def main():
     assert len(tables_in_database) == 0, "PostgreSQL database is not empty"
 
     await test_vector_engine_search_none_limit()
+
+    await test_vector_engine_search_with_nodeset_filtering()
 
 
 if __name__ == "__main__":

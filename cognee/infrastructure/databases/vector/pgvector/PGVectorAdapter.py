@@ -283,7 +283,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         query_vector: Optional[List[float]] = None,
         limit: Optional[int] = 15,
         with_vector: bool = False,
-        include_payload: bool = False,
+        include_payload: bool = True,
         belongs_to_nodesets: List[str] = None,
     ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
@@ -318,9 +318,9 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         async with self.get_async_session() as session:
             if belongs_to_nodesets:
                 from sqlalchemy import cast, bindparam
-                from sqlalchemy.dialects.postgresql import JSONB
+                from sqlalchemy.dialects.postgresql import JSONB, ARRAY, TEXT
 
-                target = bindparam("target", value=belongs_to_nodesets, type_=JSONB)
+                target = bindparam("target", value=belongs_to_nodesets, type_=ARRAY(TEXT()))
                 query = (
                     select(
                         *select_columns,
@@ -331,7 +331,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     .where(
                         cast(PGVectorDataPoint.c.payload, JSONB)
                         .op("->")("belongs_to_set")
-                        .op("@>")(target)
+                        .op("?|")(target)
                     )
                     .order_by("similarity")
                 )
