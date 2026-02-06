@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Optional, Type, List
+from typing import Any, Optional, Type, List, Union
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
@@ -63,7 +63,7 @@ class GraphCompletionRetriever(BaseRetriever):
 
     async def get_retrieved_objects(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
-    ) -> List[Edge]:
+    ) -> Union[List[Edge], List[List[Edge]]]:
         """
         Performs a brute-force triplet search on the graph and updates access timestamps.
 
@@ -133,7 +133,7 @@ class GraphCompletionRetriever(BaseRetriever):
         self,
         query: Optional[str] = None,
         query_batch: Optional[List[str]] = None,
-    ) -> List[Edge] | List[List[Edge]]:
+    ) -> Union[List[Edge], List[List[Edge]]]:
         """
         Retrieves relevant graph triplets based on a query string.
 
@@ -177,7 +177,7 @@ class GraphCompletionRetriever(BaseRetriever):
         query: Optional[str] = None,
         query_batch: Optional[List[str]] = None,
         retrieved_objects=None,
-    ) -> str | List[str]:
+    ) -> Union[str, List[str]]:
         """
         Transforms raw retrieved graph triplets into a textual context string.
 
@@ -292,3 +292,33 @@ class GraphCompletionRetriever(BaseRetriever):
             )
 
         return completion if query_batch else [completion]
+
+    async def get_completion(
+        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
+    ) -> List[Any]:
+        """
+        Generates a final output or answer based on the query and retrieved context.
+
+        Args:
+            query (str): The original user query.
+            query_batch (List[str]): The batch of user queries.
+
+        Returns:
+            List[Any]: A list containing the generated completions or response objects.
+        """
+        is_query_valid, msg = validate_queries(query, query_batch)
+        if not is_query_valid:
+            raise QueryValidationError(message=msg)
+
+        retrieved_objects = await self.get_retrieved_objects(query=query, query_batch=query_batch)
+        context = await self.get_context_from_objects(
+            query=query, query_batch=query_batch, retrieved_objects=retrieved_objects
+        )
+        completion = await self.get_completion_from_context(
+            query=query,
+            query_batch=query_batch,
+            retrieved_objects=retrieved_objects,
+            context=context,
+        )
+
+        return completion

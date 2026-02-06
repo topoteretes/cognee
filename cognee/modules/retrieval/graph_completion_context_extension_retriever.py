@@ -272,7 +272,7 @@ class GraphCompletionContextExtensionRetriever(GraphCompletionRetriever):
         query: Optional[str] = None,
         query_batch: Optional[List[str]] = None,
         retrieved_objects: List[Edge] | List[List[Edge]] = None,
-    ) -> str | List[str]:
+    ) -> Union[str, List[str]]:
         triplets = retrieved_objects
 
         if query:

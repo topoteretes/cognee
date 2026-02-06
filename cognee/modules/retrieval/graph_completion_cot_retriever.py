@@ -95,7 +95,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
     async def get_retrieved_objects(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
-    ) -> List[Edge]:
+    ) -> Union[List[Edge], List[List[Edge]]]:
         """
         Run chain-of-thought completion with optional structured output.
 
@@ -372,7 +372,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         query: Optional[str] = None,
         query_batch: Optional[List[str]] = None,
         retrieved_objects=None,
-    ) -> str | List[str]:
+    ) -> Union[str, List[str]]:
         triplets = retrieved_objects
 
         if query:
