@@ -44,10 +44,7 @@ class S3BinaryData(IngestionData):
             file_path = os.path.basename(self.s3_path)
 
             logger.debug(
-                "Opening S3 file for metadata",
-                s3_path=self.s3_path,
-                file_path=file_path,
-                storage_path=file_dir_path,
+                f"Opening S3 file for metadata: s3_path={self.s3_path}, file_path={file_path}, storage_path={file_dir_path}"
             )
 
             start_time = time.perf_counter()
@@ -63,25 +60,17 @@ class S3BinaryData(IngestionData):
                 elapsed = time.perf_counter() - start_time
                 file_size = self.metadata.get("file_size")
                 logger.info(
-                    "Retrieved metadata from S3",
-                    s3_path=self.s3_path,
-                    file_path=file_path,
-                    file_size_bytes=file_size,
-                    duration_seconds=round(elapsed, 3),
+                    f"Retrieved metadata from S3: s3_path={self.s3_path}, file_path={file_path}, "
+                    f"file_size_bytes={file_size}, duration_seconds={round(elapsed, 3)}"
                 )
                 if elapsed > S3_SLOW_OPERATION_THRESHOLD_SEC:
                     logger.warning(
-                        "S3 metadata read slow",
-                        s3_path=self.s3_path,
-                        duration_seconds=round(elapsed, 2),
-                        threshold_seconds=S3_SLOW_OPERATION_THRESHOLD_SEC,
+                        f"S3 metadata read slow: s3_path={self.s3_path}, duration_seconds={round(elapsed, 2)}, "
+                        f"threshold_seconds={S3_SLOW_OPERATION_THRESHOLD_SEC}"
                     )
             except Exception as error:
                 logger.error(
-                    "S3 metadata operation failed",
-                    s3_path=self.s3_path,
-                    file_path=file_path,
-                    error=str(error),
+                    f"S3 metadata operation failed: s3_path={self.s3_path}, file_path={file_path}, error={error}",
                     exc_info=True,
                 )
                 raise
@@ -94,10 +83,7 @@ class S3BinaryData(IngestionData):
         file_path = os.path.basename(self.s3_path)
 
         logger.debug(
-            "Opening S3 file for read",
-            s3_path=self.s3_path,
-            file_path=file_path,
-            storage_path=file_dir_path,
+            f"Opening S3 file for read: s3_path={self.s3_path}, file_path={file_path}, storage_path={file_dir_path}"
         )
 
         start_time = time.perf_counter()
@@ -108,34 +94,24 @@ class S3BinaryData(IngestionData):
                 elapsed_open = time.perf_counter() - start_time
                 file_size = self.metadata.get("file_size") if self.metadata else None
                 logger.info(
-                    "Opened S3 file for read",
-                    s3_path=self.s3_path,
-                    file_path=file_path,
-                    file_size_bytes=file_size,
-                    open_duration_seconds=round(elapsed_open, 3),
+                    f"Opened S3 file for read: s3_path={self.s3_path}, file_path={file_path}, "
+                    f"file_size_bytes={file_size}, open_duration_seconds={round(elapsed_open, 3)}"
                 )
                 if elapsed_open > S3_SLOW_OPERATION_THRESHOLD_SEC:
                     logger.warning(
-                        "S3 file open slow",
-                        s3_path=self.s3_path,
-                        duration_seconds=round(elapsed_open, 2),
-                        threshold_seconds=S3_SLOW_OPERATION_THRESHOLD_SEC,
+                        f"S3 file open slow: s3_path={self.s3_path}, duration_seconds={round(elapsed_open, 2)}, "
+                        f"threshold_seconds={S3_SLOW_OPERATION_THRESHOLD_SEC}"
                     )
                 try:
                     yield file
                 finally:
                     total_elapsed = time.perf_counter() - start_time
                     logger.debug(
-                        "Closed S3 file after read",
-                        s3_path=self.s3_path,
-                        total_duration_seconds=round(total_elapsed, 3),
+                        f"Closed S3 file after read: s3_path={self.s3_path}, total_duration_seconds={round(total_elapsed, 3)}"
                     )
         except Exception as error:
             logger.error(
-                "S3 file open failed",
-                s3_path=self.s3_path,
-                file_path=file_path,
-                error=str(error),
+                f"S3 file open failed: s3_path={self.s3_path}, file_path={file_path}, error={error}",
                 exc_info=True,
             )
             raise
