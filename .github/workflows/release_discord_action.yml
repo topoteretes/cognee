@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
       - name: Github Releases To Discord
         uses: SethCohen/github-releases-to-discord@v1.16.2
         with:
