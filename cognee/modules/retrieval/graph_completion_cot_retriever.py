@@ -117,10 +117,6 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             raise QueryValidationError(
                 message="You cannot use batch queries with session saving currently."
             )
-        if query_batch and self.save_interaction:
-            raise QueryValidationError(
-                message="Cannot use batch queries with interaction saving currently."
-            )
 
         is_query_valid, msg = validate_queries(query, query_batch)
         if not is_query_valid:
