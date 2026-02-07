@@ -133,7 +133,7 @@ Be careful with deletion operations as they are irreversible.
                         else:
                             user = await get_user(args.user_id)
 
-                        await cognee_datasets.delete_dataset(dataset_id=dataset_id, user=user)
+                        await cognee_datasets.empty_dataset(dataset_id=dataset_id, user=user)
                     elif hasattr(args, "dataset_id") and hasattr(args, "data_id"):
                         await cognee_datasets.delete_data(args.dataset_id, args.data_id)
                 except Exception as e:

@@ -103,11 +103,11 @@ async def run_tasks(
                         pipeline_run_id,
                         {
                             **(context or {}),
-                            "user": user,
+                            "user": user,  # Used by tasks via context["user"]
                             "data": data_item,
                             "dataset": dataset,
                         },
-                        user,
+                        user,  # Used by pipeline framework for telemetry
                         incremental_loading,
                     )
                 )

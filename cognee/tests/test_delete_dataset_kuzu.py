@@ -174,7 +174,7 @@ async def main(mock_create_structured_output: AsyncMock):
             maries_initial_nodes_by_collection[collection_name] = []
         maries_initial_nodes_by_collection[collection_name].append(node)
 
-    await datasets.delete_dataset(johns_dataset_id, default_user)  # type: ignore
+    await datasets.empty_dataset(johns_dataset_id, default_user)  # type: ignore
 
     graph_engine = await get_graph_engine()
     nodes, edges = await graph_engine.get_graph_data()
@@ -193,7 +193,7 @@ async def main(mock_create_structured_output: AsyncMock):
             vector_items = await vector_engine.retrieve(collection_name, query_node_ids)
             assert len(vector_items) == 0, "Vector items are not deleted."
 
-    await datasets.delete_dataset(maries_dataset_id, new_user)  # type: ignore
+    await datasets.empty_dataset(maries_dataset_id, new_user)  # type: ignore
 
     graph_engine = await get_graph_engine()
     final_nodes, final_edges = await graph_engine.get_graph_data()

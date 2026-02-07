@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID
 from typing import Optional
 
@@ -55,7 +56,7 @@ class datasets:
         return await get_pipeline_status(dataset_ids, pipeline_name="cognify_pipeline")
 
     @staticmethod
-    async def delete_dataset(dataset_id: UUID, user: Optional[User] = None):
+    async def empty_dataset(dataset_id: UUID, user: Optional[User] = None):
         from cognee.modules.data.methods import delete_data, delete_dataset
 
         if not user:
@@ -72,8 +73,7 @@ class datasets:
 
         dataset_data = await get_dataset_data(dataset.id)
 
-        for data in dataset_data:
-            await delete_data(data)
+        await asyncio.gather(*[delete_data(data) for data in dataset_data])
 
         return await delete_dataset(dataset)
 
@@ -128,4 +128,4 @@ class datasets:
         for dataset in user_datasets:
             await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
-            await datasets.delete_dataset(dataset.id, user)
+            await datasets.empty_dataset(dataset.id, user)

@@ -446,7 +446,7 @@ async def test_dataset_deletion_removes_files():
 
     # Delete the entire dataset
     logger.info(f"Deleting dataset {dataset_id}...")
-    await datasets.delete_dataset(dataset_id, user=user)
+    await datasets.empty_dataset(dataset_id, user=user)
 
     # Verify dataset is deleted
     from cognee.modules.data.methods import get_dataset

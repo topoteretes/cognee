@@ -325,7 +325,7 @@ class TestDeleteCommand:
         get_deletion_counts_mock.return_value = DeletionCountsPreview()
 
         delete_dataset_mock = AsyncMock()
-        datasets_mock.delete_dataset = delete_dataset_mock
+        datasets_mock.empty_dataset = delete_dataset_mock
 
         command = DeleteCommand()
         args = argparse.Namespace(dataset_id=expected_dataset_id, user_id=expected_user_id)

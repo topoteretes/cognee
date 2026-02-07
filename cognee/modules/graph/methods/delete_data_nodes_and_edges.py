@@ -3,9 +3,7 @@ from typing import Dict, List
 
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_engine
-from cognee.infrastructure.environment.config.is_backend_access_control_enabled import (
-    is_multi_user_support_possible,
-)
+from cognee.context_global_variables import is_multi_user_support_possible
 from cognee.modules.graph.legacy.has_edges_in_legacy_ledger import has_edges_in_legacy_ledger
 from cognee.modules.graph.legacy.has_nodes_in_legacy_ledger import has_nodes_in_legacy_ledger
 from cognee.modules.graph.methods import (

@@ -162,7 +162,7 @@ async def main(mock_create_structured_output: AsyncMock):
     initial_node_ids = set([node[0] for node in initial_nodes])
 
     default_user = await get_default_user()
-    await datasets.delete_dataset(johns_dataset_id, default_user)  # type: ignore
+    await datasets.empty_dataset(johns_dataset_id, default_user)  # type: ignore
 
     nodes, edges = await graph_engine.get_graph_data()
     assert len(nodes) == 9 and len(edges) == 10, "Nodes and edges are not deleted."
@@ -194,7 +194,7 @@ async def main(mock_create_structured_output: AsyncMock):
             vector_items = await vector_engine.retrieve(collection_name, query_node_ids)
             assert len(vector_items) == 0, "Vector items are not deleted."
 
-    await datasets.delete_dataset(maries_dataset_id, new_user)  # type: ignore
+    await datasets.empty_dataset(maries_dataset_id, new_user)  # type: ignore
 
     final_nodes, final_edges = await graph_engine.get_graph_data()
     assert len(final_nodes) == 0 and len(final_edges) == 0, "Nodes and edges are not deleted."

@@ -13,7 +13,6 @@ This folder is deprecated. All examples have been reorganized into `/new-example
 | `python/ontology_demo_example_2.py` | `new-examples/demos/ontology_medical_comparison/` |
 | `python/temporal_example.py` | `new-examples/demos/temporal_awareness_example.py` |
 | `python/conversation_session_persistence_example.py` | `new-examples/demos/conversation_session_persistence_example.py` |
-| `python/feedback_enrichment_minimal_example.py` | `new-examples/demos/feedback_enrichment_minimal_example.py` |
 | `python/simple_node_set_example.py` | `new-examples/demos/nodeset_memory_grouping_with_tags_example.py` |
 | `python/weighted_edges_example.py` | `new-examples/demos/weighted_edges_relationships_example.py` |
 | `python/dynamic_multiple_edges_example.py` | `new-examples/demos/dynamic_multiple_weighted_edges_example.py` |

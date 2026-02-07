@@ -18,7 +18,7 @@ async def update(
     graph_db_config: dict = None,
     preferred_loaders: dict[str, dict[str, Any]] = None,
     incremental_loading: bool = True,
-):
+) -> Any:
     """
     Update existing data in Cognee.
 

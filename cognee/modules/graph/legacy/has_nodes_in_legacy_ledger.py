@@ -5,9 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.relational import with_async_session
-from cognee.infrastructure.environment.config.is_backend_access_control_enabled import (
-    is_backend_access_control_enabled,
-)
+from cognee.context_global_variables import backend_access_control_enabled
 from cognee.modules.graph.models import Node
 from .GraphRelationshipLedger import GraphRelationshipLedger
 
@@ -38,7 +36,7 @@ async def has_nodes_in_legacy_ledger(nodes: List[Node], session: AsyncSession):
     if len(legacy_nodes) == 0:
         return [False for __ in nodes]
 
-    if is_backend_access_control_enabled():
+    if backend_access_control_enabled():
         confirmed_nodes = await confirm_nodes_in_graph(legacy_nodes)
         return [node_id in confirmed_nodes for node_id in node_ids]
     else:
