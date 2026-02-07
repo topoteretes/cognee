@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { fetch } from '@/utils';
 import { DataFile } from './useData';
@@ -11,20 +11,7 @@ export interface Dataset {
   status: string;
 }
 
-function filterDatasets(datasets: Dataset[], searchValue: string) {
-  if (searchValue.trim() === "") {
-    return datasets;
-  }
-
-  const lowercaseSearchValue = searchValue.toLowerCase();
-
-  return datasets.filter((dataset) =>
-    dataset.name.toLowerCase().includes(lowercaseSearchValue)
-  );
-}
-
-function useDatasets(useCloud = false, searchValue: string = "") {
-  const allDatasets = useRef<Dataset[]>([]);
+function useDatasets(useCloud = false) {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   // const statusTimeout = useRef<any>(null);
 
@@ -69,32 +56,26 @@ function useDatasets(useCloud = false, searchValue: string = "") {
   //   };
   // }, []);
 
-  useLayoutEffect(() => {
-    setDatasets(filterDatasets(allDatasets.current, searchValue));
-  }, [searchValue]);
-
   const addDataset = useCallback((datasetName: string) => {
     return createDataset({ name: datasetName  }, useCloud)
       .then((dataset) => {
-        const newDatasets = [
-          ...allDatasets.current,
+        setDatasets((datasets) => [
+          ...datasets,
           dataset,
-        ];
-        allDatasets.current = newDatasets;
-        setDatasets(filterDatasets(newDatasets, searchValue));
+        ]);
       });
-  }, [searchValue, useCloud]);
+  }, [useCloud]);
 
   const removeDataset = useCallback((datasetId: string) => {
     return fetch(`/v1/datasets/${datasetId}`, {
       method: 'DELETE',
     }, useCloud)
       .then(() => {
-        const newDatasets = allDatasets.current.filter((dataset) => dataset.id !== datasetId)
-        allDatasets.current = newDatasets;
-        setDatasets(filterDatasets(newDatasets, searchValue));
+        setDatasets((datasets) =>
+          datasets.filter((dataset) => dataset.id !== datasetId)
+        );
       });
-  }, [searchValue, useCloud]);
+  }, [useCloud]);
 
   const fetchDatasets = useCallback(() => {
     return fetch('/v1/datasets', {
@@ -104,8 +85,7 @@ function useDatasets(useCloud = false, searchValue: string = "") {
       }, useCloud)
       .then((response) => response.json())
       .then((datasets) => {
-        allDatasets.current = datasets;
-        setDatasets(filterDatasets(datasets, searchValue));
+        setDatasets(datasets);
 
         // if (datasets.length > 0) {
         //   checkDatasetStatuses(datasets);
@@ -117,38 +97,28 @@ function useDatasets(useCloud = false, searchValue: string = "") {
         console.error('Error fetching datasets:', error);
         throw error;
       });
-  }, [searchValue, useCloud]);
-
-  useEffect(() => {
-    if (allDatasets.current.length === 0) {
-      fetchDatasets();
-    }
-  }, [fetchDatasets]);
+  }, [useCloud]);
 
   const getDatasetData = useCallback((datasetId: string) => {
     return fetch(`/v1/datasets/${datasetId}/data`, {}, useCloud)
       .then((response) => response.json())
       .then((data) => {
-        const datasetIndex = allDatasets.current.findIndex((dataset) => dataset.id === datasetId);
+        const datasetIndex = datasets.findIndex((dataset) => dataset.id === datasetId);
 
         if (datasetIndex >= 0) {
-          const newDatasets = [
-            ...allDatasets.current.slice(0, datasetIndex),
-              {
-              ...allDatasets.current[datasetIndex],
-                data,
-              },
-            ...allDatasets.current.slice(datasetIndex + 1),
-          ];
-
-          allDatasets.current = newDatasets;
-
-          setDatasets(filterDatasets(newDatasets, searchValue));
+          setDatasets((datasets) => [
+           ...datasets.slice(0, datasetIndex),
+            {
+             ...datasets[datasetIndex],
+              data,
+            },
+           ...datasets.slice(datasetIndex + 1),
+          ]);
         }
 
         return data;
       });
-  }, [searchValue, useCloud]);
+  }, [datasets, useCloud]);
 
   const removeDatasetData = useCallback((datasetId: string, dataId: string) => {
     return fetch(`/v1/datasets/${datasetId}/data/${dataId}`, {

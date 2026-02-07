@@ -16,6 +16,9 @@ class GraphRelationshipLedger(Base):
     source_node_id = Column(UUID, nullable=False)
     destination_node_id = Column(UUID, nullable=False)
     creator_function = Column(String, nullable=False)
+    # TODO(security): node_label stores readable entity names (e.g. "Apple", "John").
+    #   Evaluate whether this needs hashing/minimization for SOC2 compliance.
+    #   Align with Pavel/compliance requirements. Tracked as near-term security follow-up.
     node_label = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     deleted_at = Column(DateTime(timezone=True), nullable=True)

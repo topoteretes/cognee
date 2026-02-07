@@ -6,6 +6,10 @@ from cognee.infrastructure.databases.vector.get_vector_engine import get_vector_
 from cognee.context_global_variables import is_multi_user_support_possible
 from cognee.modules.graph.legacy.has_nodes_in_legacy_ledger import has_nodes_in_legacy_ledger
 from cognee.modules.graph.legacy.has_edges_in_legacy_ledger import has_edges_in_legacy_ledger
+from cognee.modules.graph.legacy.mark_ledger_as_deleted import (
+    mark_ledger_edges_as_deleted,
+    mark_ledger_nodes_as_deleted,
+)
 from cognee.modules.graph.methods import (
     delete_dataset_related_edges,
     delete_dataset_related_nodes,
@@ -80,6 +84,12 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Non
                     # Triplet collection might not exist if triplet embedding was never enabled
                     pass
 
+        await mark_ledger_nodes_as_deleted([node.slug for node in non_legacy_nodes])
+        if len(affected_relationships) > 0:
+            await mark_ledger_edges_as_deleted(
+                [edge.relationship_name for edge in non_legacy_relationships]
+            )
+
         await delete_dataset_related_nodes(dataset_id)
         await delete_dataset_related_edges(dataset_id)
     else:
@@ -143,6 +153,12 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Non
                 except Exception:
                     # Triplet collection might not exist if triplet embedding was never enabled
                     pass
+
+        await mark_ledger_nodes_as_deleted([node.slug for node in non_legacy_nodes])
+        if len(affected_relationships) > 0:
+            await mark_ledger_edges_as_deleted(
+                [edge.relationship_name for edge in non_legacy_relationships]
+            )
 
         await delete_dataset_related_nodes(dataset_id)
         await delete_dataset_related_edges(dataset_id)

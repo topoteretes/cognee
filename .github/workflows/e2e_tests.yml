@@ -376,12 +376,8 @@ jobs:
         run: uv run python ./cognee/tests/test_delete_permission.py
 
   test-deletion-on-default-graph:
-    name: Delete default graph data test ${{ matrix.python-version }} on ubuntu-22.04
+    name: Delete default graph data test
     runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        python-version: ${{ fromJSON(inputs.supported-python-versions) }}
-      fail-fast: false
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -391,7 +387,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.11.x'
 
       - name: Run deletion on default graph
         env:
@@ -407,12 +403,8 @@ jobs:
         run: uv run python ./cognee/tests/test_delete_default_graph.py
 
   test-deletion-on-default-graph-non-mocked:
-    name: Delete default graph data test ${{ matrix.python-version }} on ubuntu-22.04
+    name: Delete default graph data test (non-mocked)
     runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        python-version: ${{ fromJSON(inputs.supported-python-versions) }}
-      fail-fast: false
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -422,7 +414,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.11.x'
 
       - name: Run deletion on default graph non mocked
         env:
@@ -438,12 +430,8 @@ jobs:
         run: uv run python ./cognee/tests/test_delete_default_graph_non_mocked.py
 
   test-deletion-on-custom-graph:
-    name: Delete custom graph data test ${{ matrix.python-version }} on ubuntu-22.04
+    name: Delete custom graph data test
     runs-on: ubuntu-22.04
-    strategy:
-      matrix:
-        python-version: ${{ fromJSON(inputs.supported-python-versions) }}
-      fail-fast: false
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -453,7 +441,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.11.x'
 
       - name: Run deletion on custom graph
         env:

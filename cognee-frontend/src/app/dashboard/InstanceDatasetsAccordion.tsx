@@ -9,11 +9,9 @@ import { CTAButton, GhostButton, IconButton, Input, Modal } from "@/ui/elements"
 
 import DatasetsAccordion, { DatasetsAccordionProps } from "./DatasetsAccordion";
 
-interface InstanceDatasetsAccordionProps extends Omit<DatasetsAccordionProps, "title"> {
-  searchValue: string;
-}
+type InstanceDatasetsAccordionProps = Omit<DatasetsAccordionProps, "title">;
 
-export default function InstanceDatasetsAccordion({ searchValue, onDatasetsChange }: InstanceDatasetsAccordionProps) {
+export default function InstanceDatasetsAccordion({ onDatasetsChange }: InstanceDatasetsAccordionProps) {
   const {
     value: isLocalCogneeConnected,
     setTrue: setLocalCogneeConnected,
@@ -75,7 +73,6 @@ export default function InstanceDatasetsAccordion({ searchValue, onDatasetsChang
             </div>
           </div>
         )}
-        searchValue={searchValue}
         tools={isLocalCogneeConnected ? <span className="text-xs text-indigo-600">Connected</span> : <span className="text-xs text-gray-400">Not connected</span>}
         switchCaretPosition={true}
         className="pt-3 pb-1.5"
@@ -93,7 +90,6 @@ export default function InstanceDatasetsAccordion({ searchValue, onDatasetsChang
               </div>
             </div>
           )}
-          searchValue={searchValue}
           tools={<span className="text-xs text-indigo-600">Connected</span>}
           switchCaretPosition={true}
           className="pt-3 pb-1.5"
