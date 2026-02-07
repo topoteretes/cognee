@@ -373,7 +373,7 @@ function CellResult({ content }: { content: [] }) {
         // Insights search returns uncommon graph data structure
         if (Array.from(line).length > 0 && Array.isArray(line[0]) && line[0][1]["relationship_name"]) {
           const data = transformInsightsGraphData(line);
-          
+
           parsedContent.push(
             <div key={line[0][1]["relationship_name"]} className="flex flex-col w-full h-full min-h-80 bg-white">
               <span className="text-sm pl-2 mb-4">reasoning graph</span>
