@@ -9,11 +9,7 @@ from cognee.modules.graph.models import Edge
 
 @with_async_session
 async def get_dataset_related_edges(dataset_id: UUID, session: AsyncSession):
-    return (
-        await session.scalars(
-            select(Edge).where(Edge.dataset_id == dataset_id).distinct(Edge.relationship_name)
-        )
-    ).all()
+    return (await session.scalars(select(Edge).where(Edge.dataset_id == dataset_id))).all()
 
 
 @with_async_session

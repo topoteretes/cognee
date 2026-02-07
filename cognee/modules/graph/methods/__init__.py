@@ -10,6 +10,7 @@ from .get_data_related_edges import get_data_related_edges, get_global_data_rela
 from .delete_data_related_nodes import delete_data_related_nodes
 from .delete_data_related_edges import delete_data_related_edges
 from .delete_data_nodes_and_edges import delete_data_nodes_and_edges
+from .delete_from_graph_and_vector import delete_from_graph_and_vector
 
 from .get_dataset_related_nodes import get_dataset_related_nodes, get_global_dataset_related_nodes
 from .get_dataset_related_edges import get_dataset_related_edges, get_global_dataset_related_edges
