@@ -7,10 +7,17 @@ from cognee.modules.visualization.cognee_network_visualization import (
 @pytest.mark.asyncio
 async def test_create_cognee_style_network_with_logo():
     nodes_data = [
-        (1, {
-            "type": "Entity", "name": "Node1", "updated_at": 123, "created_at": 123,
-            "source_task": "extract_graph_from_data", "source_pipeline": "cognify_pipeline",
-        }),
+        (
+            1,
+            {
+                "type": "Entity",
+                "name": "Node1",
+                "updated_at": 123,
+                "created_at": 123,
+                "source_task": "extract_graph_from_data",
+                "source_pipeline": "cognify_pipeline",
+            },
+        ),
         (
             2,
             {

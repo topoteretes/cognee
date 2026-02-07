@@ -66,22 +66,20 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
                 if key.startswith("weight_") and isinstance(value, (int, float)):
                     all_weights[key[7:]] = value
 
-        links_list.append({
-            "source": source,
-            "target": target,
-            "relation": relation,
-            "weight": primary_weight,
-            "all_weights": all_weights,
-            "relationship_type": edge_info.get("relationship_type") if edge_info else None,
-            "edge_info": edge_info if edge_info else {},
-        })
+        links_list.append(
+            {
+                "source": source,
+                "target": target,
+                "relation": relation,
+                "weight": primary_weight,
+                "all_weights": all_weights,
+                "relationship_type": edge_info.get("relationship_type") if edge_info else None,
+                "edge_info": edge_info if edge_info else {},
+            }
+        )
 
-    task_color_map = _generate_provenance_colors(
-        [n.get("source_task") for n in nodes_list]
-    )
-    pipeline_color_map = _generate_provenance_colors(
-        [n.get("source_pipeline") for n in nodes_list]
-    )
+    task_color_map = _generate_provenance_colors([n.get("source_task") for n in nodes_list])
+    pipeline_color_map = _generate_provenance_colors([n.get("source_pipeline") for n in nodes_list])
 
     html_content = _build_html(nodes_list, links_list, task_color_map, pipeline_color_map)
 
@@ -107,9 +105,7 @@ def _build_html(nodes_list, links_list, task_color_map=None, pipeline_color_map=
     html_template = _get_html_template()
     html_content = html_template.replace("__NODES_DATA__", _safe_json_embed(nodes_list))
     html_content = html_content.replace("__LINKS_DATA__", _safe_json_embed(links_list))
-    html_content = html_content.replace(
-        "__TASK_COLORS__", _safe_json_embed(task_color_map or {})
-    )
+    html_content = html_content.replace("__TASK_COLORS__", _safe_json_embed(task_color_map or {}))
     html_content = html_content.replace(
         "__PIPELINE_COLORS__", _safe_json_embed(pipeline_color_map or {})
     )
