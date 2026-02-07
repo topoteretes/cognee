@@ -1,5 +1,6 @@
 import asyncio
 from os import path
+from uuid import UUID
 import lancedb
 from pydantic import BaseModel
 from lancedb.pydantic import LanceModel, Vector
@@ -204,15 +205,19 @@ class LanceDBAdapter(VectorDBInterface):
             )
 
     async def retrieve(self, collection_name: str, data_point_ids: list[str]):
-        collection = await self.get_collection(collection_name)
+        try:
+            collection = await self.get_collection(collection_name)
+        except CollectionNotFoundError:
+            # If collection doesn't exist, return empty list (no items to retrieve)
+            return []
 
         if len(data_point_ids) == 1:
-            results = await collection.query().where(f"id = '{data_point_ids[0]}'")
+            query = collection.query().where(f"id = '{data_point_ids[0]}'")
         else:
-            results = await collection.query().where(f"id IN {tuple(data_point_ids)}")
+            query = collection.query().where(f"id IN {tuple(data_point_ids)}")
 
         # Convert query results to list format
-        results_list = results.to_list() if hasattr(results, "to_list") else list(results)
+        results_list = await query.to_list()
 
         return [
             ScoredResult(
@@ -231,6 +236,7 @@ class LanceDBAdapter(VectorDBInterface):
         limit: Optional[int] = 15,
         with_vector: bool = False,
         normalized: bool = True,
+        include_payload: bool = False,
     ):
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
@@ -247,17 +253,27 @@ class LanceDBAdapter(VectorDBInterface):
         if limit <= 0:
             return []
 
-        result_values = await collection.vector_search(query_vector).limit(limit).to_list()
+        # Note: Exclude payload if not needed to optimize performance
+        select_columns = (
+            ["id", "vector", "payload", "_distance"]
+            if include_payload
+            else ["id", "vector", "_distance"]
+        )
+        result_values = (
+            await collection.vector_search(query_vector)
+            .select(select_columns)
+            .limit(limit)
+            .to_list()
+        )
 
         if not result_values:
             return []
-
         normalized_values = normalize_distances(result_values)
 
         return [
             ScoredResult(
                 id=parse_id(result["id"]),
-                payload=result["payload"],
+                payload=result["payload"] if include_payload else None,
                 score=normalized_values[value_index],
             )
             for value_index, result in enumerate(result_values)
@@ -269,6 +285,7 @@ class LanceDBAdapter(VectorDBInterface):
         query_texts: List[str],
         limit: Optional[int] = None,
         with_vectors: bool = False,
+        include_payload: bool = False,
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
@@ -279,12 +296,17 @@ class LanceDBAdapter(VectorDBInterface):
                     query_vector=query_vector,
                     limit=limit,
                     with_vector=with_vectors,
+                    include_payload=include_payload,
                 )
                 for query_vector in query_vectors
             ]
         )
 
-    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
+        # Skip deletion if collection doesn't exist
+        if not await self.has_collection(collection_name):
+            return
+
         collection = await self.get_collection(collection_name)
 
         # Delete one at a time to avoid commit conflicts

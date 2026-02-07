@@ -83,6 +83,18 @@ async def setup_test_environment_with_chunks_simple():
     try:
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
+
+        from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
+        from cognee.infrastructure.databases.vector.create_vector_engine import (
+            _create_vector_engine,
+        )
+        from cognee.infrastructure.databases.relational.create_relational_engine import (
+            create_relational_engine,
+        )
+
+        _create_graph_engine.cache_clear()
+        _create_vector_engine.cache_clear()
+        create_relational_engine.cache_clear()
     except Exception:
         pass
 
@@ -174,6 +186,18 @@ async def setup_test_environment_with_chunks_complex():
     try:
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
+
+        from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
+        from cognee.infrastructure.databases.vector.create_vector_engine import (
+            _create_vector_engine,
+        )
+        from cognee.infrastructure.databases.relational.create_relational_engine import (
+            create_relational_engine,
+        )
+
+        _create_graph_engine.cache_clear()
+        _create_vector_engine.cache_clear()
+        create_relational_engine.cache_clear()
     except Exception:
         pass
 
@@ -195,11 +219,33 @@ async def setup_test_environment_empty():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
+    from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
+    from cognee.infrastructure.databases.relational.create_relational_engine import (
+        create_relational_engine,
+    )
+
+    _create_graph_engine.cache_clear()
+    _create_vector_engine.cache_clear()
+    create_relational_engine.cache_clear()
+
     yield
 
     try:
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
+
+        from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
+        from cognee.infrastructure.databases.vector.create_vector_engine import (
+            _create_vector_engine,
+        )
+        from cognee.infrastructure.databases.relational.create_relational_engine import (
+            create_relational_engine,
+        )
+
+        _create_graph_engine.cache_clear()
+        _create_vector_engine.cache_clear()
+        create_relational_engine.cache_clear()
     except Exception:
         pass
 
@@ -208,8 +254,13 @@ async def setup_test_environment_empty():
 async def test_rag_completion_context_simple(setup_test_environment_with_chunks_simple):
     """Integration test: verify CompletionRetriever can retrieve context (simple)."""
     retriever = CompletionRetriever()
+    query = "Mike"
 
-    context = await retriever.get_context("Mike")
+    retrieved_objects = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(
+        query=query, retrieved_objects=retrieved_objects
+    )
 
     assert isinstance(context, str), "Context should be a string"
     assert "Mike Broski" in context, "Failed to get Mike Broski"
@@ -219,8 +270,13 @@ async def test_rag_completion_context_simple(setup_test_environment_with_chunks_
 async def test_rag_completion_context_multiple_chunks(setup_test_environment_with_chunks_simple):
     """Integration test: verify CompletionRetriever can retrieve context from multiple chunks."""
     retriever = CompletionRetriever()
+    query = "Steve"
 
-    context = await retriever.get_context("Steve")
+    retrieved_objects = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(
+        query=query, retrieved_objects=retrieved_objects
+    )
 
     assert isinstance(context, str), "Context should be a string"
     assert "Steve Rodger" in context, "Failed to get Steve Rodger"
@@ -231,8 +287,13 @@ async def test_rag_completion_context_complex(setup_test_environment_with_chunks
     """Integration test: verify CompletionRetriever can retrieve context (complex)."""
     # TODO: top_k doesn't affect the output, it should be fixed.
     retriever = CompletionRetriever(top_k=20)
+    query = "Christina"
 
-    context = await retriever.get_context("Christina")
+    retrieved_objects = await retriever.get_retrieved_objects(query)
+
+    context = await retriever.get_context_from_objects(
+        query=query, retrieved_objects=retrieved_objects
+    )
 
     assert context[0:15] == "Christina Mayer", "Failed to get Christina Mayer"
 
@@ -241,14 +302,18 @@ async def test_rag_completion_context_complex(setup_test_environment_with_chunks
 async def test_get_rag_completion_context_on_empty_graph(setup_test_environment_empty):
     """Integration test: verify CompletionRetriever handles empty graph correctly."""
     retriever = CompletionRetriever()
+    query = "Christina Mayer"
 
     with pytest.raises(NoDataError):
-        await retriever.get_context("Christina Mayer")
+        await retriever.get_retrieved_objects(query)
 
     vector_engine = get_vector_engine()
     await vector_engine.create_collection(
         "DocumentChunk_text", payload_schema=DocumentChunkWithEntities
     )
 
-    context = await retriever.get_context("Christina Mayer")
+    retrieved_objects = await retriever.get_retrieved_objects(query)
+    context = await retriever.get_context_from_objects(
+        query=query, retrieved_objects=retrieved_objects
+    )
     assert context == "", "Returned context should be empty on an empty graph"

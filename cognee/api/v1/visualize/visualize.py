@@ -1,3 +1,5 @@
+from typing import Any
+
 from cognee.modules.visualization.cognee_network_visualization import (
     cognee_network_visualization,
 )
@@ -11,7 +13,7 @@ import asyncio
 logger = get_logger()
 
 
-async def visualize_graph(destination_file_path: str = None):
+async def visualize_graph(destination_file_path: str = None) -> Any:
     graph_engine = await get_graph_engine()
     graph_data = await graph_engine.get_graph_data()
 

@@ -6,6 +6,9 @@ cognee/.data/
 
 code_pipeline_output*/
 
+# Test output files
+test_outputs/
+
 *.lance/
 .DS_Store
 # Byte-compiled / optimized / DLL files
@@ -199,3 +202,5 @@ SWE-bench_testsample/
 
 # ChromaDB Data
 .chromadb_data/
+
+deployment/helm/values-local.yml

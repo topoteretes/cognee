@@ -1,31 +1,26 @@
 # .gitguardian.yml
-version: v1
+version: 2
 
-secret-scan:
-  # Ignore specific files
-  excluded-paths:
-    - '.env.template'
-    - '.github/workflows/*.yml'
-    - 'examples/**'
-    - 'tests/**'
+secret:
+  # Ignore specific file paths from scanning
+  ignored-paths:
+    - ".env.template"
+    - ".github/workflows/*.yml"
+    - "examples/**"
+    - "tests/**"
+    - "docker-compose.yml"
+    - "deployment/helm/docker-compose-helm.yml"
 
-  # Ignore specific patterns
-  excluded-detectors:
-    - 'Generic Password'
-    - 'Generic High Entropy Secret'
+  # Ignore specific detector types (test/CI credentials, not real secrets)
+  ignored-detectors:
+    - generic_password
+    - generic_high_entropy_secret
 
-  # Ignore by commit (if needed)
-  excluded-commits:
-    - '782bbb4'
-    - 'f857e07'
-
-  # Custom rules for template files
-  paths-ignore:
-    - path: '.env.template'
-      comment: 'Template file with placeholder values'
-    - path: '.github/workflows/search_db_tests.yml'
-      comment: 'Test workflow with test credentials'
-    - path: 'docker-compose.yml'
-      comment: 'Development docker compose with test credentials (neo4j/pleaseletmein, postgres cognee/cognee)'
-    - path: 'deployment/helm/docker-compose-helm.yml'
-      comment: 'Helm deployment docker compose with test postgres credentials (cognee/cognee)'
+  # Ignore specific known false-positive matches
+  ignored-matches:
+    - name: "CI test postgres credentials in e2e_tests.yml"
+      match: "cognee"
+    - name: "CI test postgres credentials in search_db_tests.yml"
+      match: "cognee"
+    - name: "Docker compose neo4j test password"
+      match: "pleaseletmein"

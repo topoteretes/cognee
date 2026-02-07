@@ -4,7 +4,7 @@ from typing import Union, Optional, List, Type
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
-from cognee.modules.search.types import SearchResult, SearchType, CombinedSearchResult
+from cognee.modules.search.types import SearchResult, SearchType
 from cognee.modules.users.methods import get_default_user
 from cognee.modules.search.methods import search as search_function
 from cognee.modules.data.methods import get_authorized_existing_datasets
@@ -29,14 +29,13 @@ async def search(
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
-    save_interaction: bool = False,
-    last_k: Optional[int] = 1,
     only_context: bool = False,
-    use_combined_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
-) -> Union[List[SearchResult], CombinedSearchResult]:
+    verbose: bool = False,
+    retriever_specific_config: Optional[dict] = None,
+) -> List[SearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
 
@@ -122,9 +121,11 @@ async def search(
 
         node_name: Filter results to specific named entities (for targeted search).
 
-        save_interaction: Save interaction (query, context, answer connected to triplet endpoints) results into the graph or not
-
         session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
+
+        verbose: If True, returns detailed result information including graph representation (when possible).
+
+        retriever_specific_config: Optional dictionary of additional configuration parameters specific to the retriever being used.
 
     Returns:
         list: Search results in format determined by query_type:
@@ -211,13 +212,12 @@ async def search(
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
-        save_interaction=save_interaction,
-        last_k=last_k,
         only_context=only_context,
-        use_combined_context=use_combined_context,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
+        verbose=verbose,
+        retriever_specific_config=retriever_specific_config,
     )
 
     return filtered_search_results

@@ -31,14 +31,18 @@ async def test_get_context_success(mock_vector_engine):
         "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
         return_value=mock_vector_engine,
     ):
-        context = await retriever.get_context("test query")
+        objects = await retriever.get_retrieved_objects("test query")
+        context = await retriever.get_context_from_objects("test query", objects)
+        await retriever.get_completion_from_context("test query", objects, context)
 
     assert context == "Alice knows Bob\nBob works at Tech Corp"
-    mock_vector_engine.search.assert_awaited_once_with("Triplet_text", "test query", limit=5)
+    mock_vector_engine.search.assert_awaited_once_with(
+        "Triplet_text", "test query", limit=5, include_payload=True
+    )
 
 
 @pytest.mark.asyncio
-async def test_get_context_no_collection(mock_vector_engine):
+async def test_get_objects_no_collection(mock_vector_engine):
     """Test that NoDataError is raised when Triplet_text collection doesn't exist."""
     mock_vector_engine.has_collection.return_value = False
 
@@ -49,7 +53,7 @@ async def test_get_context_no_collection(mock_vector_engine):
         return_value=mock_vector_engine,
     ):
         with pytest.raises(NoDataError, match="create_triplet_embeddings"):
-            await retriever.get_context("test query")
+            await retriever.get_retrieved_objects("test query")
 
 
 @pytest.mark.asyncio
@@ -63,13 +67,13 @@ async def test_get_context_empty_results(mock_vector_engine):
         "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
         return_value=mock_vector_engine,
     ):
-        context = await retriever.get_context("test query")
+        context = await retriever.get_context_from_objects("test query", [])
 
     assert context == ""
 
 
 @pytest.mark.asyncio
-async def test_get_context_collection_not_found_error(mock_vector_engine):
+async def test_get_objects_collection_not_found_error(mock_vector_engine):
     """Test that CollectionNotFoundError is converted to NoDataError."""
     mock_vector_engine.has_collection.side_effect = CollectionNotFoundError("Collection not found")
 
@@ -80,7 +84,7 @@ async def test_get_context_collection_not_found_error(mock_vector_engine):
         return_value=mock_vector_engine,
     ):
         with pytest.raises(NoDataError, match="No data found"):
-            await retriever.get_context("test query")
+            await retriever.get_retrieved_objects("test query")
 
 
 @pytest.mark.asyncio
@@ -98,7 +102,8 @@ async def test_get_context_empty_payload_text(mock_vector_engine):
         return_value=mock_vector_engine,
     ):
         with pytest.raises(KeyError):
-            await retriever.get_context("test query")
+            objects = await retriever.get_retrieved_objects("test query")
+            await retriever.get_context_from_objects("test query", retrieved_objects=objects)
 
 
 @pytest.mark.asyncio
@@ -115,7 +120,8 @@ async def test_get_context_single_triplet(mock_vector_engine):
         "cognee.modules.retrieval.triplet_retriever.get_vector_engine",
         return_value=mock_vector_engine,
     ):
-        context = await retriever.get_context("test query")
+        objects = await retriever.get_retrieved_objects("test query")
+        context = await retriever.get_context_from_objects("test query", retrieved_objects=objects)
 
     assert context == "Single triplet"
 
@@ -172,7 +178,7 @@ async def test_get_completion_without_context(mock_vector_engine):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query")
+        completion = await retriever.get_completion_from_context("test query", None, None)
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -195,7 +201,9 @@ async def test_get_completion_with_provided_context(mock_vector_engine):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query", context="Provided context")
+        completion = await retriever.get_completion_from_context(
+            "test query", None, context="Provided context"
+        )
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -210,7 +218,7 @@ async def test_get_completion_with_session(mock_vector_engine):
     mock_vector_engine.has_collection.return_value = True
     mock_vector_engine.search.return_value = [mock_result]
 
-    retriever = TripletRetriever()
+    retriever = TripletRetriever(session_id="test_session")
 
     mock_user = MagicMock()
     mock_user.id = "test-user-id"
@@ -243,7 +251,9 @@ async def test_get_completion_with_session(mock_vector_engine):
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = mock_user
 
-        completion = await retriever.get_completion("test query", session_id="test_session")
+        objects = await retriever.get_retrieved_objects("test query")
+        context = await retriever.get_context_from_objects("test query", retrieved_objects=objects)
+        completion = await retriever.get_completion_from_context("test query", objects, context)
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -278,7 +288,9 @@ async def test_get_completion_with_session_no_user_id(mock_vector_engine):
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = None  # No user
 
-        completion = await retriever.get_completion("test query")
+        objects = await retriever.get_retrieved_objects("test query")
+        context = await retriever.get_context_from_objects("test query", retrieved_objects=objects)
+        completion = await retriever.get_completion_from_context("test query", objects, context)
 
     assert isinstance(completion, list)
     assert len(completion) == 1
@@ -297,7 +309,7 @@ async def test_get_completion_with_response_model(mock_vector_engine):
     mock_vector_engine.has_collection.return_value = True
     mock_vector_engine.search.return_value = [mock_result]
 
-    retriever = TripletRetriever()
+    retriever = TripletRetriever(response_model=TestModel)
 
     with (
         patch(
@@ -314,7 +326,9 @@ async def test_get_completion_with_response_model(mock_vector_engine):
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
 
-        completion = await retriever.get_completion("test query", response_model=TestModel)
+        objects = await retriever.get_retrieved_objects("test query")
+        context = await retriever.get_context_from_objects("test query", retrieved_objects=objects)
+        completion = await retriever.get_completion_from_context("test query", objects, context)
 
     assert isinstance(completion, list)
     assert len(completion) == 1

@@ -30,7 +30,7 @@ jobs:
           LLM_MODEL: "gemini/gemini-2.0-flash"
           EMBEDDING_PROVIDER: "gemini"
           EMBEDDING_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          EMBEDDING_MODEL: "gemini/text-embedding-004"
+          EMBEDDING_MODEL: "gemini/gemini-embedding-001"
           EMBEDDING_DIMENSIONS: "768"
           EMBEDDING_MAX_TOKENS: "8076"
         run: uv run python ./examples/python/simple_example.py

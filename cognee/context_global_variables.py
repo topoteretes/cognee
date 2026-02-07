@@ -4,8 +4,11 @@ from typing import Union
 from uuid import UUID
 
 from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
-from cognee.infrastructure.databases.graph.config import get_graph_config
+from cognee.infrastructure.databases.vector.config import (
+    get_vectordb_config,
+    get_vectordb_context_config,
+)
+from cognee.infrastructure.databases.graph.config import get_graph_config, get_graph_context_config
 from cognee.infrastructure.databases.utils import get_or_create_dataset_database
 from cognee.infrastructure.databases.utils import resolve_dataset_database_connection_info
 from cognee.infrastructure.files.storage.config import file_storage_config
@@ -83,6 +86,19 @@ def backend_access_control_enabled():
     return False
 
 
+VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "falkor"]
+GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["kuzu", "falkor"]
+
+
+def is_multi_user_support_possible():
+    graph_config = get_graph_context_config()
+    vector_config = get_vectordb_context_config()
+    return (
+        graph_config["graph_database_provider"] in GRAPH_DBS_WITH_MULTI_USER_SUPPORT
+        and vector_config["vector_db_provider"] in VECTOR_DBS_WITH_MULTI_USER_SUPPORT
+    )
+
+
 async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):
     """
     If backend access control is enabled this function will ensure all datasets have their own databases,
@@ -121,13 +137,17 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     )
 
     # Set vector and graph database configuration based on dataset database information
-    # TODO: Add better handling of vector and graph config accross Cognee.
+    # TODO: Add better handling of vector and graph config across Cognee.
     #  LRU_CACHE takes into account order of inputs, if order of inputs is changed it will be registered as a new DB adapter
     vector_config = {
         "vector_db_provider": dataset_database.vector_database_provider,
         "vector_db_url": dataset_database.vector_database_url,
         "vector_db_key": dataset_database.vector_database_key,
         "vector_db_name": dataset_database.vector_database_name,
+        "vector_db_port": dataset_database.vector_database_connection_info.get("port", ""),
+        "vector_db_host": dataset_database.vector_database_connection_info.get("host", ""),
+        "vector_db_username": dataset_database.vector_database_connection_info.get("username", ""),
+        "vector_db_password": dataset_database.vector_database_connection_info.get("password", ""),
     }
 
     graph_config = {

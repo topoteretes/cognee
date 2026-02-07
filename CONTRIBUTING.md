@@ -76,7 +76,7 @@ git clone https://github.com/<your-github-username>/cognee.git
 cd cognee
 ```
 In case you are working on Vector and Graph Adapters
-1. Fork the [**cognee**](https://github.com/topoteretes/cognee-community) repository
+1. Fork the [**cognee-community**](https://github.com/topoteretes/cognee-community) repository
 2. Clone your fork:
 ```shell
 git clone https://github.com/<your-github-username>/cognee-community.git
@@ -120,6 +120,21 @@ or
 uv run python examples/python/simple_example.py
 ```
 
+### Running Simple Example
+
+Change .env.example into .env and provide your OPENAI_API_KEY as LLM_API_KEY
+
+Make sure to run ```shell uv sync ``` in the root cloned folder or set up a virtual environment to run cognee
+
+```shell
+python cognee/cognee/examples/python/simple_example.py
+```
+or
+
+```shell
+uv run python cognee/cognee/examples/python/simple_example.py
+```
+
 ## 4. 📤 Submitting Changes
 
 1. Make sure that `pre-commit` and hooks are installed. See `Required tools` section for more information. Try executing `pre-commit run` if you are not sure.
@@ -134,6 +149,7 @@ git push origin feature/your-feature-name
    - Go to the [**cognee** repository](https://github.com/topoteretes/cognee) or [cognee community repository](https://github.com/topoteretes/cognee-community)
    - Click "Compare & Pull Request" and open a PR against dev branch
    - Fill in the PR template with details about your changes
+   - You MUST provide screenshots of unit and integration tests passing on your machine. We can't merge PRs otherwise
 
 ## 5. 📜 Developer Certificate of Origin (DCO)
 

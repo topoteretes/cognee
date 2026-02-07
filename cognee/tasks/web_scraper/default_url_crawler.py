@@ -73,7 +73,11 @@ class DefaultUrlCrawler:
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay_factor = retry_delay_factor
-        self.headers = headers or {"User-Agent": "Cognee-Scraper/1.0"}
+        self.headers = headers or {
+            "User-Agent": "Cognee-Scraper/1.0 (hello@cognee.ai)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
         self.robots_cache_ttl = robots_cache_ttl
         self._last_request_time_per_domain: Dict[str, float] = {}
         self._robots_cache: Dict[str, RobotsTxtCache] = {}
@@ -288,7 +292,7 @@ class DefaultUrlCrawler:
         while True:
             try:
                 await self._respect_rate_limit(url, crawl_delay)
-                resp = await self._client.get(url)
+                resp = await self._client.get(url, headers=self.headers)
                 resp.raise_for_status()
                 logger.info(
                     f"Successfully fetched {url} (status={resp.status_code}, size={len(resp.text)} bytes)"

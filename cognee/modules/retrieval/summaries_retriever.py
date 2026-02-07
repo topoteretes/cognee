@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Optional, List, Union
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -23,13 +23,14 @@ class SummariesRetriever(BaseRetriever):
     - top_k: int - Number of top summaries to retrieve.
     """
 
-    def __init__(self, top_k: int = 5):
+    def __init__(self, top_k: int = 5, session_id: Optional[str] = None):
         """Initialize retriever with search parameters."""
         self.top_k = top_k
+        self.session_id = session_id
 
-    async def get_context(self, query: str) -> Any:
+    async def get_retrieved_objects(self, query: str) -> Any:
         """
-        Retrieves summary context based on the query.
+        Retrieves text summary objects based on the query.
 
         On encountering a missing collection, raises NoDataError with a message to add data
         first.
@@ -42,7 +43,7 @@ class SummariesRetriever(BaseRetriever):
         Returns:
         --------
 
-            - Any: A list of payloads from the retrieved summaries.
+            - Any: A list of text summaries retrieved from the search.
         """
         logger.info(
             f"Starting summary retrieval for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
@@ -52,54 +53,66 @@ class SummariesRetriever(BaseRetriever):
 
         try:
             summaries_results = await vector_engine.search(
-                "TextSummary_text", query, limit=self.top_k
+                "TextSummary_text", query, limit=self.top_k, include_payload=True
             )
             logger.info(f"Found {len(summaries_results)} summaries from vector search")
 
             await update_node_access_timestamps(summaries_results)
 
+            return summaries_results
         except CollectionNotFoundError as error:
             logger.error("TextSummary_text collection not found in vector database")
             raise NoDataError("No data found in the system, please add data first.") from error
 
-        summary_payloads = [summary.payload for summary in summaries_results]
-        logger.info(f"Returning {len(summary_payloads)} summary payloads")
-        return summary_payloads
-
-    async def get_completion(
-        self, query: str, context: Optional[Any] = None, session_id: Optional[str] = None, **kwargs
-    ) -> Any:
+    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
         """
-        Generates a completion using summaries context.
+        Retrieves relevant summaries as context.
 
-        If no context is provided, retrieves context using the query. Returns the provided
-        context or the retrieved context if none was given.
+        Fetches text summaries based on a query from a vector engine and combines their text.
+        Returns empty string if no summaries are found. Raises NoDataError if the collection is not
+        found.
 
         Parameters:
         -----------
 
-            - query (str): The search query for generating the completion.
-            - context (Optional[Any]): Optional context for the completion; if not provided,
-              will be retrieved based on the query. (default None)
-            - session_id (Optional[str]): Optional session identifier for caching. If None,
-              defaults to 'default_session'. (default None)
+            - query (str): The query string used to search for relevant text summaries.
 
         Returns:
         --------
 
-            - Any: The generated completion context, which is either provided or retrieved.
+            - str: A string containing the combined text of the retrieved summaries, or an
+              empty string if none are found.
         """
-        logger.info(
-            f"Starting completion generation for query: '{query[:100]}{'...' if len(query) > 100 else ''}'"
-        )
-
-        if context is None:
-            logger.debug("No context provided, retrieving context from vector database")
-            context = await self.get_context(query)
+        if retrieved_objects:
+            summary_payload_texts = [summary.payload["text"] for summary in retrieved_objects]
+            return "\n".join(summary_payload_texts)
         else:
-            logger.debug("Using provided context")
+            return ""
 
-        logger.info(
-            f"Returning context with {len(context) if isinstance(context, list) else 1} item(s)"
-        )
-        return context
+    async def get_completion_from_context(
+        self, query: str, retrieved_objects: Any, context: Any
+    ) -> Union[List[str], List[dict]]:
+        """
+        Generates a completion using text summaries.
+        In case of the Summaries Retriever, we do not generate a completion, we just return
+        the payloads of found summaries.
+
+        Parameters:
+        -----------
+
+            - query (str): The query string to be used for generating a completion.
+            - retrieved_objects (Any): The retrieved objects to be used for generating a completion.
+            - context (Any): The context to be used for generating a completion.
+
+        Returns:
+        --------
+
+            - List[dict]: A list of payloads of found summaries.
+        """
+        # TODO: Do we want to generate a completion using LLM here?
+        if retrieved_objects:
+            summary_payloads = [summary.payload for summary in retrieved_objects]
+            logger.info(f"Returning {len(summary_payloads)} summary payloads")
+            return summary_payloads
+        else:
+            return []

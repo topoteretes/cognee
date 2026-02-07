@@ -98,9 +98,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 )
 
     @retry(
-        stop=stop_after_delay(30),
+        stop=stop_after_delay(128),
         wait=wait_exponential_jitter(2, 128),
-        retry=retry_if_not_exception_type((litellm.exceptions.NotFoundError, EmbeddingException)),
+        retry=retry_if_not_exception_type((litellm.exceptions.NotFoundError)),
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
@@ -129,15 +129,20 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                 return [data["embedding"] for data in response["data"]]
             else:
                 async with embedding_rate_limiter_context_manager():
+                    embedding_kwargs = {
+                        "model": self.model,
+                        "input": text,
+                        "api_key": self.api_key,
+                        "api_base": self.endpoint,
+                        "api_version": self.api_version,
+                    }
+                    # Pass through target embedding dimensions when supported
+                    if self.dimensions is not None:
+                        embedding_kwargs["dimensions"] = self.dimensions
+
                     # Ensure each attempt does not hang indefinitely
                     response = await asyncio.wait_for(
-                        litellm.aembedding(
-                            model=self.model,
-                            input=text,
-                            api_key=self.api_key,
-                            api_base=self.endpoint,
-                            api_version=self.api_version,
-                        ),
+                        litellm.aembedding(**embedding_kwargs),
                         timeout=30.0,
                     )
 

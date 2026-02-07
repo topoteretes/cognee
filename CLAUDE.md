@@ -193,7 +193,6 @@ Available search types (from `cognee/modules/search/types/SearchType.py`):
 - **NATURAL_LANGUAGE** - Natural language to structured query
 - **TEMPORAL** - Time-aware graph search
 - **FEELING_LUCKY** - Automatic search type selection
-- **FEEDBACK** - User feedback-based refinement
 - **CODING_RULES** - Code-specific search rules
 
 Key files:
@@ -427,10 +426,12 @@ git checkout -b feature/your-feature-name
 
 ## Code Style
 
-- Ruff for linting and formatting (configured in `pyproject.toml`)
-- Line length: 100 characters
-- Pre-commit hooks run ruff automatically
-- Type hints encouraged (mypy checks enabled)
+- **Formatter**: Ruff (configured in `pyproject.toml`)
+- **Line length**: 100 characters
+- **String quotes**: Use double quotes `"` not single quotes `'` (enforced by ruff-format)
+- **Pre-commit hooks**: Run ruff linting and formatting automatically
+- **Type hints**: Encouraged (mypy checks enabled)
+- **Important**: Always run `pre-commit run --all-files` before committing to catch formatting issues
 
 ## Testing Strategy
 

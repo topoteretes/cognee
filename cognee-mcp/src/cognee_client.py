@@ -192,7 +192,7 @@ class CogneeClient:
 
             with redirect_stdout(sys.stderr):
                 results = await self.cognee.search(
-                    query_type=SearchType[query_type.upper()], query_text=query_text
+                    query_type=SearchType[query_type.upper()], query_text=query_text, top_k=top_k
                 )
                 return results
 
@@ -206,8 +206,6 @@ class CogneeClient:
             ID of the data to delete
         dataset_id : UUID
             ID of the dataset containing the data
-        mode : str
-            Deletion mode ("soft" or "hard")
 
         Returns
         -------
@@ -216,12 +214,9 @@ class CogneeClient:
         """
         if self.use_api:
             # API mode: Make HTTP request
-            endpoint = f"{self.api_url}/api/v1/delete"
-            params = {"data_id": str(data_id), "dataset_id": str(dataset_id), "mode": mode}
+            endpoint = f"{self.api_url}/api/v1/datasets/{str(dataset_id)}/data/{str(data_id)}"
 
-            response = await self.client.delete(
-                endpoint, params=params, headers=self._get_headers()
-            )
+            response = await self.client.delete(endpoint, headers=self._get_headers())
             response.raise_for_status()
             return response.json()
         else:
@@ -230,10 +225,11 @@ class CogneeClient:
 
             with redirect_stdout(sys.stderr):
                 user = await get_default_user()
-                result = await self.cognee.delete(
-                    data_id=data_id, dataset_id=dataset_id, mode=mode, user=user
+                await self.cognee.datasets.delete_data(
+                    dataset_id=dataset_id,
+                    data_id=data_id,
+                    user=user,
                 )
-                return result
 
     async def prune_data(self) -> Dict[str, Any]:
         """
