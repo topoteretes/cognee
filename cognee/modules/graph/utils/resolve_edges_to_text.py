@@ -8,6 +8,7 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
+
 def _get_top_n_frequent_words(
     text: str, stop_words: set = None, top_n: int = 3, separator: str = ", "
 ) -> str:
@@ -30,14 +31,13 @@ def _create_title_from_text(text: str, first_n_words: int = 7, top_n_words: int 
 
 
 def _extract_nodes_from_edges(retrieved_edges: List[Edge]) -> dict:
-
     """Creates a dictionary of nodes with their names and content."""
 
     logger.debug(
         "Extracting nodes from retrieved edges",
         extra={"edge_count": len(retrieved_edges)},
     )
-    
+
     nodes = {}
 
     for edge in retrieved_edges:

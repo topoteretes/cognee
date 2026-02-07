@@ -1,8 +1,8 @@
 """
 Temporal awareness for graph construction and retrieval tasks.
 
-This module provides tools for building and querying dynamic knowledge graphs. 
-It uses the Graphiti library to ensure that data is stored as a sequence of events (episodes), 
+This module provides tools for building and querying dynamic knowledge graphs.
+It uses the Graphiti library to ensure that data is stored as a sequence of events (episodes),
 enabling the system to understand when things happened and how facts have changed over time.
 """
 

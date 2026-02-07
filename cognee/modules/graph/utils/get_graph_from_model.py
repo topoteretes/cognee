@@ -6,6 +6,7 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
+
 def _extract_field_data(field_value: Any) -> List[Tuple[Optional[Edge], List[DataPoint]]]:
     """Extract edge metadata and datapoints from a field value."""
     # Handle single DataPoint
