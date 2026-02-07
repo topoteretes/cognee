@@ -35,6 +35,25 @@ logger = get_logger()
 observe = get_observe()
 
 
+def _enrich_llm_span(model: str, name: str) -> None:
+    """Set LLM attributes on the current OTEL span, if tracing is enabled."""
+    from cognee.modules.observability.trace_context import is_tracing_enabled
+
+    if not is_tracing_enabled():
+        return
+
+    try:
+        from opentelemetry import trace as otel_trace
+        from cognee.modules.observability.tracing import COGNEE_LLM_MODEL, COGNEE_LLM_PROVIDER
+
+        current_span = otel_trace.get_current_span()
+        if current_span and current_span.is_recording():
+            current_span.set_attribute(COGNEE_LLM_MODEL, model)
+            current_span.set_attribute(COGNEE_LLM_PROVIDER, name)
+    except Exception:
+        pass
+
+
 class GenericAPIAdapter(LLMInterface):
     """
     Adapter for Generic API LLM provider API.
@@ -120,7 +139,7 @@ class GenericAPIAdapter(LLMInterface):
 
         try:
             async with llm_rate_limiter_context_manager():
-                return await self.aclient.chat.completions.create(
+                result = await self.aclient.chat.completions.create(
                     model=self.model,
                     messages=[
                         {
@@ -137,6 +156,8 @@ class GenericAPIAdapter(LLMInterface):
                     api_base=self.endpoint,
                     response_model=response_model,
                 )
+                _enrich_llm_span(self.model, self.name)
+                return result
         except (
             ContentFilterFinishReasonError,
             ContentPolicyViolationError,

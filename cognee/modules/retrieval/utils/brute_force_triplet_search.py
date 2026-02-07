@@ -8,8 +8,17 @@ from cognee.infrastructure.databases.vector.exceptions import CollectionNotFound
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
+from cognee.modules.observability.trace_context import is_tracing_enabled
 
 logger = get_logger(level=ERROR)
+
+
+def _get_tracer():
+    if is_tracing_enabled():
+        from cognee.modules.observability.tracing import get_tracer
+
+        return get_tracer()
+    return None
 
 
 def format_triplets(edges):
@@ -154,54 +163,69 @@ async def brute_force_triplet_search(
     if top_k <= 0:
         raise ValueError("top_k must be a positive integer.")
 
-    query_list_length = len(query_batch) if query_batch is not None else None
-    wide_search_limit = (
-        None if query_list_length else (wide_search_top_k if node_name is None else None)
-    )
+    tracer = _get_tracer()
 
-    if collections is None:
-        collections = [
-            "Entity_name",
-            "TextSummary_text",
-            "EntityType_name",
-            "DocumentChunk_text",
-        ]
+    if tracer is not None:
+        span_ctx = tracer.start_as_current_span("cognee.retriever.triplet_search")
+    else:
+        from contextlib import nullcontext
 
-    if "EdgeType_relationship_name" not in collections:
-        collections.append("EdgeType_relationship_name")
+        span_ctx = nullcontext()
 
-    try:
-        vector_search = NodeEdgeVectorSearch()
-
-        await vector_search.embed_and_retrieve_distances(
-            query=None if query_list_length else query,
-            query_batch=query_batch if query_list_length else None,
-            collections=collections,
-            wide_search_limit=wide_search_limit,
+    with span_ctx as otel_span:
+        query_list_length = len(query_batch) if query_batch is not None else None
+        wide_search_limit = (
+            None if query_list_length else (wide_search_top_k if node_name is None else None)
         )
 
-        if not vector_search.has_results():
+        if collections is None:
+            collections = [
+                "Entity_name",
+                "TextSummary_text",
+                "EntityType_name",
+                "DocumentChunk_text",
+            ]
+
+        if "EdgeType_relationship_name" not in collections:
+            collections.append("EdgeType_relationship_name")
+
+        try:
+            vector_search = NodeEdgeVectorSearch()
+
+            await vector_search.embed_and_retrieve_distances(
+                query=None if query_list_length else query,
+                query_batch=query_batch if query_list_length else None,
+                collections=collections,
+                wide_search_limit=wide_search_limit,
+            )
+
+            if not vector_search.has_results():
+                return [[] for _ in range(query_list_length)] if query_list_length else []
+
+            results = await _get_top_triplet_importances(
+                memory_fragment,
+                vector_search,
+                properties_to_project,
+                node_type,
+                node_name,
+                triplet_distance_penalty,
+                wide_search_limit,
+                top_k,
+                query_list_length=query_list_length,
+            )
+
+            return results
+        except CollectionNotFoundError:
             return [[] for _ in range(query_list_length)] if query_list_length else []
+        except Exception as error:
+            if otel_span is not None:
+                from opentelemetry.trace import StatusCode
 
-        results = await _get_top_triplet_importances(
-            memory_fragment,
-            vector_search,
-            properties_to_project,
-            node_type,
-            node_name,
-            triplet_distance_penalty,
-            wide_search_limit,
-            top_k,
-            query_list_length=query_list_length,
-        )
-
-        return results
-    except CollectionNotFoundError:
-        return [[] for _ in range(query_list_length)] if query_list_length else []
-    except Exception as error:
-        logger.error(
-            "Error during brute force search for query: %s. Error: %s",
-            query_batch if query_list_length else [query],
-            error,
-        )
-        raise error
+                otel_span.set_status(StatusCode.ERROR, str(error))
+                otel_span.record_exception(error)
+            logger.error(
+                "Error during brute force search for query: %s. Error: %s",
+                query_batch if query_list_length else [query],
+                error,
+            )
+            raise error
