@@ -4,9 +4,37 @@ from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
 
+from cognee.infrastructure.engine import DataPoint
 from ..tasks.task import Task
 
 logger = get_logger("run_tasks_base")
+
+
+def _stamp_provenance(data, pipeline_name, task_name, visited=None):
+    """Recursively stamp DataPoints with provenance. Only sets if currently None."""
+    if visited is None:
+        visited = set()
+
+    if isinstance(data, DataPoint):
+        obj_id = id(data)
+        if obj_id in visited:
+            return
+        visited.add(obj_id)
+
+        if data.source_pipeline is None:
+            data.source_pipeline = pipeline_name
+        if data.source_task is None:
+            data.source_task = task_name
+
+        # Recurse into DataPoint model fields to stamp nested DataPoints
+        for field_name in data.model_fields:
+            field_value = getattr(data, field_name, None)
+            if field_value is not None:
+                _stamp_provenance(field_value, pipeline_name, task_name, visited)
+
+    elif isinstance(data, (list, tuple)):
+        for item in data:
+            _stamp_provenance(item, pipeline_name, task_name, visited)
 
 
 async def handle_task(
@@ -39,7 +67,11 @@ async def handle_task(
         args.append(context)
 
     try:
+        task_name = running_task.executable.__name__
+        pipe_name = context.get("pipeline_name") if context else None
+
         async for result_data in running_task.execute(args, next_task_batch_size):
+            _stamp_provenance(result_data, pipe_name, task_name)
             async for result in run_tasks_base(leftover_tasks, result_data, user, context):
                 yield result
 
