@@ -55,7 +55,7 @@ Be careful with deletion operations as they are irreversible.
                         )
                     )
                 except CliCommandException as e:
-                    fmt.error(f"Error occured when fetching preview data: {str(e)}")
+                    fmt.error(f"Error occurred when fetching preview data: {str(e)}")
                     return
 
                 if not preview_data:
