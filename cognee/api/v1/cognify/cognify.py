@@ -281,12 +281,15 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
         )
 
     default_tasks = [
+        # EXTRACT: classify raw Data items into typed Document objects
         Task(classify_documents),
+        # EXTRACT: split Documents into semantic text chunks
         Task(
             extract_chunks_from_documents,
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
             chunker=chunker,
-        ),  # Extract text chunks based on the document type.
+        ),
+        # COGNIFY: LLM-extract entities and relationships into a knowledge graph
         Task(
             extract_graph_from_data,
             graph_model=graph_model,
@@ -294,11 +297,13 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             custom_prompt=custom_prompt,
             task_config={"batch_size": chunks_per_batch},
             **kwargs,
-        ),  # Generate knowledge graphs from the document chunks.
+        ),
+        # COGNIFY: LLM-summarize each chunk for hierarchical retrieval
         Task(
             summarize_text,
             task_config={"batch_size": chunks_per_batch},
         ),
+        # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(
             add_data_points,
             embed_triplets=embed_triplets,
@@ -338,14 +343,19 @@ async def get_temporal_tasks(
         chunks_per_batch = configured if configured is not None else 10
 
     temporal_tasks = [
+        # EXTRACT: classify raw Data items into typed Document objects
         Task(classify_documents),
+        # EXTRACT: split Documents into semantic text chunks
         Task(
             extract_chunks_from_documents,
             max_chunk_size=chunk_size or get_max_chunk_tokens(),
             chunker=chunker,
         ),
+        # COGNIFY: extract temporal events and timestamps from chunks
         Task(extract_events_and_timestamps, task_config={"batch_size": chunks_per_batch}),
+        # COGNIFY: build knowledge graph from extracted events
         Task(extract_knowledge_graph_from_events),
+        # LOAD: persist nodes, edges, and embeddings to graph/vector DBs
         Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
     ]
 
