@@ -7,7 +7,7 @@ from cognee.modules.ingestion.exceptions import IngestionError
 from .data_types import TextData, BinaryData, S3BinaryData
 
 
-def classify(data: Union[str, BinaryIO], filename: str = None):
+def classify(data: Union[str, BinaryIO], filename: str = None) -> Union[TextData, BinaryData, S3BinaryData]:
     if isinstance(data, str):
         return TextData(data)
 
