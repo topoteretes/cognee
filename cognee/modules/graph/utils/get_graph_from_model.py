@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from typing import Tuple, List, Any, Dict, Optional
 from cognee.infrastructure.engine import DataPoint, Edge
+from cognee.infrastructure.engine.models.FieldAnnotations import _Relationship
 from cognee.modules.storage.utils import copy_model
 from cognee.shared.logging_utils import get_logger
 
@@ -54,7 +55,11 @@ def _extract_field_data(field_value: Any) -> List[Tuple[Optional[Edge], List[Dat
 
 
 def _create_edge_properties(
-    source_id: str, target_id: str, relationship_name: str, edge_metadata: Optional[Edge]
+    source_id: str,
+    target_id: str,
+    relationship_name: str,
+    edge_metadata: Optional[Edge],
+    relationship_annotation: Optional[_Relationship] = None,
 ) -> Dict[str, Any]:
     """Create edge properties dictionary with metadata if present."""
     properties = {
@@ -64,8 +69,17 @@ def _create_edge_properties(
         "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
     }
 
+    # Apply annotation defaults first (lower priority)
+    if relationship_annotation:
+        if relationship_annotation.weight is not None and "weight" not in properties:
+            properties["weight"] = relationship_annotation.weight
+        if relationship_annotation.properties:
+            for k, v in relationship_annotation.properties.items():
+                if k not in properties:
+                    properties[k] = v
+
     if edge_metadata:
-        # Add edge metadata
+        # Add edge metadata (overrides annotation defaults)
         edge_data = edge_metadata.model_dump(exclude_none=True)
         properties.update(edge_data)
 
@@ -77,14 +91,35 @@ def _create_edge_properties(
     return properties
 
 
-def _get_relationship_key(field_name: str, edge_metadata: Optional[Edge]) -> str:
-    """Extract relationship key from edge metadata or use field name as fallback."""
+def _get_relationship_annotation(model_class: type, field_name: str) -> Optional[_Relationship]:
+    """Look up the _Relationship annotation for a field, if any."""
+    field_info = model_class.model_fields.get(field_name)
+    if field_info and field_info.metadata:
+        for meta in field_info.metadata:
+            if isinstance(meta, _Relationship):
+                return meta
+    return None
+
+
+def _get_relationship_key(
+    field_name: str, edge_metadata: Optional[Edge], model_class: type = None
+) -> str:
+    """Extract relationship key: Edge metadata > Relationship annotation > field name."""
+    # 1. Instance-level Edge metadata always wins
     if (
         edge_metadata
         and hasattr(edge_metadata, "relationship_type")
         and edge_metadata.relationship_type
     ):
         return edge_metadata.relationship_type
+
+    # 2. Class-level Relationship annotation
+    if model_class is not None:
+        rel = _get_relationship_annotation(model_class, field_name)
+        if rel and rel.label:
+            return rel.label
+
+    # 3. Fall back to field name
     return field_name
 
 
@@ -100,12 +135,13 @@ def _process_datapoint_field(
     visited_properties: Dict[str, bool],
     properties_to_visit: set,
     excluded_properties: set,
+    model_class: type = None,
 ) -> None:
     """Process a field containing DataPoints, always working with lists."""
     excluded_properties.add(field_name)
 
     for edge_metadata, datapoints in edge_datapoint_pairs:
-        relationship_key = _get_relationship_key(field_name, edge_metadata)
+        relationship_key = _get_relationship_key(field_name, edge_metadata, model_class)
 
         for datapoint in datapoints:
             property_key = _generate_property_key(
@@ -205,6 +241,7 @@ async def get_graph_from_model(
                 visited_properties,
                 properties_to_visit,
                 excluded_properties,
+                model_class=type(data_point),
             )
 
     # Create node for current DataPoint if needed
@@ -224,16 +261,22 @@ async def get_graph_from_model(
         )
 
     # Process all relationships using generator
+    model_class = type(data_point)
     for target_datapoint, field_name, edge_metadata in _targets_generator(
         data_point, properties_to_visit
     ):
-        relationship_name = _get_relationship_key(field_name, edge_metadata)
+        relationship_name = _get_relationship_key(field_name, edge_metadata, model_class)
+        rel_annotation = _get_relationship_annotation(model_class, field_name)
 
         # Create edge if not already added
         edge_key = f"{data_point_id}_{target_datapoint.id}_{field_name}"
         if edge_key not in added_edges:
             edge_properties = _create_edge_properties(
-                data_point.id, target_datapoint.id, relationship_name, edge_metadata
+                data_point.id,
+                target_datapoint.id,
+                relationship_name,
+                edge_metadata,
+                rel_annotation,
             )
             edges.append((data_point.id, target_datapoint.id, relationship_name, edge_properties))
             logger.debug(
