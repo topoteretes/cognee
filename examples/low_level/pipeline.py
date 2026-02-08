@@ -16,29 +16,27 @@ from cognee.tasks.storage import add_data_points
 
 class Person(DataPoint):
     name: str
-    # Metadata "index_fields" specifies which DataPoint fields should be embedded for vector search
-    metadata: dict = {"index_fields": ["name"]}
+    # "index_fields": fields to embed for vector search
+    # "identity_fields": fields used to generate deterministic IDs (deduplication)
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
 class Department(DataPoint):
     name: str
     employees: list[Person]
-    # Metadata "index_fields" specifies which DataPoint fields should be embedded for vector search
-    metadata: dict = {"index_fields": ["name"]}
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
 class CompanyType(DataPoint):
     name: str = "Company"
-    # Metadata "index_fields" specifies which DataPoint fields should be embedded for vector search
-    metadata: dict = {"index_fields": ["name"]}
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
 class Company(DataPoint):
     name: str
     departments: list[Department]
     is_type: CompanyType
-    # Metadata "index_fields" specifies which DataPoint fields should be embedded for vector search
-    metadata: dict = {"index_fields": ["name"]}
+    metadata: dict = {"index_fields": ["name"], "identity_fields": ["name"]}
 
 
 class Data(BaseModel):
@@ -47,41 +45,40 @@ class Data(BaseModel):
 
 
 def ingest_files(data: List[Data]):
-    people_data_points = {}
-    departments_data_points = {}
-    companies_data_points = {}
+    # With identity_fields, DataPoints with the same name automatically get the same UUID.
+    # No manual dict-based deduplication needed — just create instances freely.
+    all_companies = []
 
     for data_item in data:
         people = data_item.payload["people"]
         companies = data_item.payload["companies"]
 
+        # Build departments with their employees
+        dept_employees: Dict[str, List[Person]] = {}
         for person in people:
-            new_person = Person(name=person["name"])
-            people_data_points[person["name"]] = new_person
+            dept_name = person["department"]
+            if dept_name not in dept_employees:
+                dept_employees[dept_name] = []
+            dept_employees[dept_name].append(Person(name=person["name"]))
 
-            if person["department"] not in departments_data_points:
-                departments_data_points[person["department"]] = Department(
-                    name=person["department"], employees=[new_person]
-                )
-            else:
-                departments_data_points[person["department"]].employees.append(new_person)
+        departments = {
+            name: Department(name=name, employees=employees)
+            for name, employees in dept_employees.items()
+        }
 
-        # Create a single CompanyType node, so we connect all companies to it.
-        companyType = CompanyType()
+        # Create a single CompanyType node (deterministic ID via identity_fields)
+        company_type = CompanyType()
 
         for company in companies:
-            new_company = Company(name=company["name"], departments=[], is_type=companyType)
-            companies_data_points[company["name"]] = new_company
+            company_departments = [
+                departments.get(dept_name, Department(name=dept_name, employees=[]))
+                for dept_name in company["departments"]
+            ]
+            all_companies.append(
+                Company(name=company["name"], departments=company_departments, is_type=company_type)
+            )
 
-            for department_name in company["departments"]:
-                if department_name not in departments_data_points:
-                    departments_data_points[department_name] = Department(
-                        name=department_name, employees=[]
-                    )
-
-                new_company.departments.append(departments_data_points[department_name])
-
-    return list(companies_data_points.values())
+    return all_companies
 
 
 async def main():
