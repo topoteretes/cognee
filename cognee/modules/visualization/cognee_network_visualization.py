@@ -1,5 +1,6 @@
 import os
 import json
+import colorsys
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorage
@@ -7,683 +8,80 @@ from cognee.infrastructure.files.storage.LocalFileStorage import LocalFileStorag
 logger = get_logger()
 
 
-async def cognee_network_visualization(graph_data, destination_file_path: str = None):
-    import networkx
+def _generate_provenance_colors(values):
+    """Generate a deterministic color map for a set of provenance values."""
+    color_map = {}
+    unique = sorted(set(v for v in values if v))
+    for i, name in enumerate(unique):
+        hue = (i * 137.5) % 360
+        r, g, b = colorsys.hls_to_rgb(hue / 360, 0.6, 0.65)
+        color_map[name] = "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
+    return color_map
 
+
+async def cognee_network_visualization(graph_data, destination_file_path: str = None):
     nodes_data, edges_data = graph_data
 
-    G = networkx.DiGraph()
-
-    nodes_list = []
     color_map = {
-        "Entity": "#5C10F4",
+        "Entity": "#6510F4",
         "EntityType": "#A550FF",
         "DocumentChunk": "#0DFF00",
-        "TextSummary": "#5C10F4",
+        "TextSummary": "#6510F4",
         "TableRow": "#A550FF",
-        "TableType": "#5C10F4",
-        "ColumnValue": "#757470",
+        "TableType": "#6510F4",
+        "ColumnValue": "#747470",
         "SchemaTable": "#A550FF",
-        "DatabaseSchema": "#5C10F4",
+        "DatabaseSchema": "#6510F4",
         "SchemaRelationship": "#323332",
-        "default": "#D8D8D8",
+        "default": "#DBD8D8",
     }
 
+    nodes_list = []
     for node_id, node_info in nodes_data:
         node_info = node_info.copy()
         node_info["id"] = str(node_id)
-        node_info["color"] = color_map.get(node_info.get("type", "default"), "#D3D3D3")
+        node_info["color"] = color_map.get(node_info.get("type", "default"), "#DBD8D8")
         node_info["name"] = node_info.get("name", str(node_id))
-
-        try:
-            del node_info[
-                "updated_at"
-            ]  #:TODO: We should decide what properties to show on the nodes and edges, we dont necessarily need all.
-        except KeyError:
-            pass
-
-        try:
-            del node_info["created_at"]
-        except KeyError:
-            pass
-
+        node_info.pop("updated_at", None)
+        node_info.pop("created_at", None)
         nodes_list.append(node_info)
-        G.add_node(node_id, **node_info)
 
-    edge_labels = {}
     links_list = []
     for source, target, relation, edge_info in edges_data:
         source = str(source)
         target = str(target)
-        G.add_edge(source, target)
-        edge_labels[(source, target)] = relation
 
-        # Extract edge metadata including all weights
         all_weights = {}
         primary_weight = None
 
         if edge_info:
-            # Single weight (backward compatibility)
             if "weight" in edge_info:
                 all_weights["default"] = edge_info["weight"]
                 primary_weight = edge_info["weight"]
-
-            # Multiple weights
             if "weights" in edge_info and isinstance(edge_info["weights"], dict):
                 all_weights.update(edge_info["weights"])
-                # Use the first weight as primary for visual thickness if no default weight
                 if primary_weight is None and edge_info["weights"]:
                     primary_weight = next(iter(edge_info["weights"].values()))
-
-            # Individual weight fields (weight_strength, weight_confidence, etc.)
             for key, value in edge_info.items():
                 if key.startswith("weight_") and isinstance(value, (int, float)):
-                    weight_name = key[7:]  # Remove "weight_" prefix
-                    all_weights[weight_name] = value
+                    all_weights[key[7:]] = value
 
-        link_data = {
-            "source": source,
-            "target": target,
-            "relation": relation,
-            "weight": primary_weight,  # Primary weight for backward compatibility
-            "all_weights": all_weights,  # All weights for display
-            "relationship_type": edge_info.get("relationship_type") if edge_info else None,
-            "edge_info": edge_info if edge_info else {},
-        }
-        links_list.append(link_data)
-
-    html_template = r"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <script src="https://d3js.org/d3.v5.min.js"></script>
-        <script src="https://d3js.org/d3-contour.v1.min.js"></script>
-        <style>
-            body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: linear-gradient(90deg, #101010, #1a1a2e); color: white; font-family: 'Inter', sans-serif; }
-
-            svg { width: 100vw; height: 100vh; display: block; }
-            .links line { stroke: rgba(160, 160, 160, 0.25); stroke-width: 1.5px; stroke-linecap: round; }
-            .links line.weighted { stroke: rgba(255, 215, 0, 0.4); }
-            .links line.multi-weighted { stroke: rgba(0, 255, 127, 0.45); }
-            .nodes circle { stroke: white; stroke-width: 0.5px; }
-            .node-label { font-size: 5px; font-weight: bold; fill: #F4F4F4; text-anchor: middle; dominant-baseline: middle; font-family: 'Inter', sans-serif; pointer-events: none; }
-            .edge-label { font-size: 3px; fill: #F4F4F4; text-anchor: middle; dominant-baseline: middle; font-family: 'Inter', sans-serif; pointer-events: none; paint-order: stroke; stroke: rgba(50,51,50,0.75); stroke-width: 1px; }
-
-            .density path { mix-blend-mode: screen; }
-
-            .tooltip {
-                position: absolute;
-                text-align: left;
-                padding: 8px;
-                font-size: 12px;
-                background: rgba(0, 0, 0, 0.9);
-                color: white;
-                border: 1px solid rgba(255, 255, 255, 0.3);
-                border-radius: 4px;
-                pointer-events: none;
-                opacity: 0;
-                transition: opacity 0.2s;
-                z-index: 1000;
-                max-width: 300px;
-                word-wrap: break-word;
+        links_list.append(
+            {
+                "source": source,
+                "target": target,
+                "relation": relation,
+                "weight": primary_weight,
+                "all_weights": all_weights,
+                "relationship_type": edge_info.get("relationship_type") if edge_info else None,
+                "edge_info": edge_info if edge_info else {},
             }
-            #info-panel {
-                position: fixed;
-                left: 12px;
-                top: 12px;
-                width: 340px;
-                max-height: calc(100vh - 24px);
-                overflow: auto;
-                background: rgba(50, 51, 50, 0.7);
-                backdrop-filter: blur(6px);
-                border: 1px solid rgba(216, 216, 216, 0.35);
-                border-radius: 8px;
-                color: #F4F4F4;
-                padding: 12px 14px;
-                z-index: 1100;
-            }
-            #info-panel h3 { margin: 0 0 8px 0; font-size: 14px; color: #F4F4F4; }
-            #info-panel .kv { font-size: 12px; line-height: 1.4; }
-            #info-panel .kv .k { color: #D8D8D8; }
-            #info-panel .kv .v { color: #F4F4F4; }
-            #info-panel .placeholder { opacity: 0.7; font-size: 12px; }
-        </style>
-    </head>
-    <body>
-        <svg></svg>
-        <div class="tooltip" id="tooltip"></div>
-        <div id="info-panel"><div class="placeholder">Hover a node or edge to inspect details</div></div>
-        <script>
-            var nodes = {nodes};
-            var links = {links};
+        )
 
-            var svg = d3.select("svg"),
-                width = window.innerWidth,
-                height = window.innerHeight;
+    task_color_map = _generate_provenance_colors([n.get("source_task") for n in nodes_list])
+    pipeline_color_map = _generate_provenance_colors([n.get("source_pipeline") for n in nodes_list])
 
-            var container = svg.append("g");
-            var tooltip = d3.select("#tooltip");
-            var infoPanel = d3.select('#info-panel');
-
-            function renderInfo(title, entries){
-                function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-                var html = '<h3>' + esc(title) + '</h3>';
-                html += '<div class="kv">';
-                entries.forEach(function(e){
-                    html += '<div><span class="k">' + esc(e.k) + ':</span> <span class="v">' + esc(e.v) + '</span></div>';
-                });
-                html += '</div>';
-                infoPanel.html(html);
-            }
-            function pickDescription(obj){
-                if (!obj) return null;
-                var keys = ['description','summary','text','content'];
-                for (var i=0; i<keys.length; i++){
-                    var v = obj[keys[i]];
-                    if (typeof v === 'string' && v.trim()) return v.trim();
-                }
-                return null;
-            }
-            function truncate(s, n){ if (!s) return s; return s.length > n ? (s.slice(0, n) + '…') : s; }
-            function renderNodeInfo(n){
-                var entries = [];
-                if (n.name) entries.push({k:'Name', v: n.name});
-                if (n.type) entries.push({k:'Type', v: n.type});
-                if (n.id) entries.push({k:'ID', v: n.id});
-                var desc = pickDescription(n) || pickDescription(n.properties);
-                if (desc) entries.push({k:'Description', v: truncate(desc.replace(/\s+/g,' ').trim(), 280)});
-                if (n.properties) {
-                    Object.keys(n.properties).slice(0, 12).forEach(function(key){
-                        var v = n.properties[key];
-                        if (v !== undefined && v !== null && typeof v !== 'object') entries.push({k: key, v: String(v)});
-                    });
-                }
-                renderInfo(n.name || 'Node', entries);
-            }
-            function renderEdgeInfo(e){
-                var entries = [];
-                if (e.relation) entries.push({k:'Relation', v: e.relation});
-                if (e.weight !== undefined && e.weight !== null) entries.push({k:'Weight', v: e.weight});
-                if (e.all_weights && Object.keys(e.all_weights).length){
-                    Object.keys(e.all_weights).slice(0, 8).forEach(function(k){ entries.push({k: 'w.'+k, v: e.all_weights[k]}); });
-                }
-                if (e.relationship_type) entries.push({k:'Type', v: e.relationship_type});
-                var edesc = pickDescription(e.edge_info);
-                if (edesc) entries.push({k:'Description', v: truncate(edesc.replace(/\s+/g,' ').trim(), 280)});
-                renderInfo('Edge', entries);
-            }
-
-            // Basic runtime diagnostics
-            console.log('[Cognee Visualization] nodes:', nodes ? nodes.length : 0, 'links:', links ? links.length : 0);
-            window.addEventListener('error', function(e){
-                try {
-                    tooltip.html('<strong>Error:</strong> ' + e.message)
-                        .style('left', '12px')
-                        .style('top', '12px')
-                        .style('opacity', 1);
-                } catch(_) {}
-            });
-
-            // Normalize node IDs and link endpoints for robustness
-            function resolveId(d){ return (d && (d.id || d.node_id || d.uuid || d.external_id || d.name)) || undefined; }
-            if (Array.isArray(nodes)) {
-                nodes.forEach(function(n){ var id = resolveId(n); if (id !== undefined) n.id = id; });
-            }
-            if (Array.isArray(links)) {
-                links.forEach(function(l){
-                    if (typeof l.source === 'object') l.source = resolveId(l.source);
-                    if (typeof l.target === 'object') l.target = resolveId(l.target);
-                });
-            }
-
-            if (!nodes || nodes.length === 0) {
-                container.append('text')
-                    .attr('x', width / 2)
-                    .attr('y', height / 2)
-                    .attr('fill', '#fff')
-                    .attr('font-size', 14)
-                    .attr('text-anchor', 'middle')
-                    .text('No graph data available');
-            }
-
-            // Visual defs - reusable glow
-            var defs = svg.append("defs");
-            var glow = defs.append("filter").attr("id", "glow")
-                .attr("x", "-30%")
-                .attr("y", "-30%")
-                .attr("width", "160%")
-                .attr("height", "160%");
-            glow.append("feGaussianBlur").attr("stdDeviation", 8).attr("result", "coloredBlur");
-            var feMerge = glow.append("feMerge");
-            feMerge.append("feMergeNode").attr("in", "coloredBlur");
-            feMerge.append("feMergeNode").attr("in", "SourceGraphic");
-
-            // Stronger glow for hovered adjacency
-            var glowStrong = defs.append("filter").attr("id", "glow-strong")
-                .attr("x", "-40%")
-                .attr("y", "-40%")
-                .attr("width", "180%")
-                .attr("height", "180%");
-            glowStrong.append("feGaussianBlur").attr("stdDeviation", 14).attr("result", "coloredBlur");
-            var feMerge2 = glowStrong.append("feMerge");
-            feMerge2.append("feMergeNode").attr("in", "coloredBlur");
-            feMerge2.append("feMergeNode").attr("in", "SourceGraphic");
-
-            var currentTransform = d3.zoomIdentity;
-            var densityZoomTimer = null;
-            var isInteracting = false;
-            var labelBaseSize = 10;
-            function getGroupKey(d){ return d && (d.type || d.category || d.group || d.color) || 'default'; }
-
-            var simulation = d3.forceSimulation(nodes)
-                .force("link", d3.forceLink(links).id(function(d){ return d.id; }).distance(100).strength(0.2))
-                .force("charge", d3.forceManyBody().strength(-180))
-                .force("collide", d3.forceCollide().radius(16).iterations(2))
-                .force("center", d3.forceCenter(width / 2, height / 2))
-                .force("x", d3.forceX().strength(0.06).x(width / 2))
-                .force("y", d3.forceY().strength(0.06).y(height / 2))
-                .alphaDecay(0.06)
-                .velocityDecay(0.6);
-
-            // Density layer (sibling of container to avoid double transforms)
-            var densityLayer = svg.append("g")
-                .attr("class", "density")
-                .style("pointer-events", "none");
-            if (densityLayer.lower) densityLayer.lower();
-
-            var link = container.append("g")
-                .attr("class", "links")
-                .selectAll("line")
-                .data(links)
-                .enter().append("line")
-                .style("opacity", 0)
-                .style("pointer-events", "none")
-                .attr("stroke-width", d => {
-                    if (d.weight) return Math.max(2, d.weight * 5);
-                    if (d.all_weights && Object.keys(d.all_weights).length > 0) {
-                        var avgWeight = Object.values(d.all_weights).reduce((a, b) => a + b, 0) / Object.values(d.all_weights).length;
-                        return Math.max(2, avgWeight * 5);
-                    }
-                    return 2;
-                })
-                .attr("class", d => {
-                    if (d.all_weights && Object.keys(d.all_weights).length > 1) return "multi-weighted";
-                    if (d.weight || (d.all_weights && Object.keys(d.all_weights).length > 0)) return "weighted";
-                    return "";
-                })
-                .on("mouseover", function(d) {
-                    // Create tooltip content for edge
-                    renderEdgeInfo(d);
-                    var content = "<strong>Edge Information</strong><br/>";
-                    content += "Relationship: " + d.relation + "<br/>";
-
-                    // Show all weights
-                    if (d.all_weights && Object.keys(d.all_weights).length > 0) {
-                        content += "<strong>Weights:</strong><br/>";
-                        Object.keys(d.all_weights).forEach(function(weightName) {
-                            content += "&nbsp;&nbsp;" + weightName + ": " + d.all_weights[weightName] + "<br/>";
-                        });
-                    } else if (d.weight !== null && d.weight !== undefined) {
-                        content += "Weight: " + d.weight + "<br/>";
-                    }
-
-                    if (d.relationship_type) {
-                        content += "Type: " + d.relationship_type + "<br/>";
-                    }
-
-                    // Add other edge properties
-                    if (d.edge_info) {
-                        Object.keys(d.edge_info).forEach(function(key) {
-                            if (key !== 'weight' && key !== 'weights' && key !== 'relationship_type' &&
-                                key !== 'source_node_id' && key !== 'target_node_id' &&
-                                key !== 'relationship_name' && key !== 'updated_at' &&
-                                !key.startsWith('weight_')) {
-                                content += key + ": " + d.edge_info[key] + "<br/>";
-                            }
-                        });
-                    }
-
-                    tooltip.html(content)
-                        .style("left", (d3.event.pageX + 10) + "px")
-                        .style("top", (d3.event.pageY - 10) + "px")
-                        .style("opacity", 1);
-                })
-                .on("mouseout", function(d) {
-                    tooltip.style("opacity", 0);
-                });
-
-            var edgeLabels = container.append("g")
-                .attr("class", "edge-labels")
-                .selectAll("text")
-                .data(links)
-                .enter().append("text")
-                .attr("class", "edge-label")
-                .style("opacity", 0)
-                .text(d => {
-                    var label = d.relation;
-                    if (d.all_weights && Object.keys(d.all_weights).length > 1) {
-                        // Show count of weights for multiple weights
-                        label += " (" + Object.keys(d.all_weights).length + " weights)";
-                    } else if (d.weight) {
-                        label += " (" + d.weight + ")";
-                    } else if (d.all_weights && Object.keys(d.all_weights).length === 1) {
-                        var singleWeight = Object.values(d.all_weights)[0];
-                        label += " (" + singleWeight + ")";
-                    }
-                    return label;
-                });
-
-            var nodeGroup = container.append("g")
-                .attr("class", "nodes")
-                .selectAll("g")
-                .data(nodes)
-                .enter().append("g");
-
-            // Color fallback by type when d.color is missing
-            var colorByType = {
-                "Entity": "#5C10F4",
-                "EntityType": "#A550FF",
-                "DocumentChunk": "#0DFF00",
-                "TextSummary": "#5C10F4",
-                "TableRow": "#A550FF",
-                "TableType": "#5C10F4",
-                "ColumnValue": "#757470",
-                "SchemaTable": "#A550FF",
-                "DatabaseSchema": "#5C10F4",
-                "SchemaRelationship": "#323332"
-            };
-
-            var node = nodeGroup.append("circle")
-                .attr("r", 13)
-                .attr("fill", function(d){ return d.color || colorByType[d.type] || "#D3D3D3"; })
-                .style("filter", "url(#glow)")
-                .attr("shape-rendering", "geometricPrecision")
-                .call(d3.drag()
-                    .on("start", dragstarted)
-                    .on("drag", function(d){ dragged(d); updateDensity(); showAdjacency(d); })
-                    .on("end", dragended));
-
-            // Show links only for hovered node adjacency
-            function isAdjacent(linkDatum, nodeId) {
-                var sid = linkDatum && linkDatum.source && (linkDatum.source.id || linkDatum.source);
-                var tid = linkDatum && linkDatum.target && (linkDatum.target.id || linkDatum.target);
-                return sid === nodeId || tid === nodeId;
-            }
-
-            function showAdjacency(d) {
-                var nodeId = d && (d.id || d.node_id || d.uuid || d.external_id || d.name);
-                if (!nodeId) return;
-                // Build neighbor set
-                var neighborIds = {};
-                neighborIds[nodeId] = true;
-                for (var i = 0; i < links.length; i++) {
-                    var l = links[i];
-                    var sid = l && l.source && (l.source.id || l.source);
-                    var tid = l && l.target && (l.target.id || l.target);
-                    if (sid === nodeId) neighborIds[tid] = true;
-                    if (tid === nodeId) neighborIds[sid] = true;
-                }
-
-                link
-                    .style("opacity", function(l){ return isAdjacent(l, nodeId) ? 0.95 : 0; })
-                    .style("stroke", function(l){ return isAdjacent(l, nodeId) ? "rgba(255,255,255,0.95)" : null; })
-                    .style("stroke-width", function(l){ return isAdjacent(l, nodeId) ? 2.5 : 1.5; });
-                edgeLabels.style("opacity", function(l){ return isAdjacent(l, nodeId) ? 1 : 0; });
-                densityLayer.style("opacity", 0.35);
-
-                // Highlight neighbor nodes and dim others
-                node
-                    .style("opacity", function(n){ return neighborIds[n.id] ? 1 : 0.25; })
-                    .style("filter", function(n){ return neighborIds[n.id] ? "url(#glow-strong)" : "url(#glow)"; })
-                    .attr("r", function(n){ return neighborIds[n.id] ? 15 : 13; });
-                // Raise highlighted nodes
-                node.filter(function(n){ return neighborIds[n.id]; }).raise();
-                // Neighbor labels brighter
-                nodeGroup.select("text")
-                    .style("opacity", function(n){ return neighborIds[n.id] ? 1 : 0.2; })
-                    .style("font-size", function(n){
-                        var size = neighborIds[n.id] ? Math.min(22, labelBaseSize * 1.25) : labelBaseSize;
-                        return size + "px";
-                    });
-            }
-
-            function clearAdjacency() {
-                link.style("opacity", 0)
-                    .style("stroke", null)
-                    .style("stroke-width", 1.5);
-                edgeLabels.style("opacity", 0);
-                densityLayer.style("opacity", 1);
-                node
-                    .style("opacity", 1)
-                    .style("filter", "url(#glow)")
-                    .attr("r", 13);
-                nodeGroup.select("text")
-                    .style("opacity", 1)
-                    .style("font-size", labelBaseSize + "px");
-            }
-
-            node.on("mouseover", function(d){ showAdjacency(d); })
-                .on("mouseout", function(){ clearAdjacency(); });
-            node.on("mouseover", function(d){ renderNodeInfo(d); tooltip.style('opacity', 0); });
-            // Also bind on the group so labels trigger adjacency too
-            nodeGroup.on("mouseover", function(d){ showAdjacency(d); })
-                .on("mouseout", function(){ clearAdjacency(); });
-
-            // Density always on; no hover gating
-
-            // Add labels sparsely to reduce clutter (every ~50th node), and truncate long text
-            nodeGroup
-                .filter(function(d, i){ return i % 14 === 0; })
-                .append("text")
-                .attr("class", "node-label")
-                .attr("dy", 4)
-                .attr("text-anchor", "middle")
-                .text(function(d){
-                    var s = d && d.name ? String(d.name) : '';
-                    return s.length > 40 ? (s.slice(0, 40) + "…") : s;
-                })
-                .style("font-size", labelBaseSize + "px");
-
-            function applyLabelSize() {
-                var k = (currentTransform && currentTransform.k) || 1;
-                // Keep labels readable across zoom levels and hide when too small
-                labelBaseSize = Math.max(7, Math.min(18, 10 / Math.sqrt(k)));
-                nodeGroup.select("text")
-                    .style("font-size", labelBaseSize + "px")
-                    .style("display", (k < 0.35 ? "none" : null));
-            }
-
-
-
-            // Density cloud computation (throttled)
-            var densityTick = 0;
-            var geoPath = d3.geoPath().projection(null);
-            var MAX_POINTS_PER_GROUP = 400;
-            function updateDensity() {
-                try {
-                    if (isInteracting) return; // skip during interaction for smoother UX
-                    if (typeof d3 === 'undefined' || typeof d3.contourDensity !== 'function') {
-                        return; // d3-contour not available; skip gracefully
-                    }
-                    if (!nodes || nodes.length === 0) return;
-                    var usable = nodes.filter(function(d){ return d && typeof d.x === 'number' && isFinite(d.x) && typeof d.y === 'number' && isFinite(d.y); });
-                    if (usable.length < 3) return; // not enough positioned points yet
-
-                    var t = currentTransform || d3.zoomIdentity;
-                    if (t.k && t.k < 0.08) {
-                        // Skip density at extreme zoom-out to avoid numerical instability/perf issues
-                        densityLayer.selectAll('*').remove();
-                        return;
-                    }
-
-                    function hexToRgb(hex){
-                        if (!hex) return {r: 0, g: 200, b: 255};
-                        var c = hex.replace('#','');
-                        if (c.length === 3) c = c.split('').map(function(x){ return x+x; }).join('');
-                        var num = parseInt(c, 16);
-                        return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
-                    }
-
-                    // Build groups across all nodes
-                    var groups = {};
-                    for (var i = 0; i < usable.length; i++) {
-                        var k = getGroupKey(usable[i]);
-                        if (!groups[k]) groups[k] = [];
-                        groups[k].push(usable[i]);
-                    }
-
-                    densityLayer.selectAll('*').remove();
-
-                    Object.keys(groups).forEach(function(key){
-                        var arr = groups[key];
-                        if (!arr || arr.length < 3) return;
-
-                        // Transform positions into screen space and sample to cap cost
-                        var arrT = [];
-                        var step = Math.max(1, Math.floor(arr.length / MAX_POINTS_PER_GROUP));
-                        for (var j = 0; j < arr.length; j += step) {
-                            var nx = t.applyX(arr[j].x);
-                            var ny = t.applyY(arr[j].y);
-                            if (isFinite(nx) && isFinite(ny)) {
-                                arrT.push({ x: nx, y: ny, type: arr[j].type, color: arr[j].color });
-                            }
-                        }
-                        if (arrT.length < 3) return;
-
-                        // Compute adaptive bandwidth based on group spread
-                        var cx = 0, cy = 0;
-                        for (var k = 0; k < arrT.length; k++){ cx += arrT[k].x; cy += arrT[k].y; }
-                        cx /= arrT.length; cy /= arrT.length;
-                        var sumR = 0;
-                        for (var k2 = 0; k2 < arrT.length; k2++){
-                            var dx = arrT[k2].x - cx, dy = arrT[k2].y - cy;
-                            sumR += Math.sqrt(dx*dx + dy*dy);
-                        }
-                        var avgR = sumR / arrT.length;
-                        var dynamicBandwidth = Math.max(12, Math.min(80, avgR));
-                        var densityBandwidth = dynamicBandwidth / (t.k || 1);
-
-                        var contours = d3.contourDensity()
-                            .x(function(d){ return d.x; })
-                            .y(function(d){ return d.y; })
-                            .size([width, height])
-                            .bandwidth(densityBandwidth)
-                            .thresholds(8)
-                            (arrT);
-
-                        if (!contours || contours.length === 0) return;
-                        var maxVal = d3.max(contours, function(d){ return d.value; }) || 1;
-
-                        // Use the first node color in the group or fallback neon palette
-                        var baseColor = (arr.find(function(d){ return d && d.color; }) || {}).color || '#00c8ff';
-                        var rgb = hexToRgb(baseColor);
-
-                        var g = densityLayer.append('g').attr('data-group', key);
-                        g.selectAll('path')
-                            .data(contours)
-                            .enter()
-                            .append('path')
-                            .attr('d', geoPath)
-                            .attr('fill', 'rgb(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ')')
-                            .attr('stroke', 'none')
-                            .style('opacity', function(d){
-                                var v = maxVal ? (d.value / maxVal) : 0;
-                                var alpha = Math.pow(Math.max(0, Math.min(1, v)), 1.6); // accentuate clusters
-                                return 0.65 * alpha; // up to 0.65 opacity at peak density
-                            })
-                            .style('filter', 'blur(2px)');
-                    });
-                } catch (e) {
-                    // Reduce impact of any runtime errors during zoom
-                    console.warn('Density update failed:', e);
-                }
-            }
-
-            simulation.on("tick", function() {
-                link.attr("x1", d => d.source.x)
-                    .attr("y1", d => d.source.y)
-                    .attr("x2", d => d.target.x)
-                    .attr("y2", d => d.target.y);
-
-                edgeLabels
-                    .attr("x", d => (d.source.x + d.target.x) / 2)
-                    .attr("y", d => (d.source.y + d.target.y) / 2 - 5);
-
-                node.attr("cx", d => d.x)
-                    .attr("cy", d => d.y);
-
-                nodeGroup.select("text")
-                    .attr("x", d => d.x)
-                    .attr("y", d => d.y)
-                    .attr("dy", 4)
-                    .attr("text-anchor", "middle");
-
-                densityTick += 1;
-                if (densityTick % 24 === 0) updateDensity();
-            });
-
-            var zoomBehavior = d3.zoom()
-                .on("start", function(){ isInteracting = true; densityLayer.style("opacity", 0.2); })
-                .on("zoom", function(){
-                    currentTransform = d3.event.transform;
-                    container.attr("transform", currentTransform);
-                })
-                .on("end", function(){
-                    if (densityZoomTimer) clearTimeout(densityZoomTimer);
-                    densityZoomTimer = setTimeout(function(){ isInteracting = false; densityLayer.style("opacity", 1); updateDensity(); }, 140);
-                });
-            svg.call(zoomBehavior);
-
-            function dragstarted(d) {
-                if (!d3.event.active) simulation.alphaTarget(0.3).restart();
-                d.fx = d.x;
-                d.fy = d.y;
-                isInteracting = true;
-                densityLayer.style("opacity", 0.2);
-            }
-
-            function dragged(d) {
-                d.fx = d3.event.x;
-                d.fy = d3.event.y;
-            }
-
-            function dragended(d) {
-                if (!d3.event.active) simulation.alphaTarget(0);
-                d.fx = null;
-                d.fy = null;
-                if (densityZoomTimer) clearTimeout(densityZoomTimer);
-                densityZoomTimer = setTimeout(function(){ isInteracting = false; densityLayer.style("opacity", 1); updateDensity(); }, 140);
-            }
-
-            window.addEventListener("resize", function() {
-                width = window.innerWidth;
-                height = window.innerHeight;
-                svg.attr("width", width).attr("height", height);
-                simulation.force("center", d3.forceCenter(width / 2, height / 2));
-                simulation.alpha(1).restart();
-                updateDensity();
-                applyLabelSize();
-            });
-
-            // Initial density draw
-            updateDensity();
-            applyLabelSize();
-        </script>
-
-        <svg style="position: fixed; bottom: 10px; right: 10px; width: 150px; height: auto; z-index: 9999;" viewBox="0 0 158 44" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path fill-rule="evenodd" clip-rule="evenodd" d="M11.7496 4.92654C7.83308 4.92654 4.8585 7.94279 4.8585 11.3612V14.9304C4.8585 18.3488 7.83308 21.3651 11.7496 21.3651C13.6831 21.3651 15.0217 20.8121 16.9551 19.3543C18.0458 18.5499 19.5331 18.8013 20.3263 19.9072C21.1195 21.0132 20.8717 22.5213 19.781 23.3257C17.3518 25.0851 15.0217 26.2414 11.7 26.2414C5.35425 26.2414 0 21.2646 0 14.9304V11.3612C0 4.97681 5.35425 0.0502739 11.7 0.0502739C15.0217 0.0502739 17.3518 1.2065 19.781 2.96598C20.8717 3.77032 21.1195 5.27843 20.3263 6.38439C19.5331 7.49035 18.0458 7.69144 16.9551 6.93737C15.0217 5.52979 13.6831 4.92654 11.7496 4.92654ZM35.5463 4.92654C31.7289 4.92654 28.6552 8.04333 28.6552 11.8639V14.478C28.6552 18.2986 31.7289 21.4154 35.5463 21.4154C39.3141 21.4154 42.3878 18.2986 42.3878 14.478V11.8639C42.3878 8.04333 39.3141 4.92654 35.5463 4.92654ZM23.7967 11.8639C23.7967 5.32871 29.0518 0 35.5463 0C42.0408 0 47.2463 5.32871 47.2463 11.8639V14.478C47.2463 21.0132 42.0408 26.3419 35.5463 26.3419C29.0518 26.3419 23.7967 21.0635 23.7967 14.478V11.8639ZM63.3091 5.07736C59.4917 5.07736 56.418 8.19415 56.418 12.0147C56.418 15.8353 59.4917 18.9521 63.3091 18.9521C67.1265 18.9521 70.1506 15.8856 70.1506 12.0147C70.1506 8.14388 67.0769 5.07736 63.3091 5.07736ZM51.5595 11.9645C51.5595 5.42925 56.8146 0.150814 63.3091 0.150814C66.0854 0.150814 68.5642 1.10596 70.5968 2.71463L72.4311 0.904876C73.3731 -0.0502693 74.9099 -0.0502693 75.8519 0.904876C76.7938 1.86002 76.7938 3.41841 75.8519 4.37356L73.7201 6.53521C74.5629 8.19414 75.0587 10.0542 75.0587 12.0147C75.0587 18.4997 69.8532 23.8284 63.3587 23.8284C63.3091 23.8284 63.2099 23.8284 63.1603 23.8284H58.0044C57.1616 23.8284 56.4675 24.5322 56.4675 25.3868C56.4675 26.2414 57.1616 26.9452 58.0044 26.9452H64.6476H66.7794C68.5146 26.9452 70.3489 27.4479 71.7866 28.6041C73.2739 29.8106 74.2159 31.5701 74.4142 33.7317C74.7116 37.6026 72.0345 40.2166 69.8532 41.0713L63.8048 43.7859C62.5654 44.3389 61.1277 43.7859 60.6319 42.5291C60.0866 41.2723 60.6319 39.8648 61.8714 39.3118L68.0188 36.5972C68.0684 36.5972 68.118 36.5469 68.1675 36.5469C68.4154 36.4463 68.8616 36.1447 69.2087 35.6923C69.5061 35.2398 69.7044 34.7371 69.6548 34.1339C69.6053 33.229 69.2582 32.7263 68.8616 32.4247C68.4154 32.0728 67.7214 31.8214 66.8786 31.8214H58.2027C58.1531 31.8214 58.1531 31.8214 58.1035 31.8214H58.054C54.534 31.8214 51.6586 28.956 51.6586 25.3868C51.6586 23.0743 52.8485 21.0635 54.6828 19.9072C52.6997 17.7959 51.5595 15.031 51.5595 11.9645ZM90.8736 5.07736C87.0562 5.07736 83.9824 8.19415 83.9824 12.0147V23.9289C83.9824 25.2862 82.8917 26.3922 81.5532 26.3922C80.2146 26.3922 79.1239 25.2862 79.1239 23.9289V11.9645C79.1239 5.42925 84.379 0.150814 90.824 0.150814C97.2689 0.150814 102.524 5.42925 102.524 11.9645V23.8786C102.524 25.2359 101.433 26.3419 100.095 26.3419C98.7562 26.3419 97.6655 25.2359 97.6655 23.8786V11.9645C97.7647 8.14387 94.6414 5.07736 90.8736 5.07736ZM119.43 5.07736C115.513 5.07736 112.39 8.24441 112.39 12.065V14.5785C112.39 18.4494 115.513 21.5662 119.43 21.5662C120.768 21.5662 122.057 21.164 123.098 20.5105C124.238 19.8067 125.726 20.1586 126.42 21.3148C127.114 22.4711 126.767 23.9792 125.627 24.683C123.842 25.7889 121.71 26.4425 119.43 26.4425C112.885 26.4425 107.581 21.1137 107.581 14.5785V12.065C107.581 5.47952 112.935 0.201088 119.43 0.201088C125.032 0.201088 129.692 4.07194 130.931 9.3001L131.427 11.3612L121.115 15.584C119.876 16.0867 118.488 15.4834 117.942 14.2266C117.447 12.9699 118.041 11.5623 119.281 11.0596L125.478 8.54604C124.238 6.43466 122.008 5.07736 119.43 5.07736ZM146.003 5.07736C142.086 5.07736 138.963 8.24441 138.963 12.065V14.5785C138.963 18.4494 142.086 21.5662 146.003 21.5662C147.341 21.5662 148.630 21.164 149.671 20.5105C150.217 20.1586 150.663 19.8067 151.109 19.304C152.001 18.2986 153.538 18.2483 154.53 19.2034C155.521 20.1083 155.571 21.6667 154.629 22.6721C153.935 23.4262 153.092 24.13 152.2 24.683C150.415 25.7889 148.283 26.4425 146.003 26.4425C139.458 26.4425 134.154 21.1137 134.154 14.5785V12.065C134.154 5.47952 139.508 0.201088 146.003 0.201088C151.605 0.201088 156.265 4.07194 157.504 9.3001L158 11.3612L147.688 15.584C146.449 16.0867 145.061 15.4834 144.515 14.2266C144.019 12.9699 144.614 11.5623 145.854 11.0596L152.051 8.54604C150.762 6.43466 148.58 5.07736 146.003 5.07736Z" fill="white"/>
-        </svg>
-    </body>
-    </html>
-    """
-
-    # Safely embed JSON inside <script> by escaping </ to avoid prematurely closing the tag
-    def _safe_json_embed(obj):
-        return json.dumps(obj).replace("</", "<\\/")
-
-    html_content = html_template.replace("{nodes}", _safe_json_embed(nodes_list))
-    html_content = html_content.replace("{links}", _safe_json_embed(links_list))
+    html_content = _build_html(nodes_list, links_list, task_color_map, pipeline_color_map)
 
     if not destination_file_path:
         home_dir = os.path.expanduser("~")
@@ -693,9 +91,1439 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
     file_path = os.path.basename(destination_file_path)
 
     file_storage = LocalFileStorage(dir_path)
-
     file_storage.store(file_path, html_content, overwrite=True)
 
     logger.info(f"Graph visualization saved as {destination_file_path}")
 
     return html_content
+
+
+def _build_html(nodes_list, links_list, task_color_map=None, pipeline_color_map=None):
+    def _safe_json_embed(obj):
+        return json.dumps(obj).replace("</", "<\\/")
+
+    html_template = _get_html_template()
+    html_content = html_template.replace("__NODES_DATA__", _safe_json_embed(nodes_list))
+    html_content = html_content.replace("__LINKS_DATA__", _safe_json_embed(links_list))
+    html_content = html_content.replace("__TASK_COLORS__", _safe_json_embed(task_color_map or {}))
+    html_content = html_content.replace(
+        "__PIPELINE_COLORS__", _safe_json_embed(pipeline_color_map or {})
+    )
+    return html_content
+
+
+def _get_html_template():
+    return r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cognee Knowledge Graph</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#000000;--bg2:#323332;--surface:rgba(255,255,255,0.06);
+  --border:rgba(219,216,216,0.12);--text:#F4F4F4;--text2:#DBD8D8;
+  --accent:#6510F4;--accent2:#A550FF;--green:#0DFF00;
+}
+@font-face{font-family:'Inter';src:local('Inter'),local('Inter-Regular');font-display:swap}
+body,html{width:100%;height:100%;overflow:hidden;background:#000000;color:#F4F4F4;font-family:'Inter',system-ui,-apple-system,sans-serif}
+canvas{display:block;width:100vw;height:100vh;cursor:grab}
+canvas:active{cursor:grabbing}
+
+#header{
+  position:fixed;top:0;left:0;right:0;height:48px;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 20px;z-index:100;
+  background:linear-gradient(180deg,rgba(0,0,0,0.95) 0%,rgba(0,0,0,0) 100%);
+  pointer-events:none;
+}
+#header>*{pointer-events:auto}
+.logo{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:0.02em;color:var(--text)}
+.logo svg{width:20px;height:20px}
+.stats{display:flex;gap:16px;font-size:11px;color:var(--text2);font-variant-numeric:tabular-nums}
+.stats span{display:flex;align-items:center;gap:4px}
+.stats .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+
+#controls{
+  position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:100;
+  display:flex;gap:2px;padding:4px;
+  background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+}
+.ctrl-btn{
+  padding:6px 14px;font-size:11px;font-weight:500;font-family:inherit;
+  color:var(--text2);background:transparent;border:none;border-radius:7px;
+  cursor:pointer;transition:all 0.15s ease;white-space:nowrap;
+}
+.ctrl-btn:hover{color:var(--text);background:var(--surface)}
+.ctrl-btn.active{color:#F4F4F4;background:rgba(101,16,244,0.2)}
+.ctrl-sep{width:1px;background:var(--border);margin:2px 4px}
+
+#search-box{
+  position:fixed;top:56px;left:20px;z-index:100;width:280px;
+}
+#search-input{
+  width:100%;padding:8px 12px 8px 32px;
+  font-size:12px;font-family:inherit;color:var(--text);
+  background:var(--bg2);border:1px solid var(--border);border-radius:8px;
+  outline:none;transition:border-color 0.15s;
+}
+#search-input:focus{border-color:var(--accent)}
+#search-input::placeholder{color:var(--text2)}
+.search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text2);pointer-events:none}
+
+#info-panel{
+  position:fixed;top:56px;right:20px;width:320px;max-height:calc(100vh - 80px);
+  overflow-y:auto;z-index:100;
+  background:var(--bg2);border:1px solid var(--border);border-radius:12px;
+  padding:16px;opacity:0;transform:translateX(8px);
+  transition:opacity 0.2s ease,transform 0.2s ease;
+}
+#info-panel.visible{opacity:1;transform:translateX(0)}
+#info-panel::-webkit-scrollbar{width:4px}
+#info-panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.panel-header{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.panel-type{
+  font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;
+  padding:2px 6px;border-radius:4px;background:rgba(101,16,244,0.2);color:#A550FF;
+}
+.panel-title{font-size:14px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.panel-section{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.panel-section-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text2);margin-bottom:8px}
+.panel-row{display:flex;justify-content:space-between;align-items:flex-start;padding:3px 0;font-size:12px;gap:12px}
+.panel-row .k{color:var(--text2);flex-shrink:0}
+.panel-row .v{color:var(--text);text-align:right;word-break:break-word;max-width:200px}
+
+#legend{
+  position:fixed;bottom:64px;left:20px;z-index:100;
+  display:flex;flex-wrap:wrap;gap:6px 12px;
+  padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+  max-width:400px;
+}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text2);white-space:nowrap}
+.legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+.empty-state{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  text-align:center;color:var(--text2);font-size:14px;
+}
+
+#loading-overlay{
+  position:fixed;top:0;left:0;right:0;bottom:0;z-index:200;
+  background:rgba(0,0,0,0.92);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  transition:opacity 0.4s ease;
+}
+#loading-overlay.hidden{opacity:0;pointer-events:none}
+#loading-text{font-size:14px;color:var(--text2);margin-bottom:16px}
+#loading-bar-bg{width:240px;height:4px;background:var(--bg2);border-radius:2px;overflow:hidden}
+#loading-bar{width:0%;height:100%;background:var(--accent);border-radius:2px;transition:width 0.15s linear}
+#loading-stats{font-size:11px;color:var(--text2);margin-top:10px;opacity:0.7}
+
+#minimap-container{
+  position:fixed;bottom:64px;right:20px;z-index:100;
+  border:1px solid var(--border);border-radius:8px;overflow:hidden;
+  background:rgba(0,0,0,0.7);cursor:pointer;display:none;
+}
+#minimap-canvas{display:block}
+
+#fps-counter{
+  position:fixed;top:12px;right:180px;z-index:100;
+  font-size:10px;color:var(--text2);font-variant-numeric:tabular-nums;
+  display:none;pointer-events:none;
+}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+    </svg>
+    <span>Cognee</span>
+  </div>
+  <div class="stats" id="stats"></div>
+</div>
+
+<div id="search-box">
+  <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+  <input type="text" id="search-input" placeholder="Search nodes..." autocomplete="off" spellcheck="false">
+</div>
+
+<div id="controls">
+  <button class="ctrl-btn active" data-layer="nodes">Nodes</button>
+  <button class="ctrl-btn active" data-layer="edges">Edges</button>
+  <button class="ctrl-btn active" data-layer="labels">Labels</button>
+  <button class="ctrl-btn" data-layer="heatmap">Heatmap</button>
+  <button class="ctrl-btn" data-layer="typeclouds">Type Clouds</button>
+  <div class="ctrl-sep"></div>
+  <span style="font-size:10px;color:var(--text2);padding:6px 4px">Color:</span>
+  <button class="ctrl-btn active" data-colorby="type">Type</button>
+  <button class="ctrl-btn" data-colorby="task">Task</button>
+  <button class="ctrl-btn" data-colorby="pipeline">Pipeline</button>
+  <div class="ctrl-sep"></div>
+  <button class="ctrl-btn" id="btn-zoom-out" title="Zoom out (-)">&#x2212;</button>
+  <button class="ctrl-btn" id="btn-zoom-in" title="Zoom in (+)">+</button>
+  <button class="ctrl-btn" id="btn-fit" title="Fit to view (F)">Fit</button>
+</div>
+
+<div id="info-panel"></div>
+<div id="legend"></div>
+
+<div id="loading-overlay">
+  <div id="loading-text">Laying out graph...</div>
+  <div id="loading-bar-bg"><div id="loading-bar"></div></div>
+  <div id="loading-stats"></div>
+</div>
+
+<div id="minimap-container"><canvas id="minimap-canvas"></canvas></div>
+<div id="fps-counter"></div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+(function(){
+"use strict";
+
+var nodes = __NODES_DATA__;
+var links = __LINKS_DATA__;
+var taskColors = __TASK_COLORS__;
+var pipelineColors = __PIPELINE_COLORS__;
+
+if (!nodes || nodes.length === 0) {
+  document.body.innerHTML = '<div class="empty-state">No graph data available</div>';
+  return;
+}
+
+// ── Helpers ──
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+function truncate(s,n){if(!s)return"";return s.length>n?s.slice(0,n)+"\u2026":s}
+function hexToRgb(hex){
+  if(!hex)return[219,216,216];
+  var c=hex.replace("#","");
+  if(c.length===3)c=c[0]+c[0]+c[1]+c[1]+c[2]+c[2];
+  var n=parseInt(c,16);
+  return[(n>>16)&255,(n>>8)&255,n&255];
+}
+function hslToRgb(h,s,l){
+  s/=100;l/=100;
+  var a=s*Math.min(l,1-l);
+  function f(n){var k=(n+h/30)%12;return l-a*Math.max(-1,Math.min(k-3,9-k,1))}
+  return[Math.round(f(0)*255),Math.round(f(8)*255),Math.round(f(4)*255)];
+}
+function clamp(v,lo,hi){return v<lo?lo:v>hi?hi:v}
+function lerp(a,b,t){return a+(b-a)*t}
+
+var N=nodes.length;
+var M=links.length;
+
+// ── Resolve IDs ──
+nodes.forEach(function(n){
+  if(!n.id)n.id=n.node_id||n.uuid||n.external_id||n.name||Math.random().toString(36);
+});
+var nodeMap={};
+nodes.forEach(function(n){nodeMap[n.id]=n});
+links=links.filter(function(l){
+  var s=typeof l.source==="object"?(l.source.id||l.source):l.source;
+  var t=typeof l.target==="object"?(l.target.id||l.target):l.target;
+  return nodeMap[s]&&nodeMap[t];
+});
+M=links.length;
+
+// ── Compute node degrees for sizing ──
+var degreeMap={};
+nodes.forEach(function(n){degreeMap[n.id]=0});
+links.forEach(function(l){
+  var s=typeof l.source==="object"?l.source.id:l.source;
+  var t=typeof l.target==="object"?l.target.id:l.target;
+  degreeMap[s]=(degreeMap[s]||0)+1;
+  degreeMap[t]=(degreeMap[t]||0)+1;
+});
+var maxDeg=Math.max(1,Math.max.apply(null,Object.values(degreeMap)));
+nodes.forEach(function(n){n._degree=degreeMap[n.id]||0;n._r=4+Math.sqrt(n._degree/maxDeg)*10});
+
+// Pre-sort nodes by degree descending (for adaptive labels)
+var nodesByDegree=nodes.slice().sort(function(a,b){return b._degree-a._degree});
+var topDegreeSet=new Set();
+nodesByDegree.slice(0,Math.min(10,N)).forEach(function(n){topDegreeSet.add(n.id)});
+
+// ── Color palette ──
+var colorByType={
+  "Entity":"#6510F4","EntityType":"#A550FF","DocumentChunk":"#0DFF00",
+  "TextSummary":"#6510F4","TableRow":"#A550FF","TableType":"#6510F4",
+  "ColumnValue":"#747470","SchemaTable":"#A550FF","DatabaseSchema":"#6510F4",
+  "SchemaRelationship":"#323332"
+};
+var typeColors={};
+var typeRgbCache={};
+var hueStep=0;
+nodes.forEach(function(n){
+  if(!n.color)n.color=colorByType[n.type]||null;
+  if(!n.color){
+    if(!typeColors[n.type]){
+      var hue=(hueStep*137.5)%360;hueStep++;
+      typeColors[n.type]="hsl("+hue+",55%,65%)";
+    }
+    n.color=typeColors[n.type];
+  }
+  // Cache RGB per type
+  if(!typeRgbCache[n.type]){
+    var c=n.color;
+    if(c.indexOf("hsl")===0){
+      var m=c.match(/[\d.]+/g);
+      typeRgbCache[n.type]=hslToRgb(+m[0],+m[1],+m[2]);
+    }else{
+      typeRgbCache[n.type]=hexToRgb(c);
+    }
+  }
+  n._rgb=typeRgbCache[n.type];
+});
+
+// ── Color-by mode ──
+var colorByMode="type";
+
+function recolorNodes(){
+  nodes.forEach(function(n){
+    if(colorByMode==="type"){
+      n.color=colorByType[n.type]||typeColors[n.type]||"#DBD8D8";
+    }else if(colorByMode==="task"){
+      n.color=taskColors[n.source_task||"Unknown"]||"#DBD8D8";
+    }else{
+      n.color=pipelineColors[n.source_pipeline||"Unknown"]||"#DBD8D8";
+    }
+    // Recache RGB
+    if(n.color.indexOf("hsl")===0){
+      var m=n.color.match(/[\d.]+/g);
+      n._rgb=hslToRgb(+m[0],+m[1],+m[2]);
+    }else{
+      n._rgb=hexToRgb(n.color);
+    }
+  });
+}
+
+document.querySelectorAll(".ctrl-btn[data-colorby]").forEach(function(btn){
+  btn.addEventListener("click",function(){
+    document.querySelectorAll(".ctrl-btn[data-colorby]").forEach(function(b){b.classList.remove("active")});
+    btn.classList.add("active");
+    colorByMode=btn.dataset.colorby;
+    recolorNodes();
+    updateLegend();
+    draw();
+  });
+});
+
+// ── Stats ──
+var typeCounts={};
+nodes.forEach(function(n){typeCounts[n.type]=(typeCounts[n.type]||0)+1});
+var taskCounts={};
+nodes.forEach(function(n){var t=n.source_task||"Unknown";taskCounts[t]=(taskCounts[t]||0)+1});
+var pipeCounts={};
+nodes.forEach(function(n){var p=n.source_pipeline||"Unknown";pipeCounts[p]=(pipeCounts[p]||0)+1});
+var uniqueTasks=Object.keys(taskCounts).length;
+var uniquePipelines=Object.keys(pipeCounts).length;
+var statsEl=document.getElementById("stats");
+var perfTier=N>10000?"large":N>2000?"medium":"small";
+statsEl.innerHTML='<span><span class="dot" style="background:#6510F4"></span>'+N.toLocaleString()+" nodes</span>"+
+  '<span><span class="dot" style="background:#747470"></span>'+M.toLocaleString()+" edges</span>"+
+  '<span>'+Object.keys(typeCounts).length+" types</span>"+
+  '<span>'+uniqueTasks+" tasks</span>"+
+  '<span>'+uniquePipelines+" pipelines</span>"+
+  '<span style="opacity:0.5">['+perfTier+']</span>';
+
+// ── Legend ──
+var legendEl=document.getElementById("legend");
+
+function updateLegend(){
+  var entries,counts,colorSource;
+  if(colorByMode==="type"){
+    counts=typeCounts;
+    entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
+    colorSource=function(t){return colorByType[t]||typeColors[t]||"#DBD8D8"};
+  }else if(colorByMode==="task"){
+    counts=taskCounts;
+    entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
+    colorSource=function(t){return taskColors[t]||"#DBD8D8"};
+  }else{
+    counts=pipeCounts;
+    entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
+    colorSource=function(t){return pipelineColors[t]||"#DBD8D8"};
+  }
+  if(entries.length>12)entries=entries.slice(0,12);
+  legendEl.innerHTML=entries.map(function(t){
+    return '<div class="legend-item"><div class="legend-dot" style="background:'+colorSource(t)+'"></div>'+esc(t)+" ("+counts[t]+")</div>";
+  }).join("");
+}
+updateLegend();
+
+// ── Canvas setup ──
+var canvas=document.getElementById("canvas");
+var ctx=canvas.getContext("2d");
+var dpr=window.devicePixelRatio||1;
+var W,H;
+function resize(){
+  W=window.innerWidth;H=window.innerHeight;
+  canvas.width=W*dpr;canvas.height=H*dpr;
+  canvas.style.width=W+"px";canvas.style.height=H+"px";
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+resize();
+window.addEventListener("resize",function(){resize();draw()});
+
+// ── Layer toggles ──
+var layers={nodes:true,edges:true,labels:true,heatmap:false,typeclouds:false};
+document.querySelectorAll(".ctrl-btn[data-layer]").forEach(function(btn){
+  btn.addEventListener("click",function(){
+    var key=btn.dataset.layer;
+    layers[key]=!layers[key];
+    btn.classList.toggle("active",layers[key]);
+    draw();
+  });
+});
+
+// ── Transform state ──
+var tx=W/2,ty=H/2,scale=1;
+
+// ── Smooth zoom animation state ──
+var zoomAnim=null; // {fromScale,toScale,fromTx,toTx,fromTy,toTy,startTime,duration}
+
+function animateZoom(){
+  if(!zoomAnim)return;
+  var elapsed=performance.now()-zoomAnim.startTime;
+  var t=Math.min(1,elapsed/zoomAnim.duration);
+  // Ease out cubic
+  var e=1-Math.pow(1-t,3);
+  scale=lerp(zoomAnim.fromScale,zoomAnim.toScale,e);
+  tx=lerp(zoomAnim.fromTx,zoomAnim.toTx,e);
+  ty=lerp(zoomAnim.fromTy,zoomAnim.toTy,e);
+  draw();
+  if(t<1){requestAnimationFrame(animateZoom)}
+  else{zoomAnim=null}
+}
+
+function smoothZoomTo(newScale,pivotX,pivotY,duration){
+  newScale=clamp(newScale,0.02,30);
+  var ratio=newScale/scale;
+  var newTx=pivotX-(pivotX-tx)*ratio;
+  var newTy=pivotY-(pivotY-ty)*ratio;
+  zoomAnim={fromScale:scale,toScale:newScale,fromTx:tx,toTx:newTx,fromTy:ty,toTy:newTy,startTime:performance.now(),duration:duration||150};
+  requestAnimationFrame(animateZoom);
+}
+
+function smoothPanZoomTo(newScale,newTx,newTy,duration){
+  newScale=clamp(newScale,0.02,30);
+  zoomAnim={fromScale:scale,toScale:newScale,fromTx:tx,toTx:newTx,fromTy:ty,toTy:newTy,startTime:performance.now(),duration:duration||300};
+  requestAnimationFrame(animateZoom);
+}
+
+// ── Zoom-to-fit ──
+function zoomToFit(animated){
+  var minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  var valid=0;
+  nodes.forEach(function(n){
+    if(typeof n.x!=="number"||!isFinite(n.x))return;
+    valid++;
+    if(n.x<minX)minX=n.x;if(n.x>maxX)maxX=n.x;
+    if(n.y<minY)minY=n.y;if(n.y>maxY)maxY=n.y;
+  });
+  if(valid===0){return}
+  var pad=0.1;
+  var gw=maxX-minX||100;
+  var gh=maxY-minY||100;
+  var cx=(minX+maxX)/2;
+  var cy=(minY+maxY)/2;
+  var sx=W*(1-2*pad)/gw;
+  var sy=H*(1-2*pad)/gh;
+  var ns=Math.min(sx,sy,10);
+  var ntx=W/2-cx*ns;
+  var nty=H/2-cy*ns;
+  if(animated){smoothPanZoomTo(ns,ntx,nty,400)}
+  else{scale=ns;tx=ntx;ty=nty;draw()}
+}
+
+// ── Force simulation (Phase 3f: adaptive tuning) ──
+var repStr,linkDist,alphaDecayVal,velDecayVal,distMaxVal,collideIter;
+if(N>10000){
+  repStr=-20;linkDist=20;alphaDecayVal=0.05;velDecayVal=0.6;distMaxVal=200;collideIter=0;
+}else if(N>5000){
+  repStr=-40;linkDist=30;alphaDecayVal=0.04;velDecayVal=0.5;distMaxVal=300;collideIter=0;
+}else if(N>2000){
+  repStr=-60;linkDist=40;alphaDecayVal=0.03;velDecayVal=0.45;distMaxVal=400;collideIter=1;
+}else if(N>500){
+  repStr=-120;linkDist=70;alphaDecayVal=0.02;velDecayVal=0.4;distMaxVal=500;collideIter=1;
+}else{
+  repStr=-180;linkDist=100;alphaDecayVal=0.02;velDecayVal=0.4;distMaxVal=600;collideIter=1;
+}
+
+var MAX_TICKS=N>10000?300:N>5000?400:1000;
+var simTickCount=0;
+var simDone=false;
+
+// ── Loading overlay (Phase 3g) ──
+var loadingOverlay=document.getElementById("loading-overlay");
+var loadingBar=document.getElementById("loading-bar");
+var loadingText=document.getElementById("loading-text");
+var loadingStatsEl=document.getElementById("loading-stats");
+var showLoading=N>200;
+
+if(!showLoading){
+  loadingOverlay.classList.add("hidden");
+}else{
+  loadingStatsEl.textContent=N.toLocaleString()+" nodes, "+M.toLocaleString()+" edges";
+}
+
+var simulation=d3.forceSimulation(nodes)
+  .force("link",d3.forceLink(links).id(function(d){return d.id}).distance(linkDist).strength(0.2))
+  .force("charge",d3.forceManyBody().strength(repStr).distanceMax(distMaxVal))
+  .force("center",d3.forceCenter(0,0))
+  .force("x",d3.forceX(0).strength(0.04))
+  .force("y",d3.forceY(0).strength(0.04))
+  .alphaDecay(alphaDecayVal)
+  .velocityDecay(velDecayVal);
+
+if(collideIter>0){
+  simulation.force("collide",d3.forceCollide().radius(function(d){return d._r+2}).iterations(collideIter));
+}
+
+// ── Quadtree (Phase 3a) ──
+var quadtree=null;
+var qtRebuildInterval=N>10000?10:N>2000?5:3;
+
+function rebuildQuadtree(){
+  quadtree=d3.quadtree()
+    .x(function(d){return d.x})
+    .y(function(d){return d.y})
+    .addAll(nodes.filter(function(n){return typeof n.x==="number"&&isFinite(n.x)}));
+}
+
+// ── Adjacency index ──
+var adjMap={};
+nodes.forEach(function(n){adjMap[n.id]=[]});
+
+// Simulation tick handler
+simulation.on("tick",function(){
+  simTickCount++;
+
+  // Rebuild adjacency once after link objects are resolved
+  if(simTickCount===1){
+    adjMap={};
+    nodes.forEach(function(n2){adjMap[n2.id]=[]});
+    links.forEach(function(l){
+      var sid=l.source.id||l.source;
+      var tid=l.target.id||l.target;
+      if(adjMap[sid])adjMap[sid].push(tid);
+      if(adjMap[tid])adjMap[tid].push(sid);
+    });
+  }
+
+  // Rebuild quadtree periodically
+  if(simTickCount%qtRebuildInterval===0){rebuildQuadtree()}
+
+  // Update loading progress
+  if(showLoading&&!simDone){
+    var pct=Math.min(99,Math.round(simTickCount/MAX_TICKS*100));
+    loadingBar.style.width=pct+"%";
+    loadingText.textContent="Laying out graph... "+pct+"%";
+  }
+
+  // Cap simulation ticks
+  if(simTickCount>=MAX_TICKS&&!simDone){
+    simulation.stop();
+    simDone=true;
+    rebuildQuadtree();
+    computeDensity();
+    if(showLoading){
+      loadingBar.style.width="100%";
+      loadingText.textContent="Done!";
+      setTimeout(function(){loadingOverlay.classList.add("hidden")},300);
+    }
+    zoomToFit(false);
+    setupMinimap();
+    draw();
+    return;
+  }
+
+  // Only draw during simulation if small graph, otherwise skip frames
+  if(N<2000||simTickCount%3===0){draw()}
+});
+
+// When simulation ends naturally (alpha < alphaMin)
+simulation.on("end",function(){
+  if(!simDone){
+    simDone=true;
+    rebuildQuadtree();
+    computeDensity();
+    if(showLoading){
+      loadingBar.style.width="100%";
+      loadingText.textContent="Done!";
+      setTimeout(function(){loadingOverlay.classList.add("hidden")},300);
+    }
+    zoomToFit(false);
+    setupMinimap();
+    draw();
+  }
+});
+
+// ── Interaction state ──
+var hoveredNode=null;
+var searchQuery="";
+var searchMatches=new Set();
+
+// ── Search ──
+var searchInput=document.getElementById("search-input");
+searchInput.addEventListener("input",function(){
+  searchQuery=searchInput.value.trim().toLowerCase();
+  searchMatches.clear();
+  if(searchQuery){
+    nodes.forEach(function(n){
+      var name=(n.name||"").toLowerCase();
+      var type=(n.type||"").toLowerCase();
+      if(name.indexOf(searchQuery)>=0||type.indexOf(searchQuery)>=0)searchMatches.add(n.id);
+    });
+  }
+  draw();
+});
+
+// ── Info panel ──
+var infoPanel=document.getElementById("info-panel");
+function showNodeInfo(n){
+  if(!n){infoPanel.classList.remove("visible");return}
+  var html='<div class="panel-header">';
+  html+='<span class="panel-type" style="background:'+n.color+'22;color:'+n.color+'">'+esc(n.type||"Node")+"</span>";
+  html+='<span class="panel-title">'+esc(truncate(n.name||n.id,40))+"</span></div>";
+
+  var desc=null;
+  var descKeys=["description","summary","text","content"];
+  for(var i=0;i<descKeys.length;i++){
+    var v=n[descKeys[i]]||(n.properties&&n.properties[descKeys[i]]);
+    if(typeof v==="string"&&v.trim()){desc=v.trim();break}
+  }
+  if(desc){
+    html+='<div style="font-size:12px;color:var(--text2);line-height:1.5;margin-top:8px">'+esc(truncate(desc,300))+"</div>";
+  }
+
+  html+='<div class="panel-section"><div class="panel-section-title">Properties</div>';
+  html+='<div class="panel-row"><span class="k">ID</span><span class="v" style="font-size:10px;opacity:0.7">'+esc(truncate(n.id,36))+"</span></div>";
+  html+='<div class="panel-row"><span class="k">Connections</span><span class="v">'+n._degree+"</span></div>";
+  if(n.source_task)html+='<div class="panel-row"><span class="k">Source Task</span><span class="v">'+esc(n.source_task)+"</span></div>";
+  if(n.source_pipeline)html+='<div class="panel-row"><span class="k">Source Pipeline</span><span class="v">'+esc(n.source_pipeline)+"</span></div>";
+
+  if(n.properties){
+    Object.keys(n.properties).slice(0,10).forEach(function(key){
+      var v=n.properties[key];
+      if(v!==undefined&&v!==null&&typeof v!=="object"){
+        html+='<div class="panel-row"><span class="k">'+esc(key)+'</span><span class="v">'+esc(truncate(String(v),80))+"</span></div>";
+      }
+    });
+  }
+  html+="</div>";
+
+  infoPanel.innerHTML=html;
+  infoPanel.classList.add("visible");
+}
+
+function showEdgeInfo(e){
+  var html='<div class="panel-header">';
+  html+='<span class="panel-type">Edge</span>';
+  html+='<span class="panel-title">'+esc(e.relation||"relationship")+"</span></div>";
+  html+='<div class="panel-section"><div class="panel-section-title">Details</div>';
+  var sName=e.source.name||e.source.id;
+  var tName=e.target.name||e.target.id;
+  html+='<div class="panel-row"><span class="k">From</span><span class="v">'+esc(truncate(sName,30))+"</span></div>";
+  html+='<div class="panel-row"><span class="k">To</span><span class="v">'+esc(truncate(tName,30))+"</span></div>";
+  if(e.weight!=null)html+='<div class="panel-row"><span class="k">Weight</span><span class="v">'+e.weight+"</span></div>";
+  if(e.all_weights&&Object.keys(e.all_weights).length>0){
+    Object.keys(e.all_weights).forEach(function(k){
+      html+='<div class="panel-row"><span class="k">w:'+esc(k)+'</span><span class="v">'+e.all_weights[k]+"</span></div>";
+    });
+  }
+  if(e.relationship_type)html+='<div class="panel-row"><span class="k">Type</span><span class="v">'+esc(e.relationship_type)+"</span></div>";
+  html+="</div>";
+  infoPanel.innerHTML=html;
+  infoPanel.classList.add("visible");
+}
+
+// ── Hit testing (Phase 3a: quadtree-accelerated) ──
+function screenToWorld(sx,sy){return{x:(sx-tx)/scale,y:(sy-ty)/scale}}
+function worldToScreen(wx,wy){return{x:wx*scale+tx,y:wy*scale+ty}}
+
+function findNodeAt(sx,sy){
+  var w=screenToWorld(sx,sy);
+  var searchR=(20)/scale; // max search radius in world coords
+  if(quadtree){
+    var found=quadtree.find(w.x,w.y,searchR);
+    if(found){
+      var dx=found.x-w.x,dy=found.y-w.y;
+      var d=Math.sqrt(dx*dx+dy*dy);
+      var hitR=(found._r+4)/scale;
+      if(d<hitR)return found;
+    }
+    return null;
+  }
+  // Fallback for before quadtree is built
+  var best=null,bestD=Infinity;
+  for(var i=nodes.length-1;i>=0;i--){
+    var n=nodes[i];
+    if(typeof n.x!=="number")continue;
+    var dx2=n.x-w.x,dy2=n.y-w.y;
+    var d2=Math.sqrt(dx2*dx2+dy2*dy2);
+    var hitR2=(n._r+4)/scale;
+    if(d2<hitR2&&d2<bestD){best=n;bestD=d2}
+  }
+  return best;
+}
+
+function findEdgeAt(sx,sy){
+  var w=screenToWorld(sx,sy);
+  var threshold=6/scale;
+  // Only check edges with at least one endpoint in viewport (Phase 3b)
+  var vp=getViewportWorld();
+  var margin=50/scale;
+  for(var i=0;i<links.length;i++){
+    var e=links[i];
+    var ax=e.source.x,ay=e.source.y,bx=e.target.x,by=e.target.y;
+    if(typeof ax!=="number")continue;
+    // Skip if both endpoints off-screen
+    var sIn=ax>=vp.x1-margin&&ax<=vp.x2+margin&&ay>=vp.y1-margin&&ay<=vp.y2+margin;
+    var tIn=bx>=vp.x1-margin&&bx<=vp.x2+margin&&by>=vp.y1-margin&&by<=vp.y2+margin;
+    if(!sIn&&!tIn)continue;
+    var ddx=bx-ax,ddy=by-ay;
+    var len2=ddx*ddx+ddy*ddy;
+    if(len2===0)continue;
+    var t=Math.max(0,Math.min(1,((w.x-ax)*ddx+(w.y-ay)*ddy)/len2));
+    var px=ax+t*ddx,py=ay+t*ddy;
+    var dist=Math.sqrt((w.x-px)*(w.x-px)+(w.y-py)*(w.y-py));
+    if(dist<threshold)return e;
+  }
+  return null;
+}
+
+// ── Viewport helpers (Phase 3b) ──
+function getViewportWorld(){
+  return{
+    x1:-tx/scale,
+    y1:-ty/scale,
+    x2:(W-tx)/scale,
+    y2:(H-ty)/scale
+  };
+}
+
+function isInViewport(wx,wy,margin,vp){
+  return wx>=vp.x1-margin&&wx<=vp.x2+margin&&wy>=vp.y1-margin&&wy<=vp.y2+margin;
+}
+
+// ── Mouse ──
+var isDragging=false,dragNode=null,isPanning=false;
+var lastMx=0,lastMy=0;
+
+canvas.addEventListener("mousedown",function(ev){
+  var mx=ev.offsetX,my=ev.offsetY;
+  lastMx=mx;lastMy=my;
+  var hit=findNodeAt(mx,my);
+  if(hit){
+    dragNode=hit;isDragging=true;
+    dragNode.fx=dragNode.x;dragNode.fy=dragNode.y;
+    simulation.alphaTarget(0.3).restart();
+    canvas.style.cursor="grabbing";
+  }else{
+    isPanning=true;
+    canvas.style.cursor="grabbing";
+  }
+});
+
+canvas.addEventListener("mousemove",function(ev){
+  var mx=ev.offsetX,my=ev.offsetY;
+  if(isDragging&&dragNode){
+    var w=screenToWorld(mx,my);
+    dragNode.fx=w.x;dragNode.fy=w.y;
+  }else if(isPanning){
+    tx+=mx-lastMx;ty+=my-lastMy;
+    draw();
+  }else{
+    var hit=findNodeAt(mx,my);
+    if(hit!==hoveredNode){
+      hoveredNode=hit;
+      if(hoveredNode){
+        showNodeInfo(hoveredNode);
+        canvas.style.cursor="pointer";
+      }else{
+        var edge=findEdgeAt(mx,my);
+        if(edge){showEdgeInfo(edge);canvas.style.cursor="pointer"}
+        else{infoPanel.classList.remove("visible");canvas.style.cursor="grab"}
+      }
+      draw();
+    }
+  }
+  lastMx=mx;lastMy=my;
+});
+
+canvas.addEventListener("mouseup",function(){
+  if(isDragging&&dragNode){
+    dragNode.fx=null;dragNode.fy=null;
+    simulation.alphaTarget(0);
+  }
+  isDragging=false;dragNode=null;isPanning=false;
+  canvas.style.cursor="grab";
+});
+
+canvas.addEventListener("mouseleave",function(){
+  if(isDragging&&dragNode){dragNode.fx=null;dragNode.fy=null;simulation.alphaTarget(0)}
+  isDragging=false;dragNode=null;isPanning=false;
+  hoveredNode=null;draw();
+});
+
+// ── Double-click to zoom to node (Phase 1) ──
+canvas.addEventListener("dblclick",function(ev){
+  ev.preventDefault();
+  var mx=ev.offsetX,my=ev.offsetY;
+  var hit=findNodeAt(mx,my);
+  if(hit&&typeof hit.x==="number"){
+    var ns=clamp(scale*2,0.02,30);
+    var ntx=W/2-hit.x*ns;
+    var nty=H/2-hit.y*ns;
+    smoothPanZoomTo(ns,ntx,nty,300);
+  }
+});
+
+// ── Wheel zoom (Phase 1: proportional to deltaY) ──
+canvas.addEventListener("wheel",function(ev){
+  ev.preventDefault();
+  if(zoomAnim)zoomAnim=null; // cancel any running animation
+  var mx=ev.offsetX,my=ev.offsetY;
+  var factor=Math.exp(-ev.deltaY*0.002);
+  var newScale=clamp(scale*factor,0.02,30);
+  var ratio=newScale/scale;
+  tx=mx-(mx-tx)*ratio;
+  ty=my-(my-ty)*ratio;
+  scale=newScale;
+  draw();
+},{passive:false});
+
+// ── Zoom buttons (Phase 1) ──
+document.getElementById("btn-zoom-in").addEventListener("click",function(){
+  smoothZoomTo(scale*1.4,W/2,H/2,200);
+});
+document.getElementById("btn-zoom-out").addEventListener("click",function(){
+  smoothZoomTo(scale/1.4,W/2,H/2,200);
+});
+document.getElementById("btn-fit").addEventListener("click",function(){
+  zoomToFit(true);
+});
+
+// ── Density (Phase 2: Grid-based heatmap + type clouds) ──
+var densityCellSize=30; // world-space cell size
+var heatmapGrid=null; // {cols,rows,ox,oy,data:[]} global density
+var typeGrids=null; // {type:{cols,rows,ox,oy,data:[],rgb:[]}} per-type density
+
+function computeDensity(){
+  if(!layers.heatmap&&!layers.typeclouds)return;
+  // Compute world bounding box
+  var minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  nodes.forEach(function(n){
+    if(typeof n.x!=="number"||!isFinite(n.x))return;
+    if(n.x<minX)minX=n.x;if(n.x>maxX)maxX=n.x;
+    if(n.y<minY)minY=n.y;if(n.y>maxY)maxY=n.y;
+  });
+  if(minX===Infinity)return;
+
+  var pad=densityCellSize*2;
+  minX-=pad;minY-=pad;maxX+=pad;maxY+=pad;
+  var cols=Math.ceil((maxX-minX)/densityCellSize);
+  var rows=Math.ceil((maxY-minY)/densityCellSize);
+  if(cols<1||rows<1||cols*rows>500000)return; // safety limit
+
+  // Global heatmap
+  if(layers.heatmap){
+    var grid=new Float32Array(cols*rows);
+    nodes.forEach(function(n){
+      if(typeof n.x!=="number"||!isFinite(n.x))return;
+      var ci=Math.floor((n.x-minX)/densityCellSize);
+      var ri=Math.floor((n.y-minY)/densityCellSize);
+      if(ci>=0&&ci<cols&&ri>=0&&ri<rows)grid[ri*cols+ci]++;
+    });
+    // Multi-pass 3x3 box blur (3 passes approximates Gaussian)
+    var src=grid,dst;
+    for(var pass=0;pass<3;pass++){
+      dst=new Float32Array(cols*rows);
+      for(var r=0;r<rows;r++){
+        for(var c=0;c<cols;c++){
+          var sum=0,cnt=0;
+          for(var dr=-1;dr<=1;dr++){
+            for(var dc=-1;dc<=1;dc++){
+              var rr=r+dr,cc=c+dc;
+              if(rr>=0&&rr<rows&&cc>=0&&cc<cols){sum+=src[rr*cols+cc];cnt++}
+            }
+          }
+          dst[r*cols+c]=sum/cnt;
+        }
+      }
+      src=dst;
+    }
+    var blurred=src;
+    var maxVal=0;
+    for(var i=0;i<blurred.length;i++){if(blurred[i]>maxVal)maxVal=blurred[i]}
+    // Pre-render to offscreen canvas for smooth bilinear interpolation
+    var hmCanvas=document.createElement("canvas");
+    hmCanvas.width=cols;hmCanvas.height=rows;
+    var hmCtx=hmCanvas.getContext("2d");
+    var hmImg=hmCtx.createImageData(cols,rows);
+    if(maxVal>0){
+      for(var i=0;i<blurred.length;i++){
+        var v=blurred[i];
+        if(v>0){
+          var a=Math.round((0.03+(v/maxVal)*0.17)*255);
+          var idx=i*4;
+          hmImg.data[idx]=255;hmImg.data[idx+1]=230;hmImg.data[idx+2]=200;hmImg.data[idx+3]=a;
+        }
+      }
+    }
+    hmCtx.putImageData(hmImg,0,0);
+    heatmapGrid={cols:cols,rows:rows,ox:minX,oy:minY,data:blurred,maxVal:maxVal,canvas:hmCanvas};
+  }
+
+  // Per-type grids
+  if(layers.typeclouds){
+    var tg={};
+    nodes.forEach(function(n){
+      if(typeof n.x!=="number"||!isFinite(n.x))return;
+      var t=n.type||"default";
+      if(!tg[t]){tg[t]={grid:new Float32Array(cols*rows),rgb:n._rgb}}
+      var ci=Math.floor((n.x-minX)/densityCellSize);
+      var ri=Math.floor((n.y-minY)/densityCellSize);
+      if(ci>=0&&ci<cols&&ri>=0&&ri<rows)tg[t].grid[ri*cols+ci]++;
+    });
+    // Multi-pass blur + offscreen canvas per type
+    var result={};
+    Object.keys(tg).forEach(function(t){
+      var g=tg[t].grid;
+      var rgb=tg[t].rgb;
+      // 3-pass box blur
+      var src2=g,dst2;
+      for(var pass=0;pass<3;pass++){
+        dst2=new Float32Array(cols*rows);
+        for(var r=0;r<rows;r++){
+          for(var c=0;c<cols;c++){
+            var sum=0,cnt=0;
+            for(var dr=-1;dr<=1;dr++){
+              for(var dc=-1;dc<=1;dc++){
+                var rr=r+dr,cc=c+dc;
+                if(rr>=0&&rr<rows&&cc>=0&&cc<cols){sum+=src2[rr*cols+cc];cnt++}
+              }
+            }
+            dst2[r*cols+c]=sum/cnt;
+          }
+        }
+        src2=dst2;
+      }
+      var bl=src2;
+      var mv=0;
+      for(var i=0;i<bl.length;i++){if(bl[i]>mv)mv=bl[i]}
+      // Pre-render to offscreen canvas
+      var tcCanvas=document.createElement("canvas");
+      tcCanvas.width=cols;tcCanvas.height=rows;
+      var tcCtx=tcCanvas.getContext("2d");
+      var tcImg=tcCtx.createImageData(cols,rows);
+      if(mv>0){
+        for(var i=0;i<bl.length;i++){
+          var v=bl[i];
+          if(v>0){
+            var a=Math.round((0.05+(v/mv)*0.20)*255);
+            var idx=i*4;
+            tcImg.data[idx]=rgb[0];tcImg.data[idx+1]=rgb[1];tcImg.data[idx+2]=rgb[2];tcImg.data[idx+3]=a;
+          }
+        }
+      }
+      tcCtx.putImageData(tcImg,0,0);
+      result[t]={cols:cols,rows:rows,ox:minX,oy:minY,data:bl,maxVal:mv,rgb:rgb,canvas:tcCanvas};
+    });
+    typeGrids=result;
+  }
+}
+
+// ── FPS counter (Phase 4) ──
+var fpsEl=document.getElementById("fps-counter");
+var showFps=false;
+var fpsFrames=0,fpsLast=performance.now(),fpsCurrent=0;
+
+function updateFps(){
+  fpsFrames++;
+  var now=performance.now();
+  if(now-fpsLast>=1000){
+    fpsCurrent=Math.round(fpsFrames*1000/(now-fpsLast));
+    fpsFrames=0;fpsLast=now;
+    if(showFps)fpsEl.textContent=fpsCurrent+" fps | "+N+" nodes | "+M+" edges";
+  }
+}
+
+// ── Drawing (Phase 3b-3e: viewport culling, batched edges, LOD, adaptive labels) ──
+function draw(){
+  updateFps();
+  ctx.save();
+  ctx.clearRect(0,0,W,H);
+
+  // Background
+  ctx.fillStyle="#000000";
+  ctx.fillRect(0,0,W,H);
+
+  // Subtle grid
+  ctx.save();
+  ctx.globalAlpha=0.03;
+  ctx.strokeStyle="#fff";
+  ctx.lineWidth=1;
+  var gridSize=60*scale;
+  if(gridSize>10){
+    var ox=tx%gridSize,oy=ty%gridSize;
+    ctx.beginPath();
+    for(var gx=ox;gx<W;gx+=gridSize){ctx.moveTo(gx,0);ctx.lineTo(gx,H)}
+    for(var gy=oy;gy<H;gy+=gridSize){ctx.moveTo(0,gy);ctx.lineTo(W,gy)}
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.translate(tx,ty);
+  ctx.scale(scale,scale);
+
+  // Viewport in world coords
+  var vp=getViewportWorld();
+  var vpMargin=30/scale;
+
+  // Build neighbor set for hover
+  var neighborSet=null;
+  if(hoveredNode){
+    neighborSet=new Set();
+    neighborSet.add(hoveredNode.id);
+    if(adjMap[hoveredNode.id]){
+      adjMap[hoveredNode.id].forEach(function(id){neighborSet.add(id)});
+    }
+  }
+
+  // Search highlighting
+  var hasSearch=searchQuery&&searchMatches.size>0;
+
+  // ── Density heatmap layer (smooth offscreen canvas) ──
+  if(layers.heatmap&&heatmapGrid&&heatmapGrid.maxVal>0&&heatmapGrid.canvas){
+    ctx.save();
+    ctx.imageSmoothingEnabled=true;
+    ctx.imageSmoothingQuality="high";
+    ctx.drawImage(heatmapGrid.canvas,heatmapGrid.ox,heatmapGrid.oy,
+      heatmapGrid.cols*densityCellSize,heatmapGrid.rows*densityCellSize);
+    ctx.restore();
+  }
+
+  // ── Type cloud layer (smooth offscreen canvas) ──
+  if(layers.typeclouds&&typeGrids){
+    ctx.save();
+    ctx.imageSmoothingEnabled=true;
+    ctx.imageSmoothingQuality="high";
+    Object.keys(typeGrids).forEach(function(t){
+      var tg=typeGrids[t];
+      if(tg.maxVal<=0||!tg.canvas)return;
+      ctx.drawImage(tg.canvas,tg.ox,tg.oy,
+        tg.cols*densityCellSize,tg.rows*densityCellSize);
+    });
+    ctx.restore();
+  }
+
+  // ── Edges (Phase 3b-3c: viewport culling + batched rendering) ──
+  if(layers.edges){
+    // At extreme zoom-out with large graph, skip edges entirely
+    var skipEdges=scale<0.1&&N>5000;
+    if(!skipEdges){
+      var skipArrows=scale<0.5||N>5000;
+
+      // Classify edges into batches by visual state
+      var normalEdges=[];
+      var hoverEdges=[];
+      var searchEdges=[];
+      var arrowEdges=[];
+
+      links.forEach(function(l){
+        var sx2=l.source.x,sy2=l.source.y,tx2=l.target.x,ty2=l.target.y;
+        if(typeof sx2!=="number")return;
+
+        // Viewport culling: skip if both endpoints off-screen
+        var sIn=sx2>=vp.x1-vpMargin&&sx2<=vp.x2+vpMargin&&sy2>=vp.y1-vpMargin&&sy2<=vp.y2+vpMargin;
+        var tIn=tx2>=vp.x1-vpMargin&&tx2<=vp.x2+vpMargin&&ty2>=vp.y1-vpMargin&&ty2<=vp.y2+vpMargin;
+        if(!sIn&&!tIn)return;
+
+        var alpha=0.08;
+        var lineW=0.5;
+        var isHover=false,isSearch=false;
+
+        if(hoveredNode){
+          var sid=l.source.id||l.source;
+          var tid=l.target.id||l.target;
+          if(sid===hoveredNode.id||tid===hoveredNode.id){
+            alpha=0.6;lineW=1.5;isHover=true;
+          }else{alpha=0.02}
+        }
+        if(hasSearch){
+          var sid3=l.source.id||l.source;
+          var tid3=l.target.id||l.target;
+          if(searchMatches.has(sid3)&&searchMatches.has(tid3)){
+            alpha=Math.max(alpha,0.4);lineW=Math.max(lineW,1);isSearch=true;
+          }else if(!hoveredNode){alpha=0.02}
+        }
+        if(l.weight){lineW=Math.max(lineW,Math.min(3,l.weight*2))}
+
+        var entry={l:l,alpha:alpha,lineW:lineW};
+        if(isHover){hoverEdges.push(entry);if(!skipArrows&&alpha>0.1)arrowEdges.push(entry)}
+        else if(isSearch){searchEdges.push(entry);if(!skipArrows&&alpha>0.1)arrowEdges.push(entry)}
+        else{normalEdges.push(entry)}
+      });
+
+      // Draw normal edges in a single batch
+      if(normalEdges.length>0){
+        var nAlpha=hoveredNode?0.02:hasSearch?0.02:0.08;
+        ctx.beginPath();
+        normalEdges.forEach(function(e){
+          ctx.moveTo(e.l.source.x,e.l.source.y);
+          ctx.lineTo(e.l.target.x,e.l.target.y);
+        });
+        ctx.strokeStyle="rgba(219,216,216,"+nAlpha+")";
+        ctx.lineWidth=0.5/scale;
+        ctx.stroke();
+      }
+
+      // Draw search-matched edges
+      searchEdges.forEach(function(e){
+        ctx.beginPath();
+        ctx.moveTo(e.l.source.x,e.l.source.y);
+        ctx.lineTo(e.l.target.x,e.l.target.y);
+        ctx.strokeStyle="rgba(219,216,216,"+e.alpha+")";
+        ctx.lineWidth=e.lineW/scale;
+        ctx.stroke();
+      });
+
+      // Draw hover edges
+      hoverEdges.forEach(function(e){
+        ctx.beginPath();
+        ctx.moveTo(e.l.source.x,e.l.source.y);
+        ctx.lineTo(e.l.target.x,e.l.target.y);
+        ctx.strokeStyle="rgba(219,216,216,"+e.alpha+")";
+        ctx.lineWidth=e.lineW/scale;
+        ctx.stroke();
+      });
+
+      // Draw arrows for highlighted edges
+      if(!skipArrows){
+        arrowEdges.forEach(function(e){
+          var l=e.l;
+          var sx3=l.source.x,sy3=l.source.y,tx3=l.target.x,ty3=l.target.y;
+          var ddx=tx3-sx3,ddy=ty3-sy3;
+          var len=Math.sqrt(ddx*ddx+ddy*ddy);
+          if(len>0){
+            var ux=ddx/len,uy=ddy/len;
+            var tr=(l.target._r||6)+2;
+            var ax=tx3-ux*tr,ay=ty3-uy*tr;
+            var arrowSize=4/scale;
+            ctx.beginPath();
+            ctx.moveTo(ax,ay);
+            ctx.lineTo(ax-ux*arrowSize+uy*arrowSize*0.5,ay-uy*arrowSize-ux*arrowSize*0.5);
+            ctx.lineTo(ax-ux*arrowSize-uy*arrowSize*0.5,ay-uy*arrowSize+ux*arrowSize*0.5);
+            ctx.closePath();
+            ctx.fillStyle="rgba(219,216,216,"+e.alpha+")";
+            ctx.fill();
+          }
+        });
+      }
+    }
+  }
+
+  // Edge labels on hover
+  if(layers.labels&&hoveredNode&&scale>0.4){
+    ctx.font=(10/scale)+"px Inter,system-ui,sans-serif";
+    ctx.textAlign="center";
+    ctx.textBaseline="middle";
+    links.forEach(function(l){
+      var sid=l.source.id||l.source;
+      var tid=l.target.id||l.target;
+      if(sid===hoveredNode.id||tid===hoveredNode.id){
+        var mx2=(l.source.x+l.target.x)/2;
+        var my2=(l.source.y+l.target.y)/2;
+        ctx.fillStyle="rgba(219,216,216,0.7)";
+        ctx.fillText(truncate(l.relation||"",30),mx2,my2-6/scale);
+      }
+    });
+  }
+
+  // ── Nodes (Phase 3d: LOD rendering) ──
+  if(layers.nodes){
+    var useDots=scale<0.2||N>10000;
+    var skipGlow=N>5000;
+    var skipBorder=N>2000;
+
+    nodes.forEach(function(n){
+      if(typeof n.x!=="number")return;
+      // Viewport culling
+      if(!isInViewport(n.x,n.y,n._r*3+vpMargin,vp))return;
+
+      var r=n._r;
+      var alpha=1;
+      var glowAlpha=0;
+
+      if(hoveredNode){
+        if(neighborSet.has(n.id)){
+          alpha=1;glowAlpha=n.id===hoveredNode.id?0.4:0.2;
+        }else{
+          alpha=0.15;
+        }
+      }
+      if(hasSearch){
+        if(searchMatches.has(n.id)){alpha=1;glowAlpha=0.3}
+        else if(!hoveredNode){alpha=0.12}
+      }
+
+      if(useDots){
+        // Simplified: small filled rectangle
+        ctx.globalAlpha=alpha;
+        ctx.fillStyle=n.color;
+        var dotSize=Math.max(1,r*0.5);
+        ctx.fillRect(n.x-dotSize,n.y-dotSize,dotSize*2,dotSize*2);
+        ctx.globalAlpha=1;
+        return;
+      }
+
+      // Glow (skip for large graphs)
+      if(glowAlpha>0&&!skipGlow){
+        var grd=ctx.createRadialGradient(n.x,n.y,r,n.x,n.y,r*3);
+        var rgb=n._rgb;
+        grd.addColorStop(0,"rgba("+rgb[0]+","+rgb[1]+","+rgb[2]+","+glowAlpha+")");
+        grd.addColorStop(1,"rgba("+rgb[0]+","+rgb[1]+","+rgb[2]+",0)");
+        ctx.fillStyle=grd;
+        ctx.beginPath();
+        ctx.arc(n.x,n.y,r*3,0,Math.PI*2);
+        ctx.fill();
+      }
+
+      // Node circle
+      ctx.globalAlpha=alpha;
+      ctx.beginPath();
+      ctx.arc(n.x,n.y,r,0,Math.PI*2);
+      ctx.fillStyle=n.color;
+      ctx.fill();
+
+      // Subtle border (skip for medium+ graphs)
+      if(!skipBorder){
+        ctx.strokeStyle="rgba(244,244,244,0.2)";
+        ctx.lineWidth=0.5;
+        ctx.stroke();
+      }
+      ctx.globalAlpha=1;
+    });
+  }
+
+  // ── Labels (Phase 3e: adaptive) ──
+  if(layers.labels){
+    var fontSize=Math.max(3,Math.min(12,10/scale));
+    ctx.font="500 "+fontSize+"px Inter,system-ui,sans-serif";
+    ctx.textAlign="center";
+    ctx.textBaseline="middle";
+
+    // Adaptive label strategy
+    var disableLabels=N>10000&&scale<0.5;
+
+    if(!disableLabels){
+      var labelEvery;
+      if(N>5000){labelEvery=Infinity} // only special nodes
+      else if(N>2000){labelEvery=Math.ceil(N/20)}
+      else if(N>500){labelEvery=scale<0.3?Math.ceil(N/20):scale<0.8?Math.ceil(N/80):1}
+      else{labelEvery=1}
+
+      nodes.forEach(function(n,i){
+        if(typeof n.x!=="number")return;
+        // Viewport culling for labels
+        if(!isInViewport(n.x,n.y,n._r+fontSize*2+vpMargin,vp))return;
+
+        var shouldLabel=false;
+
+        // Always label hovered + neighbors
+        if(hoveredNode&&neighborSet&&neighborSet.has(n.id))shouldLabel=true;
+        // Always label search matches
+        if(hasSearch&&searchMatches.has(n.id))shouldLabel=true;
+
+        if(N>5000){
+          // Only label top-degree or hovered/searched
+          if(topDegreeSet.has(n.id))shouldLabel=true;
+        }else{
+          // High-degree nodes
+          if(n._degree>=maxDeg*0.3)shouldLabel=true;
+          // Sparse labeling
+          if(labelEvery<Infinity&&i%labelEvery===0)shouldLabel=true;
+        }
+
+        if(!shouldLabel)return;
+
+        var alpha2=0.85;
+        if(hoveredNode){
+          alpha2=neighborSet.has(n.id)?1:0.1;
+        }
+        if(hasSearch){
+          alpha2=searchMatches.has(n.id)?1:0.08;
+        }
+
+        var label=truncate(n.name||"",30);
+        var yOff=n._r+fontSize*0.8;
+
+        // Text shadow
+        ctx.fillStyle="rgba(0,0,0,"+alpha2*0.8+")";
+        ctx.fillText(label,n.x+0.5,n.y+yOff+0.5);
+
+        ctx.fillStyle="rgba(244,244,244,"+alpha2+")";
+        ctx.fillText(label,n.x,n.y+yOff);
+      });
+    }else if(hoveredNode){
+      // Even with labels disabled, label hovered node
+      var hn=hoveredNode;
+      var label2=truncate(hn.name||"",30);
+      var yOff2=hn._r+fontSize*0.8;
+      ctx.fillStyle="rgba(0,0,0,0.8)";
+      ctx.fillText(label2,hn.x+0.5,hn.y+yOff2+0.5);
+      ctx.fillStyle="rgba(244,244,244,1)";
+      ctx.fillText(label2,hn.x,hn.y+yOff2);
+    }
+  }
+
+  ctx.restore();
+
+  // Update minimap
+  if(minimapReady)drawMinimap();
+}
+
+// ── Density scheduling ──
+var densityTimer=null;
+function scheduleDensity(){
+  if(densityTimer)clearTimeout(densityTimer);
+  densityTimer=setTimeout(computeDensity,300);
+}
+
+// Recompute density when simulation settles
+var densityTickCount=0;
+simulation.on("tick.density",function(){
+  densityTickCount++;
+  if(densityTickCount%50===0)computeDensity();
+});
+
+// ── Minimap (Phase 4) ──
+var minimapContainer=document.getElementById("minimap-container");
+var minimapCanvas=document.getElementById("minimap-canvas");
+var minimapCtx=minimapCanvas.getContext("2d");
+var minimapW=150,minimapH=100;
+var minimapReady=false;
+var minimapBounds=null; // {minX,maxX,minY,maxY}
+var minimapDragging=false;
+
+function setupMinimap(){
+  if(N<500){return} // hide minimap for small graphs
+  minimapCanvas.width=minimapW*dpr;
+  minimapCanvas.height=minimapH*dpr;
+  minimapCanvas.style.width=minimapW+"px";
+  minimapCanvas.style.height=minimapH+"px";
+  minimapCtx.setTransform(dpr,0,0,dpr,0,0);
+  minimapContainer.style.display="block";
+  minimapReady=true;
+  computeMinimapBounds();
+  drawMinimap();
+}
+
+function computeMinimapBounds(){
+  var minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  nodes.forEach(function(n){
+    if(typeof n.x!=="number"||!isFinite(n.x))return;
+    if(n.x<minX)minX=n.x;if(n.x>maxX)maxX=n.x;
+    if(n.y<minY)minY=n.y;if(n.y>maxY)maxY=n.y;
+  });
+  var pad=50;
+  minimapBounds={minX:minX-pad,maxX:maxX+pad,minY:minY-pad,maxY:maxY+pad};
+}
+
+function drawMinimap(){
+  if(!minimapReady||!minimapBounds)return;
+  var mb=minimapBounds;
+  var gw=mb.maxX-mb.minX||100;
+  var gh=mb.maxY-mb.minY||100;
+  var sx=minimapW/gw;
+  var sy=minimapH/gh;
+  var ms=Math.min(sx,sy);
+
+  minimapCtx.clearRect(0,0,minimapW,minimapH);
+  minimapCtx.fillStyle="rgba(0,0,0,0.6)";
+  minimapCtx.fillRect(0,0,minimapW,minimapH);
+
+  // Draw nodes as dots
+  var dotR=Math.max(0.5,1);
+  nodes.forEach(function(n){
+    if(typeof n.x!=="number")return;
+    var px=(n.x-mb.minX)*ms;
+    var py=(n.y-mb.minY)*ms;
+    minimapCtx.fillStyle=n.color;
+    minimapCtx.fillRect(px-dotR,py-dotR,dotR*2,dotR*2);
+  });
+
+  // Draw viewport rectangle
+  var vp=getViewportWorld();
+  var vx1=(vp.x1-mb.minX)*ms;
+  var vy1=(vp.y1-mb.minY)*ms;
+  var vx2=(vp.x2-mb.minX)*ms;
+  var vy2=(vp.y2-mb.minY)*ms;
+  minimapCtx.strokeStyle="rgba(255,255,255,0.7)";
+  minimapCtx.lineWidth=1;
+  minimapCtx.strokeRect(vx1,vy1,vx2-vx1,vy2-vy1);
+}
+
+// Minimap click-to-navigate
+minimapCanvas.addEventListener("mousedown",function(ev){
+  ev.stopPropagation();
+  minimapDragging=true;
+  navigateMinimap(ev);
+});
+minimapCanvas.addEventListener("mousemove",function(ev){
+  if(minimapDragging)navigateMinimap(ev);
+});
+minimapCanvas.addEventListener("mouseup",function(){minimapDragging=false});
+minimapCanvas.addEventListener("mouseleave",function(){minimapDragging=false});
+
+function navigateMinimap(ev){
+  if(!minimapBounds)return;
+  var rect=minimapCanvas.getBoundingClientRect();
+  var mx=(ev.clientX-rect.left);
+  var my=(ev.clientY-rect.top);
+  var mb=minimapBounds;
+  var gw=mb.maxX-mb.minX||100;
+  var gh=mb.maxY-mb.minY||100;
+  var ms=Math.min(minimapW/gw,minimapH/gh);
+  var wx=mx/ms+mb.minX;
+  var wy=my/ms+mb.minY;
+  tx=W/2-wx*scale;
+  ty=H/2-wy*scale;
+  draw();
+}
+
+// Initial draw
+draw();
+
+// ── Keyboard shortcuts ──
+document.addEventListener("keydown",function(ev){
+  if(ev.target===searchInput)return;
+  if(ev.key==="f"||ev.key==="/"){ev.preventDefault();searchInput.focus()}
+  if(ev.key==="Escape"){searchInput.value="";searchQuery="";searchMatches.clear();searchInput.blur();draw()}
+  if(ev.key==="0"){tx=W/2;ty=H/2;scale=1;draw()}
+  // Phase 1: keyboard zoom
+  if(ev.key==="="||ev.key==="+"){smoothZoomTo(scale*1.4,W/2,H/2,200)}
+  if(ev.key==="-"||ev.key==="_"){smoothZoomTo(scale/1.4,W/2,H/2,200)}
+  // Phase 4: FPS counter toggle
+  if(ev.key==="d"||ev.key==="D"){
+    showFps=!showFps;
+    fpsEl.style.display=showFps?"block":"none";
+    if(!showFps)fpsEl.textContent="";
+  }
+});
+
+// Trigger density computation after initial layout
+scheduleDensity();
+
+})();
+</script>
+</body>
+</html>"""

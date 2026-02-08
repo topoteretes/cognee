@@ -46,6 +46,8 @@ class DataPoint(BaseModel):
     metadata: Optional[MetaData] = {"index_fields": []}
     type: str = Field(default_factory=lambda: DataPoint.__name__)
     belongs_to_set: Optional[List["DataPoint"]] = None
+    source_pipeline: Optional[str] = None
+    source_task: Optional[str] = None
 
     def __init__(self, **data):
         super().__init__(**data)
