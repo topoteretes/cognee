@@ -17,6 +17,7 @@ async def test_create_cognee_style_network_with_logo():
                 "source_task": "extract_graph_from_data",
                 "source_pipeline": "cognify_pipeline",
                 "source_note_set": "research_notes",
+                "source_user": "alice@example.com",
             },
         ),
         (
@@ -29,6 +30,7 @@ async def test_create_cognee_style_network_with_logo():
                 "source_task": "extract_chunks_from_documents",
                 "source_pipeline": "cognify_pipeline",
                 "source_note_set": "meeting_notes",
+                "source_user": "bob@example.com",
             },
         ),
     ]
@@ -83,8 +85,11 @@ async def test_create_cognee_style_network_with_logo():
     assert "taskColors" in html_output
     assert "pipelineColors" in html_output
     assert "notesetColors" in html_output
+    assert "userColors" in html_output
     assert "Source Task" in html_output
     assert "Source Pipeline" in html_output
     assert "Source Note Set" in html_output
+    assert "Source User" in html_output
     assert 'data-colorby="noteset"' in html_output
+    assert 'data-colorby="user"' in html_output
     assert "updateLegend" in html_output

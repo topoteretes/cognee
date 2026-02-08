@@ -81,9 +81,15 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
     task_color_map = _generate_provenance_colors([n.get("source_task") for n in nodes_list])
     pipeline_color_map = _generate_provenance_colors([n.get("source_pipeline") for n in nodes_list])
     note_set_color_map = _generate_provenance_colors([n.get("source_note_set") for n in nodes_list])
+    user_color_map = _generate_provenance_colors([n.get("source_user") for n in nodes_list])
 
     html_content = _build_html(
-        nodes_list, links_list, task_color_map, pipeline_color_map, note_set_color_map
+        nodes_list,
+        links_list,
+        task_color_map,
+        pipeline_color_map,
+        note_set_color_map,
+        user_color_map,
     )
 
     if not destination_file_path:
@@ -101,8 +107,57 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
     return html_content
 
 
+async def aggregate_multi_user_graphs(user_dataset_pairs):
+    """Aggregate graph data from multiple user+dataset pairs into a single graph.
+
+    Args:
+        user_dataset_pairs: list of (user, dataset) tuples where user is a User model
+            instance and dataset is a Dataset model instance.
+
+    Returns:
+        A tuple (nodes_data, edges_data) in the same format as get_graph_data(),
+        with nodes tagged with source_user from the owning user's email.
+    """
+    from cognee.infrastructure.databases.graph import get_graph_engine
+    from cognee.context_global_variables import set_database_global_context_variables
+
+    all_nodes = {}
+    all_edges = []
+    seen_edges = set()
+
+    for user, dataset in user_dataset_pairs:
+        await set_database_global_context_variables(dataset.id, user.id)
+
+        graph_engine = await get_graph_engine()
+        nodes_data, edges_data = await graph_engine.get_graph_data()
+
+        user_label = getattr(user, "email", None) or str(user.id)
+
+        for node_id, node_info in nodes_data:
+            node_key = str(node_id)
+            if node_key not in all_nodes:
+                node_info = dict(node_info) if not isinstance(node_info, dict) else node_info.copy()
+                if not node_info.get("source_user"):
+                    node_info["source_user"] = user_label
+                all_nodes[node_key] = (node_id, node_info)
+
+        for edge in edges_data:
+            source, target, relation = edge[0], edge[1], edge[2]
+            edge_key = (str(source), str(target), relation)
+            if edge_key not in seen_edges:
+                seen_edges.add(edge_key)
+                all_edges.append(edge)
+
+    return (list(all_nodes.values()), all_edges)
+
+
 def _build_html(
-    nodes_list, links_list, task_color_map=None, pipeline_color_map=None, note_set_color_map=None
+    nodes_list,
+    links_list,
+    task_color_map=None,
+    pipeline_color_map=None,
+    note_set_color_map=None,
+    user_color_map=None,
 ):
     def _safe_json_embed(obj):
         return json.dumps(obj).replace("</", "<\\/")
@@ -117,6 +172,7 @@ def _build_html(
     html_content = html_content.replace(
         "__NOTESET_COLORS__", _safe_json_embed(note_set_color_map or {})
     )
+    html_content = html_content.replace("__USER_COLORS__", _safe_json_embed(user_color_map or {}))
     return html_content
 
 
@@ -269,6 +325,7 @@ canvas:active{cursor:grabbing}
   <button class="ctrl-btn" data-colorby="task">Task</button>
   <button class="ctrl-btn" data-colorby="pipeline">Pipeline</button>
   <button class="ctrl-btn" data-colorby="noteset">Note Set</button>
+  <button class="ctrl-btn" data-colorby="user">User</button>
   <div class="ctrl-sep"></div>
   <button class="ctrl-btn" id="btn-zoom-out" title="Zoom out (-)">&#x2212;</button>
   <button class="ctrl-btn" id="btn-zoom-in" title="Zoom in (+)">+</button>
@@ -298,6 +355,7 @@ var links = __LINKS_DATA__;
 var taskColors = __TASK_COLORS__;
 var pipelineColors = __PIPELINE_COLORS__;
 var notesetColors = __NOTESET_COLORS__;
+var userColors = __USER_COLORS__;
 
 if (!nodes || nodes.length === 0) {
   document.body.innerHTML = '<div class="empty-state">No graph data available</div>';
@@ -399,8 +457,10 @@ function recolorNodes(){
       n.color=taskColors[n.source_task||"Unknown"]||"#DBD8D8";
     }else if(colorByMode==="pipeline"){
       n.color=pipelineColors[n.source_pipeline||"Unknown"]||"#DBD8D8";
-    }else{
+    }else if(colorByMode==="noteset"){
       n.color=notesetColors[n.source_note_set||"Unknown"]||"#DBD8D8";
+    }else if(colorByMode==="user"){
+      n.color=userColors[n.source_user||"Unknown"]||"#DBD8D8";
     }
     // Recache RGB
     if(n.color.indexOf("hsl")===0){
@@ -432,9 +492,12 @@ var pipeCounts={};
 nodes.forEach(function(n){var p=n.source_pipeline||"Unknown";pipeCounts[p]=(pipeCounts[p]||0)+1});
 var notesetCounts={};
 nodes.forEach(function(n){var s=n.source_note_set||"Unknown";notesetCounts[s]=(notesetCounts[s]||0)+1});
+var userCounts={};
+nodes.forEach(function(n){var u=n.source_user||"Unknown";userCounts[u]=(userCounts[u]||0)+1});
 var uniqueTasks=Object.keys(taskCounts).length;
 var uniquePipelines=Object.keys(pipeCounts).length;
 var uniqueNotesets=Object.keys(notesetCounts).length;
+var uniqueUsers=Object.keys(userCounts).length;
 var statsEl=document.getElementById("stats");
 var perfTier=N>10000?"large":N>2000?"medium":"small";
 statsEl.innerHTML='<span><span class="dot" style="background:#6510F4"></span>'+N.toLocaleString()+" nodes</span>"+
@@ -443,6 +506,7 @@ statsEl.innerHTML='<span><span class="dot" style="background:#6510F4"></span>'+N
   '<span>'+uniqueTasks+" tasks</span>"+
   '<span>'+uniquePipelines+" pipelines</span>"+
   '<span>'+uniqueNotesets+" note sets</span>"+
+  '<span>'+uniqueUsers+" users</span>"+
   '<span style="opacity:0.5">['+perfTier+']</span>';
 
 // ── Legend ──
@@ -462,10 +526,14 @@ function updateLegend(){
     counts=pipeCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
     colorSource=function(t){return pipelineColors[t]||"#DBD8D8"};
-  }else{
+  }else if(colorByMode==="noteset"){
     counts=notesetCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
     colorSource=function(t){return notesetColors[t]||"#DBD8D8"};
+  }else{
+    counts=userCounts;
+    entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
+    colorSource=function(t){return userColors[t]||"#DBD8D8"};
   }
   if(entries.length>12)entries=entries.slice(0,12);
   legendEl.innerHTML=entries.map(function(t){
@@ -729,6 +797,7 @@ function showNodeInfo(n){
   if(n.source_task)html+='<div class="panel-row"><span class="k">Source Task</span><span class="v">'+esc(n.source_task)+"</span></div>";
   if(n.source_pipeline)html+='<div class="panel-row"><span class="k">Source Pipeline</span><span class="v">'+esc(n.source_pipeline)+"</span></div>";
   if(n.source_note_set)html+='<div class="panel-row"><span class="k">Source Note Set</span><span class="v">'+esc(n.source_note_set)+"</span></div>";
+  if(n.source_user)html+='<div class="panel-row"><span class="k">Source User</span><span class="v">'+esc(n.source_user)+"</span></div>";
 
   if(n.properties){
     Object.keys(n.properties).slice(0,10).forEach(function(key){
