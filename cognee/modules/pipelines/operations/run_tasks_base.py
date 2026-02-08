@@ -70,7 +70,7 @@ async def handle_task(
 
     try:
         task_name = running_task.executable.__name__
-        pipe_name = context.get("pipeline_name") if context else None
+        pipe_name = context.get("pipeline_name") if isinstance(context, dict) else None
 
         async for result_data in running_task.execute(args, kwargs, next_task_batch_size):
             _stamp_provenance(result_data, pipe_name, task_name)
