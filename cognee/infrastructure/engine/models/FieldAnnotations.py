@@ -83,3 +83,46 @@ def Dedup(description: str = "Used for entity deduplication"):
             name: Annotated[str, Dedup()] = ""
     """
     return _Dedup(description)
+
+
+class _Relationship:
+    """Marker: this field is a graph relationship with a custom edge label."""
+
+    def __init__(
+        self,
+        label: str = "",
+        weight: "float | None" = None,
+        properties: "dict | None" = None,
+        description: str = "",
+    ):
+        self.label = label
+        self.weight = weight
+        self.properties = properties or {}
+        self.description = description
+
+    def __repr__(self):
+        parts = []
+        if self.label:
+            parts.append(repr(self.label))
+        if self.weight is not None:
+            parts.append(f"weight={self.weight}")
+        return f"Relationship({', '.join(parts)})"
+
+
+def Relationship(
+    label: str = "",
+    weight: "float | None" = None,
+    properties: "dict | None" = None,
+    description: str = "Defines graph relationship",
+):
+    """Declare a field as a graph relationship with a custom edge label.
+
+    The label overrides the field name as the edge type in the knowledge graph.
+    Instance-level Edge(relationship_type=...) tuple syntax still takes precedence.
+
+    Example:
+        class Person(DataPoint):
+            friends: Annotated[list["Person"], Relationship("knows")] = []
+            employer: Annotated[Optional["Company"], Relationship("works_at", weight=0.9)] = None
+    """
+    return _Relationship(label=label, weight=weight, properties=properties, description=description)

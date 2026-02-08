@@ -280,6 +280,18 @@ class TestFieldAnnotations:
         meta = WithBio.model_fields["metadata"].default
         assert meta == {"index_fields": []}
 
+    def test_relationship_annotation_accessible(self):
+        from cognee.infrastructure.engine import DataPoint, Relationship
+        from cognee.infrastructure.engine.models.FieldAnnotations import _Relationship
+
+        class PersonTest(DataPoint):
+            friends: Annotated[list["PersonTest"], Relationship("knows")] = []
+
+        field_info = PersonTest.model_fields["friends"]
+        rel_markers = [m for m in field_info.metadata if isinstance(m, _Relationship)]
+        assert len(rel_markers) == 1
+        assert rel_markers[0].label == "knows"
+
 
 # ── Legacy backward compatibility tests ──
 
