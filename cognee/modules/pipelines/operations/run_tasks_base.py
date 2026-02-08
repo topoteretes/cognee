@@ -1,4 +1,6 @@
 import inspect
+import warnings
+
 from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
@@ -11,6 +13,7 @@ from cognee.modules.observability import (
     COGNEE_RESULT_COUNT,
 )
 from cognee.infrastructure.engine import DataPoint
+from cognee.pipelines.types import get_ctx_param_name  # Direct import to avoid circular
 from ..tasks.task import Task
 
 logger = get_logger("run_tasks_base")
@@ -103,14 +106,26 @@ async def handle_task(
         },
     )
 
-    has_context = any(
-        [key == "context" for key in inspect.signature(running_task.executable).parameters.keys()]
-    )
-
+    sig = inspect.signature(running_task.executable)
     kwargs = {}
 
-    if has_context:
-        kwargs["context"] = context
+    # New way: Ctx[T] annotation marks the context parameter
+    ctx_param = get_ctx_param_name(sig)
+    if ctx_param is not None:
+        kwargs[ctx_param] = context
+    else:
+        # Legacy way: magic name-matching on "context" parameter
+        has_context = any(key == "context" for key in sig.parameters.keys())
+        if has_context:
+            warnings.warn(
+                f"Task '{running_task.executable.__name__}' uses implicit context injection "
+                f"via parameter name 'context'. Use Ctx annotation instead: "
+                f"from cognee.pipelines import Ctx; "
+                f"async def {running_task.executable.__name__}(data, ctx: Ctx[dict] = None)",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            kwargs["context"] = context
 
     task_name = running_task.executable.__name__
 

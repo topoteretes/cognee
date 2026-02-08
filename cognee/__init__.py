@@ -32,8 +32,11 @@ from cognee.modules.visualization.cognee_network_visualization import (
 from .api.v1.ui import start_ui
 from .api.v1.session import session
 
-# Pipelines
+# Pipelines (legacy)
 from .modules import pipelines
+
+# Simplified pipeline API
+from .pipelines import flow, step, Pipeline, dataset, Pipe, Ctx, Drop
 
 from cognee.run_migrations import run_migrations
 
