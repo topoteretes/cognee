@@ -495,6 +495,9 @@ document.querySelectorAll(".ctrl-btn[data-layer]").forEach(function(btn){
     var key=btn.dataset.layer;
     layers[key]=!layers[key];
     btn.classList.toggle("active",layers[key]);
+    if((key==="heatmap"||key==="typeclouds")&&layers[key]){
+      computeDensity();
+    }
     draw();
   });
 });
