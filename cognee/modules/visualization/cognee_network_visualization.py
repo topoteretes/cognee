@@ -80,8 +80,11 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
 
     task_color_map = _generate_provenance_colors([n.get("source_task") for n in nodes_list])
     pipeline_color_map = _generate_provenance_colors([n.get("source_pipeline") for n in nodes_list])
+    note_set_color_map = _generate_provenance_colors([n.get("source_note_set") for n in nodes_list])
 
-    html_content = _build_html(nodes_list, links_list, task_color_map, pipeline_color_map)
+    html_content = _build_html(
+        nodes_list, links_list, task_color_map, pipeline_color_map, note_set_color_map
+    )
 
     if not destination_file_path:
         home_dir = os.path.expanduser("~")
@@ -98,7 +101,9 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
     return html_content
 
 
-def _build_html(nodes_list, links_list, task_color_map=None, pipeline_color_map=None):
+def _build_html(
+    nodes_list, links_list, task_color_map=None, pipeline_color_map=None, note_set_color_map=None
+):
     def _safe_json_embed(obj):
         return json.dumps(obj).replace("</", "<\\/")
 
@@ -108,6 +113,9 @@ def _build_html(nodes_list, links_list, task_color_map=None, pipeline_color_map=
     html_content = html_content.replace("__TASK_COLORS__", _safe_json_embed(task_color_map or {}))
     html_content = html_content.replace(
         "__PIPELINE_COLORS__", _safe_json_embed(pipeline_color_map or {})
+    )
+    html_content = html_content.replace(
+        "__NOTESET_COLORS__", _safe_json_embed(note_set_color_map or {})
     )
     return html_content
 
@@ -141,7 +149,7 @@ canvas:active{cursor:grabbing}
 }
 #header>*{pointer-events:auto}
 .logo{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:0.02em;color:var(--text)}
-.logo svg{width:20px;height:20px}
+.logo img{height:28px;width:auto}
 .stats{display:flex;gap:16px;font-size:11px;color:var(--text2);font-variant-numeric:tabular-nums}
 .stats span{display:flex;align-items:center;gap:4px}
 .stats .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
@@ -239,10 +247,7 @@ canvas:active{cursor:grabbing}
 
 <div id="header">
   <div class="logo">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-    </svg>
-    <span>Cognee</span>
+    <img src="data:image/png;base64,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" alt="Cognee">
   </div>
   <div class="stats" id="stats"></div>
 </div>
@@ -263,6 +268,7 @@ canvas:active{cursor:grabbing}
   <button class="ctrl-btn active" data-colorby="type">Type</button>
   <button class="ctrl-btn" data-colorby="task">Task</button>
   <button class="ctrl-btn" data-colorby="pipeline">Pipeline</button>
+  <button class="ctrl-btn" data-colorby="noteset">Note Set</button>
   <div class="ctrl-sep"></div>
   <button class="ctrl-btn" id="btn-zoom-out" title="Zoom out (-)">&#x2212;</button>
   <button class="ctrl-btn" id="btn-zoom-in" title="Zoom in (+)">+</button>
@@ -291,6 +297,7 @@ var nodes = __NODES_DATA__;
 var links = __LINKS_DATA__;
 var taskColors = __TASK_COLORS__;
 var pipelineColors = __PIPELINE_COLORS__;
+var notesetColors = __NOTESET_COLORS__;
 
 if (!nodes || nodes.length === 0) {
   document.body.innerHTML = '<div class="empty-state">No graph data available</div>';
@@ -390,8 +397,10 @@ function recolorNodes(){
       n.color=colorByType[n.type]||typeColors[n.type]||"#DBD8D8";
     }else if(colorByMode==="task"){
       n.color=taskColors[n.source_task||"Unknown"]||"#DBD8D8";
-    }else{
+    }else if(colorByMode==="pipeline"){
       n.color=pipelineColors[n.source_pipeline||"Unknown"]||"#DBD8D8";
+    }else{
+      n.color=notesetColors[n.source_note_set||"Unknown"]||"#DBD8D8";
     }
     // Recache RGB
     if(n.color.indexOf("hsl")===0){
@@ -421,8 +430,11 @@ var taskCounts={};
 nodes.forEach(function(n){var t=n.source_task||"Unknown";taskCounts[t]=(taskCounts[t]||0)+1});
 var pipeCounts={};
 nodes.forEach(function(n){var p=n.source_pipeline||"Unknown";pipeCounts[p]=(pipeCounts[p]||0)+1});
+var notesetCounts={};
+nodes.forEach(function(n){var s=n.source_note_set||"Unknown";notesetCounts[s]=(notesetCounts[s]||0)+1});
 var uniqueTasks=Object.keys(taskCounts).length;
 var uniquePipelines=Object.keys(pipeCounts).length;
+var uniqueNotesets=Object.keys(notesetCounts).length;
 var statsEl=document.getElementById("stats");
 var perfTier=N>10000?"large":N>2000?"medium":"small";
 statsEl.innerHTML='<span><span class="dot" style="background:#6510F4"></span>'+N.toLocaleString()+" nodes</span>"+
@@ -430,6 +442,7 @@ statsEl.innerHTML='<span><span class="dot" style="background:#6510F4"></span>'+N
   '<span>'+Object.keys(typeCounts).length+" types</span>"+
   '<span>'+uniqueTasks+" tasks</span>"+
   '<span>'+uniquePipelines+" pipelines</span>"+
+  '<span>'+uniqueNotesets+" note sets</span>"+
   '<span style="opacity:0.5">['+perfTier+']</span>';
 
 // ── Legend ──
@@ -445,10 +458,14 @@ function updateLegend(){
     counts=taskCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
     colorSource=function(t){return taskColors[t]||"#DBD8D8"};
-  }else{
+  }else if(colorByMode==="pipeline"){
     counts=pipeCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
     colorSource=function(t){return pipelineColors[t]||"#DBD8D8"};
+  }else{
+    counts=notesetCounts;
+    entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
+    colorSource=function(t){return notesetColors[t]||"#DBD8D8"};
   }
   if(entries.length>12)entries=entries.slice(0,12);
   legendEl.innerHTML=entries.map(function(t){
@@ -708,6 +725,7 @@ function showNodeInfo(n){
   html+='<div class="panel-row"><span class="k">Connections</span><span class="v">'+n._degree+"</span></div>";
   if(n.source_task)html+='<div class="panel-row"><span class="k">Source Task</span><span class="v">'+esc(n.source_task)+"</span></div>";
   if(n.source_pipeline)html+='<div class="panel-row"><span class="k">Source Pipeline</span><span class="v">'+esc(n.source_pipeline)+"</span></div>";
+  if(n.source_note_set)html+='<div class="panel-row"><span class="k">Source Note Set</span><span class="v">'+esc(n.source_note_set)+"</span></div>";
 
   if(n.properties){
     Object.keys(n.properties).slice(0,10).forEach(function(key){
