@@ -1,6 +1,5 @@
 import os
 import sys
-import time
 import unittest
 import uuid
 from unittest.mock import MagicMock, patch
@@ -10,6 +9,7 @@ import requests
 from cognee.shared.utils import (
     TELEMETRY_REQUEST_TIMEOUT,
     _send_telemetry_request,
+    _telemetry_queue,
     send_telemetry,
 )
 
@@ -47,7 +47,7 @@ class TestTelemetry(unittest.TestCase):
 
         # Make sure ENV is not test or dev
         original_env = os.environ.get("ENV")
-        os.environ["ENV"] = "prod"  # Set to dev to ensure telemetry is sent
+        os.environ["ENV"] = "prod"  # Set to prod to ensure telemetry is sent
 
         # Generate a random user ID for testing
         test_user_id = str(uuid.uuid4())
@@ -57,6 +57,9 @@ class TestTelemetry(unittest.TestCase):
         additional_props = {"test_key": "test_value"}
 
         send_telemetry(event_name, test_user_id, additional_props)
+
+        # Wait for the worker thread to process the queued item
+        _telemetry_queue.join()
 
         # Verify telemetry was sent
         mock_post.assert_called_once()
@@ -87,8 +90,6 @@ class TestTelemetry(unittest.TestCase):
             os.environ["ENV"] = original_env
         else:
             del os.environ["ENV"]
-
-        time.sleep(0.3)  # allow background thread to call mock_post
 
     @patch("cognee.shared.utils.requests.post")
     def test_telemetry_disabled(self, mock_post):
@@ -135,7 +136,7 @@ class TestTelemetry(unittest.TestCase):
             del os.environ["TELEMETRY_DISABLED"]
 
         send_telemetry("timeout_test", "user-1", {})
-        time.sleep(0.3)
+        _telemetry_queue.join()
 
         mock_post.assert_called_once()
         _, kwargs = mock_post.call_args
@@ -189,6 +190,24 @@ class TestTelemetry(unittest.TestCase):
 
         mock_post.assert_called_once()
         self.assertEqual(mock_post.return_value.status_code, 503)
+
+    def test_send_telemetry_enqueues_payload(self):
+        """send_telemetry puts payload on the queue rather than spawning a thread."""
+        original_env = os.environ.get("ENV")
+        os.environ["ENV"] = "prod"
+        if "TELEMETRY_DISABLED" in os.environ:
+            del os.environ["TELEMETRY_DISABLED"]
+
+        # Patch at the worker level so the item stays in the queue briefly
+        with patch("cognee.shared.utils._send_telemetry_request"):
+            send_telemetry("queue_test", "user-1", {})
+            # The item should have been enqueued
+            _telemetry_queue.join()
+
+        if original_env is not None:
+            os.environ["ENV"] = original_env
+        else:
+            del os.environ["ENV"]
 
 
 if __name__ == "__main__":

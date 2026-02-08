@@ -1,8 +1,10 @@
 """This module contains utility functions for the cognee."""
 
+import atexit
 import http.server
 import os
 import pathlib
+import queue
 import socketserver
 import ssl
 from datetime import datetime, timezone
@@ -23,6 +25,37 @@ proxy_url = "https://test.prometh.ai"
 
 # Timeout for telemetry HTTP request; short to avoid blocking if proxy is unreachable
 TELEMETRY_REQUEST_TIMEOUT: int = int(os.getenv("TELEMETRY_REQUEST_TIMEOUT", "5"))
+
+# ---------------------------------------------------------------------------
+# Single background worker thread for fire-and-forget telemetry requests.
+# Using a queue avoids spawning a new thread for every send_telemetry() call.
+# ---------------------------------------------------------------------------
+_telemetry_queue: queue.Queue = queue.Queue()
+_SENTINEL = object()  # poison pill to shut down the worker
+
+
+def _telemetry_worker() -> None:
+    """Drain the telemetry queue and send each payload. Runs in a single daemon thread."""
+    while True:
+        payload = _telemetry_queue.get()
+        if payload is _SENTINEL:
+            _telemetry_queue.task_done()
+            break
+        try:
+            _send_telemetry_request(payload)
+        finally:
+            _telemetry_queue.task_done()
+
+
+_telemetry_thread = Thread(target=_telemetry_worker, daemon=True)
+_telemetry_thread.start()
+
+
+def _shutdown_telemetry_worker() -> None:
+    _telemetry_queue.put(_SENTINEL)
+
+
+atexit.register(_shutdown_telemetry_worker)
 
 
 def create_secure_ssl_context() -> ssl.SSLContext:
@@ -119,9 +152,8 @@ def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_proper
         },
     }
 
-    # Fire-and-forget in a daemon thread so we never block the event loop or pipeline
-    thread = Thread(target=_send_telemetry_request, args=(payload,), daemon=True)
-    thread.start()
+    # Fire-and-forget via the single background worker thread
+    _telemetry_queue.put(payload)
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):
