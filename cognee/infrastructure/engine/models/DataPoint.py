@@ -1,7 +1,7 @@
-from uuid import UUID, uuid4
+from uuid import UUID, NAMESPACE_OID, uuid4, uuid5
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timezone
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 from typing import Optional, Any, Dict, List
 
 
@@ -13,6 +13,7 @@ class MetaData(TypedDict):
 
     type: str
     index_fields: list[str]
+    identity_fields: NotRequired[list[str]]
 
 
 # Updated DataPoint model with versioning and new fields
@@ -52,8 +53,48 @@ class DataPoint(BaseModel):
     source_user: Optional[str] = None
 
     def __init__(self, **data):
+        if "id" not in data:
+            identity_fields = self.__class__._get_identity_fields()
+            if identity_fields:
+                identity_id = self.__class__._generate_identity_id(
+                    identity_fields, data, self.__class__.__name__
+                )
+                if identity_id is not None:
+                    data["id"] = identity_id
+
         super().__init__(**data)
         object.__setattr__(self, "type", self.__class__.__name__)
+
+    @classmethod
+    def _get_identity_fields(cls) -> Optional[list[str]]:
+        """Get identity_fields from the class's metadata field default, if defined."""
+        metadata_field = cls.model_fields.get("metadata")
+        if metadata_field is not None and metadata_field.default is not None:
+            return metadata_field.default.get("identity_fields")
+        return None
+
+    @staticmethod
+    def _generate_identity_id(
+        identity_fields: list[str], data: dict, class_name: str
+    ) -> Optional[UUID]:
+        """Generate a deterministic UUID5 from identity field values.
+
+        Returns None if any identity field is missing from data,
+        causing fallback to the default UUID4.
+        """
+        parts = []
+        for field_name in identity_fields:
+            if field_name not in data:
+                return None
+            value = data[field_name]
+            if isinstance(value, str):
+                value = value.lower().replace(" ", "_").replace("'", "")
+            else:
+                value = str(value)
+            parts.append(value)
+        joined = "|".join(parts)
+        identity_string = f"{class_name}:{joined}"
+        return uuid5(NAMESPACE_OID, identity_string)
 
     @classmethod
     def get_embeddable_data(self, data_point: "DataPoint"):
