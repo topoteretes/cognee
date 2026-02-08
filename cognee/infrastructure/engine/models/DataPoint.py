@@ -1,9 +1,10 @@
 import pickle
-from uuid import UUID, uuid4
-from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+from uuid import UUID, uuid4
+
+from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import TypedDict
-from typing import Optional, Any, Dict, List
 
 
 # Define metadata type
@@ -155,7 +156,7 @@ class DataPoint(BaseModel):
 
             - str: The JSON string representation of the DataPoint instance.
         """
-        return self.json()
+        return self.model_dump_json()
 
     @classmethod
     def from_json(self, json_str: str):
