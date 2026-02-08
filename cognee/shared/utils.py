@@ -22,7 +22,7 @@ logger = get_logger()
 proxy_url = "https://test.prometh.ai"
 
 # Timeout for telemetry HTTP request; short to avoid blocking if proxy is unreachable
-TELEMETRY_REQUEST_TIMEOUT = os.getenv("TELEMETRY_REQUEST_TIMEOUT", 5)
+TELEMETRY_REQUEST_TIMEOUT: int = int(os.getenv("TELEMETRY_REQUEST_TIMEOUT", "5"))
 
 
 def create_secure_ssl_context() -> ssl.SSLContext:
