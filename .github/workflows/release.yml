@@ -16,15 +16,15 @@ jobs:
       - name: Check out ${{ github.ref_name }}
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.flavour }}
+          ref: ${{ github.ref_name }}
           fetch-depth: 0  # Fetch all history for comparison
 
       - name: Fetch main branch for comparison
-        if: ${{ inputs.flavour == 'dev' }}
+        if: ${{ github.ref_name == 'dev' }}
         run: git fetch origin main:main
 
       - name: Fetch dev branch for comparison
-        if: ${{ inputs.flavour == 'main' }}
+        if: ${{ github.ref_name == 'main' }}
         run: git fetch origin dev:dev
 
       - name: Install uv
