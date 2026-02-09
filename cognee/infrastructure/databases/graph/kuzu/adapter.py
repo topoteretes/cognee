@@ -18,7 +18,6 @@ from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.infrastructure.files.storage import get_file_storage
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
-    record_graph_changes,
 )
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.storage.utils import JSONEncoder
@@ -440,7 +439,6 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to add node: {e}")
             raise
 
-    @record_graph_changes
     async def add_nodes(self, nodes: List[DataPoint]) -> None:
         """
         Add multiple nodes to the graph in a batch operation.
@@ -737,7 +735,6 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to add edge: {e}")
             raise
 
-    @record_graph_changes
     async def add_edges(self, edges: List[Tuple[str, str, str, Dict[str, Any]]]) -> None:
         """
         Add multiple edges in a batch operation.
@@ -1823,67 +1820,6 @@ class KuzuAdapter(GraphDBInterface):
         """
         result = await self.query(query)
         return [record[0] for record in result] if result else []
-
-    async def get_last_user_interaction_ids(self, limit: int) -> List[str]:
-        """
-        Retrieve the IDs of the most recent CogneeUserInteraction nodes.
-        Parameters:
-        -----------
-        - limit (int): The maximum number of interaction IDs to return.
-        Returns:
-        --------
-        - List[str]: A list of interaction IDs, sorted by created_at descending.
-        """
-
-        query = """
-        MATCH (n)
-        WHERE n.type = 'CogneeUserInteraction'
-        RETURN n.id as id
-        ORDER BY n.created_at DESC
-        LIMIT $limit
-        """
-        rows = await self.query(query, {"limit": limit})
-
-        id_list = [row[0] for row in rows]
-        return id_list
-
-    async def apply_feedback_weight(
-        self,
-        node_ids: List[str],
-        weight: float,
-    ) -> None:
-        """
-        Increment `feedback_weight` inside r.properties JSON for edges where
-        relationship_name = 'used_graph_element_to_answer'.
-
-        """
-        # Step 1: fetch matching edges
-        query = """
-            MATCH (n:Node)-[r:EDGE]->()
-            WHERE n.id IN $node_ids AND r.relationship_name = 'used_graph_element_to_answer'
-            RETURN r.properties, n.id
-            """
-        results = await self.query(query, {"node_ids": node_ids})
-
-        # Step 2: update JSON client-side
-        updates = []
-        for props_json, source_id in results:
-            try:
-                props = json.loads(props_json) if props_json else {}
-            except json.JSONDecodeError:
-                props = {}
-
-            props["feedback_weight"] = props.get("feedback_weight", 0) + weight
-            updates.append((source_id, json.dumps(props)))
-
-        # Step 3: write back
-        for node_id, new_props in updates:
-            update_query = """
-                MATCH (n:Node)-[r:EDGE]->()
-                WHERE n.id = $node_id AND r.relationship_name = 'used_graph_element_to_answer'
-                SET r.properties = $props
-                """
-            await self.query(update_query, {"node_id": node_id, "props": new_props})
 
     async def collect_events(self, ids: List[str]) -> Any:
         """
