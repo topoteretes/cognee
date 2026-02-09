@@ -13,4 +13,5 @@ from .exceptions import (
     MutuallyExclusiveQueryParametersError,
     CacheConnectionError,
     SessionQAEntryValidationError,
+    SessionParameterValidationError,
 )
