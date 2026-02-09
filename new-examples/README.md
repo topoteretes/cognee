@@ -54,7 +54,6 @@
 | `web_url_content_ingestion_example.py` | Extract from web pages and ingest directly to memory |
 | `temporal_awareness_example.py` | Time-based queries |
 | `retrievers_and_search_examples.py` | Retriever patterns and search types guide |
-| `feedback_enrichment_minimal_example.py` | User feedback enrichment |
 | `nodeset_memory_grouping_with_tags_example.py` | Memory grouping with tags |
 | `weighted_edges_relationships_example.py` | Weighted edge relationships |
 | `dynamic_multiple_weighted_edges_example.py` | Multiple weighted edges |

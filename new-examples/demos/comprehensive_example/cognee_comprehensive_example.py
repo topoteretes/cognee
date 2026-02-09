@@ -72,28 +72,6 @@ async def main():
     )
     print("Filtered search result:", results)
 
-    # demonstrate interactive search with feedback mechanism for continuous improvement
-    answer = await cognee.search(
-        query_type=cognee.SearchType.GRAPH_COMPLETION,
-        query_text="What is the most zen thing about Python?",
-        save_interaction=True,
-    )
-    print("Initial answer:", answer)
-
-    # provide feedback on the previous search result to improve future retrievals
-    # the last_k parameter specifies which previous answer to give feedback about
-    await cognee.search(
-        query_type=cognee.SearchType.FEEDBACK,
-        query_text="Last result was useful, I like code that complies with best practices.",
-        last_k=1,
-    )
-
-    feedback_enhanced_graph_visualization_path = (
-        artifacts_path + "/graph_visualization_after_feedback.html"
-    )
-
-    await cognee.visualize_graph(feedback_enhanced_graph_visualization_path)
-
 
 if __name__ == "__main__":
     asyncio.run(main())

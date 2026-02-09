@@ -2,9 +2,10 @@ from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any
 
 from cognee.modules.users.models import User
-from cognee.api.v1.delete import delete
+from cognee.modules.users.methods import get_default_user
 from cognee.api.v1.add import add
 from cognee.api.v1.cognify import cognify
+from cognee.api.v1.datasets import datasets
 
 
 async def update(
@@ -17,7 +18,7 @@ async def update(
     graph_db_config: dict = None,
     preferred_loaders: dict[str, dict[str, Any]] = None,
     incremental_loading: bool = True,
-):
+) -> Any:
     """
     Update existing data in Cognee.
 
@@ -72,9 +73,12 @@ async def update(
             - Processing status and any errors
             - Execution timestamps and metadata
     """
-    await delete(
-        data_id=data_id,
+    if not user:
+        user = await get_default_user()
+
+    await datasets.delete_data(
         dataset_id=dataset_id,
+        data_id=data_id,
         user=user,
     )
 

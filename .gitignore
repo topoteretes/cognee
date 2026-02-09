@@ -202,3 +202,5 @@ SWE-bench_testsample/
 
 # ChromaDB Data
 .chromadb_data/
+
+deployment/helm/values-local.yml

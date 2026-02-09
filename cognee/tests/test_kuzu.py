@@ -115,7 +115,7 @@ async def main():
         )
         objects = await graph_retriever.get_retrieved_objects("What is in the context?")
         context_nonempty = await graph_retriever.get_context_from_objects(
-            "What is in the context?", objects
+            query="What is in the context?", retrieved_objects=objects
         )
 
         graph_retriever = GraphCompletionRetriever(
@@ -124,7 +124,7 @@ async def main():
         )
         objects = await graph_retriever.get_retrieved_objects("What is in the context?")
         context_empty = await graph_retriever.get_context_from_objects(
-            "What is in the context?", objects
+            query="What is in the context?", retrieved_objects=objects
         )
 
         assert isinstance(context_nonempty, str) and context_nonempty != "", (

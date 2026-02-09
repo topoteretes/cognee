@@ -1,7 +1,7 @@
 from cognee.modules.users.models import DatasetDatabase
 from sqlalchemy import select
 
-from cognee.modules.data.models import Dataset
+from cognee.modules.data.models import Dataset, DatasetData, Data
 from cognee.infrastructure.databases.utils.get_vector_dataset_database_handler import (
     get_vector_dataset_database_handler,
 )
@@ -28,7 +28,26 @@ async def delete_dataset(dataset: Dataset):
             await vector_dataset_database_handler["handler_instance"].delete_dataset(
                 dataset_database
             )
-    # TODO: Remove dataset from pipeline_run_status in Data objects related to dataset as well
-    #       This blocks recreation of the dataset with the same name and data after deletion as
-    #       it's marked as completed and will be just skipped even though it's empty.
+
+        # Clear pipeline_status entries for this dataset from related Data objects
+        # so re-adding the same data isn't blocked by stale "completed" status.
+        data_ids_query = select(DatasetData.data_id).where(DatasetData.dataset_id == dataset.id)
+        data_records = (
+            (await session.execute(select(Data).where(Data.id.in_(data_ids_query)))).scalars().all()
+        )
+
+        dataset_id_str = str(dataset.id)
+        for data_record in data_records:
+            if not data_record.pipeline_status:
+                continue
+            updated = False
+            for pipeline_name in list(data_record.pipeline_status.keys()):
+                if dataset_id_str in data_record.pipeline_status[pipeline_name]:
+                    del data_record.pipeline_status[pipeline_name][dataset_id_str]
+                    updated = True
+            if updated:
+                await session.merge(data_record)
+
+        await session.commit()
+
     return await db_engine.delete_entity_by_id(dataset.__tablename__, dataset.id)
