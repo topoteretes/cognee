@@ -1,9 +1,3 @@
-"""
-Integration tests: session persistence memify pipeline + SessionManager.
-
-Runs with FsCache and in-memory Redis (parametrized). Uses a module-scoped
-event loop so cognee graph/vector engines are not reused across different loops.
-"""
 import asyncio
 import pathlib
 import sys
