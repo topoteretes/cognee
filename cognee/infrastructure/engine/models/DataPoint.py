@@ -2,9 +2,7 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import TypedDict
 
 
