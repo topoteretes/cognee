@@ -215,6 +215,51 @@ def get_permissions_router() -> APIRouter:
 
         return JSONResponse(status_code=200, content={"message": "User added to tenant"})
 
+    @permissions_router.delete("/tenants/{tenant_id}/users/{user_id}")
+    async def remove_user_from_tenant_endpoint(
+        tenant_id: UUID, user_id: UUID, user: User = Depends(get_authenticated_user)
+    ):
+        """
+        Remove a user from a tenant.
+
+        The tenant owner or any user with user management permission in the tenant
+        (e.g. users in the Admin role) can remove users from the tenant. The tenant
+        owner cannot be removed from their own tenant. This removes the user from all
+        roles in the tenant and revokes their permissions on datasets belonging to
+        the tenant. Data owned by the removed user (e.g. datasets they created)
+        remains in the tenant.
+
+        ## Path Parameters
+        - **tenant_id** (UUID): The UUID of the tenant
+        - **user_id** (UUID): The UUID of the user to remove from the tenant
+
+        ## Response
+        Returns a success message indicating the user was removed from the tenant.
+
+        ## Error Codes
+        - **400 Bad Request**: Attempt to remove the tenant owner from their own tenant
+        - **403 Forbidden**: Requester is not the tenant owner and does not have user
+          management permission (e.g. Admin role) in the tenant
+        - **404 Not Found**: Tenant not found, user not found, or user not in tenant
+        - **500 Internal Server Error**: Error removing user from tenant
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"DELETE /v1/permissions/tenants/{str(tenant_id)}/users/{str(user_id)}",
+                "tenant_id": str(tenant_id),
+                "user_id": str(user_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.users.tenants.methods import remove_user_from_tenant
+
+        await remove_user_from_tenant(user_id=user_id, tenant_id=tenant_id, owner_id=user.id)
+
+        return JSONResponse(status_code=200, content={"message": "User removed from tenant"})
+
     @permissions_router.post("/tenants")
     async def create_tenant(tenant_name: str, user: User = Depends(get_authenticated_user)):
         """
