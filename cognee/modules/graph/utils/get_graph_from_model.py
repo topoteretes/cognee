@@ -2,6 +2,9 @@ from datetime import datetime, timezone
 from typing import Tuple, List, Any, Dict, Optional
 from cognee.infrastructure.engine import DataPoint, Edge
 from cognee.modules.storage.utils import copy_model
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 
 def _extract_field_data(field_value: Any) -> List[Tuple[Optional[Edge], List[DataPoint]]]:
@@ -135,8 +138,8 @@ def _targets_generator(
 
 async def get_graph_from_model(
     data_point: DataPoint,
-    added_nodes: Dict[str, bool],
-    added_edges: Dict[str, bool],
+    added_nodes: Optional[Dict[str, bool]] = None,
+    added_edges: Optional[Dict[str, bool]] = None,
     visited_properties: Optional[Dict[str, bool]] = None,
     include_root: bool = True,
 ) -> Tuple[List[DataPoint], List[Tuple[str, str, str, Dict[str, Any]]]]:
@@ -153,13 +156,32 @@ async def get_graph_from_model(
     Returns:
         Tuple of (nodes, edges) extracted from the model
     """
+    if added_nodes is None:
+        added_nodes = {}
+
+    if added_edges is None:
+        added_edges = {}
+
     if str(data_point.id) in added_nodes:
+        logger.debug(
+            "Skipping already processed DataPoint",
+            extra={"datapoint_id": str(data_point.id)},
+        )
         return [], []
 
     nodes = []
     edges = []
     visited_properties = visited_properties or {}
     data_point_id = str(data_point.id)
+
+    logger.debug(
+        "Starting graph extraction for DataPoint",
+        extra={
+            "datapoint_id": data_point_id,
+            "datapoint_type": type(data_point).__name__,
+            "processed_nodes_so_far": len(added_nodes),
+        },
+    )
 
     data_point_properties = {"type": type(data_point).__name__}
     excluded_properties = set()
@@ -201,6 +223,14 @@ async def get_graph_from_model(
         nodes.append(SimpleDataPointModel(**data_point_properties))
         added_nodes[data_point_id] = True
 
+        logger.debug(
+            "Added node to graph",
+            extra={
+                "datapoint_id": data_point_id,
+                "node_type": type(data_point).__name__,
+            },
+        )
+
     # Process all relationships using generator
     for target_datapoint, field_name, edge_metadata in _targets_generator(
         data_point, properties_to_visit
@@ -214,6 +244,15 @@ async def get_graph_from_model(
                 data_point.id, target_datapoint.id, relationship_name, edge_metadata
             )
             edges.append((data_point.id, target_datapoint.id, relationship_name, edge_properties))
+            logger.debug(
+                "Added edge to graph",
+                extra={
+                    "source_id": str(data_point.id),
+                    "target_id": str(target_datapoint.id),
+                    "relationship": relationship_name,
+                },
+            )
+
             added_edges[edge_key] = True
 
         # Mark property as visited - CRITICAL for preventing infinite loops
@@ -226,6 +265,14 @@ async def get_graph_from_model(
         if str(target_datapoint.id) in added_nodes:
             continue
 
+        logger.debug(
+            "Recursing into target DataPoint",
+            extra={
+                "source_id": data_point_id,
+                "target_id": str(target_datapoint.id),
+            },
+        )
+
         child_nodes, child_edges = await get_graph_from_model(
             target_datapoint,
             include_root=True,
@@ -235,6 +282,15 @@ async def get_graph_from_model(
         )
         nodes.extend(child_nodes)
         edges.extend(child_edges)
+
+    logger.info(
+        "Completed graph extraction for DataPoint",
+        extra={
+            "datapoint_id": data_point_id,
+            "nodes_extracted": len(nodes),
+            "edges_extracted": len(edges),
+        },
+    )
 
     return nodes, edges
 

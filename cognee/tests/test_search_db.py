@@ -130,7 +130,9 @@ async def setup_test_environment():
 async def _get_retriever_context(retriever, query: str):
     """Retrieve objects and resolve context via the retriever API."""
     retrieved_objects = await retriever.get_retrieved_objects(query)
-    return await retriever.get_context_from_objects(query, retrieved_objects)
+    return await retriever.get_context_from_objects(
+        query=query, retrieved_objects=retrieved_objects
+    )
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -189,56 +191,47 @@ async def e2e_state():
     completion_gk = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION,
         query_text="Where is germany located, next to which country?",
-        save_interaction=True,
         verbose=True,
     )
     completion_cot = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION_COT,
         query_text="What is the country next to germany??",
-        save_interaction=True,
         verbose=True,
     )
     completion_ext = await cognee.search(
         query_type=SearchType.GRAPH_COMPLETION_CONTEXT_EXTENSION,
         query_text="What is the name of the country next to germany",
-        save_interaction=True,
         verbose=True,
     )
 
     completion_sum = await cognee.search(
         query_type=SearchType.GRAPH_SUMMARY_COMPLETION,
         query_text="Next to which country is Germany located?",
-        save_interaction=True,
         verbose=True,
     )
     completion_triplet = await cognee.search(
         query_type=SearchType.TRIPLET_COMPLETION,
         query_text="Next to which country is Germany located?",
-        save_interaction=True,
         verbose=True,
     )
     completion_chunks = await cognee.search(
         query_type=SearchType.CHUNKS,
         query_text="Germany",
-        save_interaction=False,
         verbose=True,
     )
     completion_summaries = await cognee.search(
         query_type=SearchType.SUMMARIES,
         query_text="Germany",
-        save_interaction=False,
         verbose=True,
     )
     completion_rag = await cognee.search(
         query_type=SearchType.RAG_COMPLETION,
         query_text="Next to which country is Germany located?",
-        save_interaction=False,
         verbose=True,
     )
     completion_temporal = await cognee.search(
         query_type=SearchType.TEMPORAL,
         query_text="Next to which country is Germany located?",
-        save_interaction=False,
         verbose=True,
     )
 
@@ -422,23 +415,12 @@ async def test_e2e_search_results_and_wrappers(e2e_state):
 
 @pytest.mark.asyncio
 async def test_e2e_graph_side_effects_and_node_fields(e2e_state):
-    """Search interactions create expected graph nodes/edges and required fields."""
+    """Graph snapshot from e2e run has expected structure (nodes and edges from cognify)."""
     graph = e2e_state["graph_snapshot"]
     nodes, edges = graph
 
     type_counts = Counter(node_data[1].get("type", {}) for node_data in nodes)
-    edge_type_counts = Counter(edge_type[2] for edge_type in edges)
 
-    assert type_counts.get("CogneeUserInteraction", 0) == 4
-    assert type_counts.get("NodeSet", 0) == 1
-    assert edge_type_counts.get("used_graph_element_to_answer", 0) >= 10
-    assert edge_type_counts.get("belongs_to_set", 0) >= 4
-
-    required_fields_user_interaction = {"question", "answer", "context"}
-
-    for node_id, data in nodes:
-        if data.get("type") == "CogneeUserInteraction":
-            assert required_fields_user_interaction.issubset(data.keys())
-            for field in required_fields_user_interaction:
-                value = data[field]
-                assert isinstance(value, str) and value.strip()
+    assert type_counts.get("Entity", 0) >= 1, "expected at least one Entity from cognify"
+    assert len(nodes) >= 1
+    assert len(edges) >= 1

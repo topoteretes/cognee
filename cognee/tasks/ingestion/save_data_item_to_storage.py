@@ -76,11 +76,7 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
             if settings.accept_local_file_path:
                 # Normalize path separators before creating file URL
                 normalized_path = os.path.normpath(data_item)
-                # Use forward slashes in file URLs for consistency
-                url_path = normalized_path.replace(os.sep, "/")
-                file_path = "file://" + url_path
-
-                return file_path
+                return Path(normalized_path).as_uri()
             else:
                 raise IngestionError(message="Local files are not accepted.")
         # Data is a relative file path
@@ -88,10 +84,7 @@ async def save_data_item_to_storage(data_item: Union[BinaryIO, str, Any]) -> str
             if settings.accept_local_file_path:
                 # Normalize path separators before creating file URL
                 normalized_path = os.path.normpath(abs_path)
-                # Use forward slashes in file URLs for consistency
-                url_path = normalized_path.replace(os.sep, "/")
-                file_path = "file://" + url_path
-                return file_path
+                return Path(normalized_path).as_uri()
 
         # data is text, save it to data storage and return the file path
         return await save_data_to_file(data_item)
