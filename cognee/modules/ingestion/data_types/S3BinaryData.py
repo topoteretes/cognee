@@ -1,5 +1,4 @@
 import os
-import sys
 import time
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -13,7 +12,7 @@ from .IngestionData import IngestionData
 logger = get_logger(__name__)
 
 # Threshold in seconds above which S3 operations are logged as slow
-S3_SLOW_OPERATION_THRESHOLD_SEC = 10.0
+S3_SLOW_OPERATION_THRESHOLD_SEC = 30.0
 
 
 def create_s3_binary_data(s3_path: str, name: Optional[str] = None) -> "S3BinaryData":
@@ -31,14 +30,7 @@ class S3BinaryData(IngestionData):
 
     def get_identifier(self):
         metadata = self.get_metadata()
-        try:
-            return metadata["content_hash"]
-        except KeyError:
-            logger.error(
-                "Content hash not found in metadata",
-                extra={"s3_path": self.s3_path, "metadata": metadata},
-            )
-            raise
+        return metadata["content_hash"]
 
     def get_metadata(self):
         run_sync(self.ensure_metadata())
@@ -63,31 +55,7 @@ class S3BinaryData(IngestionData):
             file_storage = S3FileStorage(file_dir_path)
             async with file_storage.open(file_path, "rb") as file:
                 self.metadata = await get_file_metadata(file)
-
-            elapsed = time.perf_counter() - start_time
-            file_size = self.metadata.get("file_size") if self.metadata else None
-
-            logger.info(
-                "S3 metadata fetched",
-                extra={
-                    "s3_path": self.s3_path,
-                    "file_path": file_path,
-                    "file_size_bytes": file_size,
-                    "duration_seconds": round(elapsed, 3),
-                },
-            )
-
-            if elapsed > S3_SLOW_OPERATION_THRESHOLD_SEC:
-                logger.warning(
-                    "S3 metadata fetch slow",
-                    extra={
-                        "s3_path": self.s3_path,
-                        "duration_seconds": round(elapsed, 2),
-                        "threshold_seconds": S3_SLOW_OPERATION_THRESHOLD_SEC,
-                    },
-                )
-
-        except Exception as error:
+        except (OSError, ValueError) as error:
             logger.error(
                 "S3 metadata fetch failed",
                 extra={
@@ -99,6 +67,30 @@ class S3BinaryData(IngestionData):
             )
             raise
 
+        elapsed = time.perf_counter() - start_time
+        duration_sec = round(elapsed, 3)
+        if elapsed > S3_SLOW_OPERATION_THRESHOLD_SEC:
+            logger.warning(
+                "S3 metadata fetch slow",
+                extra={
+                    "s3_path": self.s3_path,
+                    "file_path": file_path,
+                    "duration_seconds": duration_sec,
+                    "threshold_seconds": S3_SLOW_OPERATION_THRESHOLD_SEC,
+                },
+            )
+        else:
+            file_size = self.metadata.get("file_size") if self.metadata else None
+            logger.info(
+                "S3 metadata fetched",
+                extra={
+                    "s3_path": self.s3_path,
+                    "file_path": file_path,
+                    "file_size_bytes": file_size,
+                    "duration_seconds": duration_sec,
+                },
+            )
+
         if self.metadata is not None and self.metadata.get("name") is None:
             self.metadata["name"] = self.name or file_path
 
@@ -108,64 +100,6 @@ class S3BinaryData(IngestionData):
 
         file_dir_path = os.path.dirname(self.s3_path)
         file_path = os.path.basename(self.s3_path)
-
-        logger.debug(
-            "Opening S3 file for read",
-            extra={
-                "s3_path": self.s3_path,
-                "file_path": file_path,
-                "storage_path": file_dir_path,
-            },
-        )
-
-        start_time = time.perf_counter()
         file_storage = S3FileStorage(file_dir_path)
-        open_cm = file_storage.open(file_path, "rb")
-        file = None
-
-        try:
-            file = await open_cm.__aenter__()
-        except Exception as error:
-            logger.error(
-                "S3 file open failed",
-                extra={
-                    "s3_path": self.s3_path,
-                    "file_path": file_path,
-                    "error": str(error),
-                },
-                exc_info=True,
-            )
-            raise
-
-        try:
-            elapsed_open = time.perf_counter() - start_time
-            file_size = self.metadata.get("file_size") if self.metadata else None
-            logger.info(
-                "Opened S3 file for read",
-                extra={
-                    "s3_path": self.s3_path,
-                    "file_path": file_path,
-                    "file_size_bytes": file_size,
-                    "open_duration_seconds": round(elapsed_open, 3),
-                },
-            )
-            if elapsed_open > S3_SLOW_OPERATION_THRESHOLD_SEC:
-                logger.warning(
-                    "S3 file open slow",
-                    extra={
-                        "s3_path": self.s3_path,
-                        "duration_seconds": round(elapsed_open, 2),
-                        "threshold_seconds": S3_SLOW_OPERATION_THRESHOLD_SEC,
-                    },
-                )
+        async with file_storage.open(file_path, "rb") as file:
             yield file
-        finally:
-            await open_cm.__aexit__(*sys.exc_info())
-            total_elapsed = time.perf_counter() - start_time
-            logger.debug(
-                "Closed S3 file after read",
-                extra={
-                    "s3_path": self.s3_path,
-                    "total_duration_seconds": round(total_elapsed, 3),
-                },
-            )
