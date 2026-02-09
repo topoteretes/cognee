@@ -1,7 +1,9 @@
+from collections.abc import Callable
+
 from cognee.shared.utils import start_visualization_server
 
 
-def visualization_server(port):
+def visualization_server(port) -> Callable[[], Callable[[], None]]:
     """
     Start a visualization server on the specified port.
 
