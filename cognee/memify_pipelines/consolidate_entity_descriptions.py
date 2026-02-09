@@ -39,10 +39,12 @@ async def get_entity_neighborhood(
         graph_engine.get_neighbors(node_id),
     )
 
+    entity_type, filtered_neighbors = format_neighbors(neighbors)
     return {
         "properties": get_entity_properties(props),
         "edges": format_edges(edges),
-        "neighbors": format_neighbors(neighbors),
+        "neighbors": filtered_neighbors,
+        "entity_type": entity_type,
     }
 
 
@@ -62,15 +64,20 @@ def format_edges(edges: List[Any]) -> Dict[str, str]:
 
 def format_neighbors(
     neighbors: List[Dict[str, Any]], node_fields: Optional[Set[str]] = None
-) -> List[Dict[str, Any]]:
-    """Filter neighbor fields and exclude those with only an ID."""
+) -> tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Filter neighbor fields and exclude those with only an ID, returning EntityType separately."""
     if node_fields is None:
         node_fields = {"id", "name", "description", "text", "type"}
 
-    filtered_neighbors = [
-        {k: v for k, v in neighbor.items() if k in node_fields} for neighbor in neighbors
-    ]
-    return [n for n in filtered_neighbors if len(n) > 1]
+    entity_type = None
+    filtered_neighbors: List[Dict[str, Any]] = []
+    for neighbor in neighbors:
+        if neighbor.get("type") == "EntityType":
+            entity_type = neighbor
+        filtered_neighbor = {k: v for k, v in neighbor.items() if k in node_fields}
+        if len(filtered_neighbor) > 1:
+            filtered_neighbors.append(filtered_neighbor)
+    return entity_type, filtered_neighbors
 
 
 # endregion
@@ -130,19 +137,8 @@ async def query_LLM(text_input, system_prompt):
     )
 
 
-async def get_entity_type(graph_engine, entity_type_node):
-    node_types, _ = await graph_engine.get_filtered_graph_data(
-        [{"type": ["EntityType"], "name": [entity_type_node["name"]]}]
-    )
-    return node_types
-
-
-def build_entity_type(node_types):
-    if not node_types:
-        return None
-    if len(node_types) > 1:
-        logging.warning("Multiple is_a relations found, using only the first one.")
-    entity_type_id, entity_type_props = node_types[0]
+def build_entity_type(entity_type_node):
+    entity_type_id, entity_type_props = entity_type_node["id"], entity_type_node
     entity_type_props = {
         **entity_type_props,
         "id": entity_type_id,
@@ -161,45 +157,33 @@ def build_entity(id, name, entity_type, description):
     )
 
 
+async def generate_consolidated_entity(node, system_prompt) -> Entity:
+    props = node["properties"]
+    text = build_node_neighborhood_prompt(node)
+    result = await query_LLM(text, system_prompt)
+    entity_type = build_entity_type(node["entity_type"])
+    entity = build_entity(props["id"], props["name"], entity_type, result.description)
+    return entity
+
+
 # endregion
 
 
-async def consolidate_entity_descriptions(nodes) -> List[DataPoint]:
+async def generate_consolidated_entities(nodes) -> List[DataPoint]:
     system_prompt = render_prompt(prompt_name, {})
-    enriched_data = []
-    graph_engine = await get_graph_engine()
 
-    for node in nodes:
-        props = node["properties"]
+    consolidate_entity_descriptions_tasks = (
+        generate_consolidated_entity(node, system_prompt) for node in nodes
+    )
 
-        text = build_node_neighborhood_prompt(node)
-
-        result = await query_LLM(text, system_prompt)
-
-        for neighbor in node["neighbors"]:
-            if neighbor["type"] != "EntityType":
-                continue
-
-            entity_type_node = neighbor
-            node_types = await get_entity_type(graph_engine, entity_type_node)
-
-            if not node_types:
-                continue
-
-            entity_type = build_entity_type(node_types)
-
-            entity = build_entity(props["id"], props["name"], entity_type, result.description)
-
-            enriched_data.append(entity)
-
-    return enriched_data
+    return await asyncio.gather(*consolidate_entity_descriptions_tasks)
 
 
 async def consolidate_entity_descriptions_pipeline():
     extraction_tasks = [Task(get_entities_with_neighborhood)]
 
     enrichment_tasks = [
-        Task(consolidate_entity_descriptions),
+        Task(generate_consolidated_entities),
         Task(add_data_points),
     ]
 
