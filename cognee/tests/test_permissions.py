@@ -1,13 +1,15 @@
 import asyncio
 import os
 import pathlib
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, patch
 
 import cognee
 from cognee.context_global_variables import backend_access_control_enabled
+from cognee.exceptions import CogneeValidationError
+from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 from cognee.modules.engine.operations.setup import setup as engine_setup
 from cognee.modules.search.types import SearchType
 from cognee.modules.users.exceptions import PermissionDeniedError
@@ -17,6 +19,7 @@ from cognee.modules.users.roles.methods import add_user_to_role, create_role
 from cognee.modules.users.tenants.methods import (
     add_user_to_tenant,
     create_tenant,
+    remove_user_from_tenant,
     select_tenant,
 )
 
@@ -41,11 +44,11 @@ async def _reset_engines_and_prune() -> None:
     except Exception:
         pass
 
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
-    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
@@ -210,3 +213,53 @@ async def test_permissions_example_flow(permissions_example_env):
         assert isinstance(search_results, list) and len(search_results) == 1
         assert search_results[0]["dataset_name"] == "QUANTUM_COGNEE_LAB"
         assert search_results[0]["search_result"] == ["MOCK_ANSWER"]
+
+        # Remove user_3 from tenant (tenant owner user_2 removes user_3).
+        await remove_user_from_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_2.id)
+
+        # user_3 can no longer read the tenant dataset after being removed.
+        with pytest.raises(PermissionDeniedError):
+            with llm_patch:
+                await cognee.search(
+                    query_type=SearchType.GRAPH_COMPLETION,
+                    query_text="What is in the document?",
+                    user=user_3,
+                    dataset_ids=[quantum_cognee_lab_dataset_id],
+                )
+
+
+async def test_remove_user_from_tenant_non_owner_gets_403(permissions_example_env):
+    """Only tenant owner can remove users; non-owner gets 403."""
+    owner = await create_user("owner_rm@example.com", "example")
+    member = await create_user("member_rm@example.com", "example")
+    tenant_id = await create_tenant("TenantRm", owner.id)
+    await add_user_to_tenant(user_id=member.id, tenant_id=tenant_id, owner_id=owner.id)
+
+    # Member cannot remove another user (or themselves) from the tenant.
+    with pytest.raises(PermissionDeniedError):
+        await remove_user_from_tenant(user_id=member.id, tenant_id=tenant_id, owner_id=member.id)
+
+
+async def test_remove_user_from_tenant_cannot_remove_owner(permissions_example_env):
+    """Removing the tenant owner from their own tenant returns 400."""
+    owner = await create_user("owner_only@example.com", "example")
+    tenant_id = await create_tenant("TenantOwner", owner.id)
+
+    with pytest.raises(CogneeValidationError) as exc_info:
+        await remove_user_from_tenant(user_id=owner.id, tenant_id=tenant_id, owner_id=owner.id)
+
+    assert exc_info.value.status_code == 400
+    assert "Cannot remove the tenant owner" in exc_info.value.message
+
+
+async def test_remove_user_from_tenant_user_not_in_tenant_404(permissions_example_env):
+    """Removing a user who is not in the tenant returns 404."""
+    owner = await create_user("owner_404@example.com", "example")
+    other_user = await create_user("other_404@example.com", "example")
+    tenant_id = await create_tenant("Tenant404", owner.id)
+    # other_user is not added to the tenant.
+
+    with pytest.raises(EntityNotFoundError) as exc_info:
+        await remove_user_from_tenant(user_id=other_user.id, tenant_id=tenant_id, owner_id=owner.id)
+
+    assert "User not found in this tenant" in exc_info.value.message

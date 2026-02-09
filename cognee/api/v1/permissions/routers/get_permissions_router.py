@@ -1,14 +1,14 @@
-from uuid import UUID
 from typing import List, Union
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from cognee.modules.users.models import User
+from cognee import __version__ as cognee_version
 from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
-from cognee import __version__ as cognee_version
 
 
 class SelectTenantDTO(InDTO):
@@ -193,6 +193,49 @@ def get_permissions_router() -> APIRouter:
         await add_user_to_tenant(user_id=user_id, tenant_id=tenant_id, owner_id=user.id)
 
         return JSONResponse(status_code=200, content={"message": "User added to tenant"})
+
+    @permissions_router.delete("/tenants/{tenant_id}/users/{user_id}")
+    async def remove_user_from_tenant_endpoint(
+        tenant_id: UUID, user_id: UUID, user: User = Depends(get_authenticated_user)
+    ):
+        """
+        Remove a user from a tenant.
+
+        Only the tenant owner can remove users from their tenant. The tenant owner
+        cannot be removed from their own tenant. This removes the user from all
+        roles in the tenant and revokes their permissions on datasets belonging to
+        the tenant. Data owned by the removed user (e.g. datasets they created)
+        remains in the tenant.
+
+        ## Path Parameters
+        - **tenant_id** (UUID): The UUID of the tenant
+        - **user_id** (UUID): The UUID of the user to remove from the tenant
+
+        ## Response
+        Returns a success message indicating the user was removed from the tenant.
+
+        ## Error Codes
+        - **400 Bad Request**: Attempt to remove the tenant owner from their own tenant
+        - **403 Forbidden**: Requester is not the tenant owner
+        - **404 Not Found**: Tenant not found, user not found, or user not in tenant
+        - **500 Internal Server Error**: Error removing user from tenant
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"DELETE /v1/permissions/tenants/{str(tenant_id)}/users/{str(user_id)}",
+                "tenant_id": str(tenant_id),
+                "user_id": str(user_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.users.tenants.methods import remove_user_from_tenant
+
+        await remove_user_from_tenant(user_id=user_id, tenant_id=tenant_id, owner_id=user.id)
+
+        return JSONResponse(status_code=200, content={"message": "User removed from tenant"})
 
     @permissions_router.post("/tenants")
     async def create_tenant(tenant_name: str, user: User = Depends(get_authenticated_user)):
