@@ -93,9 +93,7 @@ async def test_extract_user_sessions_multiple_sessions(mock_user, mock_qa_data):
         mock_session_user.get.return_value = mock_user
 
         sessions = []
-        async for session in extract_user_sessions(
-            [{}], session_ids=["session1", "session2"]
-        ):
+        async for session in extract_user_sessions([{}], session_ids=["session1", "session2"]):
             sessions.append(session)
 
         assert len(sessions) == 2
@@ -192,9 +190,7 @@ async def test_extract_user_sessions_session_manager_unavailable(mock_user):
 
 
 @pytest.mark.asyncio
-async def test_extract_user_sessions_session_manager_error_handling(
-    mock_user, mock_qa_data
-):
+async def test_extract_user_sessions_session_manager_error_handling(mock_user, mock_qa_data):
     """Test extraction continues on SessionManager error for specific session."""
     mock_session_manager = _make_mock_session_manager(mock_qa_data)
     mock_session_manager.get_session.side_effect = [
