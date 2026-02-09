@@ -188,6 +188,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             system_prompt_path=self.system_prompt_path,
             system_prompt=self.system_prompt,
             response_model=self.response_model,
+            conversation_history=conversation_history if conversation_history else None,
         )
         for q, comp in zip(queries, completions):
             states[q].completion = comp

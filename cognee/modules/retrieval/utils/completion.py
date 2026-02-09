@@ -35,6 +35,7 @@ async def generate_completion_batch(
     user_prompt_path: str,
     system_prompt_path: str,
     system_prompt: Optional[str] = None,
+    conversation_history: Optional[str] = "",
     response_model: Type = str,
 ) -> List[Any]:
     """Generates completions for a batch of queries in parallel."""
@@ -46,6 +47,7 @@ async def generate_completion_batch(
                 user_prompt_path=user_prompt_path,
                 system_prompt_path=system_prompt_path,
                 system_prompt=system_prompt,
+                conversation_history=conversation_history,
                 response_model=response_model,
             )
             for q, c in zip(query_batch, context)
