@@ -49,7 +49,7 @@ async def run_sse_with_cors():
     sse_app = mcp.sse_app()
     sse_app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=["http://localhost:3000"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -70,7 +70,7 @@ async def run_http_with_cors():
     http_app = mcp.streamable_http_app()
     http_app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=["http://localhost:3000"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
