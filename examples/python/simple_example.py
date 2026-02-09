@@ -58,6 +58,13 @@ async def main():
     for result_text in search_results:
         pprint(result_text)
 
+    # Generate interactive graph visualization
+    print("\nGenerating graph visualization...")
+    from cognee.api.v1.visualize import visualize_graph
+
+    await visualize_graph()
+    print("Visualization saved to ~/graph_visualization.html")
+
 
 if __name__ == "__main__":
     logger = setup_logging(log_level=ERROR)

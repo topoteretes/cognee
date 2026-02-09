@@ -35,15 +35,15 @@ dependencies = [
     "aiohttp>=3.13.3,<4.0.0",
     "aiofiles>=23.2.1",
     "rdflib>=7.1.4,<7.2.0",
-    "pypdf>=4.1.0,<7.0.0",
+    "pypdf>=6.6.2,<7.0.0",
     "jinja2>=3.1.3,<4",
     "lancedb>=0.24.0,<1.0.0",
     "nbformat>=5.7.0,<6.0.0",
     "alembic>=1.13.3,<2",
     "limits>=4.4.1,<5",
     "fastapi>=0.116.2,<1.0.0",
-    "python-multipart>=0.0.20,<1.0.0",
-    "fastapi-users[sqlalchemy]>=14.0.1,<15.0.0",
+    "python-multipart>=0.0.22,<1.0.0",
+    "fastapi-users[sqlalchemy]>=15.0.2",
     "structlog>=25.2.0,<26",
     "pympler>=1.1,<2.0.0",
     "onnxruntime<=1.22.1",
@@ -100,7 +100,7 @@ langchain = [
     "langchain_text_splitters>=0.3.2,<1.0.0",
     "langchain-core>=1.2.5"
 ]
-llama-index = ["llama-index-core>=0.12.11,<0.13"]
+llama-index = ["llama-index-core>=0.13.0,<0.14"]
 huggingface = ["transformers>=4.46.3,<5"]
 ollama = ["transformers>=4.46.3,<5"]
 mistral = ["mistral-common>=1.5.2,<2"]
@@ -194,6 +194,13 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["cognee", "distributed"]
+
+[tool.uv]
+constraint-dependencies = [
+    "protobuf>=6.33.5",
+    "pyasn1>=0.6.2",
+    "wheel>=0.46.2",
+]
 
 [tool.ruff]
 line-length = 100
