@@ -1,3 +1,4 @@
+import os
 from uuid import UUID
 from typing import Union, Optional
 
@@ -5,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from cognee.modules.data.methods import create_dataset
+from cognee.modules.data.methods import create_authorized_dataset
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.infrastructure.databases.vector import get_vectordb_config
 from cognee.infrastructure.databases.graph.config import get_graph_config
@@ -86,7 +88,8 @@ async def get_or_create_dataset_database(
     # If dataset is given as name make sure the dataset is created first
     if isinstance(dataset, str):
         async with db_engine.get_async_session() as session:
-            await create_dataset(dataset, user, session)
+            if isinstance(dataset, str):
+                dataset = await create_authorized_dataset(dataset, user)
 
     # If dataset database already exists return it
     existing_dataset_database = await _existing_dataset_database(dataset_id, user)
