@@ -13,6 +13,11 @@ from cognee.api.client import app
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
 
+# Explicitly import the router module so it is registered in sys.modules.
+# Without this, on Python 3.10 the package-level function `get_permissions_router`
+# shadows the submodule, causing unittest.mock.patch to fail.
+import cognee.api.v1.permissions.routers.get_permissions_router as _router_mod  # noqa: F401
+
 gau_mod = importlib.import_module("cognee.modules.users.methods.get_authenticated_user")
 
 

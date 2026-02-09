@@ -7,8 +7,10 @@ from typing import Any, List, Optional, Tuple, Type, Union
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
-from cognee.context_global_variables import set_database_global_context_variables
-from cognee.context_global_variables import backend_access_control_enabled
+from cognee.context_global_variables import (
+    backend_access_control_enabled,
+    set_database_global_context_variables,
+)
 
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
