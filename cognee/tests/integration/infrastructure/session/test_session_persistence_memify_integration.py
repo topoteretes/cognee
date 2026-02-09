@@ -214,6 +214,5 @@ async def test_persist_sessions_multiple_sessions_via_session_manager(
     nodes, _edges = await graph_engine.get_graph_data()
 
     assert len(nodes) >= 3, (
-        "Expected at least 3 nodes (1 from initial doc + 2 from sessions). "
-        f"Got {len(nodes)} nodes."
+        f"Expected at least 3 nodes (1 from initial doc + 2 from sessions). Got {len(nodes)} nodes."
     )
