@@ -677,6 +677,10 @@ class Neo4jAdapter(GraphDBInterface):
         """
         Get all neighbors of a specified node, including all directly connected nodes.
 
+        This method retrieves all neighboring nodes connected to a specified node and returns
+        their properties as a list of dictionaries. It may return an empty list if no neighbors exist or an
+        error occurs.
+
         Parameters:
         -----------
 
@@ -687,37 +691,16 @@ class Neo4jAdapter(GraphDBInterface):
 
             - List[Dict[str, Any]]: A list of neighboring nodes represented as dictionaries.
         """
-        return await self.get_neighbours(node_id)
-
-    async def get_neighbours(self, node_id: str) -> List[Dict[str, Any]]:
-        """
-        Get all neighbouring nodes.
-
-        This method retrieves all neighboring nodes connected to a specified node and returns
-        them as a list of dictionaries. It may return an empty list if no neighbors exist or an
-        error occurs.
-
-        Parameters:
-        -----------
-
-            - node_id (str): The identifier of the node for which to find neighbors.
-
-        Returns:
-        --------
-
-            - List[Dict[str, Any]]: A list of dictionaries representing neighboring nodes'
-              properties.
-        """
         query = f"""
-           MATCH (n: `{BASE_LABEL}` {{id: $node_id}})-[r]-(m: `{BASE_LABEL}`)
+           MATCH (n: `{BASE_LABEL}` {{id: $node_id}})--(m: `{BASE_LABEL}`)
            RETURN DISTINCT properties(m) AS properties
            """
         try:
             result = await self.query(query, {"node_id": node_id})
             return [row["properties"] for row in result] if result else []
-        except Exception as exc:  # noqa: BLE001
-            logger.error(f"Failed to get neighbours for node {node_id}: {exc}")
-            return []
+        except Exception as exc:
+            logger.error(f"Failed to get neighbors for node {node_id}: {exc}")
+            raise exc
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """
