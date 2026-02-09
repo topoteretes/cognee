@@ -1,7 +1,7 @@
 from cognee.shared.utils import start_visualization_server
 
 
-def visualization_server(port):
+def visualization_server(port) -> callable:
     """
     Start a visualization server on the specified port.
 

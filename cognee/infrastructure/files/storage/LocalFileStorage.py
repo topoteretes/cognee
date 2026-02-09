@@ -1,5 +1,6 @@
 import os
 import shutil
+from pathlib import Path
 from urllib.parse import urlparse
 from contextlib import contextmanager
 from typing import BinaryIO, Optional, Union
@@ -15,14 +16,22 @@ def get_parsed_path(file_path: str) -> str:
 
         # Handle file:// URLs specially
         if parsed_url.scheme == "file":
-            # On Windows, urlparse handles drive letters correctly
             # Convert the path component to a proper file path
             if os.name == "nt":  # Windows
-                # Remove leading slash from Windows paths like /C:/Users/...
-                # but handle UNC paths like //server/share correctly
                 parsed_path = parsed_url.path
-                if parsed_path.startswith("/") and len(parsed_path) > 1 and parsed_path[2] == ":":
-                    # This is a Windows drive path like /C:/Users/...
+                # Handle drive letter in netloc (from malformed file://D:/path URLs)
+                if (
+                    parsed_url.netloc
+                    and len(parsed_url.netloc) == 2
+                    and parsed_url.netloc[1] == ":"
+                    and parsed_url.netloc[0].isalpha()
+                ):
+                    parsed_path = parsed_url.netloc + parsed_path
+                elif parsed_url.netloc:
+                    # True UNC path: file://server/share -> //server/share
+                    parsed_path = f"//{parsed_url.netloc}{parsed_path}"
+                # Remove leading slash from Windows paths like /C:/Users/...
+                if parsed_path.startswith("/") and len(parsed_path) > 2 and parsed_path[2] == ":":
                     parsed_path = parsed_path[1:]
                 elif parsed_path.startswith("///"):
                     # This is a UNC path like ///server/share, convert to //server/share
@@ -95,7 +104,7 @@ class LocalFileStorage(Storage):
 
                 file.close()
 
-        return "file://" + full_file_path
+        return Path(full_file_path).as_uri()
 
     @contextmanager
     def open(self, file_path: str, mode: str = "rb", *args, **kwargs):
@@ -146,7 +155,7 @@ class LocalFileStorage(Storage):
                 )
 
         with open(full_file_path, mode=mode, *args, **kwargs) as file:
-            file = FileBufferedReader(file, name="file://" + full_file_path)
+            file = FileBufferedReader(file, name=Path(full_file_path).as_uri())
 
             try:
                 yield file
