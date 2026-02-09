@@ -193,7 +193,6 @@ Available search types (from `cognee/modules/search/types/SearchType.py`):
 - **NATURAL_LANGUAGE** - Natural language to structured query
 - **TEMPORAL** - Time-aware graph search
 - **FEELING_LUCKY** - Automatic search type selection
-- **FEEDBACK** - User feedback-based refinement
 - **CODING_RULES** - Code-specific search rules
 
 Key files:

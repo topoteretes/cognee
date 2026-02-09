@@ -7,8 +7,10 @@ from typing import Any, List, Optional, Tuple, Type, Union
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.utils import send_telemetry
-from cognee.context_global_variables import set_database_global_context_variables
-from cognee.context_global_variables import backend_access_control_enabled
+from cognee.context_global_variables import (
+    backend_access_control_enabled,
+    set_database_global_context_variables,
+)
 
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
@@ -38,8 +40,6 @@ async def search(
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
-    save_interaction: bool = False,
-    last_k: Optional[int] = None,
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
@@ -82,8 +82,6 @@ async def search(
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
-        save_interaction=save_interaction,
-        last_k=last_k,
         only_context=only_context,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
@@ -119,8 +117,6 @@ async def authorized_search(
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
-    save_interaction: bool = False,
-    last_k: Optional[int] = None,
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
@@ -146,8 +142,6 @@ async def authorized_search(
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
-        save_interaction=save_interaction,
-        last_k=last_k,
         only_context=only_context,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
@@ -167,8 +161,6 @@ async def search_in_datasets_context(
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
-    save_interaction: bool = False,
-    last_k: Optional[int] = None,
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
@@ -189,8 +181,6 @@ async def search_in_datasets_context(
         top_k: int = 10,
         node_type: Optional[Type] = NodeSet,
         node_name: Optional[List[str]] = None,
-        save_interaction: bool = False,
-        last_k: Optional[int] = None,
         only_context: bool = False,
         session_id: Optional[str] = None,
         wide_search_top_k: Optional[int] = 100,
@@ -229,8 +219,6 @@ async def search_in_datasets_context(
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
-            save_interaction=save_interaction,
-            last_k=last_k,
             only_context=only_context,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
@@ -251,8 +239,6 @@ async def search_in_datasets_context(
                 top_k=top_k,
                 node_type=node_type,
                 node_name=node_name,
-                save_interaction=save_interaction,
-                last_k=last_k,
                 only_context=only_context,
                 session_id=session_id,
                 wide_search_top_k=wide_search_top_k,
