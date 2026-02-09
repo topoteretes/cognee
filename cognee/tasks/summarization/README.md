@@ -82,12 +82,14 @@ async for item in summarize_code(code_nodes):
 Default summarization model is `SummarizedContent` from `cognee.modules.cognify.config.get_cognify_config()`.
 
 **Environment Variables:**
+
 | Variable | Description |
 |----------|-------------|
 | `LLM_API_KEY` | API key for LLM provider (required) |
 | `LLM_PROVIDER` | Provider name (default: openai) |
 | `LLM_MODEL` | Model name (default: gpt-4o-mini) |
 | `MOCK_CODE_SUMMARY` | Use mock summaries for testing (true/false) |
+
 
 ## Dependencies
 
