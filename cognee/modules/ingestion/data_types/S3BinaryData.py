@@ -3,8 +3,10 @@ import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
+from botocore.exceptions import ClientError, NoCredentialsError
+
 from cognee.infrastructure.files import FileMetadata, get_file_metadata
-from cognee.infrastructure.utils import run_sync
+from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.shared.logging_utils import get_logger
 
 from .IngestionData import IngestionData
@@ -28,15 +30,15 @@ class S3BinaryData(IngestionData):
         self.s3_path = s3_path
         self.name = name
 
-    def get_identifier(self):
+    def get_identifier(self) -> str:
         metadata = self.get_metadata()
         return metadata["content_hash"]
 
-    def get_metadata(self):
+    def get_metadata(self) -> Optional[FileMetadata]:
         run_sync(self.ensure_metadata())
         return self.metadata
 
-    async def ensure_metadata(self):
+    async def ensure_metadata(self) -> None:
         if self.metadata is not None:
             return
 
@@ -55,7 +57,7 @@ class S3BinaryData(IngestionData):
             file_storage = S3FileStorage(file_dir_path)
             async with file_storage.open(file_path, "rb") as file:
                 self.metadata = await get_file_metadata(file)
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, ClientError, NoCredentialsError) as error:
             logger.error(
                 "S3 metadata fetch failed",
                 extra={
