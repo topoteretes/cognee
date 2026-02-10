@@ -213,9 +213,7 @@ class SessionManager:
             return (completion, None)
 
         resolved_session_id = self._resolve_session_id(session_id)
-        conversation_history = await self._get_formatted_history(
-            str(user_id), resolved_session_id
-        )
+        conversation_history = await self._get_formatted_history(str(user_id), resolved_session_id)
         completion, context_to_store = await self._generate_completion_and_context(
             query=query,
             context=context,
