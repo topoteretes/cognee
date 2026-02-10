@@ -22,7 +22,9 @@ async def delete_dataset_nodes_and_edges(dataset_id: UUID, user_id: UUID) -> Non
         affected_edges = await get_dataset_related_edges(dataset_id) if affected_nodes else []
     else:
         affected_nodes = await get_global_dataset_related_nodes(dataset_id)
-        affected_edges = await get_global_dataset_related_edges(dataset_id) if affected_nodes else []
+        affected_edges = (
+            await get_global_dataset_related_edges(dataset_id) if affected_nodes else []
+        )
 
     if affected_nodes:
         is_legacy_node = await has_nodes_in_legacy_ledger(affected_nodes)
