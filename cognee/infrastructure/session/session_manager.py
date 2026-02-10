@@ -175,14 +175,14 @@ class SessionManager:
         system_prompt: Optional[str] = None,
         response_model: Type = str,
         summarize_context: bool = False,
-    ) -> tuple[Any, Optional[str]]:
+    ) -> Any:
         """
         Run single-query completion with session: read history, generate, save QA.
 
         Resolves user_id from session_user; if no user or caching disabled, runs
-        completion without history and does not save (returns qa_id=None).
-        Otherwise gets formatted history, runs one or two LLM calls depending on
-        summarize_context, saves via add_qa, and returns (completion, qa_id).
+        completion without history and does not save. Otherwise gets formatted
+        history, runs one or two LLM calls depending on summarize_context,
+        saves via add_qa, and returns the completion.
 
         Args:
             session_id: Session identifier; defaults to default_session_id if None.
@@ -202,7 +202,7 @@ class SessionManager:
         user_id = getattr(user, "id", None)
 
         if not self.is_session_available_for_completion(user_id):
-            completion = await generate_completion(
+            return await generate_completion(
                 query=query,
                 context=context,
                 user_prompt_path=user_prompt_path,
@@ -210,7 +210,6 @@ class SessionManager:
                 system_prompt=system_prompt,
                 response_model=response_model,
             )
-            return (completion, None)
 
         resolved_session_id = self._resolve_session_id(session_id)
         conversation_history = await self._get_formatted_history(str(user_id), resolved_session_id)
@@ -224,14 +223,14 @@ class SessionManager:
             response_model=response_model,
             summarize_context=summarize_context,
         )
-        qa_id = await self.add_qa(
+        await self.add_qa(
             user_id=str(user_id),
             question=query,
             context=context_to_store,
             answer=str(completion),
             session_id=resolved_session_id,
         )
-        return (completion, qa_id)
+        return completion
 
     @staticmethod
     def format_entries(entries: list[dict], include_context: bool = True) -> str:
