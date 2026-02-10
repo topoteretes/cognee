@@ -285,20 +285,8 @@ async def test_get_completion_with_session(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_conversation_history",
-            return_value="Previous conversation",
-        ),
-        patch(
-            "cognee.modules.retrieval.graph_completion_retriever.summarize_and_generate_completion",
-            return_value=("Context summary", "Generated answer"),
-        ),
-        patch(
-            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
-            return_value="Generated answer",
-        ),
-        patch(
-            "cognee.modules.retrieval.graph_completion_retriever.save_conversation_history",
-        ) as mock_save,
+            "cognee.modules.retrieval.graph_completion_retriever.get_session_manager",
+        ) as mock_get_sm,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
@@ -310,6 +298,9 @@ async def test_get_completion_with_session(mock_edge):
         mock_config.caching = True
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = mock_user
+        mock_sm = MagicMock()
+        mock_sm.run_completion_with_session = AsyncMock(return_value="Generated answer")
+        mock_get_sm.return_value = mock_sm
 
         completion = await retriever.get_completion_from_context(
             query="test query", retrieved_objects=None, context=None
@@ -318,7 +309,7 @@ async def test_get_completion_with_session(mock_edge):
     assert isinstance(completion, list)
     assert len(completion) == 1
     assert completion[0] == "Generated answer"
-    mock_save.assert_awaited_once()
+    mock_sm.run_completion_with_session.assert_awaited_once()
 
 
 @pytest.mark.asyncio
