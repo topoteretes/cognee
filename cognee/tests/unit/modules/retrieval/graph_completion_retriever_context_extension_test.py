@@ -1,6 +1,5 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from uuid import UUID
 
 from cognee.modules.retrieval.graph_completion_context_extension_retriever import (
     GraphCompletionContextExtensionRetriever,
@@ -86,11 +85,15 @@ async def test_get_completion_without_context(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
+            return_value=["Generated answer"],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
             return_value="Generated answer",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -121,11 +124,11 @@ async def test_get_completion_with_provided_context(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
             return_value="Generated answer",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -175,14 +178,18 @@ async def test_get_completion_context_extension_rounds(mock_edge):
             ],  # Different contexts
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
             side_effect=[
-                "Extension query",
-                "Generated answer",
+                ["Extension query"],
+                ["Generated answer"],
             ],  # Query for extension, then final answer
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
+            return_value="Generated answer",
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -221,14 +228,18 @@ async def test_get_completion_context_extension_stops_early(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
             side_effect=[
-                "Extension query",
-                "Generated answer",
+                ["Extension query"],
+                ["Generated answer"],
             ],
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
+            return_value="Generated answer",
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -278,28 +289,28 @@ async def test_get_completion_with_session(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.get_conversation_history",
+            "cognee.modules.retrieval.graph_completion_retriever.get_conversation_history",
             return_value="Previous conversation",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.summarize_text",
-            return_value="Context summary",
+            "cognee.modules.retrieval.graph_completion_retriever.summarize_and_generate_completion",
+            return_value=("Context summary", "Generated answer"),
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
             side_effect=[
-                "Extension query",
-                "Generated answer",
+                ["Extension query"],
+                ["Generated answer"],
             ],  # Extension query, then final answer
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.save_conversation_history",
+            "cognee.modules.retrieval.graph_completion_retriever.save_conversation_history",
         ) as mock_save,
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.session_user"
+            "cognee.modules.retrieval.graph_completion_retriever.session_user"
         ) as mock_session_user,
     ):
         mock_config = MagicMock()
@@ -349,14 +360,18 @@ async def test_get_completion_with_response_model(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
             side_effect=[
-                "Extension query",
-                TestModel(answer="Test answer"),
+                ["Extension query"],
+                [TestModel(answer="Test answer")],
             ],  # Extension query, then final answer
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
+            return_value=TestModel(answer="Test answer"),
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -399,17 +414,21 @@ async def test_get_completion_with_session_no_user_id(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
             side_effect=[
-                "Extension query",
-                "Generated answer",
+                ["Extension query"],
+                ["Generated answer"],
             ],  # Extension query, then final answer
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
+            return_value="Generated answer",
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.session_user"
+            "cognee.modules.retrieval.graph_completion_retriever.session_user"
         ) as mock_session_user,
     ):
         mock_config = MagicMock()
@@ -452,11 +471,15 @@ async def test_get_completion_zero_extension_rounds(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
+            return_value=["Generated answer"],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
             return_value="Generated answer",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -498,11 +521,15 @@ async def test_get_completion_batch_queries_without_context(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
-            return_value="Generated answer",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
+            return_value=["Generated answer", "Generated answer"],
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion_batch",
+            return_value=["Generated answer", "Generated answer"],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -535,11 +562,15 @@ async def test_get_completion_batch_queries_with_provided_context(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
-            return_value="Generated answer",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
+            return_value=["Generated answer", "Generated answer"],
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion_batch",
+            return_value=["Generated answer", "Generated answer"],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -595,16 +626,18 @@ async def test_get_completion_batch_queries_context_extension_rounds(mock_edge):
             ],  # Different contexts
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
             side_effect=[
-                "Extension query",
-                "Extension query",
-                "Generated answer",
-                "Generated answer",
+                ["Extension query", "Extension query"],
+                ["Generated answer", "Generated answer"],
             ],
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion_batch",
+            return_value=["Generated answer", "Generated answer"],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -645,16 +678,18 @@ async def test_get_completion_batch_queries_context_extension_stops_early(mock_e
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
             side_effect=[
-                "Extension query",
-                "Extension query",
-                "Generated answer",
-                "Generated answer",
+                ["Extension query", "Extension query"],
+                ["Generated answer", "Generated answer"],
             ],
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion_batch",
+            return_value=["Generated answer", "Generated answer"],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -701,11 +736,15 @@ async def test_get_completion_batch_queries_zero_extension_rounds(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
-            return_value="Generated answer",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
+            return_value=["Generated answer", "Generated answer"],
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion_batch",
+            return_value=["Generated answer", "Generated answer"],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -756,16 +795,18 @@ async def test_get_completion_batch_queries_with_response_model(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
             side_effect=[
-                "Extension query",
-                "Extension query",
-                TestModel(answer="Test answer"),
-                TestModel(answer="Test answer"),
+                ["Extension query", "Extension query"],
+                [TestModel(answer="Test answer"), TestModel(answer="Test answer")],
             ],  # Extension query, then final answer
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion_batch",
+            return_value=[TestModel(answer="Test answer"), TestModel(answer="Test answer")],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
         mock_config = MagicMock()
@@ -821,16 +862,18 @@ async def test_get_completion_batch_queries_duplicate_queries(mock_edge):
             ],  # Different contexts
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion",
+            "cognee.modules.retrieval.graph_completion_context_extension_retriever.generate_completion_batch",
             side_effect=[
-                "Extension query",
-                "Extension query",
-                "Generated answer",
-                "Generated answer",
+                ["Extension query", "Extension query"],
+                ["Generated answer", "Generated answer"],
             ],
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_context_extension_retriever.CacheConfig"
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion_batch",
+            return_value=["Generated answer", "Generated answer"],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
         mock_config = MagicMock()
