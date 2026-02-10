@@ -289,8 +289,8 @@ async def test_get_completion_with_session(mock_edge):
             return_value="Previous conversation",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.summarize_text",
-            return_value="Context summary",
+            "cognee.modules.retrieval.graph_completion_retriever.summarize_and_generate_completion",
+            return_value=("Context summary", "Generated answer"),
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
