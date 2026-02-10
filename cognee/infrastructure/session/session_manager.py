@@ -1,7 +1,11 @@
+import asyncio
 import uuid
-from typing import Optional, Union
+from typing import Any, Optional, Type, Union
 
+from cognee.context_global_variables import session_user
+from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
+from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger("SessionManager")
@@ -38,7 +42,12 @@ class SessionManager:
     Manages session QA entries.
     """
 
-    def __init__(self, cache_engine, default_session_id: str = "default_session"):
+    def __init__(
+        self,
+        cache_engine,
+        default_session_id: str = "default_session",
+        session_history_last_n: int = 10,
+    ):
         """
         Initialize SessionManager with a cache engine.
 
@@ -47,9 +56,12 @@ class SessionManager:
                          Can be None if caching is disabled.
             default_session_id: Session ID to use when session_id is None. Defaults to
                                "default_session".
+            session_history_last_n: Number of prior Q&A entries to include in conversation
+                                   history for completion. Defaults to 10.
         """
         self._cache = cache_engine
         self.default_session_id = default_session_id
+        self.session_history_last_n = session_history_last_n
 
     def _resolve_session_id(self, session_id: Optional[str]) -> str:
         """Return session_id if provided, otherwise default_session_id."""
@@ -93,10 +105,145 @@ class SessionManager:
         )
         return qa_id
 
+    def is_session_available_for_completion(self, user_id: Optional[str]) -> bool:
+        """Return True if session (history + save) is available for completion."""
+        if not user_id or not self.is_available:
+            return False
+        cache_config = CacheConfig()
+        return bool(cache_config.caching)
+
+    async def _get_formatted_history(self, user_id: str, session_id: str) -> str:
+        """Load session and return formatted conversation history string."""
+        history: Union[str, list] = await self.get_session(
+            user_id=user_id,
+            session_id=session_id,
+            formatted=True,
+            last_n=self.session_history_last_n,
+            include_context=False,
+        )
+        return history if isinstance(history, str) else ""
+
+    async def _generate_completion_and_context(
+        self,
+        *,
+        query: str,
+        context: str,
+        conversation_history: str,
+        user_prompt_path: str,
+        system_prompt_path: str,
+        system_prompt: Optional[str] = None,
+        response_model: Type = str,
+        summarize_context: bool = False,
+    ) -> tuple[Any, str]:
+        """
+        Run LLM completion (and optionally summarization). Returns (completion, context_to_store).
+        """
+        if summarize_context:
+            context_summary, completion = await asyncio.gather(
+                summarize_text(context),
+                generate_completion(
+                    query=query,
+                    context=context,
+                    user_prompt_path=user_prompt_path,
+                    system_prompt_path=system_prompt_path,
+                    system_prompt=system_prompt,
+                    conversation_history=conversation_history,
+                    response_model=response_model,
+                ),
+            )
+            return (completion, context_summary)
+        else:
+            completion = await generate_completion(
+                query=query,
+                context=context,
+                user_prompt_path=user_prompt_path,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                conversation_history=conversation_history,
+                response_model=response_model,
+            )
+            return (completion, "")
+
+    async def run_completion_with_session(
+        self,
+        *,
+        session_id: Optional[str] = None,
+        query: str,
+        context: str,
+        user_prompt_path: str,
+        system_prompt_path: str,
+        system_prompt: Optional[str] = None,
+        response_model: Type = str,
+        summarize_context: bool = False,
+    ) -> tuple[Any, Optional[str]]:
+        """
+        Run single-query completion with session: read history, generate, save QA.
+
+        Resolves user_id from session_user; if no user or caching disabled, runs
+        completion without history and does not save (returns qa_id=None).
+        Otherwise gets formatted history, runs one or two LLM calls depending on
+        summarize_context, saves via add_qa, and returns (completion, qa_id).
+
+        Args:
+            session_id: Session identifier; defaults to default_session_id if None.
+            query: User question.
+            context: Retrieved context for the completion.
+            user_prompt_path: Path for user prompt template.
+            system_prompt_path: Path for system prompt template.
+            system_prompt: Optional override system prompt.
+            response_model: Pydantic model or type for structured output (default str).
+            summarize_context: If True, run summarization LLM call and store summary
+                in QA context; if False, single LLM call and store "" for context.
+
+        Returns:
+            (completion, qa_id): completion from LLM; qa_id if saved, None otherwise.
+        """
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+
+        if not self.is_session_available_for_completion(user_id):
+            completion = await generate_completion(
+                query=query,
+                context=context,
+                user_prompt_path=user_prompt_path,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                response_model=response_model,
+            )
+            return (completion, None)
+
+        resolved_session_id = self._resolve_session_id(session_id)
+        conversation_history = await self._get_formatted_history(
+            str(user_id), resolved_session_id
+        )
+        completion, context_to_store = await self._generate_completion_and_context(
+            query=query,
+            context=context,
+            conversation_history=conversation_history,
+            user_prompt_path=user_prompt_path,
+            system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
+            response_model=response_model,
+            summarize_context=summarize_context,
+        )
+        qa_id = await self.add_qa(
+            user_id=str(user_id),
+            question=query,
+            context=context_to_store,
+            answer=str(completion),
+            session_id=resolved_session_id,
+        )
+        return (completion, qa_id)
+
     @staticmethod
-    def format_entries(entries: list[dict]) -> str:
+    def format_entries(entries: list[dict], include_context: bool = True) -> str:
         """
         Format QA entries as a string for LLM prompt context.
+
+        Args:
+            entries: List of QA entry dicts (question, context, answer, time, etc.).
+            include_context: If True, include CONTEXT line for each entry; if False, omit it.
+                            Default True. Use False when building conversation history for completion.
         """
         if not entries:
             return ""
@@ -104,7 +251,8 @@ class SessionManager:
         for entry in entries:
             lines.append(f"[{entry.get('time', 'Unknown time')}]\n")
             lines.append(f"QUESTION: {entry.get('question', '')}\n")
-            lines.append(f"CONTEXT: {entry.get('context', '')}\n")
+            if include_context:
+                lines.append(f"CONTEXT: {entry.get('context', '')}\n")
             lines.append(f"ANSWER: {entry.get('answer', '')}\n\n")
         return "".join(lines)
 
@@ -115,6 +263,7 @@ class SessionManager:
         last_n: Optional[int] = None,
         formatted: bool = False,
         session_id: Optional[str] = None,
+        include_context: bool = True,
     ) -> Union[list[dict], str]:
         """
         Get session QAs by (user_id, session_id).
@@ -124,6 +273,8 @@ class SessionManager:
             last_n: If set, return only the last N entries. Otherwise return all.
             formatted: If True, return prompt-formatted string; if False, return list of entry dicts.
             session_id: Session identifier. Defaults to default_session_id if None.
+            include_context: When formatted=True, include CONTEXT in each entry. Default True.
+                            Set False for conversation history used in completion prompts.
 
         Returns:
             List of QA entry dicts, or formatted string if formatted=True.
@@ -143,7 +294,11 @@ class SessionManager:
         if entries is None:
             return "" if formatted else []
         entries_list = list(entries)
-        return self.format_entries(entries_list) if formatted else entries_list
+        return (
+            self.format_entries(entries_list, include_context=include_context)
+            if formatted
+            else entries_list
+        )
 
     async def update_qa(
         self,
