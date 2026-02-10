@@ -1,24 +1,21 @@
 import os
 import pytest
 import uuid
+import importlib
 from unittest.mock import patch, AsyncMock, MagicMock
 from uuid import uuid4
 from fastapi.testclient import TestClient
 from types import SimpleNamespace
-import importlib
 
 os.environ["REQUIRE_AUTHENTICATION"] = "false"
 os.environ["ENABLE_BACKEND_ACCESS_CONTROL"] = "false"
 from cognee.api.client import app
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.modules.users.models import User
-
-# Explicitly import the router module so it is registered in sys.modules.
-# Without this, on Python 3.10 the package-level function `get_permissions_router`
-# shadows the submodule, causing unittest.mock.patch to fail.
-import cognee.api.v1.permissions.routers.get_permissions_router as _router_mod  # noqa: F401
 
 gau_mod = importlib.import_module("cognee.modules.users.methods.get_authenticated_user")
+
+# Explicitly load the module by its full path
+router_module = importlib.import_module("cognee.api.v1.permissions.routers.get_permissions_router")
 
 
 @pytest.fixture
@@ -37,7 +34,7 @@ def mock_tenant_owner():
 
 @pytest.mark.asyncio
 @patch("cognee.api.v1.permissions.routers.get_permissions_router.get_relational_engine")
-@patch("cognee.api.v1.permissions.routers.get_permissions_router.get_tenant")
+@patch.object(router_module, "get_tenant")
 def test_get_tenant_roles_success(mock_get_tenant, mock_get_engine, client, mock_tenant_owner):
     """Test successful role listing by tenant owner."""
 
