@@ -30,7 +30,13 @@ class GraphEntityType(EntityType):
 
 
 def _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes):
+    data_chunk.contains = [
+        t for t in data_chunk.contains if t[1].id not in graph_entity_nodes.keys()
+    ]
     for entity_node in graph_entity_nodes.values():
+        if entity_node.type == "GraphEntityType":
+            continue
+
         if data_chunk.contains is None:
             data_chunk.contains = []
 
@@ -62,13 +68,13 @@ def convert_nodes_to_graph_entities(added_nodes_map, added_ontology_nodes_map):
 
 
 def populate_relations_from_ontology(
-    added_nodes_map, added_ontology_nodes_map, ontology_relationships
+    added_nodes_map, added_ontology_nodes_map, relationships, ontology_relationships
 ):
     # Create Graph Entity nodes from added_nodes_map and added_ontology_nodes_map
     graph_entity_nodes = convert_nodes_to_graph_entities(added_nodes_map, added_ontology_nodes_map)
 
     # Fill relations between each Graph Entity based off of relationships
-    for edge in ontology_relationships:
+    for edge in chain(relationships, ontology_relationships):
         source_node_id, target_node_id = edge[0], edge[1]
         source_entity = graph_entity_nodes.get(source_node_id)
         target_entity = graph_entity_nodes.get(target_node_id)
@@ -167,7 +173,7 @@ def poc_expand_with_nodes_and_edges(
         _process_graph_edges(graph, name_mapping, existing_edges_map, relationships)
 
         graph_entity_nodes = populate_relations_from_ontology(
-            added_nodes_map, added_ontology_nodes_map, ontology_relationships
+            added_nodes_map, added_ontology_nodes_map, relationships, ontology_relationships
         )
 
         # Link Graph Entities to their respective data_chunk using contains and reset maps

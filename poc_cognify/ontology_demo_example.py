@@ -54,7 +54,7 @@ async def main(use_poc):
     await cognee.prune.prune_system(metadata=True)
 
     # Step 2: Add text
-    text_list = [text_1, text_2]
+    text_list = [text_2]
     await cognee.add(text_list)
 
     # Step 3: Create knowledge graph
@@ -72,10 +72,14 @@ async def main(use_poc):
 
     if use_poc:
         await cognify_single_add_datapoints(config=config)
-        graph_visualization_path = path.join(path.dirname(__file__), "poc_cognify_result.html")
+        graph_visualization_path = path.join(
+            path.dirname(__file__), "results/poc_cognify_result_text_2.html"
+        )
     else:
         await cognee.cognify(config=config)
-        graph_visualization_path = path.join(path.dirname(__file__), "cognify_result.html")
+        graph_visualization_path = path.join(
+            path.dirname(__file__), "results/cognify_result_text_2.html"
+        )
 
     print("Knowledge with ontology created.")
 
