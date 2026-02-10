@@ -19,7 +19,6 @@ async def generate_completion(
     system_prompt = system_prompt if system_prompt else read_query_prompt(system_prompt_path)
 
     if conversation_history:
-        #:TODO: I would separate the history and put it into the system prompt but we have to test what works best with longer convos
         system_prompt = conversation_history + "\nTASK:" + system_prompt
 
     return await LLMGateway.acreate_structured_output(
