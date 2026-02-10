@@ -1,5 +1,4 @@
 import time
-import traceback
 from sqlalchemy import select
 from sqlalchemy.sql import func
 
@@ -37,6 +36,7 @@ async def get_pipeline_run_metrics(pipeline_run: PipelineRunInfo, include_option
     graph_engine = await get_graph_engine()
 
     metrics_for_pipeline_runs = []
+    cache_status = "cache miss"
     async with db_engine.get_async_session() as session:
         existing_metrics = await session.execute(
             select(GraphMetrics).where(GraphMetrics.id == pipeline_run.pipeline_run_id)
@@ -44,13 +44,8 @@ async def get_pipeline_run_metrics(pipeline_run: PipelineRunInfo, include_option
         existing_metrics = existing_metrics.scalars().first()
         if existing_metrics:
             metrics_for_pipeline_runs.append(existing_metrics)
-            logger.info(
-                "Cache hit for pipeline run ID: %s", pipeline_run.pipeline_run_id
-            )
+            cache_status = "cache hit"
         else:
-            logger.info(
-                "Cache miss for pipeline run ID: %s. Computing metrics.", pipeline_run.pipeline_run_id
-            )
             graph_metrics = await graph_engine.get_graph_metrics(include_optional)
             metrics = GraphMetrics(
                 id=pipeline_run.pipeline_run_id,
@@ -68,11 +63,12 @@ async def get_pipeline_run_metrics(pipeline_run: PipelineRunInfo, include_option
             )
             metrics_for_pipeline_runs.append(metrics)
             session.add(metrics)
-            await session.commit()
+        await session.commit()
     response_time = time.time() - start_time
     logger.info(
-        "Computed metrics for pipeline run ID %s in %.2fs",
+        "Computed metrics for pipeline run ID %s in %.2fs (%s)",
         pipeline_run.pipeline_run_id,
         response_time,
-    )   
+        cache_status,
+    )
     return metrics_for_pipeline_runs
