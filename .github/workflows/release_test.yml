@@ -22,6 +22,13 @@ jobs:
     with:
       cognee_version: ${{ inputs.cognee_version }}
 
+  cli-test:
+    name: CLI Tests
+    uses: ./.github/workflows/cli_tests.yml
+    secrets: inherit
+    with:
+      cognee_version: ${{ inputs.cognee_version }}
+
   load-tests:
     if: false
     name: Load Tests
