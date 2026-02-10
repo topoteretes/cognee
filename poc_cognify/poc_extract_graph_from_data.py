@@ -30,27 +30,7 @@ async def poc_integrate_chunk_graphs(
     graph_model: Type[BaseModel],
     ontology_resolver: BaseOntologyResolver,
 ) -> List[DocumentChunk]:
-    """Integrate chunk graphs with ontology validation and store in databases.
-
-    This function processes document chunks and their associated knowledge graphs,
-    validates entities against an ontology resolver, and stores the integrated
-    data points and edges in the configured databases.
-
-    Args:
-        data_chunks: List of document chunks containing source data
-        chunk_graphs: List of knowledge graphs corresponding to each chunk
-        graph_model: Pydantic model class for graph data validation
-        ontology_resolver: Resolver for validating entities against ontology
-
-    Returns:
-        List of updated DocumentChunk objects with integrated data
-
-    Raises:
-        InvalidChunkGraphInputError: If input validation fails
-        InvalidGraphModelError: If graph model validation fails
-        InvalidOntologyAdapterError: If ontology resolver validation fails
-    """
-
+    # region same as integrate_chunk_graphs
     if not isinstance(data_chunks, list) or not isinstance(chunk_graphs, list):
         raise InvalidChunkGraphInputError("data_chunks and chunk_graphs must be lists.")
     if len(data_chunks) != len(chunk_graphs):
@@ -74,6 +54,7 @@ async def poc_integrate_chunk_graphs(
         data_chunks,
         chunk_graphs,
     )
+    # endregion
 
     poc_expand_with_nodes_and_edges(
         data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
@@ -92,7 +73,7 @@ async def poc_extract_graph_from_data(
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
-
+    # region same as extract_graph_from_data
     if not isinstance(data_chunks, list) or not data_chunks:
         raise InvalidDataChunksError("must be a non-empty list of DocumentChunk.")
     if not all(hasattr(c, "text") for c in data_chunks):
@@ -136,6 +117,7 @@ async def poc_extract_graph_from_data(
             }
 
     ontology_resolver = config["ontology_config"]["ontology_resolver"]
+    # endregion
 
     return await poc_integrate_chunk_graphs(
         data_chunks, chunk_graphs, graph_model, ontology_resolver

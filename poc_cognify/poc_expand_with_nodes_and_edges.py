@@ -30,15 +30,17 @@ class GraphEntityType(EntityType):
 
 
 def _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes):
+    if data_chunk.contains is None:
+        data_chunk.contains = []
+
+    # Filter data_chunk.contains Entities that exist in both, data_chunk.contains and graph_entity_nodes
     data_chunk.contains = [
         t for t in data_chunk.contains if t[1].id not in graph_entity_nodes.keys()
     ]
+
     for entity_node in graph_entity_nodes.values():
         if entity_node.type == "GraphEntityType":
             continue
-
-        if data_chunk.contains is None:
-            data_chunk.contains = []
 
         data_chunk.contains.append(
             (
@@ -56,7 +58,7 @@ def _to_graph_entity(node):
     return None
 
 
-def convert_nodes_to_graph_entities(added_nodes_map, added_ontology_nodes_map):
+def _convert_entities_to_graph_entities(added_nodes_map, added_ontology_nodes_map):
     graph_entity_nodes = {}
     for node in chain(added_nodes_map.values(), added_ontology_nodes_map.values()):
         if node.id in graph_entity_nodes:
@@ -67,24 +69,28 @@ def convert_nodes_to_graph_entities(added_nodes_map, added_ontology_nodes_map):
     return graph_entity_nodes
 
 
-def populate_relations_from_ontology(
+def _populate_graph_entities_entity_relations(graph_entity_nodes, relationships):
+    for edge in relationships:
+        source_entity = graph_entity_nodes.get(edge[0])
+        target_entity = graph_entity_nodes.get(edge[1])
+        if source_entity is None or target_entity is None:
+            continue
+        source_entity.relations.append((Edge(relationship_type=edge[2]), target_entity))
+
+
+def _build_graph_entities_with_relations(
     added_nodes_map, added_ontology_nodes_map, relationships, ontology_relationships
 ):
     # Create Graph Entity nodes from added_nodes_map and added_ontology_nodes_map
-    graph_entity_nodes = convert_nodes_to_graph_entities(added_nodes_map, added_ontology_nodes_map)
+    graph_entity_nodes = _convert_entities_to_graph_entities(
+        added_nodes_map, added_ontology_nodes_map
+    )
 
     # Fill relations between each Graph Entity based off of relationships
-    for edge in chain(relationships, ontology_relationships):
-        source_node_id, target_node_id = edge[0], edge[1]
-        source_entity = graph_entity_nodes.get(source_node_id)
-        target_entity = graph_entity_nodes.get(target_node_id)
-        if source_entity is None or target_entity is None:
-            continue
+    _populate_graph_entities_entity_relations(
+        graph_entity_nodes, chain(relationships, ontology_relationships)
+    )
 
-        source_entity.relations.append((Edge(relationship_type=edge[2]), target_entity))
-    # graph_entity.relations.append((source_node_id, str(target_node_id), edge[2],
-    #                                Edge(source_node_id=str(source_node_id), target_node_id=str(target_node_id),
-    #                                     relationship_name=edge[2])))
     return graph_entity_nodes
 
 
@@ -94,42 +100,7 @@ def poc_expand_with_nodes_and_edges(
     ontology_resolver: BaseOntologyResolver = None,
     existing_edges_map: Optional[dict[str, bool]] = None,
 ):
-    """
-
-    - LLM generated docstring
-    Expand knowledge graphs with validated nodes and edges, integrating ontology information.
-
-    This function processes document chunks and their associated knowledge graphs to create
-    a comprehensive graph structure with entity nodes, entity type nodes, and their relationships.
-    It validates entities against an ontology resolver and adds ontology-derived nodes and edges
-    to enhance the knowledge representation.
-
-    Args:
-        data_chunks (list[DocumentChunk]): List of document chunks that contain the source data.
-            Each chunk should have metadata about what entities it contains.
-        chunk_graphs (list[KnowledgeGraph]): List of knowledge graphs corresponding to each
-            data chunk. Each graph contains nodes (entities) and edges (relationships) extracted
-            from the chunk content.
-        ontology_resolver (BaseOntologyResolver, optional): Resolver for validating entities and
-            types against an ontology. If None, a default RDFLibOntologyResolver is created.
-            Defaults to None.
-        existing_edges_map (dict[str, bool], optional): Mapping of existing edge keys to prevent
-            duplicate edge creation. Keys are formatted as "{source_id}_{target_id}_{relation}".
-            If None, an empty dictionary is created. Defaults to None.
-
-    Returns:
-        tuple[list, list]: A tuple containing:
-            - graph_nodes (list): Combined list of data chunks and ontology nodes (EntityType and Entity objects)
-            - graph_edges (list): List of edge tuples in format (source_id, target_id, relationship_name, properties)
-
-    Note:
-        - Entity nodes are created for each entity found in the knowledge graphs
-        - EntityType nodes are created for each unique entity type
-        - Ontology validation is performed to map entities to canonical ontology terms
-        - Duplicate nodes and edges are prevented using internal mapping and the existing_edges_map
-        - The function modifies data_chunks in-place by adding entities to their 'contains' attribute
-
-    """
+    # region same as expand_with_nodes_and_edges
     if existing_edges_map is None:
         existing_edges_map = {}
 
@@ -150,7 +121,7 @@ def poc_expand_with_nodes_and_edges(
     ontology_relationships = []
     name_mapping = {}
     key_mapping = {}
-
+    # endregion
     # Process each chunk and its corresponding graph
     for data_chunk, graph in zip(data_chunks, chunk_graphs):
         if not graph:
@@ -172,11 +143,16 @@ def poc_expand_with_nodes_and_edges(
         # Then process edges
         _process_graph_edges(graph, name_mapping, existing_edges_map, relationships)
 
-        graph_entity_nodes = populate_relations_from_ontology(
+        # Transform newly created nodes into GraphEntities and populate with relations
+        graph_entity_nodes = _build_graph_entities_with_relations(
             added_nodes_map, added_ontology_nodes_map, relationships, ontology_relationships
         )
 
         # Link Graph Entities to their respective data_chunk using contains and reset maps
         _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes)
+
+        # Reset maps to keep track of which nodes and relationships were added in current document chunk
+        added_nodes_map.clear()
         added_ontology_nodes_map.clear()
+        relationships.clear()
         ontology_relationships.clear()
