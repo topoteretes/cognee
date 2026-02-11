@@ -12,12 +12,9 @@ from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionR
 from cognee.modules.retrieval.utils.completion import (
     batch_llm_completion,
     generate_completion_batch,
-    summarize_text,
 )
-from cognee.modules.retrieval.utils.session_cache import (
-    save_conversation_history,
-    get_conversation_history,
-)
+from cognee.infrastructure.session.get_session_manager import get_session_manager
+from cognee.context_global_variables import session_user
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.exceptions.exceptions import CogneeValidationError
 
@@ -87,7 +84,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         self.validation_user_prompt_path = validation_user_prompt_path
         self.followup_system_prompt_path = followup_system_prompt_path
         self.followup_user_prompt_path = followup_user_prompt_path
-        self.completion = []
+        self._cot_final_context = None
         self.max_iter = max_iter
 
     async def get_retrieved_objects(
@@ -109,26 +106,27 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
         conversation_history = ""
         if session_save:
-            conversation_history = await get_conversation_history(session_id=self.session_id)
+            user = session_user.get()
+            user_id = getattr(user, "id", None)
+            if user_id:
+                sm = get_session_manager()
+                history = await sm.get_session(
+                    user_id=str(user_id),
+                    session_id=self.session_id,
+                    formatted=True,
+                    last_n=sm.session_history_last_n,
+                    include_context=False,
+                )
+                conversation_history = history if isinstance(history, str) else ""
 
         # Normalize single query to batch for uniform processing
         effective_batch = [query] if query else query_batch
 
-        completion, context_text, triplets = await self._run_cot_completion(
-            effective_batch, conversation_history
+        _completion, context_text, triplets = await self._run_cot_completion(
+            effective_batch, conversation_history, skip_final_completion=True
         )
 
-        # Store completion to avoid re-calling LLM in get_completion_from_context
-        self.completion = completion
-
-        if session_save:
-            context_summary = await summarize_text(context_text[0])
-            await save_conversation_history(
-                query=query,
-                context_summary=context_summary,
-                answer=str(completion[0]),
-                session_id=self.session_id,
-            )
+        self._cot_final_context = context_text
 
         if query:
             return triplets[0]
@@ -137,7 +135,10 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
     # -- CoT orchestrator --
 
     async def _run_cot_completion(
-        self, query_batch: List[str], conversation_history: str = ""
+        self,
+        query_batch: List[str],
+        conversation_history: str = "",
+        skip_final_completion: bool = False,
     ) -> tuple[List[Any], List[str], List[List[Edge]]]:
         """
         Run chain-of-thought completion with optional structured output.
@@ -146,10 +147,12 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         -----------
             - query_batch: Batch of user queries
             - conversation_history: Optional conversation history string
+            - skip_final_completion: If True, do not run _generate_completions on the last
+              iteration; return [] for completions (final completion done in get_completion_from_context).
 
         Returns:
         --------
-            - completion_result: The generated completion (string or structured model)
+            - completion_result: The generated completion (string or structured model), or [] if skip_final_completion.
             - context_text: The resolved context text
             - triplets: The list of triplets used
         """
@@ -157,12 +160,13 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         await self._fetch_initial_triplets_and_context(states)
         await self._generate_completions(states, conversation_history)
 
-        for _ in range(self.max_iter):
+        for reasoning_iteration in range(self.max_iter):
             followup_queries = await self._run_cot_round(states)
             await self._merge_followup_triplets(states, followup_queries)
-            await self._generate_completions(states, conversation_history)
+            if not (skip_final_completion and reasoning_iteration == self.max_iter - 1):
+                await self._generate_completions(states, conversation_history)
 
-        return self._collect_results(states, query_batch)
+        return self._collect_results(states, query_batch, skip_final_completion)
 
     # -- Helper methods called by the orchestrator --
 
@@ -252,13 +256,35 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             states[q].context_text = context
 
     def _collect_results(
-        self, states: dict, query_batch: List[str]
+        self,
+        states: dict,
+        query_batch: List[str],
+        skip_final_completion: bool = False,
     ) -> tuple[List[Any], List[str], List[List[Edge]]]:
         """Extract final completions, context texts, and triplets from states."""
-        completions = [states[q].completion for q in query_batch]
+        completions = [] if skip_final_completion else [states[q].completion for q in query_batch]
         contexts = [states[q].context_text for q in query_batch]
         triplets = [states[q].triplets for q in query_batch]
         return completions, contexts, triplets
+
+    async def get_context_from_objects(
+        self,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
+        retrieved_objects=None,
+    ) -> Union[str, List[str]]:
+        """Return stored CoT final context when set; otherwise delegate to parent."""
+        cot_context = getattr(self, "_cot_final_context", None)
+        if cot_context is not None:
+            if query_batch:
+                return cot_context
+            return cot_context[0] if cot_context else ""
+
+        return await super().get_context_from_objects(
+            query=query,
+            query_batch=query_batch,
+            retrieved_objects=retrieved_objects,
+        )
 
     async def get_completion_from_context(
         self,
@@ -268,34 +294,64 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         context: str | List[str] = None,
     ) -> List[Any]:
         """
-        Generate completion responses based on a user query and contextual information.
-
-        This method interacts with a language model client to retrieve a structured response,
-        using a series of iterations to refine the answers and generate follow-up questions
-        based on reasoning derived from previous outputs. It raises exceptions if the context
-        retrieval fails or if the model encounters issues in generating outputs. It returns
-        structured output using the provided response model.
-
-        Parameters:
-        -----------
-
-            - query (str): The user's query to be processed and answered.
-            - query_batch (list[str]): The list of queries to be processed and answered.
-            - context (Optional[Any]): Optional context that may assist in answering the query.
-              If not provided, it will be fetched based on the query. (default None)
-            - session_id (Optional[str]): Optional session identifier for caching. If None,
-              defaults to 'default_session'. (default None)
-            - max_iter: The maximum number of iterations to refine the answer and generate
-              follow-up questions. (default 4)
-            - response_model (Type): The Pydantic model type for structured output. (default str)
-
-        Returns:
-        --------
-
-            - List[str]: A list containing the generated answer to the user's query.
+        Generate completion from context (same as parent: SessionManager or
+        _generate_completion_without_session). Final CoT completion runs here.
         """
         if not retrieved_objects or (
             query_batch and all(len(triplet) == 0 for triplet in retrieved_objects)
         ):
             raise CogneeValidationError("No context retrieved to generate completion.")
-        return self.completion
+
+        use_session = self._use_session_cache() and not query_batch
+        if use_session:
+            sm = get_session_manager()
+            completion = await sm.generate_completion_with_session(
+                session_id=self.session_id,
+                query=query,
+                context=context,
+                user_prompt_path=self.user_prompt_path,
+                system_prompt_path=self.system_prompt_path,
+                system_prompt=self.system_prompt,
+                response_model=self.response_model,
+                summarize_context=False,
+            )
+            return [completion]
+        return await self._generate_completion_without_session(query, query_batch, context)
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    async def main() -> None:
+        retriever = GraphCompletionCotRetriever(top_k=1)
+        query_batch = [
+            "Who is david?",
+            "Who is Jessica?",
+            "Who knows design?",
+            "Who knows programming?",
+            "What schools are in the context",
+        ]
+
+        # 1. get_retrieved_objects
+        retrieved_objects = await retriever.get_retrieved_objects(query_batch=query_batch)
+        # 2. get_context_from_objects
+        context = await retriever.get_context_from_objects(
+            query_batch=query_batch, retrieved_objects=retrieved_objects
+        )
+        # 3. get_completion_from_context
+        completions = await retriever.get_completion_from_context(
+            query_batch=query_batch,
+            retrieved_objects=retrieved_objects,
+            context=context,
+        )
+        for q, c in zip(query_batch, completions):
+            print(f"Q: {q}\nA: {c}\n")
+
+        # 4. get_completion (calls 1, 2, 3 internally)
+        completions_all_in_one = await retriever.get_completion(query_batch=query_batch)
+        for q, c in zip(query_batch, completions_all_in_one):
+            print(f"Q: {q}\nA: {c}\n")
+
+        print()
+
+    asyncio.run(main())
