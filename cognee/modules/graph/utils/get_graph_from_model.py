@@ -182,7 +182,7 @@ async def get_graph_from_model(
 
         if not edge_datapoint_pairs:
             # Regular property
-            logger.debug("Categorized field: '%s'  as property", field_name)
+            logger.debug("Categorized field: '%s' as property", field_name)
             data_point_properties[field_name] = field_value
         else:
             # DataPoint relationship

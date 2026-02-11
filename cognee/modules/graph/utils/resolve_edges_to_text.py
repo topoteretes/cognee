@@ -46,7 +46,7 @@ def _extract_nodes_from_edges(retrieved_edges: List[Edge]) -> dict:
             else:
                 name = node.attributes.get("name", "Unnamed Node")
                 content = node.attributes.get("description", name)
-                logger.debug("No text found for node: %s, setting as Unamed Node", node.id)
+                logger.debug("No text found for node: %s, setting as Unnamed Node", node.id)
 
             nodes[node.id] = {"node": node, "name": name, "content": content}
 
