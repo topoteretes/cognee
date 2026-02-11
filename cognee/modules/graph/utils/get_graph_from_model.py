@@ -217,7 +217,7 @@ async def get_graph_from_model(
     for target_datapoint, field_name, edge_metadata in _targets_generator(
         data_point, properties_to_visit
     ):
-        if target_datapoint == None:
+        if target_datapoint is None:
             logger.warning("Cannot resolve edge for field: '%s'; Target data is incomplete", field_name)
             continue
         relationship_name = _get_relationship_key(field_name, edge_metadata)
