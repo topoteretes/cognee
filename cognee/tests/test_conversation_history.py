@@ -237,9 +237,7 @@ async def main():
     assert len(our_qa_triplet) == 1, "Should find Triplet question in history"
 
     # Session history via new session SDK (replaces legacy get_conversation_history)
-    entries = await cognee.session.get_session(
-        session_id=session_id_1, user=user, last_n=10
-    )
+    entries = await cognee.session.get_session(session_id=session_id_1, user=user, last_n=10)
     assert len(entries) >= 2, (
         "Session should have at least 2 Q&A entries (two searches in session_id_1)"
     )
