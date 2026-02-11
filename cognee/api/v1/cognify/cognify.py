@@ -53,6 +53,7 @@ async def cognify(
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
     data_per_batch: int = 20,
+    use_signle_add_datapoints_poc: bool = False,
     **kwargs,
 ):
     """
@@ -224,6 +225,7 @@ async def cognify(
             config=config,
             custom_prompt=custom_prompt,
             chunks_per_batch=chunks_per_batch,
+            use_signle_add_datapoints_poc=use_signle_add_datapoints_poc,
             **kwargs,
         )
 
@@ -253,6 +255,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     config: Config = None,
     custom_prompt: Optional[str] = None,
     chunks_per_batch: int = None,
+    use_signle_add_datapoints_poc: bool = False,
     **kwargs,
 ) -> list[Task]:
     if config is None:
@@ -292,6 +295,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,
+            use_signle_add_datapoints_poc=use_signle_add_datapoints_poc,
             task_config={"batch_size": chunks_per_batch},
             **kwargs,
         ),  # Generate knowledge graphs from the document chunks.
