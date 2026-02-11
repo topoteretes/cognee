@@ -5,7 +5,6 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
-from datetime import datetime, timezone
 
 logger = get_logger("ChunksRetriever")
 
@@ -115,7 +114,7 @@ class ChunksRetriever(BaseRetriever):
         except Exception as error:
             logger.warning(f"Failed to update timestamps: {error}")
             if self.strict_enrichment:
-                raise NoDataError(F"Failed to update timestampes: {error}") from error
+                raise NoDataError(f"Failed to update timestamps: {error}") from error
 
         # Get graph engine (stores chunk-document relationships)
         try:
@@ -136,10 +135,10 @@ class ChunksRetriever(BaseRetriever):
         for chunk in found_chunks:
             chunk_id = None
             try:
-                if hasattr(chunk, 'id'):
+                if hasattr(chunk, "id"):
                     chunk_id = str(chunk.id)
-                elif hasattr(chunk, 'payload') and 'id' in chunk.payload:
-                    chunk_id = str(chunk.payload['id'])
+                elif hasattr(chunk, "payload") and "id" in chunk.payload:
+                    chunk_id = str(chunk.payload["id"])
 
                 if chunk_id:
                     chunk_ids.append(chunk_id)
@@ -149,7 +148,7 @@ class ChunksRetriever(BaseRetriever):
             except Exception as error:
                 if self.strict_enrichment:
                     raise NoDataError(f"Failed to extract chunk ID: {error}") from error
-                logger.debug(f"Failed to extract chunj ID: {error}")
+                logger.debug(f"Failed to extract chunk ID: {error}")
 
         if not chunk_ids:
             logger.warning("No valid chunk IDs found, skipping enrichment")
@@ -171,17 +170,19 @@ class ChunksRetriever(BaseRetriever):
 
             for row in result:
                 try:
-                    chunk_id = str(row['chunk_id'])
+                    chunk_id = str(row["chunk_id"])
                     parent_map[chunk_id] = {
-                        'id': str(row.get('doc_id', '')),
-                        'name': row.get('doc_name', 'Unknown'),
+                        "id": str(row.get("doc_id", "")),
+                        "name": row.get("doc_name", "Unknown"),
                     }
-                    if 'doc_type' in row and row['doc_type']:
-                        parent_map[chunk_id]['type'] = row['doc_type']
+                    if "doc_type" in row and row["doc_type"]:
+                        parent_map[chunk_id]["type"] = row["doc_type"]
                 except Exception as error:
                     logger.warning(f"Failed to parse batch result row: {error}")
 
-            logger.info(f"Batched query found parents for {len(parent_map)}/{len(chunk_ids)} chunks")
+            logger.info(
+                f"Batched query found parents for {len(parent_map)}/{len(chunk_ids)} chunks"
+            )
 
         except Exception as error:
             # fallback to individual queries
@@ -200,16 +201,18 @@ class ChunksRetriever(BaseRetriever):
                     if result and len(result) > 0:
                         row = result[0]
                         parent_map[chunk_id] = {
-                            'id': str(row.get('doc_id', '')),
-                            'name': row.get('doc_name', 'Unknown'),
+                            "id": str(row.get("doc_id", "")),
+                            "name": row.get("doc_name", "Unknown"),
                         }
-                        if 'doc_type' in row and row['doc_type']:
-                            parent_map[chunk_id]['type'] = row['doc_type']
+                        if "doc_type" in row and row["doc_type"]:
+                            parent_map[chunk_id]["type"] = row["doc_type"]
 
                 except Exception as individual_error:
-                        if self.strict_enrichment:
-                            raise NoDataError(f"Failed to fetch parent for {chunk_id}: {individual_error}") from individual_error
-                        logger.debug(f"Individual query failed for {chunk_id}: {individual_error}")
+                    if self.strict_enrichment:
+                        raise NoDataError(
+                            f"Failed to fetch parent for {chunk_id}: {individual_error}"
+                        ) from individual_error
+                    logger.debug(f"Individual query failed for {chunk_id}: {individual_error}")
 
         # modify chunk payloads
         enriched_count = 0
@@ -218,10 +221,10 @@ class ChunksRetriever(BaseRetriever):
                 try:
                     parent_info = parent_map[chunk_id]
 
-                    if hasattr(chunk, 'payload') and isinstance(chunk.payload, dict):
-                        chunk.payload['parent_document'] = parent_info
+                    if hasattr(chunk, "payload") and isinstance(chunk.payload, dict):
+                        chunk.payload["parent_document"] = parent_info
                     elif isinstance(chunk, dict):
-                        chunk['parent_document'] = parent_info
+                        chunk["parent_document"] = parent_info
                     enriched_count += 1
                 except Exception as error:
                     if self.strict_enrichment:
