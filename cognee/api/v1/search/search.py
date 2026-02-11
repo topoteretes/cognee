@@ -199,9 +199,6 @@ async def search(
         datasets = await get_authorized_existing_datasets(datasets, "read", user)
         datasets = [dataset.id for dataset in datasets]
 
-        if not datasets:
-            raise DatasetNotFoundError(message="No datasets found.")
-
     filtered_search_results = await search_function(
         query_text=query_text,
         query_type=query_type,
