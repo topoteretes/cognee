@@ -1,22 +1,11 @@
 """
 End-to-end integration test for conversation history feature.
 
-NOTE (COG-3881): The test body below uses OLD session functionality (cache_engine.get_latest_qa,
-get_conversation_history, etc.). It should be updated/removed and the whole test converted to
-pytest. For now it is left as-is with comments; e2e coverage for the NEW session SDK
-(get_session, add_feedback, delete_feedback) is added at the end of this file. In COG-3881
-the entire test will be replaced with the new logic and migrated to pytest.
-
-Old behaviour covered here:
-- Tests all retrievers that save conversation history to Redis cache:
-  1. GRAPH_COMPLETION
-  2. RAG_COMPLETION
-  3. GRAPH_COMPLETION_COT
-  4. GRAPH_COMPLETION_CONTEXT_EXTENSION
-  5. GRAPH_SUMMARY_COMPLETION
-  6. TEMPORAL
-  7. TRIPLET_COMPLETION
-- Uses cache_engine.get_latest_qa and get_conversation_history (legacy).
+Covers retrievers that save conversation history (via SessionManager / cache):
+  GRAPH_COMPLETION, RAG_COMPLETION, GRAPH_COMPLETION_COT,
+  GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_SUMMARY_COMPLETION, TEMPORAL, TRIPLET_COMPLETION.
+Uses cache_engine.get_latest_qa for legacy assertions and cognee.session.get_session for
+session history; e2e for session SDK (get_session, add_feedback, delete_feedback) at end.
 """
 
 import os
@@ -247,18 +236,17 @@ async def main():
     ]
     assert len(our_qa_triplet) == 1, "Should find Triplet question in history"
 
-    from cognee.modules.retrieval.utils.session_cache import (
-        get_conversation_history,
+    # Session history via new session SDK (replaces legacy get_conversation_history)
+    entries = await cognee.session.get_session(
+        session_id=session_id_1, user=user, last_n=10
     )
-
-    formatted_history = await get_conversation_history(session_id=session_id_1)
-
-    assert "Previous conversation:" in formatted_history, (
-        "Formatted history should contain 'Previous conversation:' header"
+    assert len(entries) >= 2, (
+        "Session should have at least 2 Q&A entries (two searches in session_id_1)"
     )
-    assert "QUESTION:" in formatted_history, "Formatted history should contain 'QUESTION:' prefix"
-    assert "CONTEXT:" in formatted_history, "Formatted history should contain 'CONTEXT:' prefix"
-    assert "ANSWER:" in formatted_history, "Formatted history should contain 'ANSWER:' prefix"
+    for entry in entries:
+        assert getattr(entry, "question", None), "Entry should have question"
+        assert getattr(entry, "context", None) is not None, "Entry should have context"
+        assert getattr(entry, "answer", None), "Entry should have answer"
 
     from cognee.memify_pipelines.persist_sessions_in_knowledge_graph import (
         persist_sessions_in_knowledge_graph_pipeline,
