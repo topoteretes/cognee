@@ -39,8 +39,7 @@ else
     echo "No optional dependencies specified"
 fi
 
-ARGS="$@" #forward any args passed to the container at runtime
-echo "$ARGS"
+ARGS=("$@") #forward any args passed to the container at runtime
 
 # Set default transport mode if not specified
 TRANSPORT_MODE=${TRANSPORT_MODE:-"stdio"}
@@ -51,10 +50,11 @@ echo "Transport mode: $TRANSPORT_MODE"
 if [ "$TRANSPORT_MODE" != "stdio" ]; then
     HTTP_PORT=${HTTP_PORT:-8000}
     echo "HTTP port: $HTTP_PORT"
-    ARGS="$ARGS --host 0.0.0.0 --port $HTTP_PORT"
+    ARGS+=("--host" "0.0.0.0" "--port" "$HTTP_PORT")
 fi
 
 echo "Starting Cognee MCP Server with transport mode: $TRANSPORT_MODE"
+ARGS+=("--transport" "$TRANSPORT_MODE")
 
 # Add startup delay to ensure DB is ready
 sleep 2
@@ -80,21 +80,22 @@ if [ -n "$API_URL" ]; then
         API_URL="$FIXED_API_URL"
     fi
 
-    ARGS="$ARGS --api-url $API_URL"
+    ARGS+=("--api-url" "$API_URL")
     if [ -n "$API_TOKEN" ]; then
-        ARGS="$ARGS --api-token $API_TOKEN"
+        ARGS+=("--api-token" "$API_TOKEN")
     fi
 else
     echo "Direct mode: Using local cognee instance"
 fi
 
-#ARGS needs to not be quoted here. It contains multiple values that should be treated as separate arguments
-if [ "$DEBUG" = "true" ] && [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then    
+echo "calling cognee-mcp" "${ARGS[@]}"
+
+if [ "$DEBUG" = "true" ] && { [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; }; then
     DEBUG_PORT=${DEBUG_PORT:-5678}
     echo "Running in debug mode"
     echo "Debug port: $DEBUG_PORT"
     echo "Waiting for the debugger to attach..."
-    exec python -m debugpy --wait-for-client --listen 0.0.0.0:"$DEBUG_PORT" -m cognee-mcp --transport "$TRANSPORT_MODE" $ARGS
+    exec python -m debugpy --wait-for-client --listen 0.0.0.0:"$DEBUG_PORT" -m cognee-mcp "${ARGS[@]}"
 else
-    exec cognee-mcp --transport "$TRANSPORT_MODE" $ARGS
+    exec cognee-mcp "${ARGS[@]}"
 fi

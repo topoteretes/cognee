@@ -902,7 +902,7 @@ async def main():
     cognee_client = CogneeClient(api_url=args.api_url, api_token=args.api_token)
 
     mcp.settings.host = args.host
-    mcp.settings.port = args.port
+    mcp.settings.port = int(args.port)
 
     # Skip migrations when in API mode (the API server handles its own database)
     if not args.no_migration and not args.api_url:
@@ -928,7 +928,7 @@ async def main():
             )
             await run_http_with_cors()
         case _:
-            logger.info(f"Running MCP server with stdio")
+            logger.info("Running MCP server with stdio")
             await mcp.run_stdio_async()
 
 
