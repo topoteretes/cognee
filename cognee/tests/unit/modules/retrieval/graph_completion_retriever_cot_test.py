@@ -252,7 +252,7 @@ async def test_run_cot_completion_empty_conversation_history(mock_edge):
 
 @pytest.mark.asyncio
 async def test_get_completion(mock_edge):
-    """Test get_completion."""
+    """Test get_completion (CoT loop + final completion in get_completion_from_context)."""
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
@@ -272,7 +272,13 @@ async def test_get_completion(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.utils.completion.generate_completion",
+            "cognee.modules.retrieval.graph_completion_cot_retriever.generate_completion_batch",
+            new_callable=AsyncMock,
+            return_value=["Generated answer"],
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
+            new_callable=AsyncMock,
             return_value="Generated answer",
         ),
         patch(
@@ -316,7 +322,7 @@ async def test_get_completion(mock_edge):
 
 @pytest.mark.asyncio
 async def test_get_completion_with_session(mock_edge):
-    """Test get_completion with session caching enabled."""
+    """Test get_completion with session (SessionManager path for final completion)."""
     mock_graph_engine = AsyncMock()
     mock_graph_engine.is_empty = AsyncMock(return_value=False)
 
@@ -339,20 +345,31 @@ async def test_get_completion_with_session(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_cot_retriever.get_conversation_history",
-            return_value="Previous conversation",
+            "cognee.modules.retrieval.graph_completion_cot_retriever.get_session_manager",
+        ) as mock_get_sm,
+        patch(
+            "cognee.modules.retrieval.graph_completion_cot_retriever.generate_completion_batch",
+            new_callable=AsyncMock,
+            return_value=["Generated answer"],
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_cot_retriever.summarize_text",
-            return_value="Context summary",
-        ),
-        patch(
-            "cognee.modules.retrieval.utils.completion.generate_completion",
+            "cognee.modules.retrieval.graph_completion_cot_retriever._as_answer_text",
             return_value="Generated answer",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_cot_retriever.save_conversation_history",
-        ) as mock_save,
+            "cognee.modules.retrieval.graph_completion_cot_retriever.render_prompt",
+            return_value="Rendered prompt",
+        ),
+        patch(
+            "cognee.modules.retrieval.graph_completion_cot_retriever.read_query_prompt",
+            return_value="System prompt",
+        ),
+        patch.object(
+            LLMGateway,
+            "acreate_structured_output",
+            new_callable=AsyncMock,
+            side_effect=["validation_result", "followup_question"],
+        ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
@@ -364,6 +381,11 @@ async def test_get_completion_with_session(mock_edge):
         mock_config.caching = True
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = mock_user
+        mock_sm = MagicMock()
+        mock_sm.get_session = AsyncMock(return_value="")
+        mock_sm.session_history_last_n = 10
+        mock_sm.generate_completion_with_session = AsyncMock(return_value="Generated answer")
+        mock_get_sm.return_value = mock_sm
 
         retrieved_objects = await retriever.get_retrieved_objects("test query")
         context = await retriever.get_context_from_objects(
@@ -376,7 +398,7 @@ async def test_get_completion_with_session(mock_edge):
     assert isinstance(completion, list)
     assert len(completion) == 1
     assert completion[0] == "Generated answer"
-    mock_save.assert_awaited_once()
+    mock_sm.generate_completion_with_session.assert_awaited_once()
 
 
 @pytest.mark.asyncio
