@@ -1,6 +1,6 @@
 import tempfile
 import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from cognee.infrastructure.session.session_manager import SessionManager
 
@@ -132,3 +132,37 @@ async def test_delete_session(session_manager):
 
     entries = await session_manager.get_session(user_id="u1", session_id="s1")
     assert entries == []
+
+
+@pytest.mark.asyncio
+async def test_generate_completion_with_session_saves_qa(session_manager):
+    """generate_completion_with_session runs completion and saves QA to session (LLM mocked)."""
+    mock_user = MagicMock()
+    mock_user.id = "u1"
+    with (
+        patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
+        patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+        patch(
+            "cognee.infrastructure.session.session_manager.generate_completion",
+            new_callable=AsyncMock,
+            return_value="Integration test answer",
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+        mock_config = MagicMock()
+        mock_config.caching = True
+        mock_config_cls.return_value = mock_config
+
+        result = await session_manager.generate_completion_with_session(
+            session_id="s1",
+            query="What is X?",
+            context="Context about X.",
+            user_prompt_path="user.txt",
+            system_prompt_path="sys.txt",
+        )
+
+    assert result == "Integration test answer"
+    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    assert len(entries) == 1
+    assert entries[0]["question"] == "What is X?"
+    assert entries[0]["answer"] == "Integration test answer"

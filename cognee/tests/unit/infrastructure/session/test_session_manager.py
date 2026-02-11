@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
 from cognee.infrastructure.session.session_manager import (
@@ -223,3 +223,133 @@ class TestSessionManager:
         ok = await sm.delete_session(user_id="u1", session_id="s1")
         assert ok is True
         mock_cache.delete_session.assert_called_once_with(user_id="u1", session_id="s1")
+
+    @pytest.mark.asyncio
+    async def test_generate_completion_with_session_no_user_id_calls_generate_completion_only(
+        self, sm, mock_cache
+    ):
+        """When user_id is None, generate_completion_with_session runs completion only, no add_qa."""
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.session_user"
+            ) as mock_session_user,
+            patch(
+                "cognee.infrastructure.session.session_manager.generate_completion",
+                new_callable=AsyncMock,
+                return_value="Generated answer",
+            ) as mock_generate,
+        ):
+            mock_session_user.get.return_value = None
+
+            result = await sm.generate_completion_with_session(
+                query="Q?",
+                context="ctx",
+                user_prompt_path="user.txt",
+                system_prompt_path="sys.txt",
+            )
+
+        assert result == "Generated answer"
+        mock_generate.assert_awaited_once()
+        mock_cache.create_qa_entry.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_generate_completion_with_session_cache_disabled_calls_generate_completion_only(
+        self, sm, mock_cache
+    ):
+        """When caching disabled, generate_completion_with_session runs completion only, no add_qa."""
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.session_user"
+            ) as mock_session_user,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_manager.generate_completion",
+                new_callable=AsyncMock,
+                return_value="Generated answer",
+            ) as mock_generate,
+        ):
+            mock_user = MagicMock()
+            mock_user.id = "u1"
+            mock_session_user.get.return_value = mock_user
+            mock_config = MagicMock()
+            mock_config.caching = False
+            mock_config_cls.return_value = mock_config
+
+            result = await sm.generate_completion_with_session(
+                query="Q?",
+                context="ctx",
+                user_prompt_path="user.txt",
+                system_prompt_path="sys.txt",
+            )
+
+        assert result == "Generated answer"
+        mock_generate.assert_awaited_once()
+        mock_cache.create_qa_entry.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_generate_completion_with_session_available_calls_add_qa(self, sm, mock_cache):
+        """When session available, generate_completion_with_session gets history, generates, saves QA."""
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.session_user"
+            ) as mock_session_user,
+            patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
+            patch(
+                "cognee.infrastructure.session.session_manager.generate_completion",
+                new_callable=AsyncMock,
+                return_value="Generated answer",
+            ) as mock_generate,
+        ):
+            mock_user = MagicMock()
+            mock_user.id = "u1"
+            mock_session_user.get.return_value = mock_user
+            mock_config = MagicMock()
+            mock_config.caching = True
+            mock_config_cls.return_value = mock_config
+
+            result = await sm.generate_completion_with_session(
+                session_id="s1",
+                query="Q?",
+                context="ctx",
+                user_prompt_path="user.txt",
+                system_prompt_path="sys.txt",
+            )
+
+        assert result == "Generated answer"
+        mock_generate.assert_awaited_once()
+        mock_cache.create_qa_entry.assert_called_once()
+        call_kw = mock_cache.create_qa_entry.call_args.kwargs
+        assert call_kw["user_id"] == "u1"
+        assert call_kw["session_id"] == "s1"
+        assert call_kw["question"] == "Q?"
+        assert call_kw["answer"] == "Generated answer"
+        assert call_kw["context"] == ""
+
+    @pytest.mark.asyncio
+    async def test_generate_completion_with_session_unavailable_returns_completion_only(
+        self, sm_unavailable
+    ):
+        """When cache unavailable, generate_completion_with_session runs completion only."""
+        with (
+            patch(
+                "cognee.infrastructure.session.session_manager.session_user"
+            ) as mock_session_user,
+            patch(
+                "cognee.infrastructure.session.session_manager.generate_completion",
+                new_callable=AsyncMock,
+                return_value="Generated answer",
+            ) as mock_generate,
+        ):
+            mock_user = MagicMock()
+            mock_user.id = "u1"
+            mock_session_user.get.return_value = mock_user
+
+            result = await sm_unavailable.generate_completion_with_session(
+                query="Q?",
+                context="ctx",
+                user_prompt_path="user.txt",
+                system_prompt_path="sys.txt",
+            )
+
+        assert result == "Generated answer"
+        mock_generate.assert_awaited_once()
