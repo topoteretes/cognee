@@ -516,7 +516,137 @@ async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
     search_results = await search_task(search_query, search_type, top_k)
     return [types.TextContent(type="text", text=search_results)]
 
+@mcp.tool()
+@log_usage(function_name="MCP get_document", log_type="mcp_tool")
+async def get_document(
+    document_id: str,
+    include_metadata: bool = True
+) -> list:
+    """
+    Retrieve a complete document by its ID with all chunks and metadata.
 
+    Use this after a CHUNKS search to fetch the full source document that a chunk
+    belongs to. The document ID is found in the 'parent_document' field of enriched
+    chunk search results. Returns the document with all chunks in reading order.
+
+    Parameters
+    ----------
+    document_id : str
+        The unique identifier of the document to retrieve.
+        Obtained from chunk search results: result['parent_document']['id']
+
+    include_metadata : bool, optional
+        Whether to include document metadata (default: True).
+        Set to False for faster retrieval when metadata is not needed.
+
+    Returns
+    -------
+    list
+        A list containing a single TextContent object with JSON-formatted document data.
+
+        Response structure:
+        {
+            "document_id": str,
+            "name": str,
+            "type": str,
+            "chunk_count": int,
+            "chunks": [{"chunk_id": str, "chunk_index": int, "text": str, "word_count": int}],
+            "metadata": dict  (if include_metadata=True)
+        }
+
+        Returns error object if document not found:
+        {"error": str, "document_id": str}
+
+    Notes
+    -----
+    - Requires graph database to be accessible with Document nodes
+    - Chunks are returned sorted by chunk_index in reading order
+    - Document must have been processed via cognify to exist in graph
+    """
+
+    async def get_document_task(document_id: str, include_metadata: bool) -> str:
+        """
+        Internal task to retrieve document from graph database.
+
+        Parameters
+        ----------
+        document_id : str
+            Document identifier to retrieve
+        include_metadata : bool
+            Whether to include metadata in response
+
+        Returns
+        -------
+        str
+            JSON string containing document data or error information
+        """
+        # NOTE: MCP uses stdout to communicate, we must redirect all output
+        #       going to stdout ( like the print function ) to stderr.
+        with redirect_stdout(sys.stderr):
+            try:
+                from cognee.infrastructure.databases.graph import get_graph_engine
+
+                graph_engine = await get_graph_engine()
+
+                # query doc with all its chunks
+                query = """
+                MATCH (doc:Document {id: $doc_id})
+                OPTIONAL MATCH (doc)<-[:is_part_of]-(chunk:DocumentChunk)
+                RETURN doc,
+                       collect({
+                           id: chunk.id,
+                           chunk_index: chunk.chunk_index,
+                           text: chunk.text,
+                           word_count: chunk.word_count
+                       }) as chunks
+                """
+
+                result = await graph_engine.query(query, params={"doc_id": document_id})
+
+                if not result or not result[0].get('doc'):
+                    return json.dumps({
+                        "error": "Document not found",
+                        "document_id": document_id
+                    }, cls=JSONEncoder)
+
+                doc = result[0]['doc']
+                chunks = result[0].get('chunks', [])
+
+                # Filter out null chunks (from OPTIONAL MATCH when no chunks exist)
+                chunks = [c for c in chunks if c.get('id') is not None]
+
+                # Sort chunks by index
+                chunks.sort(key=lambda c: c.get('chunk_index', 0))
+
+                # Build response
+                response = {
+                    "document_id": str(doc.id) if hasattr(doc, 'id') else str(doc.get('id', '')),
+                    "name": doc.name if hasattr(doc, 'name') else doc.get('name', 'Unknown'),
+                    "type": doc.type if hasattr(doc, 'type') else doc.get('type', 'unknown'),
+                    "chunk_count": len(chunks),
+                    "chunks": chunks
+                }
+
+                if include_metadata:
+                    if hasattr(doc, 'metadata'):
+                        response["metadata"] = doc.metadata
+                    elif isinstance(doc, dict) and 'metadata' in doc:
+                        response["metadata"] = doc['metadata']
+
+                logger.info(f"Retrieved document {document_id} with {len(chunks)} chunks")
+                return json.dumps(response, indent=2, cls=JSONEncoder)
+
+            except Exception as error:
+                logger.error(f"Failed to retrieve document {document_id}: {error}")
+                return json.dumps({
+                    "error": f"Failed to retrieve document: {str(error)}",
+                    "document_id": document_id
+                }, cls=JSONEncoder)
+
+    result = await get_document_task(document_id, include_metadata)
+    return [types.TextContent(type="text", text=result)]
+    
+    
 @mcp.tool()
 @log_usage(function_name="MCP list_data", log_type="mcp_tool")
 async def list_data(dataset_id: str = None) -> list:
