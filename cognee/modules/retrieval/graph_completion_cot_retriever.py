@@ -18,6 +18,7 @@ from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
+from cognee.exceptions.exceptions import CogneeValidationError
 
 logger = get_logger()
 
@@ -67,6 +68,9 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         save_interaction: bool = False,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
+        max_iter: int = 4,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
     ):
         super().__init__(
             user_prompt_path=user_prompt_path,
@@ -78,19 +82,68 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             save_interaction=save_interaction,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
+            session_id=session_id,
+            response_model=response_model,
         )
         self.validation_system_prompt_path = validation_system_prompt_path
         self.validation_user_prompt_path = validation_user_prompt_path
         self.followup_system_prompt_path = followup_system_prompt_path
         self.followup_user_prompt_path = followup_user_prompt_path
+        self.completion = []
+        self.max_iter = max_iter
+
+    async def get_retrieved_objects(self, query: str) -> List[Edge]:
+        """
+        Run chain-of-thought completion with optional structured output.
+
+        Parameters:
+        -----------
+            - query: User query
+
+        Returns:
+        --------
+            - List of retrieved edges
+        """
+        # Check if session saving is enabled
+        cache_config = CacheConfig()
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+        session_save = user_id and cache_config.caching
+
+        # Load conversation history if enabled
+        conversation_history = ""
+        if session_save:
+            conversation_history = await get_conversation_history(session_id=self.session_id)
+
+        completion, context_text, triplets = await self._run_cot_completion(
+            query=query,
+            conversation_history=conversation_history,
+        )
+
+        # Note: completion info is stored to reduce the need to call LLM again in get_completion_from_context
+        self.completion = completion
+
+        if self.save_interaction and context_text and triplets and completion:
+            await self.save_qa(
+                question=query, answer=str(completion), context=context_text, triplets=triplets
+            )
+
+        # Save to session cache if enabled
+        if session_save:
+            context_summary = await summarize_text(context_text)
+            await save_conversation_history(
+                query=query,
+                context_summary=context_summary,
+                answer=str(completion),
+                session_id=self.session_id,
+            )
+
+        return triplets
 
     async def _run_cot_completion(
         self,
         query: str,
-        context: Optional[List[Edge]] = None,
         conversation_history: str = "",
-        max_iter: int = 4,
-        response_model: Type = str,
     ) -> tuple[Any, str, List[Edge]]:
         """
         Run chain-of-thought completion with optional structured output.
@@ -113,15 +166,12 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         triplets = []
         completion = ""
 
-        for round_idx in range(max_iter + 1):
+        for round_idx in range(self.max_iter + 1):
             if round_idx == 0:
-                if context is None:
-                    triplets = await self.get_context(query)
-                    context_text = await self.resolve_edges_to_text(triplets)
-                else:
-                    context_text = await self.resolve_edges_to_text(context)
+                triplets = await self.get_triplets(query)
+                context_text = await self.resolve_edges_to_text(triplets)
             else:
-                triplets += await self.get_context(followup_question)
+                triplets += await self.get_triplets(followup_question)
                 context_text = await self.resolve_edges_to_text(list(set(triplets)))
 
             completion = await generate_completion(
@@ -131,12 +181,12 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
                 conversation_history=conversation_history if conversation_history else None,
-                response_model=response_model,
+                response_model=self.response_model,
             )
 
             logger.info(f"Chain-of-thought: round {round_idx} - answer: {completion}")
 
-            if round_idx < max_iter:
+            if round_idx < self.max_iter:
                 answer_text = _as_answer_text(completion)
                 valid_args = {"query": query, "answer": answer_text, "context": context_text}
                 valid_user_prompt = render_prompt(
@@ -168,13 +218,11 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
         return completion, context_text, triplets
 
-    async def get_completion(
+    async def get_completion_from_context(
         self,
         query: str,
-        context: Optional[List[Edge]] = None,
-        session_id: Optional[str] = None,
-        max_iter=4,
-        response_model: Type = str,
+        retrieved_objects: List[Edge],
+        context: str,
     ) -> List[Any]:
         """
         Generate completion responses based on a user query and contextual information.
@@ -202,38 +250,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
             - List[str]: A list containing the generated answer to the user's query.
         """
-        # Check if session saving is enabled
-        cache_config = CacheConfig()
-        user = session_user.get()
-        user_id = getattr(user, "id", None)
-        session_save = user_id and cache_config.caching
-
-        # Load conversation history if enabled
-        conversation_history = ""
-        if session_save:
-            conversation_history = await get_conversation_history(session_id=session_id)
-
-        completion, context_text, triplets = await self._run_cot_completion(
-            query=query,
-            context=context,
-            conversation_history=conversation_history,
-            max_iter=max_iter,
-            response_model=response_model,
-        )
-
-        if self.save_interaction and context and triplets and completion:
-            await self.save_qa(
-                question=query, answer=str(completion), context=context_text, triplets=triplets
-            )
-
-        # Save to session cache if enabled
-        if session_save:
-            context_summary = await summarize_text(context_text)
-            await save_conversation_history(
-                query=query,
-                context_summary=context_summary,
-                answer=str(completion),
-                session_id=session_id,
-            )
-
+        if not retrieved_objects:
+            raise CogneeValidationError("No context retrieved to generate completion.")
+        completion = self.completion
         return [completion]

@@ -6,14 +6,17 @@ from fastapi import Depends, APIRouter
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 
-from cognee.modules.search.types import SearchType, SearchResult, CombinedSearchResult
+from cognee.modules.search.types import SearchType, SearchResult
 from cognee.api.DTO import InDTO, OutDTO
-from cognee.modules.users.exceptions.exceptions import PermissionDeniedError
+from cognee.modules.users.exceptions.exceptions import PermissionDeniedError, UserNotFoundError
 from cognee.modules.users.models import User
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
+from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
+from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+from cognee.exceptions import CogneeValidationError
 
 
 # Note: Datasets sent by name will only map to datasets owned by the request sender
@@ -29,7 +32,7 @@ class SearchPayloadDTO(InDTO):
     node_name: Optional[list[str]] = Field(default=None, example=[])
     top_k: Optional[int] = Field(default=10)
     only_context: bool = Field(default=False)
-    use_combined_context: bool = Field(default=False)
+    verbose: bool = Field(default=False)
 
 
 def get_search_router() -> APIRouter:
@@ -72,7 +75,8 @@ def get_search_router() -> APIRouter:
         except Exception as error:
             return JSONResponse(status_code=500, content={"error": str(error)})
 
-    @router.post("", response_model=Union[List[SearchResult], CombinedSearchResult, List])
+    @router.post("", response_model=Union[List[SearchResult], List])
+    @log_usage(function_name="POST /v1/search", log_type="api_endpoint")
     async def search(payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)):
         """
         Search for nodes in the graph database.
@@ -116,7 +120,7 @@ def get_search_router() -> APIRouter:
                 "node_name": payload.node_name,
                 "top_k": payload.top_k,
                 "only_context": payload.only_context,
-                "use_combined_context": payload.use_combined_context,
+                "verbose": payload.verbose,
                 "cognee_version": cognee_version,
             },
         )
@@ -133,11 +137,22 @@ def get_search_router() -> APIRouter:
                 system_prompt=payload.system_prompt,
                 node_name=payload.node_name,
                 top_k=payload.top_k,
+                verbose=payload.verbose,
                 only_context=payload.only_context,
-                use_combined_context=payload.use_combined_context,
             )
 
             return jsonable_encoder(results)
+        except (DatabaseNotCreatedError, UserNotFoundError, CogneeValidationError) as e:
+            # Return a clear 422 with actionable guidance instead of leaking a stacktrace
+            status_code = getattr(e, "status_code", 422)
+            return JSONResponse(
+                status_code=status_code,
+                content={
+                    "error": "Search prerequisites not met",
+                    "detail": str(e),
+                    "hint": "Run `await cognee.add(...)` then `await cognee.cognify()` before searching.",
+                },
+            )
         except PermissionDeniedError:
             return []
         except Exception as error:

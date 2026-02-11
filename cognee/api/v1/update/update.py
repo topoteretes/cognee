@@ -1,6 +1,7 @@
 from uuid import UUID
-from typing import Union, BinaryIO, List, Optional, Any
+from typing import Union, BinaryIO, List, Optional, Any, Dict
 
+from cognee.modules.pipelines.models import PipelineRunInfo
 from cognee.modules.users.models import User
 from cognee.api.v1.delete import delete
 from cognee.api.v1.add import add
@@ -17,7 +18,7 @@ async def update(
     graph_db_config: dict = None,
     preferred_loaders: dict[str, dict[str, Any]] = None,
     incremental_loading: bool = True,
-):
+) -> Union[Dict[str, PipelineRunInfo], List[PipelineRunInfo]]:
     """
     Update existing data in Cognee.
 

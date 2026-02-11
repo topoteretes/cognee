@@ -7,5 +7,4 @@ class Entity(DataPoint):
     name: str
     is_a: Optional[EntityType] = None
     description: str
-
     metadata: dict = {"index_fields": ["name"]}

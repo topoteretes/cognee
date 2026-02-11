@@ -12,6 +12,7 @@ from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
 from cognee.modules.pipelines.models import PipelineRunErrored
 from cognee.shared.logging_utils import get_logger
+from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
 
 logger = get_logger()
@@ -35,6 +36,7 @@ def get_memify_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("", response_model=dict)
+    @log_usage(function_name="POST /v1/memify", log_type="api_endpoint")
     async def memify(payload: MemifyPayloadDTO, user: User = Depends(get_authenticated_user)):
         """
         Enrichment pipeline in Cognee, can work with already built graphs. If no data is provided existing knowledge graph will be used as data,
@@ -90,6 +92,7 @@ def get_memify_router() -> APIRouter:
                 dataset=payload.dataset_id if payload.dataset_id else payload.dataset_name,
                 node_name=payload.node_name,
                 user=user,
+                run_in_background=payload.run_in_background,
             )
 
             if isinstance(memify_run, PipelineRunErrored):

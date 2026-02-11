@@ -5,7 +5,7 @@
 
   <br />
 
-  Cognee - Accurate and Persistent AI Memory
+  Cognee - Build AI memory with a Knowledge Engine that learns
 
   <p align="center">
   <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
@@ -41,7 +41,7 @@
   </a>
 </p>
 
-Use your data to build personalized and dynamic memory for AI Agents. Cognee lets you replace RAG with scalable and modular ECL (Extract, Cognify, Load) pipelines.
+Use our knowledge engine to build personalized and dynamic memory for AI Agents. 
 
   <p align="center">
   🌐 Available Languages
@@ -51,7 +51,7 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=es">Español</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=fr">Français</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ja">日本語</a> |
-  <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ko">한국어</a> |
+  <a href="README_ko.md">한국어</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=pt">Português</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=ru">Русский</a> |
   <a href="https://www.readme-i18n.com/topoteretes/cognee?lang=zh">中文</a>
@@ -68,8 +68,9 @@ Use your data to build personalized and dynamic memory for AI Agents. Cognee let
 
 ## About Cognee
 
-Cognee is an open-source tool and platform that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search with graph databases to make your documents both searchable by meaning and connected by relationships. 
-Cognee offers default memory creation and search which we describe bellow. But with Cognee you can build your own!
+Cognee is an open-source knowledge engine that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search, graph databases and self-improvement to make your documents both searchable by meaning and connected by relationships as they change and evolve.
+
+Cognee offers default knowledge creation and search which we describe bellow. But with Cognee you can build your modular knowledge blocks!
 
 
 :star: _Help us reach more developers and grow the cognee community. Star this repo!_
@@ -78,7 +79,7 @@ Cognee offers default memory creation and search which we describe bellow. But w
 ### Cognee Open Source:
 
 - Interconnects any type of data — including past conversations, files, images, and audio transcriptions
-- Replaces traditional RAG systems with a unified memory layer built on graphs and vectors
+- Replaces traditional database lookups with a unified knowledge engine built with graphs and vectors
 - Reduces developer effort and infrastructure cost while improving quality and precision
 - Provides Pythonic data pipelines for ingestion from 30+ data sources
 - Offers high customizability through user-defined tasks, modular pipelines, and built-in search endpoints
@@ -117,7 +118,7 @@ To integrate other LLM providers, see our [LLM Provider Documentation](https://d
 
 ### Step 3: Run the Pipeline
 
-Cognee will take your documents, generate a knowledge graph from them and then query the graph based on combined relationships. 
+Cognee will take your documents, generate a knowledge graph from them and then query the graph based on combined relationships.
 
 Now, run a minimal pipeline:
 
@@ -156,7 +157,7 @@ As you can see, the output is generated from the document we previously stored i
   Cognee turns documents into AI memory.
 ```
 
-### Use the Cognee CLI 
+### Use the Cognee CLI
 
 As an alternative, you can get started with these essential commands:
 

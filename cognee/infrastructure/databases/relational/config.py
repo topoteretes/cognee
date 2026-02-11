@@ -1,4 +1,5 @@
 import os
+import json
 import pydantic
 from typing import Union
 from functools import lru_cache
@@ -19,6 +20,7 @@ class RelationalConfig(BaseSettings):
     db_username: Union[str, None] = None  # "cognee"
     db_password: Union[str, None] = None  # "cognee"
     db_provider: str = "sqlite"
+    database_connect_args: Union[str, None] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -30,6 +32,17 @@ class RelationalConfig(BaseSettings):
             databases_directory_path = os.path.join(base_config.system_root_directory, "databases")
             self.db_path = databases_directory_path
 
+        # Parse database_connect_args if provided as JSON string
+        if self.database_connect_args and isinstance(self.database_connect_args, str):
+            try:
+                parsed_args = json.loads(self.database_connect_args)
+                if isinstance(parsed_args, dict):
+                    self.database_connect_args = parsed_args
+                else:
+                    self.database_connect_args = {}
+            except json.JSONDecodeError:
+                self.database_connect_args = {}
+
         return self
 
     def to_dict(self) -> dict:
@@ -40,7 +53,8 @@ class RelationalConfig(BaseSettings):
         --------
 
             - dict: A dictionary containing database configuration settings including db_path,
-              db_name, db_host, db_port, db_username, db_password, and db_provider.
+              db_name, db_host, db_port, db_username, db_password, db_provider, and
+              database_connect_args.
         """
         return {
             "db_path": self.db_path,
@@ -50,6 +64,7 @@ class RelationalConfig(BaseSettings):
             "db_username": self.db_username,
             "db_password": self.db_password,
             "db_provider": self.db_provider,
+            "database_connect_args": self.database_connect_args,
         }
 
 
