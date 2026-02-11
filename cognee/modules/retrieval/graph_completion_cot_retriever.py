@@ -14,7 +14,6 @@ from cognee.modules.retrieval.utils.completion import (
     generate_completion_batch,
 )
 from cognee.infrastructure.session.get_session_manager import get_session_manager
-from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 from cognee.exceptions.exceptions import CogneeValidationError
@@ -104,11 +103,6 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         """
         session_save = self._use_session_cache()
         validate_retriever_input(query, query_batch, session_save)
-
-        graph_engine = await get_graph_engine()
-        if await graph_engine.is_empty():
-            logger.warning("Search attempt on an empty knowledge graph")
-            return []
 
         conversation_history = ""
         if session_save:
