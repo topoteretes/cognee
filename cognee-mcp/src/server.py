@@ -516,12 +516,10 @@ async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
     search_results = await search_task(search_query, search_type, top_k)
     return [types.TextContent(type="text", text=search_results)]
 
+
 @mcp.tool()
 @log_usage(function_name="MCP get_document", log_type="mcp_tool")
-async def get_document(
-    document_id: str,
-    include_metadata: bool = True
-) -> list:
+async def get_document(document_id: str, include_metadata: bool = True) -> list:
     """
     Retrieve a complete document by its ID with all chunks and metadata.
 
@@ -603,50 +601,239 @@ async def get_document(
 
                 result = await graph_engine.query(query, params={"doc_id": document_id})
 
-                if not result or not result[0].get('doc'):
-                    return json.dumps({
-                        "error": "Document not found",
-                        "document_id": document_id
-                    }, cls=JSONEncoder)
+                if not result or not result[0].get("doc"):
+                    return json.dumps(
+                        {"error": "Document not found", "document_id": document_id}, cls=JSONEncoder
+                    )
 
-                doc = result[0]['doc']
-                chunks = result[0].get('chunks', [])
+                doc = result[0]["doc"]
+                chunks = result[0].get("chunks", [])
 
                 # Filter out null chunks (from OPTIONAL MATCH when no chunks exist)
-                chunks = [c for c in chunks if c.get('id') is not None]
+                chunks = [c for c in chunks if c.get("id") is not None]
 
                 # Sort chunks by index
-                chunks.sort(key=lambda c: c.get('chunk_index', 0))
+                chunks.sort(key=lambda c: c.get("chunk_index", 0))
 
                 # Build response
                 response = {
-                    "document_id": str(doc.id) if hasattr(doc, 'id') else str(doc.get('id', '')),
-                    "name": doc.name if hasattr(doc, 'name') else doc.get('name', 'Unknown'),
-                    "type": doc.type if hasattr(doc, 'type') else doc.get('type', 'unknown'),
+                    "document_id": str(doc.id) if hasattr(doc, "id") else str(doc.get("id", "")),
+                    "name": doc.name if hasattr(doc, "name") else doc.get("name", "Unknown"),
+                    "type": doc.type if hasattr(doc, "type") else doc.get("type", "unknown"),
                     "chunk_count": len(chunks),
-                    "chunks": chunks
+                    "chunks": chunks,
                 }
 
                 if include_metadata:
-                    if hasattr(doc, 'metadata'):
+                    if hasattr(doc, "metadata"):
                         response["metadata"] = doc.metadata
-                    elif isinstance(doc, dict) and 'metadata' in doc:
-                        response["metadata"] = doc['metadata']
+                    elif isinstance(doc, dict) and "metadata" in doc:
+                        response["metadata"] = doc["metadata"]
 
                 logger.info(f"Retrieved document {document_id} with {len(chunks)} chunks")
                 return json.dumps(response, indent=2, cls=JSONEncoder)
 
             except Exception as error:
                 logger.error(f"Failed to retrieve document {document_id}: {error}")
-                return json.dumps({
-                    "error": f"Failed to retrieve document: {str(error)}",
-                    "document_id": document_id
-                }, cls=JSONEncoder)
+                return json.dumps(
+                    {
+                        "error": f"Failed to retrieve document: {str(error)}",
+                        "document_id": document_id,
+                    },
+                    cls=JSONEncoder,
+                )
 
     result = await get_document_task(document_id, include_metadata)
     return [types.TextContent(type="text", text=result)]
-    
-    
+
+
+@mcp.tool()
+@log_usage(function_name="MCP get_chunk_neighbors", log_type="mcp_tool")
+async def get_chunk_neighbors(
+    chunk_id: str,
+    neighbor_count: int = 2,
+    include_target: bool = True,
+) -> list:
+    """
+    Retrieve neighboring chunks around a target chunk by chunk_index position.
+
+    Use this after a CHUNKS search to get surrounding context from the same document.
+    Fetches chunks before and after the target chunk to provide narrative context
+    around search results. Chunks are retrieved by sequential chunk_index values.
+
+    Parameters
+    ----------
+    chunk_id : str
+        The unique identifier of the target chunk from search results.
+        Obtained from CHUNKS search: result[0]['id']
+
+    neighbor_count : int, optional
+        Number of chunks to retrieve on each side of the target (default: 2).
+        Maximum value: 10 (capped)
+
+    include_target : bool, optional
+        Whether to include the target chunk in results (default: True).
+        Set to False to retrieve only surrounding chunks without the target.
+
+    Returns
+    -------
+    list
+        A list containing a single TextContent object with JSON-formatted neighbor data.
+
+        Response structure:
+        {
+            "document_id": str,
+            "document_name": str,
+            "target_chunk_index": int,
+            "neighbor_count": int,
+            "chunks_returned": int,
+            "chunks": [
+                {
+                    "chunk_id": str,
+                    "chunk_index": int,
+                    "text": str,
+                    "word_count": int,
+                    "is_target": bool
+                }
+            ]
+        }
+
+        Returns error object if chunk not found:
+        {"error": str, "chunk_id": str}
+
+    Notes
+    -----
+    - Requires graph database to be accessible with DocumentChunk nodes
+    - Chunks are always returned sorted by chunk_index in ascending order
+    - Target chunk is marked with "is_target": true in results
+    - Automatically handles document boundaries (first/last chunks)
+    - Only retrieves chunks from the same parent document
+    """
+
+    async def get_neighbors_task(chunk_id: str, neighbor_count: int, include_target: bool) -> str:
+        """
+        Internal task to retrieve neighboring chunks from graph database.
+
+        Parameters
+        ----------
+        chunk_id : str
+            Target chunk identifier
+        neighbor_count : int
+            Chunks to retrieve on each side
+        include_target : bool
+            Whether to include target in results
+
+        Returns
+        -------
+        str
+            JSON string containing neighbor data or error information
+        """
+        # NOTE: MCP uses stdout to communicate, we must redirect all output
+        #       going to stdout ( like the print function ) to stderr.
+        with redirect_stdout(sys.stderr):
+            try:
+                # validate / cap neighbor count, range 1 to 10
+                neighbor_count = min(max(neighbor_count, 1), 10)
+
+                from cognee.infrastructure.databases.graph import get_graph_engine
+
+                graph_engine = await get_graph_engine()
+
+                # get chunk index
+                target_query = """
+                MATCH (chunk:DocumentChunk {id: $chunk_id})-[:is_part_of]->(doc:Document)
+                RETURN chunk.chunk_index as target_index, doc.id as doc_id, doc.name as doc_name
+                """
+
+                target_result = await graph_engine.query(
+                    target_query, params={"chunk_id": chunk_id}
+                )
+
+                # chunk DNE in graph DB
+                if not target_result:
+                    logger.warning(f"Chunk not found in graph database: {chunk_id}")
+                    return json.dumps(
+                        {
+                            "error": "Chunk not found",
+                            "chunk_id": chunk_id,
+                            "suggestion": "Verify the chunk ID from search results or check if data was cognified",
+                        },
+                        cls=JSONEncoder,
+                    )
+
+                target_index = target_result[0]["target_index"]
+                doc_id = target_result[0]["doc_id"]
+                doc_name = target_result[0]["doc_name"]
+
+                # calculate index range and retrieve neighboring chunks
+                min_index = target_index - neighbor_count
+                max_index = target_index + neighbor_count
+
+                neighbors_query = """
+                MATCH (chunk:DocumentChunk)-[:is_part_of]->(doc:Document {id: $doc_id})
+                WHERE chunk.chunk_index >= $min_index
+                  AND chunk.chunk_index <= $max_index
+                RETURN chunk.id as chunk_id,
+                       chunk.chunk_index as chunk_index,
+                       chunk.text as text,
+                       chunk.word_count as word_count
+                ORDER BY chunk.chunk_index
+                """
+
+                neighbors_result = await graph_engine.query(
+                    neighbors_query,
+                    params={"doc_id": str(doc_id), "min_index": min_index, "max_index": max_index},
+                )
+
+                # format response and filter based on include_target
+                chunks = []
+                for row in neighbors_result:
+                    is_target = row["chunk_index"] == target_index
+
+                    if not include_target and is_target:
+                        continue
+
+                    chunks.append(
+                        {
+                            "chunk_id": str(row["chunk_id"]),
+                            "chunk_index": row["chunk_index"],
+                            "text": row["text"],
+                            "word_count": row.get("word_count", 0),
+                            "is_target": is_target,
+                        }
+                    )
+
+                # Chunks are already sorted by ORDER BY in query, but chunks_returned
+                # reflects actual count after include_target filtering
+                response = {
+                    "document_id": str(doc_id),
+                    "document_name": doc_name,
+                    "target_chunk_index": target_index,
+                    "neighbor_count": neighbor_count,
+                    "chunks_returned": len(chunks),
+                    "chunks": chunks,
+                }
+
+                logger.info(f"Retrieved {len(chunks)} neighbors for chunk {chunk_id}")
+                return json.dumps(response, indent=2, cls=JSONEncoder)
+
+            except Exception as error:
+                logger.error(
+                    f"Failed to retrieve neighbors for chunk {chunk_id}: {error}", exc_info=True
+                )
+                return json.dumps(
+                    {
+                        "error": f"Failed to retrieve neighbors: {str(error)}",
+                        "chunk_id": chunk_id,
+                        "details": "Check if graph database is accessible and chunk exists",
+                    },
+                    cls=JSONEncoder,
+                )
+
+    result = await get_neighbors_task(chunk_id, neighbor_count, include_target)
+    return [types.TextContent(type="text", text=result)]
+
+
 @mcp.tool()
 @log_usage(function_name="MCP list_data", log_type="mcp_tool")
 async def list_data(dataset_id: str = None) -> list:
