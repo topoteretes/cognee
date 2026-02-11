@@ -11,4 +11,4 @@ from cognee.modules.users.models import User
     reason="cognee.delete is deprecated. Use `datasets.delete_data` instead.", version="0.3.9"
 )
 async def delete(data_id: UUID, dataset_id: UUID, mode: str = "soft", user: Optional[User] = None):
-    await datasets.delete_data(data_id=data_id, dataset_id=dataset_id, user=user)
+    return await datasets.delete_data(data_id=data_id, dataset_id=dataset_id, user=user)
