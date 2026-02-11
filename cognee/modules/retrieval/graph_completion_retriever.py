@@ -257,7 +257,7 @@ class GraphCompletionRetriever(BaseRetriever):
         use_session = self._use_session_cache() and not query_batch
         if use_session:
             sm = get_session_manager()
-            completion = await sm.run_completion_with_session(
+            completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
                 query=query,
                 context=context,

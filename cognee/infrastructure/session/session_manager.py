@@ -164,7 +164,7 @@ class SessionManager:
             )
             return (completion, "")
 
-    async def run_completion_with_session(
+    async def generate_completion_with_session(
         self,
         *,
         session_id: Optional[str] = None,

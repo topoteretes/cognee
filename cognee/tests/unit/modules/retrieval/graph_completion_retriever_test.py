@@ -299,7 +299,7 @@ async def test_get_completion_with_session(mock_edge):
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = mock_user
         mock_sm = MagicMock()
-        mock_sm.run_completion_with_session = AsyncMock(return_value="Generated answer")
+        mock_sm.generate_completion_with_session = AsyncMock(return_value="Generated answer")
         mock_get_sm.return_value = mock_sm
 
         completion = await retriever.get_completion_from_context(
@@ -309,7 +309,7 @@ async def test_get_completion_with_session(mock_edge):
     assert isinstance(completion, list)
     assert len(completion) == 1
     assert completion[0] == "Generated answer"
-    mock_sm.run_completion_with_session.assert_awaited_once()
+    mock_sm.generate_completion_with_session.assert_awaited_once()
 
 
 @pytest.mark.asyncio
