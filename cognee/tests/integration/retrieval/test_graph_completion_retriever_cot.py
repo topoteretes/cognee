@@ -215,3 +215,119 @@ async def test_get_graph_completion_cot_context_on_empty_graph(setup_test_enviro
         await retriever.get_completion_from_context(
             query=query, retrieved_objects=triplets, context=context
         )
+
+
+@pytest.mark.asyncio
+async def test_graph_completion_cot_batch_queries_context_simple(setup_test_environment_simple):
+    """Integration test: verify GraphCompletionCotRetriever can retrieve context for multiple queries (simple)."""
+    retriever = GraphCompletionCotRetriever()
+    query_batch = ["Who works at Canva?", "Who works at Figma?"]
+
+    triplets = await retriever.get_retrieved_objects(query_batch=query_batch)
+
+    context = await retriever.get_context_from_objects(
+        query_batch=query_batch, retrieved_objects=triplets
+    )
+
+    assert len(context) == 2, "Should return results for each query"
+
+    assert "Mike Broski --[works_for]--> Canva" in context[0], "Failed to get Mike Broski"
+    assert "Christina Mayer --[works_for]--> Canva" in context[0], "Failed to get Christina Mayer"
+
+    assert "Steve Rodger --[works_for]--> Figma" in context[1], "Failed to get Steve Rodger"
+    assert "Ike Loma --[works_for]--> Figma" in context[1], "Failed to get Ike Loma"
+    assert "Jason Statham --[works_for]--> Figma" in context[1], "Failed to get Jason Statham"
+
+    answer = await retriever.get_completion_from_context(
+        query_batch=query_batch, retrieved_objects=triplets, context=context
+    )
+
+    assert isinstance(answer, list), f"Expected list, got {type(answer).__name__}"
+    assert all(isinstance(item, str) and item.strip() for item in answer), (
+        "Answer must contain only non-empty strings"
+    )
+
+
+@pytest.mark.asyncio
+async def test_graph_completion_cot_batch_queries_context_complex(setup_test_environment_complex):
+    """Integration test: verify GraphCompletionCotRetriever can retrieve context for multiple queries (complex)."""
+    retriever = GraphCompletionCotRetriever(top_k=20)
+    query_batch = ["Who works at Canva?", "Who works at Figma?"]
+
+    triplets = await retriever.get_retrieved_objects(query_batch=query_batch)
+
+    context = await retriever.get_context_from_objects(
+        query_batch=query_batch, retrieved_objects=triplets
+    )
+
+    assert len(context) == 2, "Should return results for each query"
+
+    assert "Mike Broski --[works_for]--> Canva" in context[0], "Failed to get Mike Broski"
+    assert "Christina Mayer --[works_for]--> Canva" in context[0], "Failed to get Christina Mayer"
+
+    assert "Mike Rodger --[works_for]--> Figma" in context[1], "Failed to get Mike Rodger"
+    assert "Ike Loma --[works_for]--> Figma" in context[1], "Failed to get Ike Loma"
+    assert "Jason Statham --[works_for]--> Figma" in context[1], "Failed to get Jason Statham"
+
+    answer = await retriever.get_completion_from_context(
+        query_batch=query_batch, retrieved_objects=triplets, context=context
+    )
+
+    assert isinstance(answer, list), f"Expected list, got {type(answer).__name__}"
+    assert all(isinstance(item, str) and item.strip() for item in answer), (
+        "Answer must contain only non-empty strings"
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_graph_completion_cot_batch_queries_context_on_empty_graph(
+    setup_test_environment_empty,
+):
+    """Integration test: verify GraphCompletionCotRetriever handles empty graph correctly for multiple queries."""
+    retriever = GraphCompletionCotRetriever()
+    query_batch = ["Who works at Canva?", "Who works at Figma?"]
+
+    triplets = await retriever.get_retrieved_objects(query_batch=query_batch)
+
+    context = await retriever.get_context_from_objects(
+        query_batch=query_batch, retrieved_objects=triplets
+    )
+    assert len(context) == 2, "Should return results for each query"
+    assert context[0] == "" and context[1] == "", (
+        "Context should be empty on an empty graph for all queries"
+    )
+
+
+@pytest.mark.asyncio
+async def test_graph_completion_cot_context_complex_duplicate_queries(
+    setup_test_environment_complex,
+):
+    """Integration test: verify GraphCompletionCotRetriever can retrieve context for duplicate queries (complex)."""
+    retriever = GraphCompletionCotRetriever(top_k=20)
+    query_batch = ["Who works at Figma?", "Who works at Figma?"]
+
+    triplets = await retriever.get_retrieved_objects(query_batch=query_batch)
+
+    context = await retriever.get_context_from_objects(
+        query_batch=query_batch, retrieved_objects=triplets
+    )
+
+    assert len(context) == 2, "Should return results for each query"
+    assert context[0] == context[1], "Contexts should be the same for duplicate queries"
+
+    assert "Mike Rodger --[works_for]--> Figma" in context[0], "Failed to get Mike Rodger"
+    assert "Ike Loma --[works_for]--> Figma" in context[0], "Failed to get Ike Loma"
+    assert "Jason Statham --[works_for]--> Figma" in context[0], "Failed to get Jason Statham"
+
+    assert "Mike Rodger --[works_for]--> Figma" in context[1], "Failed to get Mike Rodger"
+    assert "Ike Loma --[works_for]--> Figma" in context[1], "Failed to get Ike Loma"
+    assert "Jason Statham --[works_for]--> Figma" in context[1], "Failed to get Jason Statham"
+
+    answer = await retriever.get_completion_from_context(
+        query_batch=query_batch, retrieved_objects=triplets, context=context
+    )
+
+    assert isinstance(answer, list), f"Expected list, got {type(answer).__name__}"
+    assert all(isinstance(item, str) and item.strip() for item in answer), (
+        "Answer must contain only non-empty strings"
+    )
