@@ -33,7 +33,7 @@ def mock_tenant_owner():
 
 
 @pytest.mark.asyncio
-@patch("cognee.api.v1.permissions.routers.get_permissions_router.get_relational_engine")
+@patch.object(router_module, "get_relational_engine")
 @patch.object(router_module, "get_tenant")
 def test_get_tenant_roles_success(mock_get_tenant, mock_get_engine, client, mock_tenant_owner):
     """Test successful role listing by tenant owner."""
