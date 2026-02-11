@@ -1,44 +1,55 @@
 import os
-from urllib.parse import urlparse
+import posixpath
+from urllib.parse import urlparse, unquote
 
 
-def get_data_file_path(file_path: str):
-    # Check if this is a file URI BEFORE normalizing (which corrupts URIs)
-    if file_path.startswith("file://"):
-        # Remove first occurrence of file:// prefix
-        pure_file_path = file_path.replace("file://", "", 1)
-        # Normalize the file URI for Windows - replace backslashes with forward slashes
-        normalized_file_uri = os.path.normpath(pure_file_path)
+def get_data_file_path(file_path: str) -> str:
+    """Normalize file paths from various URI schemes to filesystem paths.
 
-        # Convert path to proper file system path
+    Handles file://, s3://, and regular filesystem paths. Decodes
+    percent-encoded characters and preserves UNC network paths.
+    """
+    parsed = urlparse(file_path)
+
+    if parsed.scheme == "file":
+        # file:///path/to/file -> /path/to/file
+        fs_path = unquote(parsed.path)
+
+        if os.name == "nt" and parsed.netloc:
+            # Distinguish drive letter (file://D:/path) from UNC (file://server/share)
+            if len(parsed.netloc) == 2 and parsed.netloc[1] == ":" and parsed.netloc[0].isalpha():
+                # Drive letter in netloc from malformed file://D:/path URLs
+                fs_path = parsed.netloc + fs_path
+            else:
+                # Handle UNC paths (file://server/share/...)
+                fs_path = f"//{parsed.netloc}{fs_path}"
+
+        # Normalize the file URI for Windows - handle drive letters correctly
         if os.name == "nt":  # Windows
-            # Handle Windows drive letters correctly
-            fs_path = normalized_file_uri
+            # Handle Windows drive letters correctly: /C:/path -> C:/path
             if (
                 (fs_path.startswith("/") or fs_path.startswith("\\"))
-                and len(fs_path) > 1
+                and len(fs_path) > 2
                 and fs_path[2] == ":"
+                and fs_path[1].isalpha()
             ):
                 fs_path = fs_path[1:]
-        else:
-            # Unix - like systems
-            fs_path = normalized_file_uri
 
-        # Now split the actual filesystem path
-        actual_fs_path = os.path.normpath(fs_path)
-        return actual_fs_path
+        return os.path.normpath(fs_path)
 
-    elif file_path.startswith("s3://"):
+    elif parsed.scheme == "s3":
         # Handle S3 URLs without normalization (which corrupts them)
-        parsed_url = urlparse(file_path)
+        if not parsed.path or parsed.path == "/":
+            return f"s3://{parsed.netloc}{parsed.path}"
 
-        normalized_url = (
-            f"s3://{parsed_url.netloc}{os.sep}{os.path.normpath(parsed_url.path).lstrip(os.sep)}"
-        )
+        normalized_path = posixpath.normpath(parsed.path).lstrip("/")
 
-        return normalized_url
+        return f"s3://{parsed.netloc}/{normalized_path}"
+
+    elif parsed.scheme == "":
+        # Regular file path - normalize separators
+        return os.path.normpath(file_path)
 
     else:
-        # Regular file path - normalize separators
-        normalized_path = os.path.normpath(file_path)
-        return normalized_path
+        # Other schemes (http, etc.) - return as is or handle as needed
+        return file_path

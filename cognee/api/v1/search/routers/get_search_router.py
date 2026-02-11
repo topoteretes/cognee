@@ -13,6 +13,7 @@ from cognee.modules.users.models import User
 from cognee.modules.search.operations import get_history
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
+from cognee.shared.usage_logger import log_usage
 from cognee import __version__ as cognee_version
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.exceptions import CogneeValidationError
@@ -75,6 +76,7 @@ def get_search_router() -> APIRouter:
             return JSONResponse(status_code=500, content={"error": str(error)})
 
     @router.post("", response_model=Union[List[SearchResult], List])
+    @log_usage(function_name="POST /v1/search", log_type="api_endpoint")
     async def search(payload: SearchPayloadDTO, user: User = Depends(get_authenticated_user)):
         """
         Search for nodes in the graph database.

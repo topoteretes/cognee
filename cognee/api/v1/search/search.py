@@ -29,13 +29,12 @@ async def search(
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
-    save_interaction: bool = False,
-    last_k: Optional[int] = 1,
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
     verbose: bool = False,
+    retriever_specific_config: Optional[dict] = None,
 ) -> List[SearchResult]:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -122,11 +121,11 @@ async def search(
 
         node_name: Filter results to specific named entities (for targeted search).
 
-        save_interaction: Save interaction (query, context, answer connected to triplet endpoints) results into the graph or not
-
         session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
 
         verbose: If True, returns detailed result information including graph representation (when possible).
+
+        retriever_specific_config: Optional dictionary of additional configuration parameters specific to the retriever being used.
 
     Returns:
         list: Search results in format determined by query_type:
@@ -200,8 +199,6 @@ async def search(
     if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
         datasets = await get_authorized_existing_datasets(datasets, "read", user)
         datasets = [dataset.id for dataset in datasets]
-        if not datasets:
-            raise DatasetNotFoundError(message="No datasets found.")
 
     filtered_search_results = await search_function(
         query_text=query_text,
@@ -213,13 +210,12 @@ async def search(
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
-        save_interaction=save_interaction,
-        last_k=last_k,
         only_context=only_context,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
         triplet_distance_penalty=triplet_distance_penalty,
         verbose=verbose,
+        retriever_specific_config=retriever_specific_config,
     )
 
     return filtered_search_results

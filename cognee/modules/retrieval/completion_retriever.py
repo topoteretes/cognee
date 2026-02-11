@@ -20,10 +20,6 @@ logger = get_logger("CompletionRetriever")
 class CompletionRetriever(BaseRetriever):
     """
     Retriever for handling LLM-based completion searches.
-
-    Public methods:
-    - get_context(query: str) -> str
-    - get_completion(query: str, context: Optional[Any] = None) -> Any
     """
 
     def __init__(
@@ -32,14 +28,31 @@ class CompletionRetriever(BaseRetriever):
         system_prompt_path: str = "answer_simple_question.txt",
         system_prompt: Optional[str] = None,
         top_k: Optional[int] = 1,
+        session_id: Optional[str] = None,
+        response_model: Type = str,
     ):
         """Initialize retriever with optional custom prompt paths."""
         self.user_prompt_path = user_prompt_path
         self.system_prompt_path = system_prompt_path
         self.top_k = top_k if top_k is not None else 1
         self.system_prompt = system_prompt
+        self.session_id = session_id
+        self.response_model = response_model
 
-    async def get_context(self, query: str) -> str:
+    async def get_retrieved_objects(self, query: str) -> Any:
+        vector_engine = get_vector_engine()
+
+        try:
+            found_chunks = await vector_engine.search(
+                "DocumentChunk_text", query, limit=self.top_k, include_payload=True
+            )
+
+            return found_chunks
+        except CollectionNotFoundError as error:
+            logger.error("DocumentChunk_text collection not found")
+            raise NoDataError("No data found in the system, please add data first.") from error
+
+    async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
         """
         Retrieves relevant document chunks as context.
 
@@ -58,27 +71,18 @@ class CompletionRetriever(BaseRetriever):
             - str: A string containing the combined text of the retrieved document chunks, or an
               empty string if none are found.
         """
-        vector_engine = get_vector_engine()
-
-        try:
-            found_chunks = await vector_engine.search("DocumentChunk_text", query, limit=self.top_k)
-
-            if len(found_chunks) == 0:
-                return ""
-            # Combine all chunks text returned from vector search (number of chunks is determined by top_k
-            chunks_payload = [found_chunk.payload["text"] for found_chunk in found_chunks]
+        if retrieved_objects:
+            # Combine all chunks text returned from vector search (number of chunks is determined by top_k)
+            chunks_payload = [found_chunk.payload["text"] for found_chunk in retrieved_objects]
             combined_context = "\n".join(chunks_payload)
             return combined_context
-        except CollectionNotFoundError as error:
-            logger.error("DocumentChunk_text collection not found")
-            raise NoDataError("No data found in the system, please add data first.") from error
+        return ""
 
-    async def get_completion(
+    async def get_completion_from_context(
         self,
         query: str,
+        retrieved_objects: Any,
         context: Optional[Any] = None,
-        session_id: Optional[str] = None,
-        response_model: Type = str,
     ) -> List[Any]:
         """
         Generates an LLM completion using the context.
@@ -101,9 +105,6 @@ class CompletionRetriever(BaseRetriever):
 
             - Any: The generated completion based on the provided query and context.
         """
-        if context is None:
-            context = await self.get_context(query)
-
         # Check if we need to generate context summary for caching
         cache_config = CacheConfig()
         user = session_user.get()
@@ -111,7 +112,7 @@ class CompletionRetriever(BaseRetriever):
         session_save = user_id and cache_config.caching
 
         if session_save:
-            conversation_history = await get_conversation_history(session_id=session_id)
+            conversation_history = await get_conversation_history(session_id=self.session_id)
 
             context_summary, completion = await asyncio.gather(
                 summarize_text(context),
@@ -122,7 +123,7 @@ class CompletionRetriever(BaseRetriever):
                     system_prompt_path=self.system_prompt_path,
                     system_prompt=self.system_prompt,
                     conversation_history=conversation_history,
-                    response_model=response_model,
+                    response_model=self.response_model,
                 ),
             )
         else:
@@ -132,7 +133,7 @@ class CompletionRetriever(BaseRetriever):
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
-                response_model=response_model,
+                response_model=self.response_model,
             )
 
         if session_save:
@@ -140,7 +141,7 @@ class CompletionRetriever(BaseRetriever):
                 query=query,
                 context_summary=context_summary,
                 answer=completion,
-                session_id=session_id,
+                session_id=self.session_id,
             )
 
         return [completion]

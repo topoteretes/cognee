@@ -1,5 +1,5 @@
 import asyncio
-
+from os import path
 import cognee
 
 
@@ -21,7 +21,7 @@ async def main():
     }
 
     await cognee.add(
-        "https://en.wikipedia.org/wiki/Large_language_model",
+        "https://en.wikipedia.org/api/rest_v1/page/html/Large_language_model",
         incremental_loading=False,
         preferred_loaders={"beautiful_soup_loader": {"extraction_rules": extraction_rules}},
     )
@@ -29,7 +29,8 @@ async def main():
     await cognee.cognify()
     print("Knowledge graph created.")
 
-    await cognee.visualize_graph()
+    graph_visualization_path = path.join(path.dirname(__file__), "web_url_example.html")
+    await cognee.visualize_graph(graph_visualization_path)
     print("Data visualized")
 
 

@@ -1,6 +1,8 @@
 import pathlib
 import os
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.data.methods.create_authorized_dataset import create_authorized_dataset
+from cognee.modules.users.methods import get_default_user
 from cognee.infrastructure.databases.relational import (
     get_migration_relational_engine,
     create_db_and_tables as create_relational_db_and_tables,
@@ -11,6 +13,8 @@ from cognee.infrastructure.databases.vector.pgvector import (
 from cognee.tasks.ingestion import migrate_relational_database
 from cognee.modules.search.types import SearchType
 import cognee
+
+TEST_DATASET_NAME = "migration_test_dataset"
 
 
 def nodes_dict(nodes):
@@ -48,7 +52,9 @@ async def relational_db_migration():
 
     # 1. Search the graph
     search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION, query_text="Tell me about the artist AC/DC"
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="Tell me about the artist AC/DC",
+        datasets=[TEST_DATASET_NAME],
     )
     print("Search results:", search_results)
 
@@ -278,6 +284,9 @@ async def test_search_result_quality():
         get_migration_relational_engine,
     )
 
+    user = await get_default_user()
+    await create_authorized_dataset(TEST_DATASET_NAME, user)
+
     # Get relational database with original data
     migration_engine = get_migration_relational_engine()
     from sqlalchemy import text
@@ -308,6 +317,7 @@ async def test_search_result_quality():
                 query_text=f"List me all the invoices of Customer:{row.FirstName} {row.LastName}.",
                 top_k=50,
                 system_prompt="Just return me the invoiceID as a number without any text. This is an example output: ['1', '2', '3']. Where 1, 2, 3 are invoiceIDs of an invoice",
+                datasets=[TEST_DATASET_NAME],
             )
             print(f"Cognee search result: {search_results}")
 

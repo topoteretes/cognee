@@ -6,8 +6,13 @@ import asyncio
 import subprocess
 from pathlib import Path
 from typing import Optional
-
+from cognee.modules.data.methods import (
+    get_datasets_by_name,
+    get_last_added_data,
+)
+from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
+from cognee.shared.usage_logger import log_usage
 import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
@@ -91,6 +96,7 @@ async def health_check(request):
 
 
 @mcp.tool()
+@log_usage(function_name="MCP cognify", log_type="mcp_tool")
 async def cognify(
     data: str, graph_model_file: str = None, graph_model_name: str = None, custom_prompt: str = None
 ) -> list:
@@ -257,6 +263,7 @@ async def cognify(
 @mcp.tool(
     name="save_interaction", description="Logs user-agent interactions and query-answer pairs"
 )
+@log_usage(function_name="MCP save_interaction", log_type="mcp_tool")
 async def save_interaction(data: str) -> list:
     """
     Transform and save a user-agent interaction into structured knowledge.
@@ -281,12 +288,26 @@ async def save_interaction(data: str) -> list:
 
             try:
                 await cognee_client.cognify()
+
+                user = await get_default_user()
+                datasets = await get_datasets_by_name("main_dataset", user_id=user.id)
+                dataset = datasets[0]
+                added_data = await get_last_added_data(dataset.id)
+
                 logger.info("Save interaction process finished.")
 
                 # Rule associations only work in direct mode
                 if not cognee_client.use_api:
                     logger.info("Generating associated rules from interaction data.")
-                    await add_rule_associations(data=data, rules_nodeset_name="coding_agent_rules")
+                    await add_rule_associations(
+                        data=data,
+                        rules_nodeset_name="coding_agent_rules",
+                        context={
+                            "user": user,
+                            "dataset": dataset,
+                            "data": added_data,
+                        },
+                    )
                     logger.info("Associated rules generated from interaction data.")
                 else:
                     logger.warning("Rule associations are not available in API mode, skipping.")
@@ -316,6 +337,7 @@ async def save_interaction(data: str) -> list:
 
 
 @mcp.tool()
+@log_usage(function_name="MCP search", log_type="mcp_tool")
 async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
     """
     Search and query the knowledge graph for insights, information, and connections.
@@ -496,6 +518,7 @@ async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
 
 
 @mcp.tool()
+@log_usage(function_name="MCP list_data", log_type="mcp_tool")
 async def list_data(dataset_id: str = None) -> list:
     """
     List all datasets and their data items with IDs for deletion operations.
@@ -624,6 +647,7 @@ async def list_data(dataset_id: str = None) -> list:
 
 
 @mcp.tool()
+@log_usage(function_name="MCP delete", log_type="mcp_tool")
 async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
     """
     Delete specific data from a dataset in the Cognee knowledge graph.
@@ -703,6 +727,7 @@ async def delete(data_id: str, dataset_id: str, mode: str = "soft") -> list:
 
 
 @mcp.tool()
+@log_usage(function_name="MCP prune", log_type="mcp_tool")
 async def prune():
     """
     Reset the Cognee knowledge graph by removing all stored information.
@@ -739,6 +764,7 @@ async def prune():
 
 
 @mcp.tool()
+@log_usage(function_name="MCP cognify_status", log_type="mcp_tool")
 async def cognify_status():
     """
     Get the current status of the cognify pipeline.
@@ -884,26 +910,11 @@ async def main():
 
         await setup()
 
-        # Run Alembic migrations from the main cognee directory where alembic.ini is located
+        # Run Cognee migrations
         logger.info("Running database migrations...")
-        migration_result = subprocess.run(
-            ["python", "-m", "alembic", "upgrade", "head"],
-            capture_output=True,
-            text=True,
-            cwd=Path(__file__).resolve().parent.parent.parent,
-        )
+        from cognee.run_migrations import run_migrations
 
-        if migration_result.returncode != 0:
-            migration_output = migration_result.stderr + migration_result.stdout
-            # Check for the expected UserAlreadyExists error (which is not critical)
-            if (
-                "UserAlreadyExists" in migration_output
-                or "User default_user@example.com already exists" in migration_output
-            ):
-                logger.warning("Warning: Default user already exists, continuing startup...")
-            else:
-                logger.error(f"Migration failed with unexpected error: {migration_output}")
-                sys.exit(1)
+        await run_migrations()
 
         logger.info("Database migrations done.")
     elif args.api_url:

@@ -1,5 +1,6 @@
 import asyncio
 from typing import List, Optional, get_type_hints
+from uuid import UUID
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import insert
@@ -281,7 +282,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
     async def retrieve(self, collection_name: str, data_point_ids: List[str]):
         # Get PGVectorDataPoint Table from database
-        PGVectorDataPoint = await self.get_table(collection_name)
+        try:
+            PGVectorDataPoint = await self.get_table(collection_name)
+        except CollectionNotFoundError:
+            # If collection doesn't exist, return empty list (no items to retrieve)
+            return []
 
         async with self.get_async_session() as session:
             results = await session.execute(
@@ -301,6 +306,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         query_vector: Optional[List[float]] = None,
         limit: Optional[int] = 15,
         with_vector: bool = False,
+        include_payload: bool = False,
     ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
@@ -324,10 +330,16 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # NOTE: This needs to be initialized in case search doesn't return a value
         closest_items = []
 
+        # Note: Exclude payload from returned columns if not needed to optimize performance
+        select_columns = (
+            [PGVectorDataPoint]
+            if include_payload
+            else [PGVectorDataPoint.c.id, PGVectorDataPoint.c.vector]
+        )
         # Use async session to connect to the database
         async with self.get_async_session() as session:
             query = select(
-                PGVectorDataPoint,
+                *select_columns,
                 PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
             ).order_by("similarity")
 
@@ -344,7 +356,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             vector_list.append(
                 {
                     "id": parse_id(str(vector.id)),
-                    "payload": vector.payload,
+                    "payload": vector.payload if include_payload else None,
                     "_distance": vector.similarity,
                 }
             )
@@ -359,7 +371,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
 
         # Create and return ScoredResult objects
         return [
-            ScoredResult(id=row.get("id"), payload=row.get("payload"), score=row.get("score"))
+            ScoredResult(
+                id=row.get("id"),
+                payload=row.get("payload") if include_payload else None,
+                score=row.get("score"),
+            )
             for row in vector_list
         ]
 
@@ -369,6 +385,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         query_texts: List[str],
         limit: int = None,
         with_vectors: bool = False,
+        include_payload: bool = False,
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
@@ -379,12 +396,17 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     query_vector=query_vector,
                     limit=limit,
                     with_vector=with_vectors,
+                    include_payload=include_payload,
                 )
                 for query_vector in query_vectors
             ]
         )
 
-    async def delete_data_points(self, collection_name: str, data_point_ids: list[str]):
+    async def delete_data_points(self, collection_name: str, data_point_ids: list[UUID]):
+        # Skip deletion if collection doesn't exist
+        if not await self.has_collection(collection_name):
+            return None
+
         async with self.get_async_session() as session:
             # Get PGVectorDataPoint Table from database
             PGVectorDataPoint = await self.get_table(collection_name)
