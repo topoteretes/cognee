@@ -1,27 +1,29 @@
-import json
-import os
-import sys
 import argparse
 import asyncio
+import importlib.util
+import json
+import os
 import subprocess
+import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Optional
+
+import mcp.types as types
+import uvicorn
+from mcp.server import FastMCP
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
+
 from cognee.modules.data.methods import (
     get_datasets_by_name,
     get_last_added_data,
 )
-from cognee.modules.users.methods import get_default_user
-from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
-from cognee.shared.usage_logger import log_usage
-import importlib.util
-from contextlib import redirect_stdout
-import mcp.types as types
-from mcp.server import FastMCP
 from cognee.modules.storage.utils import JSONEncoder
-from starlette.responses import JSONResponse
-from starlette.middleware import Middleware
-from starlette.middleware.cors import CORSMiddleware
-import uvicorn
+from cognee.modules.users.methods import get_default_user
+from cognee.shared.logging_utils import get_log_file_location, get_logger, setup_logging
+from cognee.shared.usage_logger import log_usage
 
 try:
     from .cognee_client import CogneeClient
@@ -561,8 +563,8 @@ async def list_data(dataset_id: str = None) -> list:
                         )
                     ]
 
-                from cognee.modules.users.methods import get_default_user
                 from cognee.modules.data.methods import get_dataset, get_dataset_data
+                from cognee.modules.users.methods import get_default_user
 
                 logger.info(f"Listing data for dataset: {dataset_id}")
                 dataset_uuid = UUID(dataset_id)
@@ -928,7 +930,7 @@ async def main():
             )
             await run_http_with_cors()
         case _:
-            logger.info(f"Running MCP server with stdio")
+            logger.info("Running MCP server with stdio")
             await mcp.run_stdio_async()
 
 

@@ -89,7 +89,7 @@ else
 fi
 
 #ARGS needs to not be quoted here. It contains multiple values that should be treated as separate arguments
-if [ "$DEBUG" = "true" ] && [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then    
+if [ "$DEBUG" = "true" ] && [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
     DEBUG_PORT=${DEBUG_PORT:-5678}
     echo "Running in debug mode"
     echo "Debug port: $DEBUG_PORT"
