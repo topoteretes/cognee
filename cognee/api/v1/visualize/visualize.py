@@ -11,7 +11,7 @@ import asyncio
 logger = get_logger()
 
 
-async def visualize_graph(destination_file_path: str = None):
+async def visualize_graph(destination_file_path: str = None) -> str:
     graph_engine = await get_graph_engine()
     graph_data = await graph_engine.get_graph_data()
 
