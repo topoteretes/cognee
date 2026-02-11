@@ -907,30 +907,29 @@ async def main():
     # Skip migrations when in API mode (the API server handles its own database)
     if not args.no_migration and not args.api_url:
         from cognee.modules.engine.operations.setup import setup
-
-        await setup()
-
-        # Run Cognee migrations
-        logger.info("Running database migrations...")
         from cognee.run_migrations import run_migrations
 
+        logger.info("Running database migrations...")
+
+        await setup()
         await run_migrations()
 
         logger.info("Database migrations done.")
-    elif args.api_url:
-        logger.info("Skipping database migrations (using API mode)")
+    elif not args.api_url:
+        logger.info("Skipping DB migrations")
 
-    logger.info(f"Starting MCP server with transport: {args.transport}")
-    if args.transport == "stdio":
-        await mcp.run_stdio_async()
-    elif args.transport == "sse":
-        logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
-        await run_sse_with_cors()
-    elif args.transport == "http":
-        logger.info(
-            f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
-        )
-        await run_http_with_cors()
+    match args.transport.lower():
+        case "sse":
+            logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
+            await run_sse_with_cors()
+        case "http":
+            logger.info(
+                f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
+            )
+            await run_http_with_cors()
+        case _:
+            logger.info(f"Running MCP server with stdio")
+            await mcp.run_stdio_async()
 
 
 if __name__ == "__main__":
