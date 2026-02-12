@@ -255,8 +255,9 @@ class GraphCompletionRetriever(BaseRetriever):
         Note: To avoid duplicate retrievals, ensure that retrieved_objects and context
               are provided from previous method calls.
         """
-        if not retrieved_objects or (
-            query_batch and all(len(triplet) == 0 for triplet in retrieved_objects)
+        if retrieved_objects is not None and (
+            not retrieved_objects
+            or (query_batch and all(len(triplet) == 0 for triplet in retrieved_objects))
         ):
             raise CogneeValidationError("No context retrieved to generate completion.")
 

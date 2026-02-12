@@ -345,7 +345,7 @@ async def test_get_completion_with_session(mock_edge):
             return_value="Resolved context",
         ),
         patch(
-            "cognee.modules.retrieval.graph_completion_cot_retriever.get_session_manager",
+            "cognee.modules.retrieval.graph_completion_retriever.get_session_manager",
         ) as mock_get_sm,
         patch(
             "cognee.modules.retrieval.graph_completion_cot_retriever.generate_completion_batch",
