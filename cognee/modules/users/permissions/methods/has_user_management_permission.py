@@ -15,7 +15,7 @@ async def has_user_management_permission(requester_id: UUID, tenant_id: UUID) ->
     Check if requester is allowed to manage users for a tenant.
 
     The requester is allowed if they are the tenant owner or have one of the
-    roles in USER_MANAGEMENT_ALLOWED_ROLE_NAMES (e.g. tenant_admin). Add role
+    roles in USER_MANAGEMENT_ALLOWED_ROLE_NAMES (e.g. admin). Add role
     names to that set in permission_types.py to extend without changing call sites.
 
     Reuse this across all user management endpoints (list users, assign/remove

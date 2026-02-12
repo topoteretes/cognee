@@ -16,7 +16,7 @@ async def get_user_role_names_in_tenant(user_id: UUID, tenant_id: UUID) -> List[
         tenant_id: Id of the tenant.
 
     Returns:
-        List of role names (e.g. ["tenant_admin", "member"]). Empty if the user
+        List of role names (e.g. ["admin", "member"]). Empty if the user
         has no roles in the tenant.
     """
     db_engine = get_relational_engine()

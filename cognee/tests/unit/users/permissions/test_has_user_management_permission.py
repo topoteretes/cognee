@@ -49,7 +49,7 @@ async def test_has_user_management_permission_non_owner_denied(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_has_user_management_permission_allowed_role(monkeypatch):
-    """Requester is not owner but has an allowed role (e.g. tenant_admin)."""
+    """Requester is not owner but has an allowed role (e.g. admin)."""
     requester_id = uuid4()
     tenant_id = uuid4()
 
