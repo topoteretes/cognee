@@ -586,17 +586,13 @@ async def get_document(document_id: str, include_metadata: bool = True) -> list:
 
                 graph_engine = await get_graph_engine()
 
-                # query doc with all its chunks
+                # query doc with all its chunks (flat cols)
                 query = """
                 MATCH (doc:Document {id: $doc_id})
                 OPTIONAL MATCH (doc)<-[:is_part_of]-(chunk:DocumentChunk)
-                RETURN doc,
-                       collect({
-                           id: chunk.id,
-                           chunk_index: chunk.chunk_index,
-                           text: chunk.text,
-                           word_count: chunk.word_count
-                       }) as chunks
+                RETURN doc, chunk.id as chunk_id, chunk.chunk_index as chunk_index,
+                       chunk.text as chunk_text, chunk.word_count as chunk_word_count
+                ORDER BY chunk.chunk_index
                 """
 
                 result = await graph_engine.query(query, params={"doc_id": document_id})
@@ -607,13 +603,19 @@ async def get_document(document_id: str, include_metadata: bool = True) -> list:
                     )
 
                 doc = result[0]["doc"]
-                chunks = result[0].get("chunks", [])
 
-                # Filter out null chunks (from OPTIONAL MATCH when no chunks exist)
-                chunks = [c for c in chunks if c.get("id") is not None]
-
-                # Sort chunks by index
-                chunks.sort(key=lambda c: c.get("chunk_index", 0))
+                # Assemble chunks from flat rows
+                chunks = []
+                for row in result:
+                    if row.get("chunk_id") is not None:
+                        chunks.append(
+                            {
+                                "id": row["chunk_id"],
+                                "chunk_index": row.get("chunk_index", 0),
+                                "text": row.get("chunk_text", ""),
+                                "word_count": row.get("chunk_word_count", 0),
+                            }
+                        )
 
                 # Build response
                 response = {
