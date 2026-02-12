@@ -4,6 +4,7 @@ from cognee.modules.search.methods.get_search_type_retriever_instance import (
     get_search_type_retriever_instance,
 )
 from cognee.modules.search.types import SearchType
+from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
@@ -22,6 +23,11 @@ async def get_retriever_output(query_type: SearchType, query_text: str, **kwargs
 
     # Get raw result objects from retriever and forward to context and completion methods to avoid duplicate retrievals.
     retrieved_objects = await retriever_instance.get_retrieved_objects(query=query_text)
+
+    # Centralized access tracking for all retriever types
+    if retrieved_objects:
+        items = retrieved_objects if isinstance(retrieved_objects, list) else [retrieved_objects]
+        await update_node_access_timestamps(items)
 
     # Handle raw result object to extract context information
     context = await retriever_instance.get_context_from_objects(

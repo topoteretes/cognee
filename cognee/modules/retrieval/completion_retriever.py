@@ -8,7 +8,6 @@ from cognee.modules.retrieval.utils.session_cache import (
     save_conversation_history,
     get_conversation_history,
 )
-from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
