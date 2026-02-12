@@ -1,6 +1,5 @@
 from .get_role import get_role
 from .get_tenant import get_tenant
-from .authorized_give_permission_on_datasets import authorized_give_permission_on_datasets
 from .get_principal import get_principal
 from .get_principal_datasets import get_principal_datasets
 from .get_all_user_permission_datasets import get_all_user_permission_datasets
