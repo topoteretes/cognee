@@ -13,6 +13,7 @@ from cognee.modules.data.methods import (
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
 from cognee.shared.usage_logger import log_usage
+from cognee.infrastructure.databases.graph.utils import normalize_graph_result
 import importlib.util
 from contextlib import redirect_stdout
 import mcp.types as types
@@ -605,6 +606,9 @@ async def get_document(document_id: str, include_metadata: bool = True) -> list:
                 """
 
                 result = await graph_engine.query(query, params={"doc_id": document_id})
+                result = normalize_graph_result(
+                    result, ["doc", "chunk_id", "chunk_index", "chunk_text", "chunk_word_count"]
+                )
 
                 if not result or not result[0].get("doc"):
                     return json.dumps(
@@ -768,6 +772,9 @@ async def get_chunk_neighbors(
                 target_result = await graph_engine.query(
                     target_query, params={"chunk_id": chunk_id}
                 )
+                target_result = normalize_graph_result(
+                    target_result, ["target_index", "doc_id", "doc_name"]
+                )
 
                 # chunk DNE in graph DB
                 if not target_result:
@@ -803,6 +810,9 @@ async def get_chunk_neighbors(
                 neighbors_result = await graph_engine.query(
                     neighbors_query,
                     params={"doc_id": str(doc_id), "min_index": min_index, "max_index": max_index},
+                )
+                neighbors_result = normalize_graph_result(
+                    neighbors_result, ["chunk_id", "chunk_index", "text", "word_count"]
                 )
 
                 # format response and filter based on include_target
