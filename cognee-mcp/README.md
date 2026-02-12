@@ -433,6 +433,8 @@ Some features are only available in direct mode:
 - `prune` (data reset)
 - `get_developer_rules` (developer rules retrieval)
 - `list_data` with specific dataset_id (detailed data listing)
+- `get_document` (full document retrieval)
+- `get_chunk_neighbors` (neighboring chunk retrieval)
 
 Basic operations like `cognify`, `search`, `delete`, and `list_data` (all datasets) work in both modes.
 
