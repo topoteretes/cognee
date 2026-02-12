@@ -3,8 +3,6 @@ import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from botocore.exceptions import ClientError, NoCredentialsError
-
 from cognee.infrastructure.files import FileMetadata, get_file_metadata
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.shared.logging_utils import get_logger
@@ -51,6 +49,8 @@ class S3BinaryData(IngestionData):
             "Fetching S3 metadata",
             extra={"s3_path": self.s3_path, "file_path": file_path},
         )
+
+        from botocore.exceptions import ClientError, NoCredentialsError
 
         start_time = time.perf_counter()
         try:
