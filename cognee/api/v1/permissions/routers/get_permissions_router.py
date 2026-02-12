@@ -101,6 +101,7 @@ def get_permissions_router() -> APIRouter:
             additional_properties={
                 "endpoint": "POST /v1/permissions/roles",
                 "role_name": role_name,
+                "tenant_id": str(user.tenant_id),
                 "cognee_version": cognee_version,
             },
         )
@@ -110,7 +111,12 @@ def get_permissions_router() -> APIRouter:
         role_id = await create_role_method(role_name=role_name, owner_id=user.id)
 
         return JSONResponse(
-            status_code=200, content={"message": "Role created for tenant", "role_id": str(role_id)}
+            status_code=200,
+            content={
+                "message": "Role created for tenant",
+                "role_id": str(role_id),
+                "tenant_id": str(user.tenant_id),
+            },
         )
 
     @permissions_router.post("/users/{user_id}/roles")
