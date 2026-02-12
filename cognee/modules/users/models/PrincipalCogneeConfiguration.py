@@ -10,7 +10,9 @@ from cognee.infrastructure.databases.relational import Base
 class PrincipalCogneeConfiguration(Base):
     __tablename__ = "principal_configuration"
 
-    owner_id = Column(UUID, ForeignKey("principals.id", ondelete="CASCADE"), index=True)
+    owner_id = Column(
+        UUID, ForeignKey("principals.id", ondelete="CASCADE"), index=True, primary_key=True
+    )
 
     name = Column(String, unique=False, nullable=False)
 

@@ -14,7 +14,7 @@ async def get_principal_cognee_configuration(principal_id: str, name: str) -> di
     Returns:
         dict: The configuration data if found, or an empty dictionary (or None) if not found.
     """
-    relational_engine = await get_relational_engine()
+    relational_engine = get_relational_engine()
     async with relational_engine.get_async_session() as session:
         query = select(PrincipalCogneeConfiguration).where(
             PrincipalCogneeConfiguration.owner_id == principal_id,

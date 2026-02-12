@@ -22,7 +22,7 @@ async def store_principal_cognee_configuration(
     Returns:
         PrincipalCogneeConfiguration: The created or updated database model instance.
     """
-    relational_engine = await get_relational_engine()
+    relational_engine = get_relational_engine()
 
     async with relational_engine.get_async_session() as session:
         # Check if a configuration with this name already exists for the principal
