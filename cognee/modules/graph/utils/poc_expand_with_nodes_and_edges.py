@@ -39,7 +39,7 @@ def _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes):
     ]
 
     for entity_node in graph_entity_nodes.values():
-        if isinstance(entity_node, GraphEntityType):
+        if entity_node.type == "GraphEntityType":
             continue
 
         data_chunk.contains.append(

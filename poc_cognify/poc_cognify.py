@@ -106,6 +106,6 @@ async def cognify_single_add_datapoints(
         graph_db_config=graph_db_config,
         incremental_loading=incremental_loading,
         use_pipeline_cache=True,
-        pipeline_name="poc_cognify_pipeline",
+        pipeline_name="cognify_pipeline",
         data_per_batch=data_per_batch,
     )
