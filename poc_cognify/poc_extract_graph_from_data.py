@@ -1,0 +1,124 @@
+import asyncio
+from typing import Type, List, Optional
+from pydantic import BaseModel
+
+from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.ontology.get_default_ontology_resolver import (
+    get_default_ontology_resolver,
+    get_ontology_resolver_from_env,
+)
+from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
+from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
+from cognee.modules.graph.utils import (
+    retrieve_existing_edges,
+)
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.infrastructure.llm.extraction import extract_content_graph
+from cognee.tasks.graph.exceptions import (
+    InvalidGraphModelError,
+    InvalidDataChunksError,
+    InvalidChunkGraphInputError,
+    InvalidOntologyAdapterError,
+)
+from poc_expand_with_nodes_and_edges import poc_expand_with_nodes_and_edges
+
+
+async def poc_integrate_chunk_graphs(
+    data_chunks: list[DocumentChunk],
+    chunk_graphs: list,
+    graph_model: Type[BaseModel],
+    ontology_resolver: BaseOntologyResolver,
+) -> List[DocumentChunk]:
+    # region same as integrate_chunk_graphs
+    if not isinstance(data_chunks, list) or not isinstance(chunk_graphs, list):
+        raise InvalidChunkGraphInputError("data_chunks and chunk_graphs must be lists.")
+    if len(data_chunks) != len(chunk_graphs):
+        raise InvalidChunkGraphInputError(
+            f"length mismatch: {len(data_chunks)} chunks vs {len(chunk_graphs)} graphs."
+        )
+    if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
+        raise InvalidGraphModelError(graph_model)
+    if ontology_resolver is None or not hasattr(ontology_resolver, "get_subgraph"):
+        raise InvalidOntologyAdapterError(
+            type(ontology_resolver).__name__ if ontology_resolver else "None"
+        )
+
+    if graph_model is not KnowledgeGraph:
+        for chunk_index, chunk_graph in enumerate(chunk_graphs):
+            data_chunks[chunk_index].contains = chunk_graph
+
+        return data_chunks
+
+    existing_edges_map = await retrieve_existing_edges(
+        data_chunks,
+        chunk_graphs,
+    )
+    # endregion
+
+    poc_expand_with_nodes_and_edges(
+        data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
+    )
+
+    return data_chunks
+
+
+async def poc_extract_graph_from_data(
+    data_chunks: List[DocumentChunk],
+    graph_model: Type[BaseModel],
+    config: Config = None,
+    custom_prompt: Optional[str] = None,
+    **kwargs,
+) -> List[DocumentChunk]:
+    """
+    Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
+    """
+    # region same as extract_graph_from_data
+    if not isinstance(data_chunks, list) or not data_chunks:
+        raise InvalidDataChunksError("must be a non-empty list of DocumentChunk.")
+    if not all(hasattr(c, "text") for c in data_chunks):
+        raise InvalidDataChunksError("each chunk must have a 'text' attribute")
+    if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
+        raise InvalidGraphModelError(graph_model)
+
+    chunk_graphs = await asyncio.gather(
+        *[
+            extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs)
+            for chunk in data_chunks
+        ]
+    )
+
+    # Note: Filter edges with missing source or target nodes
+    if graph_model == KnowledgeGraph:
+        for graph in chunk_graphs:
+            valid_node_ids = {node.id for node in graph.nodes}
+            graph.edges = [
+                edge
+                for edge in graph.edges
+                if edge.source_node_id in valid_node_ids and edge.target_node_id in valid_node_ids
+            ]
+
+    # Extract resolver from config if provided, otherwise get default
+    if config is None:
+        ontology_config = get_ontology_env_config()
+        if (
+            ontology_config.ontology_file_path
+            and ontology_config.ontology_resolver
+            and ontology_config.matching_strategy
+        ):
+            config: Config = {
+                "ontology_config": {
+                    "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
+                }
+            }
+        else:
+            config: Config = {
+                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
+            }
+
+    ontology_resolver = config["ontology_config"]["ontology_resolver"]
+    # endregion
+
+    return await poc_integrate_chunk_graphs(
+        data_chunks, chunk_graphs, graph_model, ontology_resolver
+    )

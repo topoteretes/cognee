@@ -47,6 +47,7 @@ async def cognify_single_add_datapoints(
     data_per_batch: int = 20,
     **kwargs,
 ):
+    # region default cognify flow
     if config is None:
         ontology_config = get_ontology_env_config()
         if (
@@ -70,6 +71,7 @@ async def cognify_single_add_datapoints(
         chunks_per_batch = (
             cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 100
         )
+    # endregion
 
     tasks = [
         Task(classify_documents),
@@ -106,6 +108,6 @@ async def cognify_single_add_datapoints(
         graph_db_config=graph_db_config,
         incremental_loading=incremental_loading,
         use_pipeline_cache=True,
-        pipeline_name="cognify_pipeline",
+        pipeline_name="cognify_single_add_datapoints",
         data_per_batch=data_per_batch,
     )
