@@ -581,6 +581,15 @@ async def get_document(document_id: str, include_metadata: bool = True) -> list:
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
         with redirect_stdout(sys.stderr):
+            if cognee_client.use_api:
+                return json.dumps(
+                    {
+                        "error": "get_document is not supported in API mode",
+                        "document_id": document_id,
+                    },
+                    cls=JSONEncoder,
+                )
+
             try:
                 from cognee.infrastructure.databases.graph import get_graph_engine
 
@@ -733,6 +742,15 @@ async def get_chunk_neighbors(
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
         with redirect_stdout(sys.stderr):
+            if cognee_client.use_api:
+                return json.dumps(
+                    {
+                        "error": "get_chunk_neighbors is not supported in API mode",
+                        "chunk_id": chunk_id,
+                    },
+                    cls=JSONEncoder,
+                )
+
             try:
                 # validate / cap neighbor count, range 1 to 10
                 neighbor_count = min(max(neighbor_count, 1), 10)
