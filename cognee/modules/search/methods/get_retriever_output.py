@@ -26,8 +26,7 @@ async def get_retriever_output(query_type: SearchType, query_text: str, **kwargs
 
     # Centralized access tracking for all retriever types
     if retrieved_objects:
-        items = retrieved_objects if isinstance(retrieved_objects, list) else [retrieved_objects]
-        await update_node_access_timestamps(items)
+        await update_node_access_timestamps(retrieved_objects)
 
     # Handle raw result object to extract context information
     context = await retriever_instance.get_context_from_objects(
