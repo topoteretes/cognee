@@ -295,9 +295,9 @@ class TestSessionManager:
             ) as mock_session_user,
             patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
             patch(
-                "cognee.infrastructure.session.session_manager.generate_completion",
+                "cognee.infrastructure.session.session_manager.generate_completion_with_optional_summary",
                 new_callable=AsyncMock,
-                return_value="Generated answer",
+                return_value=("Generated answer", ""),
             ) as mock_generate,
         ):
             mock_user = MagicMock()
