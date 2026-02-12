@@ -23,7 +23,7 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
-from cognee.tasks.graph import extract_graph_from_data
+from poc_single_add_datapoints.poc_extract_graph_from_data import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
@@ -38,7 +38,7 @@ logger = get_logger("cognify")
 update_status_lock = asyncio.Lock()
 
 
-async def cognify(
+async def poc_cognify(
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
@@ -53,6 +53,7 @@ async def cognify(
     custom_prompt: Optional[str] = None,
     temporal_cognify: bool = False,
     data_per_batch: int = 20,
+    use_single_add_datapoints_poc: bool = False,
     **kwargs,
 ):
     """
@@ -224,6 +225,7 @@ async def cognify(
             config=config,
             custom_prompt=custom_prompt,
             chunks_per_batch=chunks_per_batch,
+            use_single_add_datapoints_poc=use_single_add_datapoints_poc,
             **kwargs,
         )
 
@@ -253,6 +255,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
     config: Config = None,
     custom_prompt: Optional[str] = None,
     chunks_per_batch: int = None,
+    use_single_add_datapoints_poc: bool = False,
     **kwargs,
 ) -> list[Task]:
     if config is None:
@@ -292,6 +295,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,
+            use_single_add_datapoints_poc=use_single_add_datapoints_poc,
             task_config={"batch_size": chunks_per_batch},
             **kwargs,
         ),  # Generate knowledge graphs from the document chunks.

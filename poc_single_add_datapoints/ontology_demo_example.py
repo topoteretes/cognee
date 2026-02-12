@@ -7,7 +7,7 @@ from cognee.shared.logging_utils import setup_logging
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.ontology.ontology_config import Config
 from os import path
-from poc_cognify import cognify_single_add_datapoints
+from poc_single_add_datapoints_pipeline import poc_cognify
 
 text_1 = """
 1. Audi
@@ -54,7 +54,7 @@ async def main(use_poc):
     await cognee.prune.prune_system(metadata=True)
 
     # Step 2: Add text
-    text_list = [text_2]
+    text_list = [text_1, text_2]
     await cognee.add(text_list)
 
     # Step 3: Create knowledge graph
@@ -70,18 +70,11 @@ async def main(use_poc):
         }
     }
 
-    if use_poc:
-        await cognify_single_add_datapoints(config=config)
-        graph_visualization_path = path.join(
-            path.dirname(__file__), "results/poc_cognify_result_text_2.html"
-        )
-    else:
-        await cognee.cognify(config=config)
-        graph_visualization_path = path.join(
-            path.dirname(__file__), "results/cognify_result_text_2.html"
-        )
-
-    print("Knowledge with ontology created.")
+    await poc_cognify(config=config, use_poc=use_poc)
+    graph_visualization_path = path.join(
+        path.dirname(__file__),
+        f"results/{'poc_' if use_poc else ''}cognify_result_text.html",
+    )
 
     await visualize_graph(graph_visualization_path)
 

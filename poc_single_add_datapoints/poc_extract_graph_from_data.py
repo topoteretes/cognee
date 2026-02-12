@@ -28,6 +28,9 @@ from cognee.tasks.graph.exceptions import (
     InvalidOntologyAdapterError,
 )
 from cognee.modules.cognify.config import get_cognify_config
+from poc_single_add_datapoints.poc_expand_with_nodes_and_edges import (
+    poc_expand_with_nodes_and_edges,
+)
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -62,6 +65,7 @@ async def integrate_chunk_graphs(
     graph_model: Type[BaseModel],
     ontology_resolver: BaseOntologyResolver,
     context: Dict,
+    use_single_add_datapoints_poc,
     pipeline_name: str = None,
     task_name: str = None,
 ) -> List[DocumentChunk]:
@@ -112,36 +116,41 @@ async def integrate_chunk_graphs(
         chunk_graphs,
     )
 
-    graph_nodes, graph_edges = expand_with_nodes_and_edges(
-        data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
-    )
-
-    cognify_config = get_cognify_config()
-    embed_triplets = cognify_config.triplet_embedding
-
-    if len(graph_nodes) > 0:
-        if pipeline_name or task_name:
-            for node in graph_nodes:
-                _stamp_provenance_deep(node, pipeline_name, task_name)
-
-        await add_data_points(
-            data_points=graph_nodes, custom_edges=context, embed_triplets=embed_triplets
+    if use_single_add_datapoints_poc:
+        poc_expand_with_nodes_and_edges(
+            data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
+        )
+    else:
+        graph_nodes, graph_edges = expand_with_nodes_and_edges(
+            data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
         )
 
-    if len(graph_edges) > 0:
-        await graph_engine.add_edges(graph_edges)
-        await index_graph_edges(graph_edges)
+        cognify_config = get_cognify_config()
+        embed_triplets = cognify_config.triplet_embedding
 
-        user = context["user"] if "user" in context else None
+        if len(graph_nodes) > 0:
+            if pipeline_name or task_name:
+                for node in graph_nodes:
+                    _stamp_provenance_deep(node, pipeline_name, task_name)
 
-        if user:
-            await upsert_edges(
-                graph_edges,
-                tenant_id=user.tenant_id,
-                user_id=user.id,
-                dataset_id=context["dataset"].id,
-                data_id=context["data"].id,
+            await add_data_points(
+                data_points=graph_nodes, custom_edges=context, embed_triplets=embed_triplets
             )
+
+        if len(graph_edges) > 0:
+            await graph_engine.add_edges(graph_edges)
+            await index_graph_edges(graph_edges)
+
+            user = context["user"] if "user" in context else None
+
+            if user:
+                await upsert_edges(
+                    graph_edges,
+                    tenant_id=user.tenant_id,
+                    user_id=user.id,
+                    dataset_id=context["dataset"].id,
+                    data_id=context["data"].id,
+                )
 
     return data_chunks
 
@@ -152,6 +161,7 @@ async def extract_graph_from_data(
     graph_model: Type[BaseModel],
     config: Optional[Config] = None,
     custom_prompt: Optional[str] = None,
+    use_single_add_datapoints_poc: bool = False,
     **kwargs,
 ) -> List[DocumentChunk]:
     """
@@ -211,6 +221,7 @@ async def extract_graph_from_data(
         graph_model,
         ontology_resolver,
         context,
+        use_single_add_datapoints_poc,
         pipeline_name=pipeline_name,
         task_name=task_name,
     )
