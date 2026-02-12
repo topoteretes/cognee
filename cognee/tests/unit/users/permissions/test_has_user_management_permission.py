@@ -57,7 +57,7 @@ async def test_has_user_management_permission_allowed_role(monkeypatch):
         return FakeTenant(owner_id=uuid4())  # different from requester_id
 
     async def fake_get_user_role_names(_user_id, _tenant_id):
-        return ["tenant_admin"]
+        return ["admin"]
 
     monkeypatch.setattr(_perm_mod, "get_tenant", fake_get_tenant)
     monkeypatch.setattr(_perm_mod, "get_user_role_names_in_tenant", fake_get_user_role_names)
