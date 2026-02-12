@@ -605,7 +605,7 @@ async def test_get_completion_from_context_empty():
 
 
 @pytest.mark.asyncio
-async def test_enrichment_chunk_missing_id_strict_mode(mock_vector_engine):
+async def test_enrichment_chunk_missing_id_strict_mode(mock_vector_engine, mock_graph_engine):
     """Test that chunk missing ID raises NoDataError in strict mode."""
     mock_chunk = MagicMock(spec=[])
     mock_chunk.payload = {"text": "Python is great"}
@@ -622,8 +622,13 @@ async def test_enrichment_chunk_missing_id_strict_mode(mock_vector_engine):
             "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
             new_callable=AsyncMock,
         ):
-            with pytest.raises(NoDataError, match="Failed to extract chunk ID"):
-                await retriever.get_retrieved_objects("test query")
+            with patch(
+                "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
+                new_callable=AsyncMock,
+                return_value=mock_graph_engine,
+            ):
+                with pytest.raises(NoDataError, match="Failed to extract chunk ID"):
+                    await retriever.get_retrieved_objects("test query")
 
 
 @pytest.mark.asyncio
