@@ -372,7 +372,9 @@ async def test_get_completion_without_context(mock_graph_engine, mock_vector_eng
             new_callable=AsyncMock,
             return_value="Generated answer",
         ),
-        patch("cognee.modules.retrieval.temporal_retriever.CacheConfig") as mock_cache_config,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
     ):
         mock_config = MagicMock()
         mock_config.caching = False
@@ -381,7 +383,7 @@ async def test_get_completion_without_context(mock_graph_engine, mock_vector_eng
         objects = await retriever.get_retrieved_objects("What happened in 2024?")
         context = await retriever.get_context_from_objects("What happened in 2024?", objects)
         completion = await retriever.get_completion_from_context(
-            "What happened in 2024?", objects, context=context
+            query="What happened in 2024?", retrieved_objects=objects, context=context
         )
 
     assert isinstance(completion, list)
@@ -400,7 +402,9 @@ async def test_get_completion_with_provided_context():
             new_callable=AsyncMock,
             return_value="Generated answer",
         ),
-        patch("cognee.modules.retrieval.temporal_retriever.CacheConfig") as mock_cache_config,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
     ):
         mock_config = MagicMock()
         mock_config.caching = False
@@ -409,7 +413,7 @@ async def test_get_completion_with_provided_context():
         objects = await retriever.get_retrieved_objects("What happened in 2024?")
         await retriever.get_context_from_objects("What happened in 2024?", objects)
         completion = await retriever.get_completion_from_context(
-            "test query", objects, context="Provided context"
+            query="test query", retrieved_objects=objects, context="Provided context"
         )
 
     assert isinstance(completion, list)
@@ -450,10 +454,14 @@ async def test_get_completion_with_session(mock_graph_engine, mock_vector_engine
             return_value=mock_vector_engine,
         ),
         patch(
-            "cognee.modules.retrieval.temporal_retriever.get_session_manager",
+            "cognee.modules.retrieval.graph_completion_retriever.get_session_manager",
         ) as mock_get_sm,
-        patch("cognee.modules.retrieval.temporal_retriever.CacheConfig") as mock_cache_config,
-        patch("cognee.modules.retrieval.temporal_retriever.session_user") as mock_session_user,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.session_user"
+        ) as mock_session_user,
     ):
         mock_config = MagicMock()
         mock_config.caching = True
@@ -466,7 +474,7 @@ async def test_get_completion_with_session(mock_graph_engine, mock_vector_engine
         objects = await retriever.get_retrieved_objects("What happened in 2024?")
         context = await retriever.get_context_from_objects("What happened in 2024?", objects)
         completion = await retriever.get_completion_from_context(
-            "What happened in 2024?", objects, context
+            query="What happened in 2024?", retrieved_objects=objects, context=context
         )
 
     assert isinstance(completion, list)
@@ -509,8 +517,12 @@ async def test_get_completion_with_session_no_user_id(mock_graph_engine, mock_ve
             new_callable=AsyncMock,
             return_value="Generated answer",
         ),
-        patch("cognee.modules.retrieval.temporal_retriever.CacheConfig") as mock_cache_config,
-        patch("cognee.modules.retrieval.temporal_retriever.session_user") as mock_session_user,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.session_user"
+        ) as mock_session_user,
     ):
         mock_config = MagicMock()
         mock_config.caching = True
@@ -520,7 +532,7 @@ async def test_get_completion_with_session_no_user_id(mock_graph_engine, mock_ve
         objects = await retriever.get_retrieved_objects("What happened in 2024?")
         context = await retriever.get_context_from_objects("What happened in 2024?", objects)
         completion = await retriever.get_completion_from_context(
-            "What happened in 2024?", objects, context
+            query="What happened in 2024?", retrieved_objects=objects, context=context
         )
 
     assert isinstance(completion, list)
@@ -566,7 +578,9 @@ async def test_get_completion_with_response_model(mock_graph_engine, mock_vector
             new_callable=AsyncMock,
             return_value=TestModel(answer="Test answer"),
         ),
-        patch("cognee.modules.retrieval.temporal_retriever.CacheConfig") as mock_cache_config,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
     ):
         mock_config = MagicMock()
         mock_config.caching = False
@@ -575,7 +589,7 @@ async def test_get_completion_with_response_model(mock_graph_engine, mock_vector
         objects = await retriever.get_retrieved_objects("What happened in 2024?")
         context = await retriever.get_context_from_objects("What happened in 2024?", objects)
         completion = await retriever.get_completion_from_context(
-            "What happened in 2024?", objects, context
+            query="What happened in 2024?", retrieved_objects=objects, context=context
         )
 
     assert isinstance(completion, list)
