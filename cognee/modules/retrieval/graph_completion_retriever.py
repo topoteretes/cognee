@@ -19,6 +19,7 @@ from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.modules.graph.utils import get_entity_nodes_from_triplets
+from cognee.exceptions.exceptions import CogneeValidationError
 
 logger = get_logger("GraphCompletionRetriever")
 
@@ -254,6 +255,11 @@ class GraphCompletionRetriever(BaseRetriever):
         Note: To avoid duplicate retrievals, ensure that retrieved_objects and context
               are provided from previous method calls.
         """
+        if not retrieved_objects or (
+            query_batch and all(len(triplet) == 0 for triplet in retrieved_objects)
+        ):
+            raise CogneeValidationError("No context retrieved to generate completion.")
+
         use_session = self._use_session_cache() and not query_batch
         if use_session:
             sm = get_session_manager()

@@ -16,7 +16,6 @@ from cognee.modules.retrieval.utils.completion import (
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
-from cognee.exceptions.exceptions import CogneeValidationError
 
 logger = get_logger()
 
@@ -285,35 +284,3 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             query_batch=query_batch,
             retrieved_objects=retrieved_objects,
         )
-
-    async def get_completion_from_context(
-        self,
-        query: Optional[str] = None,
-        query_batch: Optional[List[str]] = None,
-        retrieved_objects: List[Edge] | List[List[Edge]] = None,
-        context: str | List[str] = None,
-    ) -> List[Any]:
-        """
-        Generate completion from context (same as parent: SessionManager or
-        _generate_completion_without_session). Final CoT completion runs here.
-        """
-        if not retrieved_objects or (
-            query_batch and all(len(triplet) == 0 for triplet in retrieved_objects)
-        ):
-            raise CogneeValidationError("No context retrieved to generate completion.")
-
-        use_session = self._use_session_cache() and not query_batch
-        if use_session:
-            sm = get_session_manager()
-            completion = await sm.generate_completion_with_session(
-                session_id=self.session_id,
-                query=query,
-                context=context,
-                user_prompt_path=self.user_prompt_path,
-                system_prompt_path=self.system_prompt_path,
-                system_prompt=self.system_prompt,
-                response_model=self.response_model,
-                summarize_context=False,
-            )
-            return [completion]
-        return await self._generate_completion_without_session(query, query_batch, context)
