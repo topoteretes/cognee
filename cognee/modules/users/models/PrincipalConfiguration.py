@@ -7,7 +7,7 @@ from cognee.infrastructure.databases.relational import Base
 
 
 # TODO: Add migrations for this table
-class PrincipalCogneeConfiguration(Base):
+class PrincipalConfiguration(Base):
     __tablename__ = "principal_configuration"
 
     owner_id = Column(

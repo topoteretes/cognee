@@ -1,11 +1,11 @@
 from sqlalchemy import select
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.models.PrincipalCogneeConfiguration import PrincipalCogneeConfiguration
+from cognee.modules.users.models.PrincipalConfiguration import PrincipalConfiguration
 
 
-async def store_principal_cognee_configuration(
+async def store_principal_configuration(
     principal_id: str, name: str, configuration: dict
-) -> PrincipalCogneeConfiguration:
+) -> PrincipalConfiguration:
     """
     Persists or updates a Cognee configuration for a specific principal (user or group).
 
@@ -26,9 +26,9 @@ async def store_principal_cognee_configuration(
 
     async with relational_engine.get_async_session() as session:
         # Check if a configuration with this name already exists for the principal
-        query = select(PrincipalCogneeConfiguration).where(
-            PrincipalCogneeConfiguration.owner_id == principal_id,
-            PrincipalCogneeConfiguration.name == name,
+        query = select(PrincipalConfiguration).where(
+            PrincipalConfiguration.owner_id == principal_id,
+            PrincipalConfiguration.name == name,
         )
         result = await session.execute(query)
         existing_config = result.scalars().first()
@@ -40,7 +40,7 @@ async def store_principal_cognee_configuration(
             config_record = existing_config
         else:
             # Create new configuration record
-            config_record = PrincipalCogneeConfiguration(
+            config_record = PrincipalConfiguration(
                 owner_id=principal_id, name=name, configuration=configuration
             )
             session.add(config_record)

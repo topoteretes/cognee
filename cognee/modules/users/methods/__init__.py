@@ -8,5 +8,5 @@ from .get_authenticated_user import (
     get_authenticated_user,
     REQUIRE_AUTHENTICATION,
 )
-from .get_principal_cognee_configuration import get_principal_cognee_configuration
-from .store_principal_cognee_configuration import store_principal_cognee_configuration
+from .get_principal_configuration import get_principal_configuration
+from .store_principal_configuration import store_principal_configuration

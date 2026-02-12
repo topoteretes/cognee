@@ -9,4 +9,4 @@ from .TenantDefaultPermissions import TenantDefaultPermissions
 from .Permission import Permission
 from .Tenant import Tenant
 from .ACL import ACL
-from .PrincipalCogneeConfiguration import PrincipalCogneeConfiguration
+from .PrincipalConfiguration import PrincipalConfiguration

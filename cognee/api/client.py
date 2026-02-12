@@ -37,7 +37,7 @@ from cognee.api.v1.users.routers import (
     get_verify_router,
     get_users_router,
     get_visualize_router,
-    get_principal_configuration_router,
+    get_configuration_router,
 )
 from cognee.modules.users.methods.get_authenticated_user import REQUIRE_AUTHENTICATION
 
@@ -272,9 +272,9 @@ app.include_router(get_settings_router(), prefix="/api/v1/settings", tags=["sett
 app.include_router(get_visualize_router(), prefix="/api/v1/visualize", tags=["visualize"])
 
 app.include_router(
-    get_principal_configuration_router(),
-    prefix="/api/v1/principal-configuration",
-    tags=["principal-configuration"],
+    get_configuration_router(),
+    prefix="/api/v1/configuration",
+    tags=["configuration"],
 )
 
 app.include_router(get_delete_router(), prefix="/api/v1/delete", tags=["delete"])

@@ -1,9 +1,9 @@
 from sqlalchemy import select
 from cognee.infrastructure.databases.relational import get_relational_engine
-from cognee.modules.users.models.PrincipalCogneeConfiguration import PrincipalCogneeConfiguration
+from cognee.modules.users.models.PrincipalConfiguration import PrincipalConfiguration
 
 
-async def get_principal_cognee_configuration(principal_id: str, name: str) -> dict:
+async def get_principal_configuration(principal_id: str, name: str) -> dict:
     """
     Retrieves a specific Cognee configuration for a principal by its name.
 
@@ -16,9 +16,9 @@ async def get_principal_cognee_configuration(principal_id: str, name: str) -> di
     """
     relational_engine = get_relational_engine()
     async with relational_engine.get_async_session() as session:
-        query = select(PrincipalCogneeConfiguration).where(
-            PrincipalCogneeConfiguration.owner_id == principal_id,
-            PrincipalCogneeConfiguration.name == name,
+        query = select(PrincipalConfiguration).where(
+            PrincipalConfiguration.owner_id == principal_id,
+            PrincipalConfiguration.name == name,
         )
 
         result = await session.execute(query)
