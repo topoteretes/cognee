@@ -46,9 +46,11 @@ def parse_type_string(type_str: str) -> type:
     }
 
     try:
-        return type_mapping.get(type_str)
+        return type_mapping[type_str]
     except KeyError:
-        raise TypeMappingKeyError(f"Could not map provided type to a supported type: {type_str}")
+        raise TypeMappingKeyError(
+            f"Could not map provided type: {type_str} to a supported type in Python."
+        )
 
 
 def dict_to_pydantic(schema_dict: Dict[str, str], model_name: str = "DynamicModel"):
