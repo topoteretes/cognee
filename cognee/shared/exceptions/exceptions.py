@@ -20,3 +20,13 @@ class UsageLoggerError(CogneeConfigurationError):
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
     ):
         super().__init__(message, name, status_code)
+
+
+class TypeMappingKeyError(CogneeConfigurationError):
+    def __init__(
+        self,
+        message: str = "Not able to map the provided key to a supported type in Python.",
+        name: str = "TypeMappingKeyError",
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)

@@ -17,6 +17,8 @@ from cognee.modules.graph.methods import get_formatted_graph_data
 from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.authentication.default.default_jwt_strategy import DefaultJWTStrategy
+from cognee.shared.data_models import KnowledgeGraph
+from cognee.shared.dict_to_pydantic import dict_to_pydantic
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunInfo,
@@ -39,6 +41,7 @@ class CognifyPayloadDTO(InDTO):
     datasets: Optional[List[str]] = Field(default=None)
     dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
+    graph_model: Optional[dict] = Field(default=None, examples=[{}])
     custom_prompt: Optional[str] = Field(
         default="", description="Custom prompt for entity extraction and graph generation"
     )
@@ -147,9 +150,16 @@ def get_cognify_router() -> APIRouter:
                     }
                 }
 
+            if not payload.graph_model:
+                graph_model = KnowledgeGraph
+            else:
+                # If a custom graph model is provided, convert it from dict to a Pydantic model class
+                graph_model = dict_to_pydantic(payload.graph_model)
+
             cognify_run = await cognee_cognify(
                 datasets,
                 user,
+                graph_model=graph_model,
                 config=config_to_use,
                 run_in_background=payload.run_in_background,
                 custom_prompt=payload.custom_prompt,
