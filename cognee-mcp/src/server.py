@@ -6,7 +6,11 @@ import asyncio
 import subprocess
 from pathlib import Path
 from typing import Optional
-
+from cognee.modules.data.methods import (
+    get_datasets_by_name,
+    get_last_added_data,
+)
+from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
 from cognee.shared.usage_logger import log_usage
 import importlib.util
@@ -284,12 +288,26 @@ async def save_interaction(data: str) -> list:
 
             try:
                 await cognee_client.cognify()
+
+                user = await get_default_user()
+                datasets = await get_datasets_by_name("main_dataset", user_id=user.id)
+                dataset = datasets[0]
+                added_data = await get_last_added_data(dataset.id)
+
                 logger.info("Save interaction process finished.")
 
                 # Rule associations only work in direct mode
                 if not cognee_client.use_api:
                     logger.info("Generating associated rules from interaction data.")
-                    await add_rule_associations(data=data, rules_nodeset_name="coding_agent_rules")
+                    await add_rule_associations(
+                        data=data,
+                        rules_nodeset_name="coding_agent_rules",
+                        context={
+                            "user": user,
+                            "dataset": dataset,
+                            "data": added_data,
+                        },
+                    )
                     logger.info("Associated rules generated from interaction data.")
                 else:
                     logger.warning("Rule associations are not available in API mode, skipping.")
@@ -884,35 +902,34 @@ async def main():
     cognee_client = CogneeClient(api_url=args.api_url, api_token=args.api_token)
 
     mcp.settings.host = args.host
-    mcp.settings.port = args.port
+    mcp.settings.port = int(args.port)
 
     # Skip migrations when in API mode (the API server handles its own database)
     if not args.no_migration and not args.api_url:
         from cognee.modules.engine.operations.setup import setup
-
-        await setup()
-
-        # Run Cognee migrations
-        logger.info("Running database migrations...")
         from cognee.run_migrations import run_migrations
 
+        logger.info("Running database migrations...")
+
+        await setup()
         await run_migrations()
 
         logger.info("Database migrations done.")
-    elif args.api_url:
-        logger.info("Skipping database migrations (using API mode)")
+    elif not args.api_url:
+        logger.info("Skipping DB migrations")
 
-    logger.info(f"Starting MCP server with transport: {args.transport}")
-    if args.transport == "stdio":
-        await mcp.run_stdio_async()
-    elif args.transport == "sse":
-        logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
-        await run_sse_with_cors()
-    elif args.transport == "http":
-        logger.info(
-            f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
-        )
-        await run_http_with_cors()
+    match args.transport.lower():
+        case "sse":
+            logger.info(f"Running MCP server with SSE transport on {args.host}:{args.port}")
+            await run_sse_with_cors()
+        case "http":
+            logger.info(
+                f"Running MCP server with Streamable HTTP transport on {args.host}:{args.port}{args.path}"
+            )
+            await run_http_with_cors()
+        case _:
+            logger.info("Running MCP server with stdio")
+            await mcp.run_stdio_async()
 
 
 if __name__ == "__main__":
