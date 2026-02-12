@@ -95,30 +95,6 @@ async def generate_completion_with_optional_summary(
     return (completion, "")
 
 
-async def summarize_and_generate_completion(
-    context: str,
-    query: str,
-    user_prompt_path: str,
-    system_prompt_path: str,
-    system_prompt: Optional[str] = None,
-    conversation_history: Optional[str] = None,
-    response_model: Type = str,
-) -> tuple:
-    """Summarizes context and generates completion in parallel. Returns (context_summary, completion)."""
-    return await asyncio.gather(
-        summarize_text(context),
-        generate_completion(
-            query=query,
-            context=context,
-            user_prompt_path=user_prompt_path,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            conversation_history=conversation_history,
-            response_model=response_model,
-        ),
-    )
-
-
 async def batch_llm_completion(
     user_prompts: List[str],
     system_prompt: str,
