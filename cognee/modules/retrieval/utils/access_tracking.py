@@ -22,12 +22,18 @@ async def update_node_access_timestamps(items: List[Edge]):
         return
 
     # In case there are no items or the items are not Edges, we can skip processing
-    if not items and all(isinstance(item, Edge) for item in items):
-        logger.debug("No valid items to update access timestamps for.")
+    if not items:
         return
 
     items = items if isinstance(items, list) else [items]
-    items = transform_triplets_to_graph(items)  # Transform Edges to graph format
+
+    # TODO: Expand support for other result objects like what is returned from RAG_COMPLETION retriever
+    if not all(isinstance(item, Edge) for item in items):
+        logger.debug("No valid items to update access timestamps for.")
+        return
+
+    # Transform raw Edges to graph format
+    items = transform_triplets_to_graph(items)
 
     graph_engine = await get_graph_engine()
     timestamp_dt = datetime.now(timezone.utc)
