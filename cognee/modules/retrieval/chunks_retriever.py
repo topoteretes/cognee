@@ -161,13 +161,13 @@ class ChunksRetriever(BaseRetriever):
         try:
             logger.debug(f"Attempting batched parent lookup for {len(chunk_ids)} chunks")
 
-            query = """
+            cypher_query = """
             MATCH (chunk:DocumentChunk)-[:is_part_of]->(doc:Document)
             WHERE chunk.id IN $chunk_ids
-            RETURN chunk.id as chunk_id, doc.id as doc_id, doc.name as doc_name, doc-type as doc_type
+            RETURN chunk.id as chunk_id, doc.id as doc_id, doc.name as doc_name, doc.type as doc_type
             """
 
-            result = await graph_engine.query(query, params={"chunk_ids": chunk_ids})
+            result = await graph_engine.query(cypher_query, params={"chunk_ids": chunk_ids})
 
             for row in result:
                 try:
@@ -191,13 +191,13 @@ class ChunksRetriever(BaseRetriever):
 
             for chunk_id in chunk_ids:
                 try:
-                    query = """
+                    cypher_query = """
                     MATCH (chunk:DocumentChunk {id: $chunk_id})-[:is_part_of]->(doc:Document)
                     RETURN doc.id as doc_id, doc.name as doc_name, doc.type as doc_type
                     LIMIT 1
                     """
 
-                    result = await graph_engine.query(query, params={"chunk_id": chunk_id})
+                    result = await graph_engine.query(cypher_query, params={"chunk_id": chunk_id})
 
                     if result and len(result) > 0:
                         row = result[0]
