@@ -2,6 +2,7 @@ from typing import Any, Optional, List, Union
 from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.unified import get_unified_engine
+from cognee.infrastructure.databases.graph.utils import normalize_graph_result
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions.exceptions import CollectionNotFoundError
@@ -167,6 +168,7 @@ class ChunksRetriever(BaseRetriever):
             """
 
             result = await graph_engine.query(cypher_query, params={"chunk_ids": chunk_ids})
+            result = normalize_graph_result(result, ["chunk_id", "doc_id", "doc_name", "doc_type"])
 
             for row in result:
                 try:
@@ -197,6 +199,7 @@ class ChunksRetriever(BaseRetriever):
                     """
 
                     result = await graph_engine.query(cypher_query, params={"chunk_id": chunk_id})
+                    result = normalize_graph_result(result, ["doc_id", "doc_name", "doc_type"])
 
                     if result and len(result) > 0:
                         row = result[0]
