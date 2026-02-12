@@ -166,7 +166,7 @@ class config:
             if hasattr(vector_db_config, key):
                 object.__setattr__(vector_db_config, key, value)
             else:
-                InvalidConfigAttributeError(attribute=key)
+                raise InvalidConfigAttributeError(attribute=key)
 
     @staticmethod
     def set_vector_db_key(db_key: str):
@@ -204,6 +204,7 @@ class config:
             else:
                 raise InvalidConfigAttributeError(attribute=key)
 
+    @staticmethod
     def set(key: str, value):
         """
         Generic setter that maps configuration keys to their specific setter methods.
