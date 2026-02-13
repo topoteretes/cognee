@@ -1,5 +1,5 @@
 from pydantic import create_model
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from cognee.shared.exceptions.exceptions import TypeMappingKeyError
 import typing
 
@@ -49,42 +49,68 @@ def parse_type_string(type_str: str) -> type:
         return type_mapping[type_str]
     except KeyError:
         raise TypeMappingKeyError(
-            f"Could not map provided type: {type_str} to a supported type in Python."
+            f"Could not map provided type: '{type_str}' to a supported type in Python."
         )
 
 
-def dict_to_pydantic(schema_dict: Dict[str, str], model_name: str = "DynamicModel"):
+def dict_to_pydantic(schema_dict: Dict[str, Any], model_name: str = "DynamicModel"):
     """
     Convert a schema dictionary with string type annotations to a Pydantic model
+    Handles nested dictionaries and lists
     """
     fields = {}
-    for key, type_str in schema_dict.items():
-        # Parse the string type annotation to an actual Python type
-        field_type = parse_type_string(type_str)
-        fields[key] = (field_type, ...)  # ... means required field and no default value
+
+    for key, value in schema_dict.items():
+        if isinstance(value, dict):
+            # Check if it's a type annotation string or a nested schema
+            if all(isinstance(v, str) for v in value.values()):
+                # This is a simple type annotation dictionary
+                pydantic_model = dict_to_pydantic(value, key)
+                fields[key] = (pydantic_model, ...)
+            else:
+                # This is a nested schema - create a nested model
+                nested_model_name = f"{model_name}_{key.capitalize()}"
+                nested_model = dict_to_pydantic(value, nested_model_name)
+                fields[key] = (nested_model, ...)
+        elif isinstance(value, str):
+            # Simple field with type annotation
+            field_type = parse_type_string(value)
+            fields[key] = (field_type, ...)
+        else:
+            raise TypeMappingKeyError(
+                f"Value for key '{key}' must be a dictionary of type annotations or a nested schema."
+            )
 
     # Create the model class
     DynamicModel = create_model(model_name, **fields)
 
-    # Return the model class (not an instance)
     return DynamicModel
 
 
 if __name__ == "__main__":
-    schema_dict = {"name": "str", "date": "str", "participants": "List[List[str]]"}
-
-    # Create the model class
-    CalendarEvent = dict_to_pydantic(schema_dict, "CalendarEvent")
-
-    # Try validating some data against the model
-    test_data = {
-        "name": "Meeting",
-        "date": "2024-01-01",
-        "participants": [["Alice", "Bob"], ["Charlie", "Dave"]],
+    # Example usage
+    input_data = {
+        "nodes": {"id": "str", "name": "str", "type": "str", "description": "str"},
+        "edges": {"source_node_id": "str", "target_node_id": "str", "relationship_name": "str"},
     }
 
-    # Create an instance with actual data
-    event = CalendarEvent(**test_data)
-    print(event)
-    print(f"Type of participants: {type(event.participants)}")
-    print(f"First participant: {event.participants[0][0]}")
+    # Create the dynamic model
+    DynamicSchema = dict_to_pydantic(input_data, "KnowledgeGraphModel")
+
+    # Test the dynamically generated model
+    instance = DynamicSchema(
+        nodes={
+            "id": "node1",
+            "name": "Test Node",
+            "type": "test",
+            "description": "This is a test node",
+        },
+        edges={
+            "source_node_id": "node1",
+            "target_node_id": "node2",
+            "relationship_name": "connects_to",
+        },
+    )
+
+    print(instance.model_dump())
+    print(instance.model_json_schema())
