@@ -6,7 +6,7 @@ from pathlib import Path
 import os
 
 
-async def main(example, custom_prompt, use_poc):
+async def main(example, vector_search_limit, custom_prompt, use_poc):
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
@@ -25,7 +25,8 @@ async def main(example, custom_prompt, use_poc):
     for line in text:
         await cognee.add(line)
         if use_poc:
-            await disambiguate_entities_pipeline(custom_prompt=custom_prompt)
+            kwargs = {"vector_search_limit": vector_search_limit}
+            await disambiguate_entities_pipeline(custom_prompt=custom_prompt, **kwargs)
         else:
             await cognee.cognify()
 
@@ -42,7 +43,12 @@ if __name__ == "__main__":
         for i in range(1, 2):
             # loop.run_until_complete(main(example="example"+str(i), use_poc=False))
             loop.run_until_complete(
-                main(example="example" + str(i), custom_prompt=custom_prompt_text, use_poc=True)
+                main(
+                    example="example" + str(i),
+                    vector_search_limit=5,
+                    custom_prompt=custom_prompt_text,
+                    use_poc=True,
+                )
             )
     finally:
         loop.run_until_complete(loop.shutdown_asyncgens())

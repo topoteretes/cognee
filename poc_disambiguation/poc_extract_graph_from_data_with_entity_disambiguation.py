@@ -30,14 +30,6 @@ from cognee.modules.cognify.config import get_cognify_config
 from cognee.infrastructure.databases.vector import get_vector_engine
 
 
-def save_output(file, original, mine):
-    with open(file, "a") as f:
-        print("\noriginal: ", file=f)
-        print(original, file=f)
-        print("\nmine: ", file=f)
-        print(mine, file=f)
-
-
 async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
@@ -93,6 +85,7 @@ async def extract_graph_from_data_with_entity_disambiguation(
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
+    vector_search_limit = kwargs.get("vector_search_limit") or 5
 
     if not isinstance(data_chunks, list) or not data_chunks:
         raise InvalidDataChunksError("must be a non-empty list of DocumentChunk.")
@@ -101,27 +94,14 @@ async def extract_graph_from_data_with_entity_disambiguation(
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
 
-    # llm_config = get_llm_config()
-    # prompt_path = llm_config.graph_prompt_path
-
-    # original_prompt = render_prompt(prompt_path, {}, base_directory=None)
-    # Original extract_content_graph call
-    # original_chunk_graphs = await asyncio.gather(
-    #     *[
-    #         extract_content_graph(chunk.text, graph_model, custom_prompt=original_prompt, **kwargs)
-    #         for chunk in data_chunks
-    #     ]
-    # )
     vector_engine = get_vector_engine()
     exists = await vector_engine.has_collection(collection_name="Entity_name")
-
-    # augmented_prompt = "\n# 5. Reuse names\n  When possible, use the entities that already exist in the database instead of creating new ones. The following entities, represented by their names per line, already exist in the database:"
 
     if exists:
         results_per_chunk = await vector_engine.search(
             collection_name="Entity_name",
             query_text=data_chunks[0].text,
-            limit=5,
+            limit=vector_search_limit,
             include_payload=True,
         )
         for result in results_per_chunk:
@@ -134,7 +114,6 @@ async def extract_graph_from_data_with_entity_disambiguation(
         ]
     )
 
-    # save_output("results/example3",original_chunk_graphs, chunk_graphs)
     # Note: Filter edges with missing source or target nodes
     if graph_model == KnowledgeGraph:
         for graph in chunk_graphs:
