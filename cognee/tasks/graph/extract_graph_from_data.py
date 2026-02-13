@@ -29,6 +29,42 @@ from cognee.tasks.graph.exceptions import (
 )
 from cognee.modules.cognify.config import get_cognify_config
 
+# Field names that belong to the DataPoint base class itself.
+_DATAPOINT_BASE_FIELDS = frozenset(DataPoint.model_fields.keys())
+
+
+def _unwrap_datapoint_container(chunk_graph):
+    """Unwrap a pure container DataPoint whose only own fields are list[DataPoint].
+
+    When users define wrapper models like ``SpellList(DataPoint): spells: list[Spell]``
+    solely to allow the LLM to return multiple entities per chunk, we don't want the
+    wrapper itself to become a graph node.  This function detects that pattern and
+    returns the flattened list of contained DataPoints instead.
+
+    If the model has any non-list or non-DataPoint own fields it is returned unchanged,
+    preserving backward compatibility for regular single-entity models.
+    """
+    if not isinstance(chunk_graph, DataPoint):
+        return chunk_graph
+
+    # Determine fields defined by the subclass (not inherited from DataPoint).
+    own_fields = set(type(chunk_graph).model_fields.keys()) - _DATAPOINT_BASE_FIELDS
+    if not own_fields:
+        return chunk_graph
+
+    contained = []
+    for field_name in own_fields:
+        field_value = getattr(chunk_graph, field_name, None)
+        if isinstance(field_value, list) and (
+            not field_value or isinstance(field_value[0], DataPoint)
+        ):
+            contained.extend(field_value)
+        else:
+            # Has a non-list-of-DataPoint own field → not a pure container.
+            return chunk_graph
+
+    return contained
+
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
     """Recursively stamp all reachable DataPoints with provenance info."""
@@ -103,7 +139,7 @@ async def integrate_chunk_graphs(
 
     if graph_model is not KnowledgeGraph:
         for chunk_index, chunk_graph in enumerate(chunk_graphs):
-            data_chunks[chunk_index].contains = chunk_graph
+            data_chunks[chunk_index].contains = _unwrap_datapoint_container(chunk_graph)
 
         return data_chunks
 
