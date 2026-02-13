@@ -118,7 +118,6 @@ class ChunksRetriever(BaseRetriever):
             if self.strict_enrichment:
                 raise NoDataError(f"Failed to update timestamps: {error}") from error
 
-        # Get graph engine (stores chunk-document relationships)
         try:
             graph_engine = await get_graph_engine()
         except Exception as error:
@@ -130,10 +129,22 @@ class ChunksRetriever(BaseRetriever):
                 logger.warning(f"{error_msg}, skipping enrichment")
                 return found_chunks
 
+        chunk_ids, chunk_id_map = self._extract_chunk_ids(found_chunks)
+
+        if not chunk_ids:
+            logger.warning("No valid chunk IDs found, skipping enrichment")
+            return found_chunks
+
+        parent_map = await self._fetch_parent_documents(graph_engine, chunk_ids)
+        self._enrich_chunk_payloads(found_chunks, chunk_id_map, parent_map)
+
+        return found_chunks
+
+    def _extract_chunk_ids(self, found_chunks: list) -> tuple[list, dict]:
+        """Extract chunk IDs from search results into a list and lookup map."""
         chunk_ids = []
         chunk_id_map = {}
 
-        # Extract all chunk IDs for lookup
         for chunk in found_chunks:
             chunk_id = None
             try:
@@ -152,11 +163,10 @@ class ChunksRetriever(BaseRetriever):
                     raise NoDataError(f"Failed to extract chunk ID: {error}") from error
                 logger.debug(f"Failed to extract chunk ID: {error}")
 
-        if not chunk_ids:
-            logger.warning("No valid chunk IDs found, skipping enrichment")
-            return found_chunks
+        return chunk_ids, chunk_id_map
 
-        # Try batched query
+    async def _fetch_parent_documents(self, graph_engine: Any, chunk_ids: list) -> dict:
+        """Fetch parent document info for chunks via batched query with individual fallback."""
         parent_map = {}
 
         try:
@@ -173,13 +183,7 @@ class ChunksRetriever(BaseRetriever):
 
             for row in result:
                 try:
-                    chunk_id = str(row["chunk_id"])
-                    parent_map[chunk_id] = {
-                        "id": str(row.get("doc_id", "")),
-                        "name": row.get("doc_name", "Unknown"),
-                    }
-                    if "doc_type" in row and row["doc_type"]:
-                        parent_map[chunk_id]["type"] = row["doc_type"]
+                    parent_map[str(row["chunk_id"])] = self._build_parent_info(row)
                 except Exception as error:
                     logger.warning(f"Failed to parse batch result row: {error}")
 
@@ -188,7 +192,6 @@ class ChunksRetriever(BaseRetriever):
             )
 
         except Exception as error:
-            # fallback to individual queries
             logger.warning(f"Batched lookup failed, falling back to individual queries: {error}")
 
             for chunk_id in chunk_ids:
@@ -203,13 +206,7 @@ class ChunksRetriever(BaseRetriever):
                     result = normalize_graph_result(result, ["doc_id", "doc_name", "doc_type"])
 
                     if result and len(result) > 0:
-                        row = result[0]
-                        parent_map[chunk_id] = {
-                            "id": str(row.get("doc_id", "")),
-                            "name": row.get("doc_name", "Unknown"),
-                        }
-                        if "doc_type" in row and row["doc_type"]:
-                            parent_map[chunk_id]["type"] = row["doc_type"]
+                        parent_map[chunk_id] = self._build_parent_info(result[0])
 
                 except Exception as individual_error:
                     if self.strict_enrichment:
@@ -218,7 +215,22 @@ class ChunksRetriever(BaseRetriever):
                         ) from individual_error
                     logger.debug(f"Individual query failed for {chunk_id}: {individual_error}")
 
-        # modify chunk payloads
+        return parent_map
+
+    def _build_parent_info(self, row: dict) -> dict:
+        """Build parent document info dict from a graph query result row."""
+        parent_info = {
+            "id": str(row.get("doc_id", "")),
+            "name": row.get("doc_name", "Unknown"),
+        }
+        if "doc_type" in row and row["doc_type"]:
+            parent_info["type"] = row["doc_type"]
+        return parent_info
+
+    def _enrich_chunk_payloads(
+        self, found_chunks: list, chunk_id_map: dict, parent_map: dict
+    ) -> None:
+        """Attach parent document info to chunk payloads and log enrichment rate."""
         enriched_count = 0
         for chunk_id, chunk in chunk_id_map.items():
             if chunk_id in parent_map:
@@ -240,11 +252,8 @@ class ChunksRetriever(BaseRetriever):
         success_rate = (enriched_count / len(found_chunks) * 100) if found_chunks else 0
         logger.info(f"Enriched {enriched_count}/{len(found_chunks)} chunks ({success_rate:.1f}%)")
 
-        # vector and graph db out of sync
         if success_rate < 50 and len(found_chunks) > 0 and not self.strict_enrichment:
             logger.warning(
                 f"Low enrichment rate ({success_rate:.1f}%) suggests vector/graph DB inconsistency. "
                 "Consider running cognee.prune() and re-cognifying."
             )
-
-        return found_chunks
