@@ -13,12 +13,13 @@ from cognee.modules.search.types import SearchType
 from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.modules.users.methods import create_user, get_user
 from cognee.modules.users.permissions.methods import authorized_give_permission_on_datasets
-from cognee.modules.users.roles.methods import add_user_to_role, create_role
+from cognee.modules.users.roles.methods import add_user_to_role, create_role, get_roles_in_tenant
 from cognee.modules.users.tenants.methods import (
     add_user_to_tenant,
     create_tenant,
     select_tenant,
 )
+
 
 pytestmark = pytest.mark.asyncio
 
@@ -210,3 +211,50 @@ async def test_permissions_example_flow(permissions_example_env):
         assert isinstance(search_results, list) and len(search_results) == 1
         assert search_results[0]["dataset_name"] == "QUANTUM_COGNEE_LAB"
         assert search_results[0]["search_result"] == ["MOCK_ANSWER"]
+
+
+async def test_get_tenant_roles(permissions_example_env):
+    """Test retrieving all roles in a tenant."""
+    # Setup: Create users, tenant, and roles
+    user_1 = await create_user("user_1@example.com", "password123")
+    user_2 = await create_user("user_2@example.com", "password123")
+    user_3 = await create_user("user_3@example.com", "password123")
+
+    # Create a tenant as user_1
+    tenant_id = await create_tenant("TestTenant", user_1.id)
+    await select_tenant(user_id=user_1.id, tenant_id=tenant_id)
+
+    # Create roles in the tenant
+    role_1_id = await create_role(role_name="Admin", owner_id=user_1.id)
+    role_2_id = await create_role(role_name="Viewer", owner_id=user_1.id)
+    role_3_id = await create_role(role_name="Editor", owner_id=user_1.id)
+
+    # Add users to roles to test user count
+    await add_user_to_tenant(user_id=user_2.id, tenant_id=tenant_id, owner_id=user_1.id)
+    await add_user_to_tenant(user_id=user_3.id, tenant_id=tenant_id, owner_id=user_1.id)
+
+    await add_user_to_role(user_id=user_2.id, role_id=role_1_id, owner_id=user_1.id)
+    await add_user_to_role(user_id=user_3.id, role_id=role_1_id, owner_id=user_1.id)
+    await add_user_to_role(user_id=user_2.id, role_id=role_2_id, owner_id=user_1.id)
+
+    # Test: Get all roles in the tenant
+    roles = await get_roles_in_tenant(tenant_id)
+
+    # Assert: Verify roles are returned with correct details
+    assert len(roles) == 3, f"Expected 3 roles but got {len(roles)}"
+
+    # Verify role names
+    role_names = {role.name for role in roles}
+    assert role_names == {"Admin", "Viewer", "Editor"}
+
+    # Verify user counts
+    roles_by_name = {role.name: role for role in roles}
+    assert roles_by_name["Admin"].user_count == 2, "Admin role should have 2 users"
+    assert roles_by_name["Viewer"].user_count == 1, "Viewer role should have 1 user"
+    assert roles_by_name["Editor"].user_count == 0, "Editor role should have 0 users"
+
+    # verify role IDs are present and valid
+    assert all(role.id for role in roles), "All roles should have IDs"
+
+    # Test: verify all roles are from the correct tenant
+    assert all(str(role.id) in [str(role_1_id), str(role_2_id), str(role_3_id)] for role in roles)

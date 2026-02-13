@@ -108,6 +108,75 @@ def get_permissions_router() -> APIRouter:
             status_code=200, content={"message": "Role created for tenant", "role_id": str(role_id)}
         )
 
+    @permissions_router.get("/tenants/{tenant_id}/roles")
+    async def get_tenant_roles(
+        tenant_id: UUID, user: User = Depends(get_authenticated_user)
+    ):
+        """
+        Retrieve all roles available in a tenant.
+
+        This endpoint returns a list of all roles that exist within a specific tenant.
+        Only the tenant owner can access this endpoint. The response includes role
+        details such as ID, name, and the count of users assigned to each role.
+
+        ## Path Parameters
+        - **tenant_id** (UUID): The UUID of the tenant
+
+        ## Response
+        Returns a list of all roles in the tenant with their details and user counts.
+
+        Example response:
+        ```json
+        {
+            "roles": [
+                {
+                    "id": "12345678-1234-5678-1234-567812345678",
+                    "name": "Admin",
+                    "description": "Administrator role with full access",
+                    "user_count": 2
+                },
+                {
+                    "id": "87654321-4321-8765-4321-876543218765",
+                    "name": "Viewer",
+                    "description": "Read-only access",
+                    "user_count": 5
+                }
+            ]
+        }
+        ```
+
+        ## Error Codes
+        - **403 Forbidden**: User is not the tenant owner or lacks permission
+        - **404 Not Found**: Tenant doesn't exist
+        - **500 Internal Server Error**: Error retrieving roles
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"GET /v1/permissions/tenants/{str(tenant_id)}/roles",
+                "tenant_id": str(tenant_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.users.permissions.methods import has_user_management_permission
+        from cognee.modules.users.roles.methods import get_roles_in_tenant
+
+        # Check if user has permission to manage users for this tenant
+        await has_user_management_permission(user.id, tenant_id)
+
+        # Get all roles in the tenant
+        roles = await get_roles_in_tenant(tenant_id)
+
+        # Convert roles to dictionaries for JSON response
+        roles_data = [role.dict() for role in roles]
+
+        return JSONResponse(
+            status_code=200,
+            content={"roles": roles_data},
+        )
+
     @permissions_router.post("/users/{user_id}/roles")
     async def add_user_to_role(
         user_id: UUID, role_id: UUID, user: User = Depends(get_authenticated_user)
