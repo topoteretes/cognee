@@ -49,7 +49,7 @@ class DataPoint(BaseModel):
     belongs_to_set: Optional[List["DataPoint"]] = None
     source_pipeline: Optional[str] = None
     source_task: Optional[str] = None
-    source_note_set: Optional[str] = None
+    source_node_set: Optional[str] = None
     source_user: Optional[str] = None
 
     def __init__(self, **data):
