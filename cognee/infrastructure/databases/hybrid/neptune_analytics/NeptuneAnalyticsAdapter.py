@@ -435,7 +435,7 @@ class NeptuneAnalyticsAdapter(NeptuneGraphDB, VectorDBInterface):
         RETURN true
         LIMIT 1;
         """
-        query_result = await self._client.query(query)
+        query_result = self._client.query(query)
         return len(query_result) == 0
 
     @staticmethod
