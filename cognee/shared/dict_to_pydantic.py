@@ -1,116 +1,172 @@
-from pydantic import create_model
-from typing import Dict, Any, List, Optional, Union
-from cognee.shared.exceptions.exceptions import TypeMappingKeyError
-import typing
+import asyncio
+from pprint import pprint
+
+import cognee
+from cognee.shared.logging_utils import setup_logging, ERROR
+from cognee.api.v1.search import SearchType
+
+# Prerequisites:
+# 1. Copy `.env.template` and rename it to `.env`.
+# 2. Add your OpenAI API key to the `.env` file in the `LLM_API_KEY` field:
+#    LLM_API_KEY = "your_key_here"
 
 
-def parse_type_string(type_str: str) -> type:
+async def main():
+    # Create a clean slate for cognee -- reset data and system state
+    print("Resetting cognee data...")
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+    print("Data reset complete.\n")
+
+    # cognee knowledge graph will be created based on this text
+    text = """
+    Natural language processing (NLP) is an interdisciplinary
+    subfield of computer science and information retrieval.
     """
-    Convert a string type annotation to an actual Python type
-    """
-    type_str = type_str.lower()  # convert to lowercase for uniformity
 
-    # Handle List[...] types
-    if type_str.startswith("list[") and type_str.endswith("]"):
-        inner_type_str = type_str[5:-1]  # Extract what's inside List[]
-        inner_type = parse_type_string(inner_type_str)
-        return List[inner_type]  # type: ignore
+    print("Adding text to cognee:")
+    print(text.strip())
+    # Add the text, and make it available for cognify
+    await cognee.add(text)
+    print("Text added successfully.\n")
 
-    # Handle Dict[...] types
-    elif type_str.startswith("dict[") and type_str.endswith("]"):
-        inner_types = type_str[5:-1].split(", ")
-        key_type = parse_type_string(inner_types[0])
-        value_type = parse_type_string(inner_types[1])
-        return Dict[key_type, value_type]  # type: ignore
+    print("Running cognify to create knowledge graph...\n")
+    print("Cognify process steps:")
+    print("1. Classifying the document: Determining the type and category of the input text.")
+    print(
+        "2. Extracting text chunks: Breaking down the text into sentences or phrases for analysis."
+    )
+    print(
+        "3. Generating knowledge graph: Extracting entities and relationships to form a knowledge graph."
+    )
+    print("4. Summarizing text: Creating concise summaries of the content for quick insights.")
+    print("5. Adding data points: Storing the extracted chunks for processing.\n")
 
-    # Handle Optional[...] types
-    elif type_str.startswith("optional[") and type_str.endswith("]"):
-        inner_type = parse_type_string(type_str[9:-1])
-        return Optional[inner_type]  # type: ignore
+    from pydantic import BaseModel
+    from pydantic._internal._core_utils import is_core_schema, CoreSchemaOrField
+    from pydantic.json_schema import GenerateJsonSchema
+    class GenerateJsonSchemaWithoutDefaultTitles(GenerateJsonSchema):
+        def field_title_should_be_set(self, schema: CoreSchemaOrField) -> bool:
+            return_value = super().field_title_should_be_set(schema)
+            if return_value and is_core_schema(schema):
+                return False
+            return return_value
 
-    # Handle Union[...] types
-    elif type_str.startswith("union[") and type_str.endswith("]"):
-        inner_types = [parse_type_string(t.strip()) for t in type_str[6:-1].split(", ")]
-        return typing.Union[tuple(inner_types)]  # type: ignore
+    import os
+    import asyncio
+    from uuid import UUID
+    from pydantic import Field
+    from typing import List, Optional
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.responses import JSONResponse
+    from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect
+    from starlette.status import WS_1000_NORMAL_CLOSURE, WS_1008_POLICY_VIOLATION
+    from datamodel_code_generator import InputFileType, generate, GenerateConfig, DataModelType
 
-    # Handle primitive types
-    type_mapping = {
-        "str": str,
-        "int": int,
-        "float": float,
-        "bool": bool,
-        "list": list,
-        "dict": dict,
-        "any": Any,
-        "none": type(None),
-    }
+    from cognee.api.DTO import InDTO
+    from cognee.modules.pipelines.methods import get_pipeline_run
+    from cognee.modules.users.models import User
+    from cognee.modules.users.methods import get_authenticated_user
+    from cognee.modules.users.get_user_db import get_user_db_context
+    from cognee.modules.graph.methods import get_formatted_graph_data
+    from cognee.modules.users.get_user_manager import get_user_manager_context
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.users.authentication.default.default_jwt_strategy import DefaultJWTStrategy
+    from cognee.shared.data_models import KnowledgeGraph
+    from cognee.modules.pipelines.models.PipelineRunInfo import (
+        PipelineRunCompleted,
+        PipelineRunInfo,
+        PipelineRunErrored,
+    )
+    from cognee.modules.pipelines.queues.pipeline_run_info_queues import (
+        get_from_queue,
+        initialize_queue,
+        remove_queue,
+    )
+    from cognee.shared.logging_utils import get_logger
+    from cognee.shared.utils import send_telemetry
+    from cognee.shared.usage_logger import log_usage
+    from cognee import __version__ as cognee_version
+    from cognee.infrastructure.engine import DataPoint
+    # Define a custom graph model for programming languages.
+    class FieldType(BaseModel):
+        name: str = "Field"
+        metadata: dict = {"index_fields": ["name"]}
 
-    try:
-        return type_mapping[type_str]
-    except KeyError:
-        raise TypeMappingKeyError(
-            f"Could not map provided type: '{type_str}' to a supported type in Python."
-        )
+    class Field(BaseModel):
+        name: str
+        is_type: FieldType
+        metadata: dict = {"index_fields": ["name"]}
 
+    class ProgrammingLanguageType(BaseModel):
+        name: str = "Programming Language"
+        metadata: dict = {"index_fields": ["name"]}
 
-def dict_to_pydantic(schema_dict: Dict[str, Any], model_name: str = "DynamicModel"):
-    """
-    Convert a schema dictionary with string type annotations to a Pydantic model
-    Handles nested dictionaries and lists
-    """
-    fields = {}
+    class ProgrammingLanguage(BaseModel):
+        name: str
+        used_in: list[Field] = []
+        is_type: ProgrammingLanguageType
+        metadata: dict = {"index_fields": ["name"]}
 
-    for key, value in schema_dict.items():
-        if isinstance(value, dict):
-            # Check if it's a type annotation string or a nested schema
-            if all(isinstance(v, str) for v in value.values()):
-                # This is a simple type annotation dictionary
-                pydantic_model = dict_to_pydantic(value, key)
-                fields[key] = (pydantic_model, ...)
-            else:
-                # This is a nested schema - create a nested model
-                nested_model_name = f"{model_name}_{key.capitalize()}"
-                nested_model = dict_to_pydantic(value, nested_model_name)
-                fields[key] = (nested_model, ...)
-        elif isinstance(value, str):
-            # Simple field with type annotation
-            field_type = parse_type_string(value)
-            fields[key] = (field_type, ...)
-        else:
-            raise TypeMappingKeyError(
-                f"Value for key '{key}' must be a dictionary of type annotations or a nested schema."
-            )
+    graph_model = ProgrammingLanguage.model_json_schema(schema_generator=GenerateJsonSchemaWithoutDefaultTitles)
+    # If a custom graph model is provided, convert it from dict to a Pydantic model class
+    config = GenerateConfig(
+        input_file_type=InputFileType.JsonSchema,
+        input_filename="example.json",
+        output_model_type=DataModelType.PydanticV2BaseModel,
+        additional_imports=["cognee.infrastructure.engine.DataPoint", "typing.Any"],
+        base_class="cognee.infrastructure.engine.DataPoint",
+        type_overrides={"DataPoint": "cognee.infrastructure.engine.DataPoint"}
+    )
+    # Override title to ensure a valid and secure Python class name for the generated model
+    graph_model["title"] = "DynamicGraphModel"
+    result = generate(graph_model, config=config)
+    import re
+    result = re.sub(
+        r'class DataPointModel\(DataPoint\):.*?(?=\nclass|\Z)',
+        '',
+        result,
+        flags=re.DOTALL
+    )
+    # Replace all remaining references
+    result = result.replace('DataPointModel', 'DataPoint')
+    from typing import Any
+    namespace = {"Any": Any}
+    exec(result, namespace)
+    graph_model = namespace[graph_model["title"]]
+    # Rebuild the base class first
+    namespace["DataPoint"].model_rebuild()  # Resolves DataPoint's self-reference
+    graph_model.model_rebuild(_types_namespace=namespace)
 
-    # Create the model class
-    DynamicModel = create_model(model_name, **fields)
+    # Use LLMs and cognee to create knowledge graph
+    await cognee.cognify(graph_model=graph_model)
+    print("Cognify process complete.\n")
 
-    return DynamicModel
+    query_text = "Tell me about NLP"
+    print(f"Searching cognee for insights with query: '{query_text}'")
+    # Query cognee for insights on the added text
+    search_results = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION, query_text=query_text
+    )
+
+    print("Search results:")
+    # Display results
+    for result_text in search_results:
+        pprint(result_text)
+
+    # Generate interactive graph visualization
+    print("\nGenerating graph visualization...")
+    from cognee.api.v1.visualize import visualize_graph
+
+    await visualize_graph()
+    print("Visualization saved to ~/graph_visualization.html")
 
 
 if __name__ == "__main__":
-    # Example usage
-    input_data = {
-        "nodes": {"id": "str", "name": "str", "type": "str", "description": "str"},
-        "edges": {"source_node_id": "str", "target_node_id": "str", "relationship_name": "str"},
-    }
-
-    # Create the dynamic model
-    DynamicSchema = dict_to_pydantic(input_data, "KnowledgeGraphModel")
-
-    # Test the dynamically generated model
-    instance = DynamicSchema(
-        nodes={
-            "id": "node1",
-            "name": "Test Node",
-            "type": "test",
-            "description": "This is a test node",
-        },
-        edges={
-            "source_node_id": "node1",
-            "target_node_id": "node2",
-            "relationship_name": "connects_to",
-        },
-    )
-
-    print(instance.model_dump())
-    print(instance.model_json_schema())
+    logger = setup_logging(log_level=ERROR)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(main())
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
