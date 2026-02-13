@@ -5,10 +5,10 @@ import cognee
 from cognee.shared.logging_utils import setup_logging, ERROR
 from cognee.api.v1.search import SearchType
 
-# Prerequisites:
-# 1. Copy `.env.template` and rename it to `.env`.
-# 2. Add your OpenAI API key to the `.env` file in the `LLM_API_KEY` field:
-#    LLM_API_KEY = "your_key_here"
+import typing
+from typing import Any
+
+# async def json_schema_to_pydantic_model(json_schema: dict) -> Any:
 
 
 async def main():
@@ -22,6 +22,7 @@ async def main():
     text = """
     Natural language processing (NLP) is an interdisciplinary
     subfield of computer science and information retrieval.
+    Python is the best programming language in Data science.
     """
 
     print("Adding text to cognee:")
@@ -45,6 +46,7 @@ async def main():
     from pydantic import BaseModel
     from pydantic._internal._core_utils import is_core_schema, CoreSchemaOrField
     from pydantic.json_schema import GenerateJsonSchema
+
     class GenerateJsonSchemaWithoutDefaultTitles(GenerateJsonSchema):
         def field_title_should_be_set(self, schema: CoreSchemaOrField) -> bool:
             return_value = super().field_title_should_be_set(schema)
@@ -53,6 +55,7 @@ async def main():
             return return_value
 
     import os
+    import typing
     import asyncio
     from uuid import UUID
     from pydantic import Field
@@ -88,6 +91,7 @@ async def main():
     from cognee.shared.usage_logger import log_usage
     from cognee import __version__ as cognee_version
     from cognee.infrastructure.engine import DataPoint
+
     # Define a custom graph model for programming languages.
     class FieldType(BaseModel):
         name: str = "Field"
@@ -108,31 +112,41 @@ async def main():
         is_type: ProgrammingLanguageType
         metadata: dict = {"index_fields": ["name"]}
 
-    graph_model = ProgrammingLanguage.model_json_schema(schema_generator=GenerateJsonSchemaWithoutDefaultTitles)
+    graph_model = ProgrammingLanguage.model_json_schema(
+        schema_generator=GenerateJsonSchemaWithoutDefaultTitles
+    )
     # If a custom graph model is provided, convert it from dict to a Pydantic model class
     config = GenerateConfig(
         input_file_type=InputFileType.JsonSchema,
         input_filename="example.json",
         output_model_type=DataModelType.PydanticV2BaseModel,
-        additional_imports=["cognee.infrastructure.engine.DataPoint", "typing.Any"],
+        additional_imports=["cognee.infrastructure.engine.DataPoint", "typing.Any", "typing"],
         base_class="cognee.infrastructure.engine.DataPoint",
-        type_overrides={"DataPoint": "cognee.infrastructure.engine.DataPoint"}
+        type_overrides={"DataPoint": "cognee.infrastructure.engine.DataPoint"},
     )
     # Override title to ensure a valid and secure Python class name for the generated model
     graph_model["title"] = "DynamicGraphModel"
     result = generate(graph_model, config=config)
     import re
+
     result = re.sub(
-        r'class DataPointModel\(DataPoint\):.*?(?=\nclass|\Z)',
-        '',
-        result,
-        flags=re.DOTALL
+        r"class DataPointModel\(DataPoint\):.*?(?=\nclass|\Z)", "", result, flags=re.DOTALL
     )
     # Replace all remaining references
-    result = result.replace('DataPointModel', 'DataPoint')
+    result = result.replace("DataPointModel", "DataPoint")
     from typing import Any
-    namespace = {"Any": Any}
-    exec(result, namespace)
+
+    import sys
+    import types
+    module_name = "cognee.shared._generated_graph_models"
+    mod = types.ModuleType(module_name)
+    sys.modules[module_name] = mod
+
+    exec(result, mod.__dict__)
+    namespace = mod.__dict__
+
+    # namespace = {"Any": Any, "typing": typing}
+    # exec(result, namespace)
     graph_model = namespace[graph_model["title"]]
     # Rebuild the base class first
     namespace["DataPoint"].model_rebuild()  # Resolves DataPoint's self-reference
