@@ -1,23 +1,24 @@
 import asyncio
 import json
-from typing import Optional, List, Type, Any
-from pydantic import BaseModel
-from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.shared.logging_utils import get_logger
+from typing import Optional, List, Type, Any, Union
 
+from pydantic import BaseModel
+
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
+from cognee.modules.retrieval.utils.query_state import QueryState
+from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
+from cognee.shared.logging_utils import get_logger
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.modules.retrieval.utils.completion import (
-    generate_completion,
+    batch_llm_completion,
+    generate_completion_batch,
     summarize_text,
 )
 from cognee.modules.retrieval.utils.session_cache import (
     save_conversation_history,
     get_conversation_history,
 )
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
-from cognee.context_global_variables import session_user
-from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.exceptions.exceptions import CogneeValidationError
 
 logger = get_logger()
@@ -28,7 +29,6 @@ def _as_answer_text(completion: Any) -> str:
     if isinstance(completion, str):
         return completion
     if isinstance(completion, BaseModel):
-        # Add notice that this is a structured response
         json_str = completion.model_dump_json(indent=2)
         return f"[Structured Response]\n{json_str}"
     try:
@@ -65,7 +65,6 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         top_k: Optional[int] = 5,
         node_type: Optional[Type] = None,
         node_name: Optional[List[str]] = None,
-        save_interaction: bool = False,
         wide_search_top_k: Optional[int] = 100,
         triplet_distance_penalty: Optional[float] = 3.5,
         max_iter: int = 4,
@@ -79,7 +78,6 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
-            save_interaction=save_interaction,
             wide_search_top_k=wide_search_top_k,
             triplet_distance_penalty=triplet_distance_penalty,
             session_id=session_id,
@@ -92,7 +90,9 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         self.completion = []
         self.max_iter = max_iter
 
-    async def get_retrieved_objects(self, query: str) -> List[Edge]:
+    async def get_retrieved_objects(
+        self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
+    ) -> Union[List[Edge], List[List[Edge]]]:
         """
         Run chain-of-thought completion with optional structured output.
 
@@ -104,57 +104,48 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         --------
             - List of retrieved edges
         """
-        # Check if session saving is enabled
-        cache_config = CacheConfig()
-        user = session_user.get()
-        user_id = getattr(user, "id", None)
-        session_save = user_id and cache_config.caching
+        session_save = self._use_session_cache()
+        validate_retriever_input(query, query_batch, session_save)
 
-        # Load conversation history if enabled
         conversation_history = ""
         if session_save:
             conversation_history = await get_conversation_history(session_id=self.session_id)
 
+        # Normalize single query to batch for uniform processing
+        effective_batch = [query] if query else query_batch
+
         completion, context_text, triplets = await self._run_cot_completion(
-            query=query,
-            conversation_history=conversation_history,
+            effective_batch, conversation_history
         )
 
-        # Note: completion info is stored to reduce the need to call LLM again in get_completion_from_context
+        # Store completion to avoid re-calling LLM in get_completion_from_context
         self.completion = completion
 
-        if self.save_interaction and context_text and triplets and completion:
-            await self.save_qa(
-                question=query, answer=str(completion), context=context_text, triplets=triplets
-            )
-
-        # Save to session cache if enabled
         if session_save:
-            context_summary = await summarize_text(context_text)
+            context_summary = await summarize_text(context_text[0])
             await save_conversation_history(
                 query=query,
                 context_summary=context_summary,
-                answer=str(completion),
+                answer=str(completion[0]),
                 session_id=self.session_id,
             )
 
+        if query:
+            return triplets[0]
         return triplets
 
+    # -- CoT orchestrator --
+
     async def _run_cot_completion(
-        self,
-        query: str,
-        conversation_history: str = "",
-    ) -> tuple[Any, str, List[Edge]]:
+        self, query_batch: List[str], conversation_history: str = ""
+    ) -> tuple[List[Any], List[str], List[List[Edge]]]:
         """
         Run chain-of-thought completion with optional structured output.
 
         Parameters:
         -----------
-            - query: User query
-            - context: Optional pre-fetched context edges
+            - query_batch: Batch of user queries
             - conversation_history: Optional conversation history string
-            - max_iter: Maximum CoT iterations
-            - response_model: Type for structured output (str for plain text)
 
         Returns:
         --------
@@ -162,67 +153,119 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
             - context_text: The resolved context text
             - triplets: The list of triplets used
         """
-        followup_question = ""
-        triplets = []
-        completion = ""
+        states = {q: QueryState() for q in query_batch}
+        await self._fetch_initial_triplets_and_context(states)
+        await self._generate_completions(states, conversation_history)
 
-        for round_idx in range(self.max_iter + 1):
-            if round_idx == 0:
-                triplets = await self.get_triplets(query)
-                context_text = await self.resolve_edges_to_text(triplets)
-            else:
-                triplets += await self.get_triplets(followup_question)
-                context_text = await self.resolve_edges_to_text(list(set(triplets)))
+        for _ in range(self.max_iter):
+            followup_queries = await self._run_cot_round(states)
+            await self._merge_followup_triplets(states, followup_queries)
+            await self._generate_completions(states, conversation_history)
 
-            completion = await generate_completion(
-                query=query,
-                context=context_text,
-                user_prompt_path=self.user_prompt_path,
-                system_prompt_path=self.system_prompt_path,
-                system_prompt=self.system_prompt,
-                conversation_history=conversation_history if conversation_history else None,
-                response_model=self.response_model,
+        return self._collect_results(states, query_batch)
+
+    # -- Helper methods called by the orchestrator --
+
+    async def _fetch_initial_triplets_and_context(self, states: dict):
+        """Fetch triplets and resolve context text for all queries."""
+        queries = list(states.keys())
+        triplets_batch = await self.get_triplets(query_batch=queries)
+        context_batch = await asyncio.gather(
+            *[self.resolve_edges_to_text(t) for t in triplets_batch]
+        )
+        for q, triplets, context in zip(queries, triplets_batch, context_batch):
+            states[q].triplets = triplets
+            states[q].context_text = context
+
+    async def _generate_completions(self, states: dict, conversation_history: str):
+        """Generate completions for all queries in parallel."""
+        queries = list(states.keys())
+        contexts = [states[q].context_text for q in queries]
+        completions = await generate_completion_batch(
+            query_batch=queries,
+            context=contexts,
+            user_prompt_path=self.user_prompt_path,
+            system_prompt_path=self.system_prompt_path,
+            system_prompt=self.system_prompt,
+            response_model=self.response_model,
+            conversation_history=conversation_history if conversation_history else None,
+        )
+        for q, comp in zip(queries, completions):
+            states[q].completion = comp
+        logger.info(f"Chain-of-thought: generated completions for {len(queries)} queries")
+
+    async def _run_cot_round(self, states: dict) -> List[str]:
+        """Run one CoT round: validate answers, generate follow-up questions."""
+        validation_prompts, validation_system = self._build_validation_prompts(states)
+        reasoning_batch = await batch_llm_completion(validation_prompts, validation_system)
+
+        followup_prompts, followup_system = self._build_followup_prompts(states, reasoning_batch)
+        followup_questions = await batch_llm_completion(followup_prompts, followup_system)
+
+        logger.info(f"Chain-of-thought: follow-up questions: {followup_questions}")
+        return followup_questions
+
+    # -- Prompt builders --
+
+    def _build_cot_prompts(self, template_path, states, extras):
+        """Build prompts with common query+answer fields and per-query extras."""
+        return [
+            render_prompt(
+                filename=template_path,
+                context={"query": q, "answer": _as_answer_text(states[q].completion), **extra},
             )
+            for q, extra in zip(states.keys(), extras)
+        ]
 
-            logger.info(f"Chain-of-thought: round {round_idx} - answer: {completion}")
+    def _build_validation_prompts(self, states):
+        """Build validation user prompts and load system prompt."""
+        system_prompt = read_query_prompt(prompt_file_name=self.validation_system_prompt_path)
+        user_prompts = self._build_cot_prompts(
+            self.validation_user_prompt_path,
+            states,
+            [{"context": s.context_text} for s in states.values()],
+        )
+        return user_prompts, system_prompt
 
-            if round_idx < self.max_iter:
-                answer_text = _as_answer_text(completion)
-                valid_args = {"query": query, "answer": answer_text, "context": context_text}
-                valid_user_prompt = render_prompt(
-                    filename=self.validation_user_prompt_path, context=valid_args
-                )
-                valid_system_prompt = read_query_prompt(
-                    prompt_file_name=self.validation_system_prompt_path
-                )
+    def _build_followup_prompts(self, states, reasoning_batch):
+        """Build followup user prompts and load system prompt."""
+        system_prompt = read_query_prompt(prompt_file_name=self.followup_system_prompt_path)
+        user_prompts = self._build_cot_prompts(
+            self.followup_user_prompt_path,
+            states,
+            [{"reasoning": r} for r in reasoning_batch],
+        )
+        return user_prompts, system_prompt
 
-                reasoning = await LLMGateway.acreate_structured_output(
-                    text_input=valid_user_prompt,
-                    system_prompt=valid_system_prompt,
-                    response_model=str,
-                )
-                followup_args = {"query": query, "answer": answer_text, "reasoning": reasoning}
-                followup_prompt = render_prompt(
-                    filename=self.followup_user_prompt_path, context=followup_args
-                )
-                followup_system = read_query_prompt(
-                    prompt_file_name=self.followup_system_prompt_path
-                )
+    async def _merge_followup_triplets(self, states: dict, followup_questions: List[str]):
+        """Fetch triplets for follow-up questions and merge with existing state."""
+        queries = list(states.keys())
+        new_triplets_batch = await self.get_triplets(query_batch=followup_questions)
 
-                followup_question = await LLMGateway.acreate_structured_output(
-                    text_input=followup_prompt, system_prompt=followup_system, response_model=str
-                )
-                logger.info(
-                    f"Chain-of-thought: round {round_idx} - follow-up question: {followup_question}"
-                )
+        for q, new_triplets in zip(queries, new_triplets_batch):
+            states[q].merge_triplets(new_triplets)
 
-        return completion, context_text, triplets
+        context_batch = await asyncio.gather(
+            *[self.resolve_edges_to_text(states[q].triplets) for q in queries]
+        )
+        for q, context in zip(queries, context_batch):
+            states[q].context_text = context
+
+    def _collect_results(
+        self, states: dict, query_batch: List[str]
+    ) -> tuple[List[Any], List[str], List[List[Edge]]]:
+        """Extract final completions, context texts, and triplets from states."""
+        completions = [states[q].completion for q in query_batch]
+        contexts = [states[q].context_text for q in query_batch]
+        triplets = [states[q].triplets for q in query_batch]
+        return completions, contexts, triplets
 
     async def get_completion_from_context(
         self,
-        query: str,
-        retrieved_objects: List[Edge],
-        context: str,
+        query: Optional[str] = None,
+        query_batch: Optional[List[str]] = None,
+        retrieved_objects: List[Edge] | List[List[Edge]] = None,
+        context: str | List[str] = None,
     ) -> List[Any]:
         """
         Generate completion responses based on a user query and contextual information.
@@ -237,6 +280,7 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
         -----------
 
             - query (str): The user's query to be processed and answered.
+            - query_batch (list[str]): The list of queries to be processed and answered.
             - context (Optional[Any]): Optional context that may assist in answering the query.
               If not provided, it will be fetched based on the query. (default None)
             - session_id (Optional[str]): Optional session identifier for caching. If None,
@@ -250,7 +294,8 @@ class GraphCompletionCotRetriever(GraphCompletionRetriever):
 
             - List[str]: A list containing the generated answer to the user's query.
         """
-        if not retrieved_objects:
+        if not retrieved_objects or (
+            query_batch and all(len(triplet) == 0 for triplet in retrieved_objects)
+        ):
             raise CogneeValidationError("No context retrieved to generate completion.")
-        completion = self.completion
-        return [completion]
+        return self.completion

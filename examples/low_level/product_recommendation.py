@@ -1,13 +1,19 @@
 import os
 import json
 import asyncio
+from typing import Dict, List
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 from neo4j import exceptions
+from pydantic import BaseModel
 
 from cognee import prune
 
 # from cognee import visualize_graph
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.low_level import setup, DataPoint
+from cognee.modules.data.methods import create_dataset
+from cognee.modules.users.methods import get_default_user
+from cognee.modules.users.models import User
 from cognee.pipelines import run_tasks, Task
 from cognee.tasks.storage import add_data_points
 
@@ -20,9 +26,8 @@ products_aggregator_node = Products()
 
 
 class Product(DataPoint):
-    id: str
     name: str
-    type: str
+    type: str = "Product"
     price: float
     colors: list[str]
     is_type: Products = products_aggregator_node
@@ -36,7 +41,6 @@ preferences_aggregator_node = Preferences()
 
 
 class Preference(DataPoint):
-    id: str
     name: str
     value: str
     is_type: Preferences = preferences_aggregator_node
@@ -50,7 +54,6 @@ customers_aggregator_node = Customers()
 
 
 class Customer(DataPoint):
-    id: str
     name: str
     has_preference: list[Preference]
     purchased: list[Product]
@@ -58,17 +61,14 @@ class Customer(DataPoint):
     is_type: Customers = customers_aggregator_node
 
 
-def ingest_files():
-    customers_file_path = os.path.join(os.path.dirname(__file__), "customers.json")
-    customers = json.loads(open(customers_file_path, "r").read())
-
+def ingest_customers(data):
     customers_data_points = {}
     products_data_points = {}
     preferences_data_points = {}
 
-    for customer in customers:
+    for customer in data[0].customers:
         new_customer = Customer(
-            id=customer["id"],
+            id=uuid5(NAMESPACE_OID, customer["id"]),
             name=customer["name"],
             liked=[],
             purchased=[],
@@ -79,7 +79,7 @@ def ingest_files():
         for product in customer["products"]:
             if product["id"] not in products_data_points:
                 products_data_points[product["id"]] = Product(
-                    id=product["id"],
+                    id=uuid5(NAMESPACE_OID, product["id"]),
                     type=product["type"],
                     name=product["name"],
                     price=product["price"],
@@ -96,7 +96,7 @@ def ingest_files():
         for preference in customer["preferences"]:
             if preference["id"] not in preferences_data_points:
                 preferences_data_points[preference["id"]] = Preference(
-                    id=preference["id"],
+                    id=uuid5(NAMESPACE_OID, preference["id"]),
                     name=preference["name"],
                     value=preference["value"],
                 )
@@ -104,7 +104,7 @@ def ingest_files():
             new_preference = preferences_data_points[preference["id"]]
             new_customer.has_preference.append(new_preference)
 
-    return customers_data_points.values()
+    return list(customers_data_points.values())
 
 
 async def main():
@@ -113,7 +113,28 @@ async def main():
 
     await setup()
 
-    pipeline = run_tasks([Task(ingest_files), Task(add_data_points)])
+    # Get user and dataset
+    user: User = await get_default_user()  # type: ignore
+    main_dataset = await create_dataset("demo_dataset", user)
+
+    customers_file_path = os.path.join(os.path.dirname(__file__), "customers.json")
+    customers = json.loads(open(customers_file_path, "r").read())
+
+    class Data(BaseModel):
+        id: UUID
+        customers: List[Dict]
+
+    data = Data(
+        id=uuid4(),
+        customers=customers,
+    )
+
+    pipeline = run_tasks(
+        [Task(ingest_customers), Task(add_data_points)],
+        dataset_id=main_dataset.id,
+        data=[data],
+        user=user,
+    )
 
     async for status in pipeline:
         print(status)

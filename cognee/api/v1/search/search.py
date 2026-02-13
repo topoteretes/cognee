@@ -1,7 +1,6 @@
 from uuid import UUID
 from typing import Union, Optional, List, Type
 
-from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.users.models import User
 from cognee.modules.search.types import SearchResult, SearchType
@@ -29,8 +28,6 @@ async def search(
     top_k: int = 10,
     node_type: Optional[Type] = NodeSet,
     node_name: Optional[List[str]] = None,
-    save_interaction: bool = False,
-    last_k: Optional[int] = 1,
     only_context: bool = False,
     session_id: Optional[str] = None,
     wide_search_top_k: Optional[int] = 100,
@@ -123,8 +120,6 @@ async def search(
 
         node_name: Filter results to specific named entities (for targeted search).
 
-        save_interaction: Save interaction (query, context, answer connected to triplet endpoints) results into the graph or not
-
         session_id: Optional session identifier for caching Q&A interactions. Defaults to 'default_session' if None.
 
         verbose: If True, returns detailed result information including graph representation (when possible).
@@ -203,8 +198,6 @@ async def search(
     if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
         datasets = await get_authorized_existing_datasets(datasets, "read", user)
         datasets = [dataset.id for dataset in datasets]
-        if not datasets:
-            raise DatasetNotFoundError(message="No datasets found.")
 
     filtered_search_results = await search_function(
         query_text=query_text,
@@ -216,8 +209,6 @@ async def search(
         top_k=top_k,
         node_type=node_type,
         node_name=node_name,
-        save_interaction=save_interaction,
-        last_k=last_k,
         only_context=only_context,
         session_id=session_id,
         wide_search_top_k=wide_search_top_k,
