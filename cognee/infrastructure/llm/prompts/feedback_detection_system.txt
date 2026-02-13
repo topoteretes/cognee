@@ -8,8 +8,15 @@ Set feedback_detected to true when the message is primarily or solely:
 
 Set feedback_detected to false when the message is clearly a new question or request for information, even if it references the previous answer (e.g. "can you elaborate on that?" or "what about X?").
 
-When feedback_detected is true you MUST always provide both feedback_text and feedback_score. feedback_text must NEVER be empty:
-- feedback_text: Extract or briefly summarize the feedback in a short phrase (e.g. "User said the answer was wrong", "Thanks, helpful"). If the message is only a score or very short (e.g. "5/5"), still write a brief description (e.g. "User gave a positive rating", "User expressed satisfaction").
-- feedback_score: Map to a scale of 1-5 (1 = negative, 5 = positive). E.g. "5/5" -> 5, "that was wrong" -> 1, "thanks" -> 5. Use 3 (neutral) if no clear score can be inferred.
+When feedback_detected is true you MUST always provide both feedback_text and feedback_score. feedback_text must NEVER be empty.
+
+feedback_text: Write a short description (one or two sentences) that includes what the user said and why it counts as feedback. Incorporate the user's words either by quoting them or by summarizing. Examples:
+- "User said 'that was wrong — the date was 2020': correction of the previous answer."
+- "User expressed thanks: 'that was helpful, exactly what I needed.' Positive feedback."
+- "User gave a rating (5/5): positive feedback on the previous response."
+- "User said 'nope' or 'correct': short reactive feedback on the previous answer."
+So the reader understands both what the user sent and why it was detected as feedback. Keep it concise (e.g. under 300 characters).
+
+feedback_score: Map to a scale of 1-5 (1 = negative, 5 = positive). E.g. "5/5" -> 5, "that was wrong" -> 1, "thanks" -> 5. Use 3 (neutral) if no clear score can be inferred.
 
 Respond with the exact JSON structure: feedback_detected (boolean), feedback_text (string, required when feedback_detected is true), feedback_score (number 1-5, required when feedback_detected is true).
