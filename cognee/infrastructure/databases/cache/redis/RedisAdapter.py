@@ -78,6 +78,84 @@ class RedisAdapter(CacheDBInterface):
                 f"Cannot connect to Redis at {self.host}:{self.port}: {str(e)}"
             ) from e
 
+    @staticmethod
+    def _session_key(user_id: str, session_id: str) -> str:
+        return f"agent_sessions:{user_id}:{session_id}"
+
+    @staticmethod
+    def _build_qa_entry_dump(
+        question: str,
+        context: str,
+        answer: str,
+        qa_id: str | None = None,
+        feedback_text: str | None = None,
+        feedback_score: int | None = None,
+    ) -> dict:
+        entry = SessionQAEntry(
+            time=datetime.utcnow().isoformat(),
+            question=question,
+            context=context,
+            answer=answer,
+            qa_id=qa_id or str(uuid.uuid4()),
+            feedback_text=feedback_text,
+            feedback_score=feedback_score,
+        )
+        return entry.model_dump()
+
+    async def _load_entries(self, session_key: str) -> list:
+        raw = await self.async_redis.lrange(session_key, 0, -1)
+        return [json.loads(e) for e in raw] if raw else []
+
+    async def _write_entry_at(self, session_key: str, index: int, entry_dump: dict) -> None:
+        await self.async_redis.lset(session_key, index, json.dumps(entry_dump))
+
+    async def _rewrite_entries(self, session_key: str, entries: list) -> None:
+        await self.async_redis.delete(session_key)
+        for entry in entries:
+            await self.async_redis.rpush(session_key, json.dumps(entry))
+
+    @staticmethod
+    def _merge_entry_update(
+        entry: dict,
+        question: str | None = None,
+        context: str | None = None,
+        answer: str | None = None,
+        feedback_text: str | None = None,
+        feedback_score: int | None = None,
+    ) -> dict:
+        merged = {**entry}
+        if question is not None:
+            merged["question"] = question
+        if context is not None:
+            merged["context"] = context
+        if answer is not None:
+            merged["answer"] = answer
+        if feedback_text is not None:
+            merged["feedback_text"] = feedback_text
+        if feedback_score is not None:
+            merged["feedback_score"] = feedback_score
+        return merged
+
+    @staticmethod
+    def _merge_entry_clear_feedback(entry: dict) -> dict:
+        return {**entry, "feedback_text": None, "feedback_score": None}
+
+    @staticmethod
+    def _validate_entry_dict(entry_dict: dict) -> dict:
+        try:
+            return SessionQAEntry.model_validate(entry_dict).model_dump()
+        except ValidationError as e:
+            raise SessionQAEntryValidationError(
+                message=f"Session QA entry validation failed: {e!s}"
+            ) from e
+
+    @staticmethod
+    def _find_index_by_qa_id(entries: list, qa_id: str) -> int | None:
+        for i, entry in enumerate(entries):
+            if entry.get("qa_id") == qa_id:
+                return i
+        return None
+
     def acquire_lock(self):
         """
         Acquire the Redis lock manually. Raises if acquisition fails. (Sync because of Kuzu)
@@ -132,19 +210,11 @@ class RedisAdapter(CacheDBInterface):
         Same QA fields as update_qa_entry. Creates the session if it doesn't exist.
         """
         try:
-            session_key = f"agent_sessions:{user_id}:{session_id}"
-
-            entry = SessionQAEntry(
-                time=datetime.utcnow().isoformat(),
-                question=question,
-                context=context,
-                answer=answer,
-                qa_id=qa_id or str(uuid.uuid4()),
-                feedback_text=feedback_text,
-                feedback_score=feedback_score,
+            session_key = self._session_key(user_id, session_id)
+            qa_entry = self._build_qa_entry_dump(
+                question, context, answer, qa_id, feedback_text, feedback_score
             )
-            await self.async_redis.rpush(session_key, json.dumps(entry.model_dump()))
-
+            await self.async_redis.rpush(session_key, json.dumps(qa_entry))
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while adding Q&A: {str(e)}"
             logger.error(error_msg)
@@ -158,21 +228,19 @@ class RedisAdapter(CacheDBInterface):
         """
         Retrieve the most recent Q/A/context triplet(s) for the given session.
         """
-        session_key = f"agent_sessions:{user_id}:{session_id}"
+        session_key = self._session_key(user_id, session_id)
         if last_n == 1:
             data = await self.async_redis.lindex(session_key, -1)
             return [json.loads(data)] if data else None
-        else:
-            data = await self.async_redis.lrange(session_key, -last_n, -1)
-            return [json.loads(d) for d in data] if data else []
+        data = await self.async_redis.lrange(session_key, -last_n, -1)
+        return [json.loads(d) for d in data] if data else []
 
     async def get_all_qa_entries(self, user_id: str, session_id: str):
         """
         Retrieve all Q/A/context triplets for the given session.
         """
-        session_key = f"agent_sessions:{user_id}:{session_id}"
-        entries = await self.async_redis.lrange(session_key, 0, -1)
-        return [json.loads(e) for e in entries]
+        session_key = self._session_key(user_id, session_id)
+        return await self._load_entries(session_key)
 
     async def update_qa_entry(
         self,
@@ -191,35 +259,17 @@ class RedisAdapter(CacheDBInterface):
         Returns True if updated, False if qa_id not found.
         """
         try:
-            session_key = f"agent_sessions:{user_id}:{session_id}"
-            entries_raw = await self.async_redis.lrange(session_key, 0, -1)
-            if not entries_raw:
+            session_key = self._session_key(user_id, session_id)
+            entries = await self._load_entries(session_key)
+            idx = self._find_index_by_qa_id(entries, qa_id)
+            if idx is None:
                 return False
-
-            entries = [json.loads(e) for e in entries_raw]
-            for i, entry in enumerate(entries):
-                if entry.get("qa_id") == qa_id:
-                    merged = {**entry}
-                    if question is not None:
-                        merged["question"] = question
-                    if context is not None:
-                        merged["context"] = context
-                    if answer is not None:
-                        merged["answer"] = answer
-                    if feedback_text is not None:
-                        merged["feedback_text"] = feedback_text
-                    if feedback_score is not None:
-                        merged["feedback_score"] = feedback_score
-                    try:
-                        validated = SessionQAEntry.model_validate(merged)
-                    except ValidationError as e:
-                        raise SessionQAEntryValidationError(
-                            message=f"Session QA entry validation failed during update_qa_entry operation: {e!s}"
-                        ) from e
-                    await self.async_redis.lset(session_key, i, json.dumps(validated.model_dump()))
-                    return True
-            return False
-
+            merged = self._merge_entry_update(
+                entries[idx], question, context, answer, feedback_text, feedback_score
+            )
+            entries[idx] = self._validate_entry_dict(merged)
+            await self._write_entry_at(session_key, idx, entries[idx])
+            return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while updating Q&A: {str(e)}"
             logger.error(error_msg)
@@ -236,25 +286,15 @@ class RedisAdapter(CacheDBInterface):
         Set feedback_text and feedback_score to None for a QA entry.
         """
         try:
-            session_key = f"agent_sessions:{user_id}:{session_id}"
-            entries_raw = await self.async_redis.lrange(session_key, 0, -1)
-            if not entries_raw:
+            session_key = self._session_key(user_id, session_id)
+            entries = await self._load_entries(session_key)
+            idx = self._find_index_by_qa_id(entries, qa_id)
+            if idx is None:
                 return False
-
-            entries = [json.loads(e) for e in entries_raw]
-            for i, entry in enumerate(entries):
-                if entry.get("qa_id") == qa_id:
-                    merged = {**entry, "feedback_text": None, "feedback_score": None}
-                    try:
-                        validated = SessionQAEntry.model_validate(merged)
-                    except ValidationError as e:
-                        raise SessionQAEntryValidationError(
-                            message=f"Session QA entry validation failed: {e!s}"
-                        ) from e
-                    await self.async_redis.lset(session_key, i, json.dumps(validated.model_dump()))
-                    return True
-            return False
-
+            merged = self._merge_entry_clear_feedback(entries[idx])
+            entries[idx] = self._validate_entry_dict(merged)
+            await self._write_entry_at(session_key, idx, entries[idx])
+            return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while clearing feedback: {str(e)}"
             logger.error(error_msg)
@@ -272,21 +312,14 @@ class RedisAdapter(CacheDBInterface):
         Returns True if deleted, False if qa_id not found.
         """
         try:
-            session_key = f"agent_sessions:{user_id}:{session_id}"
-            entries_raw = await self.async_redis.lrange(session_key, 0, -1)
-            if not entries_raw:
+            session_key = self._session_key(user_id, session_id)
+            entries = await self._load_entries(session_key)
+            idx = self._find_index_by_qa_id(entries, qa_id)
+            if idx is None:
                 return False
-
-            entries = [json.loads(e) for e in entries_raw]
-            for i, entry in enumerate(entries):
-                if entry.get("qa_id") == qa_id:
-                    entries.pop(i)
-                    await self.async_redis.delete(session_key)
-                    for e in entries:
-                        await self.async_redis.rpush(session_key, json.dumps(e))
-                    return True
-            return False
-
+            entries.pop(idx)
+            await self._rewrite_entries(session_key, entries)
+            return True
         except (redis.ConnectionError, redis.TimeoutError) as e:
             error_msg = f"Redis connection error while deleting Q&A: {str(e)}"
             logger.error(error_msg)
@@ -302,7 +335,7 @@ class RedisAdapter(CacheDBInterface):
         Returns True if deleted, False if session did not exist.
         """
         try:
-            session_key = f"agent_sessions:{user_id}:{session_id}"
+            session_key = self._session_key(user_id, session_id)
             deleted = await self.async_redis.delete(session_key)
             return deleted > 0
 
