@@ -1,0 +1,148 @@
+import re
+import sys
+import types
+import typing
+import asyncio
+from typing import Any
+from pprint import pprint
+from pydantic import BaseModel
+from pydantic.json_schema import GenerateJsonSchema
+from pydantic._internal._core_utils import is_core_schema, CoreSchemaOrField
+from datamodel_code_generator import InputFileType, generate, GenerateConfig, DataModelType
+
+import cognee
+from cognee.shared.logging_utils import setup_logging, ERROR
+from cognee.api.v1.search import SearchType
+
+
+def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
+    # If a custom graph model is provided, convert it from dict to a Pydantic model class
+    config = GenerateConfig(
+        input_file_type=InputFileType.JsonSchema,
+        input_filename="dynamic.json",
+        output_model_type=DataModelType.PydanticV2BaseModel,
+        additional_imports=["cognee.infrastructure.engine.DataPoint", "typing.Any", "typing"],
+        # Set the base class for all generated models to the existing DataPoint class to
+        # ensure proper integration with Cognee's graph engine
+        base_class="cognee.infrastructure.engine.DataPoint",
+        type_overrides={"DataPoint": "cognee.infrastructure.engine.DataPoint"},
+    )
+    # Override title to ensure a valid and secure Python class name for the generated model
+    # TODO: For some reason having the title be "DynamicGraphModel" produces much better graphs
+    #       Check what to do, remove the forced title or use the provided one.
+    pydantic_json_schema["title"] = "DynamicGraphModel"
+    result = generate(pydantic_json_schema, config=config)
+
+    # Replace the generated DataPointModel class definition made by datamodel_code_generator with
+    # the existing Cognee DataPoint class
+    result = re.sub(
+        r"class DataPointModel\(DataPoint\):.*?(?=\nclass|\Z)", "", result, flags=re.DOTALL
+    )
+    # Replace all remaining references
+    result = result.replace("DataPointModel", "DataPoint")
+
+    # Dynamically create a module to execute the generated code and retrieve the model class
+    # This is necessary to properly handle imports and references in the generated code
+    module_name = "cognee.shared._generated_graph_models"
+    mod = types.ModuleType(module_name)
+    sys.modules[module_name] = mod
+
+    exec(result, mod.__dict__)
+    namespace = mod.__dict__
+
+    # Extract the generated graph model class from the module's namespace
+    graph_model = namespace[pydantic_json_schema["title"]]
+    # Rebuild the DataPoint class first
+    namespace["DataPoint"].model_rebuild()
+    # Then rebuild the graph model to ensure it properly inherits from the updated DataPoint class
+    graph_model.model_rebuild(_types_namespace=namespace)
+
+    # Return dynamically created Pydantic model class that can be used in cognee for graph creation and querying
+    return graph_model
+
+
+def graph_model_to_graph_schema(graph_model: BaseModel) -> dict:
+    class GenerateJsonSchemaWithoutDefaultTitles(GenerateJsonSchema):
+        def field_title_should_be_set(self, schema: CoreSchemaOrField) -> bool:
+            return_value = super().field_title_should_be_set(schema)
+            if return_value and is_core_schema(schema):
+                return False
+            return return_value
+
+    return graph_model.model_json_schema(schema_generator=GenerateJsonSchemaWithoutDefaultTitles)
+
+
+if __name__ == "__main__":
+
+    async def main():
+        # Create a clean slate for cognee -- reset data and system state
+        print("Resetting cognee data...")
+        await cognee.prune.prune_data()
+        await cognee.prune.prune_system(metadata=True)
+        print("Data reset complete.\n")
+
+        # cognee knowledge graph will be created based on this text
+        text = """
+        Python is the best programming language for Data science.
+        Rust is the best for embedded engineering.
+        C++ is the best for game development.
+        Pearl is the best for... just kidding, nobody uses pearl anymore.
+        """
+
+        await cognee.add(text)
+
+        # Define a custom graph model for programming languages.
+        class FieldType(BaseModel):
+            name: str = "Field"
+            metadata: dict = {"index_fields": ["name"]}
+
+        class Field(BaseModel):
+            name: str
+            is_type: FieldType
+            metadata: dict = {"index_fields": ["name"]}
+
+        class ProgrammingLanguageType(BaseModel):
+            name: str = "Programming Language"
+            metadata: dict = {"index_fields": ["name"]}
+
+        class ProgrammingLanguage(BaseModel):
+            name: str
+            used_in: list[Field] = []
+            is_type: ProgrammingLanguageType
+            metadata: dict = {"index_fields": ["name"]}
+
+        # Transform the custom graph model to a JSON schema and then back to a Pydantic model class to ensure it is
+        # properly formatted for cognee's graph engine
+        graph_model_schema = graph_model_to_graph_schema(ProgrammingLanguage)
+
+        graph_model = graph_schema_to_graph_model(graph_model_schema)
+
+        # Use LLMs and cognee to create knowledge graph
+        await cognee.cognify(graph_model=graph_model)
+
+        query_text = "Tell me about Python and Rust"
+        print(f"Searching cognee for insights with query: '{query_text}'")
+        # Query cognee for insights on the added text
+        search_results = await cognee.search(
+            query_type=SearchType.GRAPH_COMPLETION, query_text=query_text
+        )
+
+        print("Search results:")
+        # Display results
+        for result_text in search_results:
+            pprint(result_text)
+
+        # Generate interactive graph visualization
+        print("\nGenerating graph visualization...")
+        from cognee.api.v1.visualize import visualize_graph
+
+        await visualize_graph()
+        print("Visualization saved to ~/graph_visualization.html")
+
+    logger = setup_logging(log_level=ERROR)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(main())
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())

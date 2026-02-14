@@ -18,7 +18,7 @@ from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.authentication.default.default_jwt_strategy import DefaultJWTStrategy
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.shared.dict_to_pydantic import dict_to_pydantic
+from cognee.shared.cognee_graph_model_utils import graph_schema_to_graph_model
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunInfo,
@@ -154,7 +154,7 @@ def get_cognify_router() -> APIRouter:
                 graph_model = KnowledgeGraph
             else:
                 # If a custom graph model is provided, convert it from dict to a Pydantic model class
-                graph_model = dict_to_pydantic(payload.graph_model)
+                graph_model = graph_schema_to_graph_model(payload.graph_model)
 
             cognify_run = await cognee_cognify(
                 datasets,
