@@ -16,6 +16,9 @@ from cognee.modules.users.tenants.methods.get_user_roles import (
 from cognee.modules.users.tenants.methods.get_user_tenants import (
     get_user_tenants as method_get_user_tenants,
 )
+from cognee.modules.users.tenants.methods.get_users_in_tenant import (
+    get_users_in_tenant as method_get_users_in_tenant,
+)
 from cognee.modules.users.models import User
 from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
@@ -310,6 +313,15 @@ def get_permissions_router() -> APIRouter:
     ):
         role_list = await method_get_user_roles(tenant_id=tenant_id, user_id=user_id, user=user)
         return JSONResponse(status_code=200, content=role_list)
+
+    @permissions_router.get("/tenants/{tenant_id}/users")
+    async def get_users_in_tenant(
+        tenant_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        user_list = await method_get_users_in_tenant(tenant_id=tenant_id, user=user)
+
+        return JSONResponse(status_code=200, content=user_list)
 
     @permissions_router.get("/tenants/me")
     async def get_my_tenants(
