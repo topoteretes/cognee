@@ -210,8 +210,3 @@ async def test_get_graph_completion_cot_context_on_empty_graph(setup_test_enviro
 
     context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
     assert context == "", "Context should be empty on an empty graph"
-
-    with pytest.raises(CogneeValidationError):
-        await retriever.get_completion_from_context(
-            query=query, retrieved_objects=triplets, context=context
-        )

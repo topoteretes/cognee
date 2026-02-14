@@ -1,5 +1,5 @@
 import asyncio
-from typing import Optional, Type, Any, List
+from typing import Optional, Type, Any, List, Tuple
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 
@@ -19,7 +19,6 @@ async def generate_completion(
     system_prompt = system_prompt if system_prompt else read_query_prompt(system_prompt_path)
 
     if conversation_history:
-        #:TODO: I would separate the history and put it into the system prompt but we have to test what works best with longer convos
         system_prompt = conversation_history + "\nTASK:" + system_prompt
 
     return await LLMGateway.acreate_structured_output(
@@ -55,28 +54,45 @@ async def generate_completion_batch(
     )
 
 
-async def summarize_and_generate_completion(
-    context: str,
+async def generate_completion_with_optional_summary(
+    *,
     query: str,
+    context: str,
+    conversation_history: str,
     user_prompt_path: str,
     system_prompt_path: str,
     system_prompt: Optional[str] = None,
-    conversation_history: Optional[str] = None,
     response_model: Type = str,
-) -> tuple:
-    """Summarizes context and generates completion in parallel. Returns (context_summary, completion)."""
-    return await asyncio.gather(
-        summarize_text(context),
-        generate_completion(
-            query=query,
-            context=context,
-            user_prompt_path=user_prompt_path,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            conversation_history=conversation_history,
-            response_model=response_model,
-        ),
+    summarize_context: bool = False,
+) -> Tuple[Any, str]:
+    """
+    Run LLM completion (and optionally summarization). Returns (completion, context_to_store).
+    When summarize_context is True, context_to_store is the summarized context; otherwise "".
+    """
+    if summarize_context:
+        context_summary, completion = await asyncio.gather(
+            summarize_text(context),
+            generate_completion(
+                query=query,
+                context=context,
+                user_prompt_path=user_prompt_path,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                conversation_history=conversation_history,
+                response_model=response_model,
+            ),
+        )
+        return (completion, context_summary)
+    completion = await generate_completion(
+        query=query,
+        context=context,
+        user_prompt_path=user_prompt_path,
+        system_prompt_path=system_prompt_path,
+        system_prompt=system_prompt,
+        conversation_history=conversation_history,
+        response_model=response_model,
     )
+    return (completion, "")
 
 
 async def batch_llm_completion(
