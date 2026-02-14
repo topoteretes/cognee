@@ -1,9 +1,7 @@
 import re
 import sys
 import types
-import typing
 import asyncio
-from typing import Any
 from pprint import pprint
 from pydantic import BaseModel
 from pydantic.json_schema import GenerateJsonSchema
@@ -28,9 +26,6 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
         type_overrides={"DataPoint": "cognee.infrastructure.engine.DataPoint"},
     )
     # Override title to ensure a valid and secure Python class name for the generated model
-    # TODO: For some reason having the title be "DynamicGraphModel" produces much better graphs
-    #       Check what to do, remove the forced title or use the provided one.
-    pydantic_json_schema["title"] = "DynamicGraphModel"
     result = generate(pydantic_json_schema, config=config)
 
     # Replace the generated DataPointModel class definition made by datamodel_code_generator with
@@ -81,13 +76,10 @@ if __name__ == "__main__":
         await cognee.prune.prune_system(metadata=True)
         print("Data reset complete.\n")
 
-        # cognee knowledge graph will be created based on this text
-        text = """
-        Python is the best programming language for Data science.
-        Rust is the best for embedded engineering.
-        C++ is the best for game development.
-        Pearl is the best for... just kidding, nobody uses pearl anymore.
-        """
+        text = (
+            "Python is an interpreted, high-level, general-purpose programming language. It was created by Guido van Rossum and first released in 1991. "
+            + "Python is widely used in data analysis, web development, and machine learning."
+        )
 
         await cognee.add(text)
 
