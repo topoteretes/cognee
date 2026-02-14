@@ -1,5 +1,4 @@
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from uuid import UUID
 
 from cognee.modules.users.models import User

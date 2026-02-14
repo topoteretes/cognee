@@ -13,10 +13,9 @@ from cognee.modules.users.tenants.methods.get_users_in_role import (
 from cognee.modules.users.tenants.methods.get_user_roles import (
     get_user_roles as method_get_user_roles,
 )
-from cognee.modules.users.tenants.methods.get_tenants import get_tenants as method_get_tenants
-from cognee.modules.users.permissions.methods import get_tenant
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.users.tenants.methods.get_user_tenants import (
+    get_user_tenants as method_get_user_tenants,
+)
 from cognee.modules.users.models import User
 from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
@@ -312,11 +311,11 @@ def get_permissions_router() -> APIRouter:
         role_list = await method_get_user_roles(tenant_id=tenant_id, user_id=user_id, user=user)
         return JSONResponse(status_code=200, content=role_list)
 
-    @permissions_router.get("/tenants/")
-    async def get_user_tenants(
+    @permissions_router.get("/tenants/me")
+    async def get_my_tenants(
         user: User = Depends(get_authenticated_user),
     ):
-        tenants_list = await method_get_tenants(user=user)
+        tenants_list = await method_get_user_tenants(user=user)
         return JSONResponse(status_code=200, content=tenants_list)
 
     return permissions_router
