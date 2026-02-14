@@ -84,6 +84,8 @@ if __name__ == "__main__":
         await cognee.add(text)
 
         # Define a custom graph model for programming languages.
+        # Note: Models for generating graph schema can't inherit DataPoint directly, but will be set to inherit from
+        # DataPoint in the graph_schema_to_model function later on
         class FieldType(BaseModel):
             name: str = "Field"
             metadata: dict = {"index_fields": ["name"]}
