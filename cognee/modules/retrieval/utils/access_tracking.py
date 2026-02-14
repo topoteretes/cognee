@@ -11,23 +11,36 @@ from cognee.modules.data.models import Data
 from cognee.shared.logging_utils import get_logger
 from sqlalchemy import update
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
+from cognee.modules.search.utils.transform_triplets_to_graph import transform_triplets_to_graph
+from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 
 logger = get_logger(__name__)
 
 
-async def update_node_access_timestamps(items: List[Any]):
+async def update_node_access_timestamps(items: List[Edge]):
     if os.getenv("ENABLE_LAST_ACCESSED", "false").lower() != "true":
         return
 
+    # In case there are no items or the items are not Edges, we can skip processing
     if not items:
         return
+
+    items = items if isinstance(items, list) else [items]
+
+    # TODO: Expand support for other result objects like what is returned from RAG_COMPLETION retriever
+    if not all(isinstance(item, Edge) for item in items):
+        logger.debug("No valid items to update access timestamps for.")
+        return
+
+    # Transform raw Edges to graph format
+    items = transform_triplets_to_graph(items)
 
     graph_engine = await get_graph_engine()
     timestamp_dt = datetime.now(timezone.utc)
 
     # Extract node IDs
     node_ids = []
-    for item in items:
+    for item in items.get("nodes"):
         item_id = item.payload.get("id") if hasattr(item, "payload") else item.get("id")
         if item_id:
             node_ids.append(str(item_id))
