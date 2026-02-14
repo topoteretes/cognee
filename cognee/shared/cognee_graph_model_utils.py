@@ -30,6 +30,7 @@ def graph_schema_to_graph_model(pydantic_json_schema: dict) -> BaseModel:
 
     # Replace the generated DataPointModel class definition made by datamodel_code_generator with
     # the existing Cognee DataPoint class
+    # TODO: Probably not needed this was an attempt to allow DataPoint class to be inherited for input models
     result = re.sub(
         r"class DataPointModel\(DataPoint\):.*?(?=\nclass|\Z)", "", result, flags=re.DOTALL
     )
