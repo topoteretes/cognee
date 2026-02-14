@@ -1,9 +1,9 @@
 """
 Data ingestion and normalization tasks.
 
-This module provides functionality for accepting raw data inputs 
-(files, URLs, streams, or external objects), transforming them into 
-standardized text representations, and registering them within 
+This module provides functionality for accepting raw data inputs
+(files, URLs, streams, or external objects), transforming them into
+standardized text representations, and registering them within
 datasets and the relational database.
 """
 
