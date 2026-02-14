@@ -16,6 +16,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.modules.data.models import Data, Dataset
 from cognee.tasks.ingestion import save_data_item_to_storage
+from cognee.tasks.ingestion.data_item import DataItem
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunErrored,
@@ -70,9 +71,15 @@ async def run_tasks_data_item_incremental(
             classified_data = ingestion.classify(file)
             # data_id is the hash of file contents + owner id to avoid duplicate data
             data_id = await ingestion.identify(classified_data, user)
+        # Use the saved file path instead of the original data_item whose stream is now consumed
+        if isinstance(data_item, DataItem) and data_item.label is not None:
+            pipeline_data_item = DataItem(data=file_path, label=data_item.label)
+        else:
+            pipeline_data_item = file_path
     else:
         # If data was already processed by Cognee get data id
         data_id = data_item.id
+        pipeline_data_item = data_item
 
     # Check pipeline status, if Data already processed for pipeline before skip current processing
     async with db_engine.get_async_session() as session:
@@ -98,7 +105,7 @@ async def run_tasks_data_item_incremental(
         # Process data based on data_item and list of tasks
         async for result in run_tasks_with_telemetry(
             tasks=tasks,
-            data=[data_item],
+            data=[pipeline_data_item],
             user=user,
             pipeline_name=pipeline_id,
             context=context,
