@@ -155,7 +155,7 @@ class DataPoint(BaseModel):
 
             - str: The JSON string representation of the DataPoint instance.
         """
-        return self.json()
+        return self.model_dump_json()
 
     @classmethod
     def from_json(self, json_str: str):
