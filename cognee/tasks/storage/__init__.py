@@ -1,8 +1,8 @@
 """
 Graph persistence and indexing tasks.
 
-This module provides tasks for adding structured DataPoints to the graph database, 
-deduplicating extracted nodes and edges, and managing vector-based indexing for both 
+This module provides tasks for adding structured DataPoints to the graph database,
+deduplicating extracted nodes and edges, and managing vector-based indexing for both
 nodes and relationship types.
 """
 
