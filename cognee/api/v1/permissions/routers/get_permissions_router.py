@@ -10,7 +10,6 @@ from cognee.modules.users.exceptions import PermissionDeniedError
 from cognee.infrastructure.databases.relational import get_relational_engine
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-from cognee.modules.users.models import User
 from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.modules.users.models import User
