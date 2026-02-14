@@ -18,7 +18,7 @@ from cognee.modules.users.get_user_manager import get_user_manager_context
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.users.authentication.default.default_jwt_strategy import DefaultJWTStrategy
 from cognee.shared.data_models import KnowledgeGraph
-from cognee.shared.cognee_graph_model_utils import graph_schema_to_graph_model
+from cognee.shared.graph_model_utils import graph_schema_to_graph_model
 from cognee.modules.pipelines.models.PipelineRunInfo import (
     PipelineRunCompleted,
     PipelineRunInfo,
