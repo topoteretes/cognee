@@ -1,9 +1,10 @@
+from typing import List, Union
 from uuid import UUID
-from typing import List
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from cognee import __version__ as cognee_version
 from cognee.modules.users.tenants.methods.get_tenant_roles import (
     get_tenant_roles as method_get_tenant_roles,
 )
@@ -22,8 +23,8 @@ from cognee.modules.users.tenants.methods.get_users_in_tenant import (
 from cognee.modules.users.models import User
 from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
-from cognee import __version__ as cognee_version
 
 
 class SelectTenantDTO(InDTO):
