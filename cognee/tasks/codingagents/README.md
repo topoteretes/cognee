@@ -84,8 +84,7 @@ for rule in rules:
 
 ### Advanced: Manual Graph Construction
 
-You can manualy create `Rule` objects and link them to content using `get_origin_edges` if you want to bypass the LLM extraction.
-
+You can manually create `Rule` objects and link them to content using `get_origin_edges` if you want to bypass the LLM extraction.
 ```python
 from cognee.tasks.codingagents.coding_rule_associations import Rule, get_origin_edges
 
