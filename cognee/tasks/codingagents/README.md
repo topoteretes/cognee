@@ -56,7 +56,7 @@ await cognee.memify()# Enrich Graph (Extract Rules automatically)
 rules = await get_existing_rules("coding_agent_rules")
 if rules:
     for rule in rules:
-        print(f"{rule}") 
+        print(f"{rule}")
 ```
 
 ### Manual Rule Association
