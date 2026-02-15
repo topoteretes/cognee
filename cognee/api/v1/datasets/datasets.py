@@ -116,6 +116,9 @@ class datasets:
         except PermissionDeniedError:
             raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
 
+        if not dataset:
+            raise UnauthorizedDataAccessError(f"Dataset {dataset_id} not accessible.")
+
         dataset_data = [data for data in await get_dataset_data(dataset.id) if data.id == data_id]
 
         data = dataset_data[0] if len(dataset_data) > 0 else None
@@ -124,7 +127,7 @@ class datasets:
             # If data is not found in the system, user is using a custom graph model.
             await set_database_global_context_variables(dataset_id, dataset.owner_id)
             await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
-            return
+            return {"status": "success"}
 
         if not any(ds.id == dataset_id for ds in data.datasets):
             raise UnauthorizedDataAccessError(f"Data {data_id} not accessible.")
@@ -137,6 +140,8 @@ class datasets:
             await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
         await delete_data(data)
+
+        return {"status": "success"}
 
     @staticmethod
     async def delete_all(user: Optional[User] = None):

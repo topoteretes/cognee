@@ -212,7 +212,7 @@ async def test_get_completion_with_provided_context(mock_vector_engine):
 
 @pytest.mark.asyncio
 async def test_get_completion_with_session(mock_vector_engine):
-    """Test get_completion with session caching enabled."""
+    """Test get_completion with session caching enabled (SessionManager path)."""
     mock_result = MagicMock()
     mock_result.payload = {"text": "Test triplet"}
     mock_vector_engine.has_collection.return_value = True
@@ -229,20 +229,8 @@ async def test_get_completion_with_session(mock_vector_engine):
             return_value=mock_vector_engine,
         ),
         patch(
-            "cognee.modules.retrieval.triplet_retriever.get_conversation_history",
-            return_value="Previous conversation",
-        ),
-        patch(
-            "cognee.modules.retrieval.triplet_retriever.summarize_text",
-            return_value="Context summary",
-        ),
-        patch(
-            "cognee.modules.retrieval.triplet_retriever.generate_completion",
-            return_value="Generated answer",
-        ),
-        patch(
-            "cognee.modules.retrieval.triplet_retriever.save_conversation_history",
-        ) as mock_save,
+            "cognee.modules.retrieval.triplet_retriever.get_session_manager",
+        ) as mock_get_sm,
         patch("cognee.modules.retrieval.triplet_retriever.CacheConfig") as mock_cache_config,
         patch("cognee.modules.retrieval.triplet_retriever.session_user") as mock_session_user,
     ):
@@ -250,6 +238,9 @@ async def test_get_completion_with_session(mock_vector_engine):
         mock_config.caching = True
         mock_cache_config.return_value = mock_config
         mock_session_user.get.return_value = mock_user
+        mock_sm = MagicMock()
+        mock_sm.generate_completion_with_session = AsyncMock(return_value="Generated answer")
+        mock_get_sm.return_value = mock_sm
 
         objects = await retriever.get_retrieved_objects("test query")
         context = await retriever.get_context_from_objects("test query", retrieved_objects=objects)
@@ -258,7 +249,7 @@ async def test_get_completion_with_session(mock_vector_engine):
     assert isinstance(completion, list)
     assert len(completion) == 1
     assert completion[0] == "Generated answer"
-    mock_save.assert_awaited_once()
+    mock_sm.generate_completion_with_session.assert_awaited_once()
 
 
 @pytest.mark.asyncio
