@@ -2,6 +2,7 @@ import asyncio
 from typing import Dict, Type, List, Optional
 from pydantic import BaseModel
 
+from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.methods import upsert_edges
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
@@ -145,8 +146,6 @@ async def integrate_chunk_graphs(
 
     return data_chunks
 
-
-from cognee.modules.pipelines.tasks.task import task_summary
 
 
 @task_summary("Extracted graph from {n} chunk(s)")

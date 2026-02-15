@@ -2,6 +2,7 @@ from uuid import UUID
 from sqlalchemy import select
 from typing import AsyncGenerator
 
+from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.data.processing.document_types.Document import Document
 from cognee.modules.data.models import Data
@@ -25,8 +26,6 @@ async def update_document_token_count(document_id: UUID, token_count: int) -> No
         else:
             raise ValueError(f"Document with id {document_id} not found.")
 
-
-from cognee.modules.pipelines.tasks.task import task_summary
 
 
 @task_summary("Extracted {n} chunk(s)")

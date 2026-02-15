@@ -1,5 +1,6 @@
 from cognee.modules.data.models import Data
 import json
+from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.modules.data.processing.document_types import (
     Document,
     PdfDocument,
@@ -91,8 +92,6 @@ def update_node_set(document):
     ]
     document.source_note_set = ", ".join(node_set)
 
-
-from cognee.modules.pipelines.tasks.task import task_summary
 
 
 @task_summary("Classified {n} document(s)")
