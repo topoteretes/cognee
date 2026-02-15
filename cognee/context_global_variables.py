@@ -119,6 +119,11 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     """
 
     if not backend_access_control_enabled():
+        base_config = get_base_config()
+        storage_config = {
+            "data_root_directory": base_config.data_root_directory,
+        }
+        file_storage_config.set(storage_config)
         return
 
     user = await get_user(user_id)
