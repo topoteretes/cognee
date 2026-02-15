@@ -9,7 +9,7 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
-CONNECTION_TEST_TIMEOUT_SECONDS = 15
+CONNECTION_TEST_TIMEOUT_SECONDS = 30
 
 
 def get_max_chunk_tokens():
