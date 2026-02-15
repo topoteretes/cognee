@@ -4,6 +4,7 @@ Provides CogneeSpanExporter (in-memory span buffer), setup_tracing(),
 get_tracer(), CogneeTrace, semantic attribute constants, and redaction.
 """
 
+import os
 import re
 import threading
 from collections import defaultdict
@@ -18,6 +19,7 @@ try:
         SimpleSpanProcessor,
         ConsoleSpanExporter,
     )
+    from opentelemetry.sdk.resources import Resource
     from opentelemetry.trace import StatusCode
 
     _OTEL_AVAILABLE = True
@@ -38,6 +40,8 @@ COGNEE_PIPELINE_TASK_NAME = "cognee.pipeline.task_name"
 COGNEE_VECTOR_COLLECTION = "cognee.vector.collection"
 COGNEE_VECTOR_RESULT_COUNT = "cognee.vector.result_count"
 COGNEE_SPAN_CATEGORY = "cognee.span.category"
+COGNEE_RESULT_SUMMARY = "cognee.result.summary"
+COGNEE_RESULT_COUNT = "cognee.result.count"
 COGNEE_PIPELINE_NAME = "cognee.pipeline.name"
 
 # ---------------------------------------------------------------------------
@@ -74,74 +78,75 @@ def _check_otel_available() -> None:
 # ---------------------------------------------------------------------------
 _MAX_TRACES = 50
 
+if _OTEL_AVAILABLE:
 
-class CogneeSpanExporter(SpanExporter):
-    """Custom SpanExporter that buffers completed spans in-memory.
+    class CogneeSpanExporter(SpanExporter):
+        """Custom SpanExporter that buffers completed spans in-memory.
 
-    Spans are grouped by trace_id. The buffer is bounded to the last
-    ``_MAX_TRACES`` distinct traces.
-    """
+        Spans are grouped by trace_id. The buffer is bounded to the last
+        ``_MAX_TRACES`` distinct traces.
+        """
 
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._traces: dict[str, list[dict]] = defaultdict(list)
-        self._trace_order: list[str] = []
+        def __init__(self) -> None:
+            self._lock = threading.Lock()
+            self._traces: dict[str, list[dict]] = defaultdict(list)
+            self._trace_order: list[str] = []
 
-    def export(self, spans: Sequence["ReadableSpan"]) -> "SpanExportResult":
-        with self._lock:
-            for span in spans:
-                trace_id = format(span.context.trace_id, "032x")
-                span_dict = {
-                    "name": span.name,
-                    "trace_id": trace_id,
-                    "span_id": format(span.context.span_id, "016x"),
-                    "parent_span_id": (
-                        format(span.parent.span_id, "016x") if span.parent else None
-                    ),
-                    "start_time_ns": span.start_time,
-                    "end_time_ns": span.end_time,
-                    "duration_ms": (
-                        (span.end_time - span.start_time) / 1_000_000
-                        if span.end_time and span.start_time
-                        else 0.0
-                    ),
-                    "status": span.status.status_code.name if span.status else "UNSET",
-                    "attributes": dict(span.attributes) if span.attributes else {},
-                }
-                self._traces[trace_id].append(span_dict)
-                if trace_id not in self._trace_order:
-                    self._trace_order.append(trace_id)
+        def export(self, spans: Sequence["ReadableSpan"]) -> "SpanExportResult":
+            with self._lock:
+                for span in spans:
+                    trace_id = format(span.context.trace_id, "032x")
+                    span_dict = {
+                        "name": span.name,
+                        "trace_id": trace_id,
+                        "span_id": format(span.context.span_id, "016x"),
+                        "parent_span_id": (
+                            format(span.parent.span_id, "016x") if span.parent else None
+                        ),
+                        "start_time_ns": span.start_time,
+                        "end_time_ns": span.end_time,
+                        "duration_ms": (
+                            (span.end_time - span.start_time) / 1_000_000
+                            if span.end_time and span.start_time
+                            else 0.0
+                        ),
+                        "status": span.status.status_code.name if span.status else "UNSET",
+                        "attributes": dict(span.attributes) if span.attributes else {},
+                    }
+                    self._traces[trace_id].append(span_dict)
+                    if trace_id not in self._trace_order:
+                        self._trace_order.append(trace_id)
 
-            # Evict oldest traces if over limit
-            while len(self._trace_order) > _MAX_TRACES:
-                oldest = self._trace_order.pop(0)
-                self._traces.pop(oldest, None)
+                # Evict oldest traces if over limit
+                while len(self._trace_order) > _MAX_TRACES:
+                    oldest = self._trace_order.pop(0)
+                    self._traces.pop(oldest, None)
 
-        return SpanExportResult.SUCCESS
+            return SpanExportResult.SUCCESS
 
-    def shutdown(self) -> None:
-        pass
+        def shutdown(self) -> None:
+            pass
 
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
-        return True
+        def force_flush(self, timeout_millis: int = 30000) -> bool:
+            return True
 
-    # -- Public helpers for reading collected traces --
+        # -- Public helpers for reading collected traces --
 
-    def get_last_trace_spans(self) -> Optional[list[dict]]:
-        with self._lock:
-            if not self._trace_order:
-                return None
-            last_id = self._trace_order[-1]
-            return list(self._traces[last_id])
+        def get_last_trace_spans(self) -> Optional[list[dict]]:
+            with self._lock:
+                if not self._trace_order:
+                    return None
+                last_id = self._trace_order[-1]
+                return list(self._traces[last_id])
 
-    def get_all_traces(self) -> dict[str, list[dict]]:
-        with self._lock:
-            return {tid: list(spans) for tid, spans in self._traces.items()}
+        def get_all_traces(self) -> dict[str, list[dict]]:
+            with self._lock:
+                return {tid: list(spans) for tid, spans in self._traces.items()}
 
-    def clear(self) -> None:
-        with self._lock:
-            self._traces.clear()
-            self._trace_order.clear()
+        def clear(self) -> None:
+            with self._lock:
+                self._traces.clear()
+                self._trace_order.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -224,17 +229,28 @@ def setup_tracing(console_output: bool = False) -> "trace.Tracer":
     """
     _check_otel_available()
 
+    from cognee.version import get_cognee_version
+
     global _exporter, _tracer, _provider
 
+    version = get_cognee_version()
+    resource = Resource.create(
+        {
+            "service.name": "cognee",
+            "service.version": version,
+            "deployment.environment": os.getenv("ENV", "development"),
+        }
+    )
+
     _exporter = CogneeSpanExporter()
-    _provider = TracerProvider()
+    _provider = TracerProvider(resource=resource)
     _provider.add_span_processor(SimpleSpanProcessor(_exporter))
 
     if console_output:
         _provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
 
     trace.set_tracer_provider(_provider)
-    _tracer = trace.get_tracer("cognee")
+    _tracer = trace.get_tracer("cognee", version)
     return _tracer
 
 
@@ -253,11 +269,12 @@ def get_exporter() -> Optional["CogneeSpanExporter"]:
     return _exporter
 
 
-def shutdown_tracing() -> None:
+def shutdown_tracing(timeout_ms: int = 30000) -> None:
     """Shut down the TracerProvider and clear global state."""
     global _exporter, _tracer, _provider
 
     if _provider is not None:
+        _provider.force_flush(timeout_millis=timeout_ms)
         _provider.shutdown()
     _exporter = None
     _tracer = None

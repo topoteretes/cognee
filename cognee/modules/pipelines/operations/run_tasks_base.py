@@ -3,7 +3,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
-from cognee.modules.observability.trace_context import is_tracing_enabled
+from cognee.modules.observability import get_tracer_if_enabled
 
 from cognee.infrastructure.engine import DataPoint
 from ..tasks.task import Task
@@ -11,12 +11,16 @@ from ..tasks.task import Task
 logger = get_logger("run_tasks_base")
 
 
-def _get_tracer():
-    if is_tracing_enabled():
-        from cognee.modules.observability.tracing import get_tracer
+def _build_result_summary(executable, task_name: str, count: int) -> str:
+    """Build a human-readable result summary for a completed task.
 
-        return get_tracer()
-    return None
+    Reads the ``__task_summary__`` attribute set by the ``@task_summary``
+    decorator.  Falls back to a generic message when no template is defined.
+    """
+    template = getattr(executable, "__task_summary__", None)
+    if template:
+        return template.format(n=count)
+    return f"{task_name} produced {count} result(s)"
 
 
 async def handle_task(
@@ -50,13 +54,13 @@ async def handle_task(
     if has_context:
         kwargs["context"] = context
 
-    tracer = _get_tracer()
+    tracer = get_tracer_if_enabled()
     task_name = running_task.executable.__name__
 
     if tracer is not None:
-        from cognee.modules.observability.tracing import COGNEE_PIPELINE_TASK_NAME
+        from cognee.modules.observability import COGNEE_PIPELINE_TASK_NAME
 
-        span_ctx = tracer.start_as_current_span(f"cognee.task.{task_name}")
+        span_ctx = tracer.start_as_current_span(f"cognee.pipeline.task.{task_name}")
     else:
         from contextlib import nullcontext
 
@@ -67,9 +71,25 @@ async def handle_task(
             span.set_attribute(COGNEE_PIPELINE_TASK_NAME, task_name)
 
         try:
+            result_count = 0
+
             async for result_data in running_task.execute(args, next_task_batch_size):
+                if isinstance(result_data, list):
+                    result_count += len(result_data)
+                else:
+                    result_count += 1
+
                 async for result in run_tasks_base(leftover_tasks, result_data, user, context):
                     yield result
+
+            if span is not None:
+                from cognee.modules.observability import COGNEE_RESULT_SUMMARY, COGNEE_RESULT_COUNT
+
+                span.set_attribute(COGNEE_RESULT_COUNT, result_count)
+                span.set_attribute(
+                    COGNEE_RESULT_SUMMARY,
+                    _build_result_summary(running_task.executable, task_name, result_count),
+                )
 
             logger.info(f"{task_type} task completed: `{task_name}`")
             send_telemetry(

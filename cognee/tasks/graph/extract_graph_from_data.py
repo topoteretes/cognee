@@ -146,6 +146,10 @@ async def integrate_chunk_graphs(
     return data_chunks
 
 
+from cognee.modules.pipelines.tasks.task import task_summary
+
+
+@task_summary("Extracted graph from {n} chunk(s)")
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     context: Dict,

@@ -13,17 +13,9 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
-from cognee.modules.observability.trace_context import is_tracing_enabled
+from cognee.modules.observability import get_tracer_if_enabled
 
 logger = get_logger()
-
-
-def _get_tracer():
-    if is_tracing_enabled():
-        from cognee.modules.observability.tracing import get_tracer
-
-        return get_tracer()
-    return None
 
 
 async def search(
@@ -183,15 +175,15 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
-    tracer = _get_tracer()
+    tracer = get_tracer_if_enabled()
 
     if tracer is not None:
-        from cognee.modules.observability.tracing import (
+        from cognee.modules.observability import (
             COGNEE_SEARCH_QUERY,
             COGNEE_SEARCH_TYPE,
         )
 
-        span_ctx = tracer.start_as_current_span("cognee.search")
+        span_ctx = tracer.start_as_current_span("cognee.api.search")
     else:
         from contextlib import nullcontext
 
@@ -247,5 +239,15 @@ async def search(
             verbose=verbose,
             retriever_specific_config=retriever_specific_config,
         )
+
+        if span is not None:
+            from cognee.modules.observability import COGNEE_RESULT_SUMMARY, COGNEE_RESULT_COUNT
+
+            n = len(filtered_search_results) if filtered_search_results else 0
+            span.set_attribute(COGNEE_RESULT_COUNT, n)
+            span.set_attribute(
+                COGNEE_RESULT_SUMMARY,
+                f"Found {n} result(s) via {query_type.value}",
+            )
 
         return filtered_search_results

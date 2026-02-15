@@ -33,18 +33,10 @@ from .neo4j_metrics_utils import (
 )
 from .deadlock_retry import deadlock_retry
 
-from cognee.modules.observability.trace_context import is_tracing_enabled
+from cognee.modules.observability import get_tracer_if_enabled
 
 
 logger = get_logger("Neo4jAdapter")
-
-
-def _get_tracer():
-    if is_tracing_enabled():
-        from cognee.modules.observability.tracing import get_tracer
-
-        return get_tracer()
-    return None
 
 
 BASE_LABEL = "__Node__"
@@ -128,7 +120,7 @@ class Neo4jAdapter(GraphDBInterface):
             - List[Dict[str, Any]]: A list of dictionaries representing the result of the query
               execution.
         """
-        tracer = _get_tracer()
+        tracer = get_tracer_if_enabled()
 
         if tracer is not None:
             from cognee.modules.observability.tracing import (
@@ -138,7 +130,7 @@ class Neo4jAdapter(GraphDBInterface):
                 redact_secrets,
             )
 
-            span_ctx = tracer.start_as_current_span("cognee.graph.query")
+            span_ctx = tracer.start_as_current_span("cognee.db.graph.query")
         else:
             from contextlib import nullcontext
 

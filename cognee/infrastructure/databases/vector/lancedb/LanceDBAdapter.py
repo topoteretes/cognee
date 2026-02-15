@@ -18,15 +18,7 @@ from ..models.ScoredResult import ScoredResult
 from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
 
-from cognee.modules.observability.trace_context import is_tracing_enabled
-
-
-def _get_tracer():
-    if is_tracing_enabled():
-        from cognee.modules.observability.tracing import get_tracer
-
-        return get_tracer()
-    return None
+from cognee.modules.observability import get_tracer_if_enabled
 
 
 class IndexSchema(DataPoint):
@@ -248,7 +240,7 @@ class LanceDBAdapter(VectorDBInterface):
         normalized: bool = True,
         include_payload: bool = False,
     ):
-        tracer = _get_tracer()
+        tracer = get_tracer_if_enabled()
 
         if tracer is not None:
             from cognee.modules.observability.tracing import (
@@ -257,7 +249,7 @@ class LanceDBAdapter(VectorDBInterface):
                 COGNEE_VECTOR_RESULT_COUNT,
             )
 
-            span_ctx = tracer.start_as_current_span("cognee.vector.search")
+            span_ctx = tracer.start_as_current_span("cognee.db.vector.search")
         else:
             from contextlib import nullcontext
 

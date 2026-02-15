@@ -1,3 +1,5 @@
+from typing import Optional
+
 from .trace_context import (
     enable_tracing,
     disable_tracing,
@@ -9,6 +11,7 @@ from .trace_context import (
 from .tracing import (
     CogneeTrace,
     redact_secrets,
+    get_tracer,
     COGNEE_DB_SYSTEM,
     COGNEE_DB_QUERY,
     COGNEE_DB_ROW_COUNT,
@@ -21,4 +24,13 @@ from .tracing import (
     COGNEE_VECTOR_RESULT_COUNT,
     COGNEE_SPAN_CATEGORY,
     COGNEE_PIPELINE_NAME,
+    COGNEE_RESULT_SUMMARY,
+    COGNEE_RESULT_COUNT,
 )
+
+
+def get_tracer_if_enabled() -> Optional[object]:
+    """Return the OTEL tracer if tracing is enabled, None otherwise."""
+    if is_tracing_enabled():
+        return get_tracer()
+    return None

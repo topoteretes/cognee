@@ -26,6 +26,10 @@ async def update_document_token_count(document_id: UUID, token_count: int) -> No
             raise ValueError(f"Document with id {document_id} not found.")
 
 
+from cognee.modules.pipelines.tasks.task import task_summary
+
+
+@task_summary("Extracted {n} chunk(s)")
 async def extract_chunks_from_documents(
     documents: list[Document],
     max_chunk_size: int,

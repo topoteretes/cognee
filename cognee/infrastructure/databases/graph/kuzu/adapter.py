@@ -24,17 +24,9 @@ from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.tasks.temporal_graph.models import Timestamp
 from cognee.infrastructure.databases.cache.config import get_cache_config
-from cognee.modules.observability.trace_context import is_tracing_enabled
+from cognee.modules.observability import get_tracer_if_enabled
 
 logger = get_logger()
-
-
-def _get_tracer():
-    if is_tracing_enabled():
-        from cognee.modules.observability.tracing import get_tracer
-
-        return get_tracer()
-    return None
 
 
 cache_config = get_cache_config()
@@ -237,7 +229,7 @@ class KuzuAdapter(GraphDBInterface):
 
             - List[Tuple]: A list of tuples representing the query results.
         """
-        tracer = _get_tracer()
+        tracer = get_tracer_if_enabled()
 
         if tracer is not None:
             from cognee.modules.observability.tracing import (
@@ -247,7 +239,7 @@ class KuzuAdapter(GraphDBInterface):
                 redact_secrets,
             )
 
-            span_ctx = tracer.start_as_current_span("cognee.graph.query")
+            span_ctx = tracer.start_as_current_span("cognee.db.graph.query")
         else:
             from contextlib import nullcontext
 

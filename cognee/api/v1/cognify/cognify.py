@@ -31,18 +31,10 @@ from cognee.tasks.temporal_graph.extract_events_and_entities import extract_even
 from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
     extract_knowledge_graph_from_events,
 )
-from cognee.modules.observability.trace_context import is_tracing_enabled
+from cognee.modules.observability import get_tracer_if_enabled
 
 
 logger = get_logger("cognify")
-
-
-def _get_tracer():
-    if is_tracing_enabled():
-        from cognee.modules.observability.tracing import get_tracer
-
-        return get_tracer()
-    return None
 
 
 update_status_lock = asyncio.Lock()
@@ -204,12 +196,12 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
-    tracer = _get_tracer()
+    tracer = get_tracer_if_enabled()
 
     if tracer is not None:
-        from cognee.modules.observability.tracing import COGNEE_PIPELINE_NAME
+        from cognee.modules.observability import COGNEE_PIPELINE_NAME
 
-        span_ctx = tracer.start_as_current_span("cognee.cognify")
+        span_ctx = tracer.start_as_current_span("cognee.api.cognify")
     else:
         from contextlib import nullcontext
 
@@ -263,7 +255,7 @@ async def cognify(
         pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
 
         # Run the run_pipeline in the background or blocking based on executor
-        return await pipeline_executor_func(
+        result = await pipeline_executor_func(
             pipeline=run_pipeline,
             tasks=tasks,
             user=user,
@@ -275,6 +267,17 @@ async def cognify(
             pipeline_name="cognify_pipeline",
             data_per_batch=data_per_batch,
         )
+
+        if span is not None:
+            from cognee.modules.observability import COGNEE_RESULT_SUMMARY
+
+            dataset_desc = str(datasets) if datasets else "all datasets"
+            span.set_attribute(
+                COGNEE_RESULT_SUMMARY,
+                f"Cognify completed for {dataset_desc}",
+            )
+
+        return result
 
 
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)

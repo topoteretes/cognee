@@ -8,17 +8,14 @@ from cognee.infrastructure.databases.vector.exceptions import CollectionNotFound
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
-from cognee.modules.observability.trace_context import is_tracing_enabled
+from cognee.modules.observability import (
+    get_tracer_if_enabled,
+    COGNEE_VECTOR_COLLECTION,
+    COGNEE_VECTOR_RESULT_COUNT,
+    COGNEE_RESULT_SUMMARY,
+)
 
 logger = get_logger(level=ERROR)
-
-
-def _get_tracer():
-    if is_tracing_enabled():
-        from cognee.modules.observability.tracing import get_tracer
-
-        return get_tracer()
-    return None
 
 
 def format_triplets(edges):
@@ -163,16 +160,24 @@ async def brute_force_triplet_search(
     if top_k <= 0:
         raise ValueError("top_k must be a positive integer.")
 
-    tracer = _get_tracer()
+    tracer = get_tracer_if_enabled()
 
     if tracer is not None:
-        span_ctx = tracer.start_as_current_span("cognee.retriever.triplet_search")
+        span_ctx = tracer.start_as_current_span("cognee.retrieval.triplet_search")
     else:
         from contextlib import nullcontext
 
         span_ctx = nullcontext()
 
     with span_ctx as otel_span:
+        if otel_span is not None:
+            otel_span.set_attribute("cognee.retrieval.top_k", top_k)
+            otel_span.set_attribute(
+                "cognee.retrieval.mode", "batch" if query_batch is not None else "single"
+            )
+            if query_batch is not None:
+                otel_span.set_attribute("cognee.retrieval.batch_size", len(query_batch))
+
         query_list_length = len(query_batch) if query_batch is not None else None
         wide_search_limit = (
             None if query_list_length else (wide_search_top_k if node_name is None else None)
@@ -189,6 +194,10 @@ async def brute_force_triplet_search(
         if "EdgeType_relationship_name" not in collections:
             collections.append("EdgeType_relationship_name")
 
+        if otel_span is not None:
+            otel_span.set_attribute("cognee.retrieval.collection_count", len(collections))
+            otel_span.set_attribute(COGNEE_VECTOR_COLLECTION, ", ".join(collections))
+
         try:
             vector_search = NodeEdgeVectorSearch()
 
@@ -200,6 +209,9 @@ async def brute_force_triplet_search(
             )
 
             if not vector_search.has_results():
+                if otel_span is not None:
+                    otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
+                    otel_span.set_attribute(COGNEE_RESULT_SUMMARY, "No vector results found")
                 return [[] for _ in range(query_list_length)] if query_list_length else []
 
             results = await _get_top_triplet_importances(
@@ -213,6 +225,14 @@ async def brute_force_triplet_search(
                 top_k,
                 query_list_length=query_list_length,
             )
+
+            if otel_span is not None:
+                result_count = sum(len(r) for r in results) if query_list_length else len(results)
+                otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, result_count)
+                otel_span.set_attribute(
+                    COGNEE_RESULT_SUMMARY,
+                    f"Found {result_count} triplet(s) from {len(collections)} collection(s)",
+                )
 
             return results
         except CollectionNotFoundError:
