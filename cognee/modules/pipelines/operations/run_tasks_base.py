@@ -5,6 +5,7 @@ from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
 from cognee.modules.observability.trace_context import is_tracing_enabled
 
+from cognee.infrastructure.engine import DataPoint
 from ..tasks.task import Task
 
 logger = get_logger("run_tasks_base")
@@ -44,8 +45,10 @@ async def handle_task(
         [key == "context" for key in inspect.signature(running_task.executable).parameters.keys()]
     )
 
+    kwargs = {}
+
     if has_context:
-        args.append(context)
+        kwargs["context"] = context
 
     tracer = _get_tracer()
     task_name = running_task.executable.__name__

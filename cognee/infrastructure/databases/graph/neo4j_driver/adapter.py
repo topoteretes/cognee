@@ -16,7 +16,6 @@ from cognee.tasks.temporal_graph.models import Timestamp
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
-    record_graph_changes,
 )
 from cognee.modules.storage.utils import JSONEncoder
 
@@ -223,7 +222,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
-    @record_graph_changes
     @override_distributed(queued_add_nodes)
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
         """
@@ -494,7 +492,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return flattened
 
-    @record_graph_changes
     @override_distributed(queued_add_edges)
     async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
         """
@@ -719,6 +716,10 @@ class Neo4jAdapter(GraphDBInterface):
         """
         Get all neighbors of a specified node, including all directly connected nodes.
 
+        This method retrieves all neighboring nodes connected to a specified node and returns
+        their properties as a list of dictionaries. It may return an empty list if no neighbors exist or an
+        error occurs.
+
         Parameters:
         -----------
 
@@ -729,7 +730,16 @@ class Neo4jAdapter(GraphDBInterface):
 
             - List[Dict[str, Any]]: A list of neighboring nodes represented as dictionaries.
         """
-        return await self.get_neighbours(node_id)
+        query = f"""
+           MATCH (n: `{BASE_LABEL}` {{id: $node_id}})--(m: `{BASE_LABEL}`)
+           RETURN DISTINCT properties(m) AS properties
+           """
+        try:
+            result = await self.query(query, {"node_id": node_id})
+            return [row["properties"] for row in result] if result else []
+        except Exception as exc:
+            logger.error(f"Failed to get neighbors for node {node_id}: {exc}")
+            raise exc
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """

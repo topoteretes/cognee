@@ -3,24 +3,20 @@ from typing import Any, Optional, Type, List, Union
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.retrieval.exceptions.exceptions import QueryValidationError
-from cognee.modules.retrieval.utils.validate_queries import validate_queries
-from cognee.tasks.storage import add_data_points
+from cognee.modules.retrieval.utils.validate_queries import validate_retriever_input
 from cognee.modules.graph.utils import resolve_edges_to_text
 from cognee.modules.graph.utils.convert_node_to_data_point import get_all_subclasses
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_force_triplet_search
-from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
-from cognee.modules.retrieval.utils.session_cache import (
-    save_conversation_history,
-    get_conversation_history,
+from cognee.modules.retrieval.utils.completion import (
+    generate_completion,
+    generate_completion_batch,
 )
+from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
-from cognee.modules.graph.utils import get_entity_nodes_from_triplets
 
 logger = get_logger("GraphCompletionRetriever")
 
@@ -61,6 +57,26 @@ class GraphCompletionRetriever(BaseRetriever):
         # response_model (Type): The Pydantic model or type for the expected response.
         self.response_model = response_model
 
+    def _use_session_cache(self) -> bool:
+        """Check if session caching is enabled for the current user."""
+        user = session_user.get()
+        user_id = getattr(user, "id", None)
+        return bool(user_id and CacheConfig().caching)
+
+    @staticmethod
+    def _get_vector_index_collections() -> List[str]:
+        """Collect vector index collection names from all DataPoint subclasses."""
+        collections = []
+        for subclass in get_all_subclasses(DataPoint):
+            metadata = subclass.model_fields.get("metadata")
+            if metadata is None:
+                continue
+            default = getattr(metadata, "default", None)
+            if isinstance(default, dict):
+                for field_name in default.get("index_fields", []):
+                    collections.append(f"{subclass.__name__}_{field_name}")
+        return collections
+
     async def get_retrieved_objects(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
     ) -> Union[List[Edge], List[List[Edge]]]:
@@ -76,19 +92,7 @@ class GraphCompletionRetriever(BaseRetriever):
                        Returns an empty list if the graph is empty or no results are found.
         """
 
-        cache_config = CacheConfig()
-        user = session_user.get()
-        user_id = getattr(user, "id", None)
-        session_save = user_id and cache_config.caching
-
-        if query_batch and session_save:
-            raise QueryValidationError(
-                message="You cannot use batch queries with session saving currently."
-            )
-
-        is_query_valid, msg = validate_queries(query, query_batch)
-        if not is_query_valid:
-            raise QueryValidationError(message=msg)
+        validate_retriever_input(query, query_batch, self._use_session_cache())
 
         graph_engine = await get_graph_engine()
         is_empty = await graph_engine.is_empty()
@@ -107,9 +111,6 @@ class GraphCompletionRetriever(BaseRetriever):
         if len(triplets) == 0:
             logger.warning("Empty context was provided to the completion")
             return []
-        # TODO: Remove when refactor of timestamps tracking is merged
-        entity_nodes = get_entity_nodes_from_triplets(triplets)
-        await update_node_access_timestamps(entity_nodes)
 
         return triplets
 
@@ -147,30 +148,17 @@ class GraphCompletionRetriever(BaseRetriever):
 
             - list: A list of found triplets that match the query.
         """
-        subclasses = get_all_subclasses(DataPoint)
-        vector_index_collections: List[str] = []
-
-        for subclass in subclasses:
-            if "metadata" in subclass.model_fields:
-                metadata_field = subclass.model_fields["metadata"]
-                if hasattr(metadata_field, "default") and metadata_field.default is not None:
-                    if isinstance(metadata_field.default, dict):
-                        index_fields = metadata_field.default.get("index_fields", [])
-                        for field_name in index_fields:
-                            vector_index_collections.append(f"{subclass.__name__}_{field_name}")
-
-        found_triplets = await brute_force_triplet_search(
+        collections = self._get_vector_index_collections()
+        return await brute_force_triplet_search(
             query,
             query_batch,
             top_k=self.top_k,
-            collections=vector_index_collections or None,
+            collections=collections or None,
             node_type=self.node_type,
             node_name=self.node_name,
             wide_search_top_k=self.wide_search_top_k,
             triplet_distance_penalty=self.triplet_distance_penalty,
         )
-
-        return found_triplets
 
     async def get_context_from_objects(
         self,
@@ -213,6 +201,29 @@ class GraphCompletionRetriever(BaseRetriever):
 
         return await self.resolve_edges_to_text(triplets)
 
+    def _completion_kwargs(self, context: str) -> dict:
+        """Common kwargs for completion calls (no session)."""
+        return {
+            "context": context,
+            "user_prompt_path": self.user_prompt_path,
+            "system_prompt_path": self.system_prompt_path,
+            "system_prompt": self.system_prompt,
+            "response_model": self.response_model,
+        }
+
+    async def _generate_completion_without_session(
+        self,
+        query: Optional[str],
+        query_batch: Optional[List[str]],
+        context: str,
+    ) -> List[Any]:
+        """Generate completion(s) without session; returns list of completions."""
+        kwargs = self._completion_kwargs(context)
+        if query_batch:
+            return await generate_completion_batch(query_batch=query_batch, **kwargs)
+        completion = await generate_completion(query=query, **kwargs)
+        return [completion]
+
     async def get_completion_from_context(
         self,
         query: Optional[str] = None,
@@ -238,60 +249,21 @@ class GraphCompletionRetriever(BaseRetriever):
         Note: To avoid duplicate retrievals, ensure that retrieved_objects and context
               are provided from previous method calls.
         """
-        cache_config = CacheConfig()
-        user = session_user.get()
-        user_id = getattr(user, "id", None)
-        session_save = user_id and cache_config.caching
-
-        if session_save:
-            conversation_history = await get_conversation_history(session_id=self.session_id)
-
-            context_summary, completion = await asyncio.gather(
-                summarize_text(context),
-                generate_completion(
-                    query=query,
-                    context=context,
-                    user_prompt_path=self.user_prompt_path,
-                    system_prompt_path=self.system_prompt_path,
-                    system_prompt=self.system_prompt,
-                    conversation_history=conversation_history,
-                    response_model=self.response_model,
-                ),
-            )
-        else:
-            if query_batch:
-                completion = await asyncio.gather(
-                    *[
-                        generate_completion(
-                            query=batched_query,
-                            context=batched_context,
-                            user_prompt_path=self.user_prompt_path,
-                            system_prompt_path=self.system_prompt_path,
-                            system_prompt=self.system_prompt,
-                            response_model=self.response_model,
-                        )
-                        for batched_query, batched_context in zip(query_batch, context)
-                    ]
-                )
-            else:
-                completion = await generate_completion(
-                    query=query,
-                    context=context,
-                    user_prompt_path=self.user_prompt_path,
-                    system_prompt_path=self.system_prompt_path,
-                    system_prompt=self.system_prompt,
-                    response_model=self.response_model,
-                )
-
-        if session_save:
-            await save_conversation_history(
-                query=query,
-                context_summary=context_summary,
-                answer=completion,
+        use_session = self._use_session_cache() and not query_batch
+        if use_session:
+            sm = get_session_manager()
+            completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
+                query=query,
+                context=context,
+                user_prompt_path=self.user_prompt_path,
+                system_prompt_path=self.system_prompt_path,
+                system_prompt=self.system_prompt,
+                response_model=self.response_model,
+                summarize_context=False,
             )
-
-        return completion if query_batch else [completion]
+            return [completion]
+        return await self._generate_completion_without_session(query, query_batch, context)
 
     async def get_completion(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None
@@ -306,9 +278,7 @@ class GraphCompletionRetriever(BaseRetriever):
         Returns:
             List[Any]: A list containing the generated completions or response objects.
         """
-        is_query_valid, msg = validate_queries(query, query_batch)
-        if not is_query_valid:
-            raise QueryValidationError(message=msg)
+        validate_retriever_input(query, query_batch)
 
         retrieved_objects = await self.get_retrieved_objects(query=query, query_batch=query_batch)
         context = await self.get_context_from_objects(

@@ -8,6 +8,7 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
+
 def _get_top_n_frequent_words(
     text: str, stop_words: set = None, top_n: int = 3, separator: str = ", "
 ) -> str:
@@ -30,14 +31,13 @@ def _create_title_from_text(text: str, first_n_words: int = 7, top_n_words: int 
 
 
 def _extract_nodes_from_edges(retrieved_edges: List[Edge]) -> dict:
-
     """Creates a dictionary of nodes with their names and content."""
 
     logger.debug(
         "Extracting nodes from retrieved edges",
         extra={"edge_count": len(retrieved_edges)},
     )
-    
+
     nodes = {}
 
     for edge in retrieved_edges:
@@ -50,7 +50,7 @@ def _extract_nodes_from_edges(retrieved_edges: List[Edge]) -> dict:
                 name = _create_title_from_text(text)
                 content = text
             else:
-                logger.warning(
+                logger.debug(
                     "Node text missing, using fallback attributes",
                     extra={"node_id": str(node.id)},
                 )
@@ -64,6 +64,9 @@ def _extract_nodes_from_edges(retrieved_edges: List[Edge]) -> dict:
 
 async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
     """Converts retrieved graph edges into a human-readable string format."""
+    if not retrieved_edges:
+        return ""
+
     nodes = _extract_nodes_from_edges(retrieved_edges)
 
     node_section = "\n".join(
@@ -83,7 +86,7 @@ async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
         target_name = nodes[edge.node2.id]["name"]
         edge_label = edge.attributes.get("edge_text")
         if not edge_label:
-            logger.warning(
+            logger.debug(
                 "Edge text missing, falling back to relationship_type",
                 extra={
                     "source_id": str(edge.node1.id),

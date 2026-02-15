@@ -1,8 +1,11 @@
+from typing import List
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 from uuid import UUID
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.users.methods import get_authenticated_user
+from cognee.modules.users.methods import get_authenticated_user, get_user
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.models import User
 
@@ -11,6 +14,11 @@ from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
 
 logger = get_logger()
+
+
+class UserDatasetPair(BaseModel):
+    user_id: UUID
+    dataset_id: UUID
 
 
 def get_visualize_router() -> APIRouter:
@@ -61,6 +69,63 @@ def get_visualize_router() -> APIRouter:
             await set_database_global_context_variables(dataset[0].id, dataset[0].owner_id)
 
             html_visualization = await visualize_graph()
+            return HTMLResponse(html_visualization)
+
+        except Exception as error:
+            return JSONResponse(status_code=409, content={"error": str(error)})
+
+    @router.post("/multi", response_model=None)
+    async def visualize_multi(
+        pairs: List[UserDatasetPair],
+        user: User = Depends(get_authenticated_user),
+    ):
+        """
+        Generate a combined HTML visualization of graph data from multiple users' datasets.
+
+        This endpoint aggregates knowledge graphs from multiple user+dataset pairs
+        into a single interactive visualization, with each user's nodes tagged for
+        color-by-user rendering.
+
+        ## Request Body
+        A JSON array of objects, each with:
+        - **user_id** (UUID): The user who owns the dataset
+        - **dataset_id** (UUID): The dataset to include
+
+        ## Response
+        Returns an HTML page containing the combined interactive graph visualization.
+
+        ## Notes
+        - Requires superuser privileges to view other users' data
+        - Each user+dataset pair must exist and be accessible
+        """
+        send_telemetry(
+            "Visualize Multi API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": "POST /v1/visualize/multi",
+                "pair_count": len(pairs),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.api.v1.visualize import visualize_multi_user_graph
+
+        try:
+            if not user.is_superuser:
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "Superuser privileges required for multi-user visualization"},
+                )
+
+            user_dataset_pairs = []
+            for pair in pairs:
+                target_user = await get_user(pair.user_id)
+                datasets = await get_authorized_existing_datasets(
+                    [pair.dataset_id], "read", target_user
+                )
+                user_dataset_pairs.append((target_user, datasets[0]))
+
+            html_visualization = await visualize_multi_user_graph(user_dataset_pairs)
             return HTMLResponse(html_visualization)
 
         except Exception as error:

@@ -238,31 +238,38 @@ async def test_mcp_tool_logging(e2e_config, cache_engine):
     status_result = await mcp_server_module.cognify_status()
     assert status_result is not None, "Cognify status should return results"
 
-    await mcp_server_module.prune()
-    await asyncio.sleep(0.5)
-
     logs = await cache_engine.get_usage_logs("unknown", limit=50)
     mcp_logs = [log for log in logs if log.get("type") == "mcp_tool"]
-    assert len(mcp_logs) > 0, (
-        f"Should have MCP tool logs with user_id='unknown'. Found logs: {[log.get('function_name') for log in logs[:5]]}"
+    assert len(mcp_logs) == 5, (
+        f"Expected 5 MCP logs before prune. Found: {[log.get('function_name') for log in mcp_logs]}"
     )
-    assert len(mcp_logs) == 6
-    function_names = [log.get("function_name") for log in mcp_logs]
-    expected_tools = [
+    expected_tools_before_prune = [
         "MCP cognify",
         "MCP list_data",
         "MCP search",
         "MCP save_interaction",
         "MCP cognify_status",
-        "MCP prune",
     ]
-
-    for expected_tool in expected_tools:
+    function_names = [log.get("function_name") for log in mcp_logs]
+    for expected_tool in expected_tools_before_prune:
         assert expected_tool in function_names, (
             f"Should have {expected_tool} log. Found: {function_names}"
         )
-
     for log in mcp_logs:
         assert log["type"] == "mcp_tool"
         assert log["user_id"] == "unknown"
         assert log["success"] is True
+
+    await mcp_server_module.prune()
+    await asyncio.sleep(0.5)
+
+    logs_after_prune = await cache_engine.get_usage_logs("unknown", limit=50)
+    mcp_logs_after_prune = [log for log in logs_after_prune if log.get("type") == "mcp_tool"]
+    assert len(mcp_logs_after_prune) == 1, (
+        f"After prune, Redis is flushed so only the prune log should remain. "
+        f"Found: {[log.get('function_name') for log in mcp_logs_after_prune]}"
+    )
+    assert mcp_logs_after_prune[0]["function_name"] == "MCP prune"
+    assert mcp_logs_after_prune[0]["type"] == "mcp_tool"
+    assert mcp_logs_after_prune[0]["user_id"] == "unknown"
+    assert mcp_logs_after_prune[0]["success"] is True

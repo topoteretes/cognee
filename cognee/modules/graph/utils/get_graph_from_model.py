@@ -6,6 +6,7 @@ from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
+
 def _extract_field_data(field_value: Any) -> List[Tuple[Optional[Edge], List[DataPoint]]]:
     """Extract edge metadata and datapoints from a field value."""
     # Handle single DataPoint
@@ -136,8 +137,8 @@ def _targets_generator(
 
 async def get_graph_from_model(
     data_point: DataPoint,
-    added_nodes: Dict[str, bool],
-    added_edges: Dict[str, bool],
+    added_nodes: Optional[Dict[str, bool]] = None,
+    added_edges: Optional[Dict[str, bool]] = None,
     visited_properties: Optional[Dict[str, bool]] = None,
     include_root: bool = True,
 ) -> Tuple[List[DataPoint], List[Tuple[str, str, str, Dict[str, Any]]]]:
@@ -154,6 +155,12 @@ async def get_graph_from_model(
     Returns:
         Tuple of (nodes, edges) extracted from the model
     """
+    if added_nodes is None:
+        added_nodes = {}
+
+    if added_edges is None:
+        added_edges = {}
+
     if str(data_point.id) in added_nodes:
         logger.debug(
             "Skipping already processed DataPoint",

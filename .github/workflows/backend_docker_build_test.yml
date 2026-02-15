@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out Cognee code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build Cognee Docker image
         id: cognee-docker-tag
