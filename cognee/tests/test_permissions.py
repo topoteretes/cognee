@@ -19,12 +19,9 @@ from cognee.modules.users.roles.methods import add_user_to_role, create_role
 from cognee.modules.users.tenants.methods import (
     add_user_to_tenant,
     create_tenant,
-    remove_user_from_tenant,
     select_tenant,
     remove_user_from_tenant,
 )
-from cognee.exceptions import CogneeValidationError
-from cognee.infrastructure.databases.exceptions import EntityNotFoundError
 
 pytestmark = pytest.mark.asyncio
 

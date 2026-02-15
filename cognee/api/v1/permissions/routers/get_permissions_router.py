@@ -23,7 +23,6 @@ from cognee.modules.users.tenants.methods.get_users_in_tenant import (
 from cognee.modules.users.models import User
 from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 
 
