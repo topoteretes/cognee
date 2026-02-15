@@ -23,7 +23,6 @@ from cognee.modules.users.tenants.methods.get_users_in_tenant import (
 from cognee.modules.users.models import User
 from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
-from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 
 
@@ -223,11 +222,12 @@ def get_permissions_router() -> APIRouter:
         """
         Remove a user from a tenant.
 
-        Only the tenant owner can remove users from their tenant. The tenant owner
-        cannot be removed from their own tenant. This removes the user from all
-        roles in the tenant and revokes their permissions on datasets belonging to
-        the tenant. Data owned by the removed user (e.g. datasets they created)
-        remains in the tenant.
+        The tenant owner or any user with ``has_user_management_permission`` in the
+        tenant (e.g. users in the Admin role) can remove users from the tenant. The
+        tenant owner cannot be removed from their own tenant. This removes the user
+        from all roles in the tenant and revokes their permissions on datasets
+        belonging to the tenant. Data owned by the removed user (e.g. datasets they
+        created) remains in the tenant.
 
         ## Path Parameters
         - **tenant_id** (UUID): The UUID of the tenant
@@ -238,7 +238,8 @@ def get_permissions_router() -> APIRouter:
 
         ## Error Codes
         - **400 Bad Request**: Attempt to remove the tenant owner from their own tenant
-        - **403 Forbidden**: Requester is not the tenant owner
+        - **403 Forbidden**: Requester is not the tenant owner and does not have
+          ``has_user_management_permission`` (e.g. Admin role) in the tenant
         - **404 Not Found**: Tenant not found, user not found, or user not in tenant
         - **500 Internal Server Error**: Error removing user from tenant
         """

@@ -19,19 +19,23 @@ async def remove_user_from_tenant(user_id: UUID, tenant_id: UUID, owner_id: UUID
     """
     Remove a user from a tenant.
 
-    Only the tenant owner can remove users. The tenant owner cannot be removed
-    from their own tenant. Removes the user from all roles in the tenant and
-    revokes their permissions on datasets belonging to the tenant. Data owned
-    by the removed user within the tenant (e.g. datasets they created) remains
-    in the tenant; only their membership and direct permissions are removed.
+    The tenant owner or any user with user management permission in the tenant
+    (e.g. users in the Admin role) can remove users. The tenant owner cannot
+    be removed from their own tenant. Removes the user from all roles in the
+    tenant and revokes their permissions on datasets belonging to the tenant.
+    Data owned by the removed user within the tenant (e.g. datasets they
+    created) remains in the tenant; only their membership and direct
+    permissions are removed.
 
     Args:
         user_id: Id of the user to remove.
         tenant_id: Id of the tenant.
-        owner_id: Id of the requester (must be tenant owner).
+        owner_id: Id of the requester (must be tenant owner or have user
+            management permission in the tenant).
 
     Raises:
-        PermissionDeniedError: If requester is not the tenant owner.
+        PermissionDeniedError: If requester is not the tenant owner and does
+            not have user management permission in the tenant.
         TenantNotFoundError: If the tenant does not exist.
         EntityNotFoundError: If the user does not exist or is not in the tenant.
         CogneeValidationError: If attempting to remove the tenant owner.

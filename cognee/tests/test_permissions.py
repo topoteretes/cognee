@@ -19,8 +19,8 @@ from cognee.modules.users.roles.methods import add_user_to_role, create_role
 from cognee.modules.users.tenants.methods import (
     add_user_to_tenant,
     create_tenant,
-    remove_user_from_tenant,
     select_tenant,
+    remove_user_from_tenant,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -44,11 +44,11 @@ async def _reset_engines_and_prune() -> None:
     except Exception:
         pass
 
-    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
     from cognee.infrastructure.databases.relational.create_relational_engine import (
         create_relational_engine,
     )
     from cognee.infrastructure.databases.vector.create_vector_engine import _create_vector_engine
+    from cognee.infrastructure.databases.graph.get_graph_engine import _create_graph_engine
 
     _create_graph_engine.cache_clear()
     _create_vector_engine.cache_clear()
