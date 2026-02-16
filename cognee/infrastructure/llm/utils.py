@@ -1,12 +1,15 @@
+import asyncio
+
 import litellm
 
 from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
     get_llm_client,
 )
-from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
+
+CONNECTION_TEST_TIMEOUT_SECONDS = 30
 
 
 def get_max_chunk_tokens():
@@ -70,19 +73,42 @@ def get_model_max_completion_tokens(model_name: str):
 
 async def test_llm_connection():
     """
-    Establish a connection to the LLM and create a structured output.
+    Test connectivity to the LLM endpoint using a simple completion call.
 
-    Attempt to connect to the LLM client and uses the adapter to create a structured output
-    with a predefined text input and system prompt. Log any exceptions encountered during
-    the connection attempt and re-raise the exception for further handling.
+    Uses a lightweight litellm.acompletion() call instead of the full instructor
+    structured output pipeline to avoid failures with local models that cannot
+    produce instructor-compatible structured JSON. The call is wrapped in a timeout
+    to prevent indefinite hangs.
     """
-    try:
-        await LLMGateway.acreate_structured_output(
-            text_input="test",
-            system_prompt='Respond to me with the following string: "test"',
-            response_model=str,
-        )
+    from cognee.infrastructure.llm.config import get_llm_config
 
+    config = get_llm_config()
+    try:
+        await asyncio.wait_for(
+            litellm.acompletion(
+                model=config.llm_model,
+                messages=[{"role": "user", "content": "Say ok"}],
+                api_key=config.llm_api_key,
+                api_base=config.llm_endpoint,
+                max_tokens=5,
+            ),
+            timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        msg = (
+            f"LLM connection test timed out after {CONNECTION_TEST_TIMEOUT_SECONDS}s. "
+            "Check that your LLM endpoint is reachable and responding. "
+            "Set COGNEE_SKIP_CONNECTION_TEST=true to bypass this check."
+        )
+        logger.error(msg)
+        raise TimeoutError(msg)
+    except litellm.exceptions.AuthenticationError as e:
+        msg = (
+            "LLM authentication failed. Check your LLM_API_KEY configuration. "
+            "Set COGNEE_SKIP_CONNECTION_TEST=true to bypass this check."
+        )
+        logger.error(msg)
+        raise e
     except Exception as e:
         logger.error(e)
         logger.error("Connection to LLM could not be established.")
@@ -95,12 +121,24 @@ async def test_embedding_connection():
 
     Handles exceptions that may occur during the operation, logs the error, and re-raises
     the exception if the connection to the embedding handler cannot be established.
+    Wrapped in a timeout to prevent indefinite hangs.
     """
     try:
         # NOTE: Vector engine import must be done in function to avoid circular import issue
         from cognee.infrastructure.databases.vector import get_vector_engine
 
-        await get_vector_engine().embedding_engine.embed_text("test")
+        await asyncio.wait_for(
+            get_vector_engine().embedding_engine.embed_text("test"),
+            timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        msg = (
+            f"Embedding connection test timed out after {CONNECTION_TEST_TIMEOUT_SECONDS}s. "
+            "Check that your embedding endpoint is reachable. "
+            "Set COGNEE_SKIP_CONNECTION_TEST=true to bypass this check."
+        )
+        logger.error(msg)
+        raise TimeoutError(msg)
     except Exception as e:
         logger.error(e)
         logger.error("Connection to Embedding handler could not be established.")
