@@ -35,7 +35,9 @@ Both pipelines use the same task order, but they differ in how graph entities ar
   data points a second time.
 - **Chunk-level graph entities with relations:** `poc_expand_with_nodes_and_edges.py`
   builds `GraphEntity`/`GraphEntityType` objects (with `relations` populated) and links
-  them into each chunk’s `contains`. Maps are reset per chunk to keep additions scoped.
+  them into each chunk’s `contains`. The POC keeps global node maps for cross-chunk
+  deduplication, while computing per-chunk diffs to attach only newly created nodes
+  to each chunk.
 - **Ontology-aware behavior preserved:** Ontology resolver selection and existing-edge
   de-duplication are retained from the standard pipeline via `get_ontology_*` helpers
   and `retrieve_existing_edges()`.

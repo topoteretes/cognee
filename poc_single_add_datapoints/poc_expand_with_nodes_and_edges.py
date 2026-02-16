@@ -39,9 +39,20 @@ def _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes):
     ]
 
     for entity_node in graph_entity_nodes.values():
+        edge_text = "; ".join(
+            [
+                "relationship_name: contains",
+                f"entity_name: {entity_node.name}",
+                f"entity_description: {entity_node.description}",
+            ]
+        )
+
         data_chunk.contains.append(
             (
-                Edge(relationship_type="contains"),
+                Edge(
+                    relationship_type="contains",
+                    edge_text=edge_text,
+                ),
                 entity_node,
             )
         )
@@ -104,6 +115,12 @@ def _build_graph_entities_with_relations(
     return graph_entity_nodes
 
 
+def _filter_new_ontology_nodes(added_ontology_nodes_map_old, added_ontology_nodes_map):
+    return {
+        k: v for k, v in added_ontology_nodes_map.items() if k not in added_ontology_nodes_map_old
+    }
+
+
 def poc_expand_with_nodes_and_edges(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list[KnowledgeGraph],
@@ -137,6 +154,8 @@ def poc_expand_with_nodes_and_edges(
         if not graph:
             continue
 
+        added_ontology_nodes_map_old = set(added_ontology_nodes_map.keys())
+
         # Process nodes first
         _process_graph_nodes(
             data_chunk,
@@ -153,15 +172,18 @@ def poc_expand_with_nodes_and_edges(
         # Then process edges
         _process_graph_edges(graph, name_mapping, existing_edges_map, relationships)
 
+        new_added_ontology_nodes_map = _filter_new_ontology_nodes(
+            added_ontology_nodes_map_old, added_ontology_nodes_map
+        )
+
         # Transform newly created nodes into GraphEntities and populate with relations
         graph_entity_nodes = _build_graph_entities_with_relations(
-            data_chunks, added_ontology_nodes_map, relationships, ontology_relationships
+            data_chunks, new_added_ontology_nodes_map, relationships, ontology_relationships
         )
 
         # Link Graph Entities to their respective data_chunk using contains and reset maps
         _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes)
 
-        # Reset maps to keep track of which nodes and relationships were added in current document chunk
-        added_ontology_nodes_map.clear()
+        # Reset per-chunk edge collections only; keep node maps for cross-chunk deduplication
         relationships.clear()
         ontology_relationships.clear()
