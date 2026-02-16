@@ -178,7 +178,7 @@ async def brute_force_triplet_search(
             query_batch=query_batch if query_list_length else None,
             collections=collections,
             wide_search_limit=wide_search_limit,
-            node_names=node_name,
+            node_name=node_name,
         )
 
         if not vector_search.has_results():

@@ -309,7 +309,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         limit: Optional[int] = 15,
         with_vector: bool = False,
         include_payload: bool = False,
-        belongs_to_set: List[str] = None,
+        node_name: Optional[List[str]] = None,
     ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
@@ -341,11 +341,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
         # Use async session to connect to the database
         async with self.get_async_session() as session:
-            if belongs_to_set:
+            if node_name:
                 from sqlalchemy import cast, bindparam
                 from sqlalchemy.dialects.postgresql import JSONB, ARRAY, TEXT
 
-                target = bindparam("target", value=belongs_to_set, type_=ARRAY(TEXT()))
+                target = bindparam("target", value=node_name, type_=ARRAY(TEXT()))
                 query = (
                     select(
                         *select_columns,

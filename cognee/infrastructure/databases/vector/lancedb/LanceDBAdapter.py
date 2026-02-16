@@ -238,7 +238,7 @@ class LanceDBAdapter(VectorDBInterface):
         with_vector: bool = False,
         normalized: bool = True,
         include_payload: bool = False,
-        belongs_to_set: List[str] = None,
+        node_name: Optional[List[str]] = None,
     ):
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
@@ -261,10 +261,10 @@ class LanceDBAdapter(VectorDBInterface):
             if include_payload
             else ["id", "vector", "_distance"]
         )
-        if belongs_to_set:
+        if node_name:
             result_values = (
                 await collection.vector_search(query_vector)
-                .where(f"array_has_any(payload.belongs_to_set, {belongs_to_set})")
+                .where(f"array_has_any(payload.belongs_to_set, {node_name})")
                 .select(select_columns)
                 .limit(limit)
                 .to_list()

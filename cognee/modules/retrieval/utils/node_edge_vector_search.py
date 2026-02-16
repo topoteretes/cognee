@@ -33,7 +33,7 @@ class NodeEdgeVectorSearch:
         query_batch: Optional[List[str]] = None,
         collections: List[str] = None,
         wide_search_limit: Optional[int] = None,
-        node_names: Optional[List[str]] = None,
+        node_name: Optional[List[str]] = None,
     ):
         """Embeds query/queries and retrieves vector distances from all collections."""
         if query is not None and query_batch is not None:
@@ -51,7 +51,7 @@ class NodeEdgeVectorSearch:
         else:
             self.query_list_length = None
             search_results = await self._run_single_search(
-                collections, query, wide_search_limit, node_names
+                collections, query, wide_search_limit, node_name
             )
 
         elapsed_time = time.time() - start_time
@@ -147,7 +147,7 @@ class NodeEdgeVectorSearch:
         collections: List[str],
         query: str,
         wide_search_limit: Optional[int],
-        node_names: List[str],
+        node_name: Optional[List[str]],
     ) -> List[List[Any]]:
         """Runs single query search and returns flat lists per collection.
 
@@ -157,7 +157,7 @@ class NodeEdgeVectorSearch:
         await self._embed_query(query)
         search_tasks = [
             self._search_single_collection(
-                self.vector_engine, wide_search_limit, collection, node_names
+                self.vector_engine, wide_search_limit, collection, node_name
             )
             for collection in collections
         ]
@@ -174,7 +174,7 @@ class NodeEdgeVectorSearch:
         vector_engine: Any,
         wide_search_limit: Optional[int],
         collection_name: str,
-        node_names: List[str],
+        node_name: Optional[List[str]],
     ):
         """Searches one collection and returns results or empty list if not found."""
         try:
@@ -182,7 +182,7 @@ class NodeEdgeVectorSearch:
                 collection_name=collection_name,
                 query_vector=self.query_vector,
                 limit=wide_search_limit,
-                belongs_to_set=node_names,
+                node_name=node_name,
             )
         except CollectionNotFoundError:
             return []
