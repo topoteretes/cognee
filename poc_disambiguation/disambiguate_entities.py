@@ -51,10 +51,8 @@ async def disambiguate_entities_pipeline(
     config: Config = None,
     vector_db_config: dict = None,
     graph_db_config: dict = None,
-    run_in_background: bool = False,
     incremental_loading: bool = True,
     custom_prompt: Optional[str] = None,
-    temporal_cognify: bool = False,
     data_per_batch: int = 20,
     **kwargs,
 ):
