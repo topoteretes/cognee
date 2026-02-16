@@ -182,7 +182,7 @@ class NodeEdgeVectorSearch:
                 collection_name=collection_name,
                 query_vector=self.query_vector,
                 limit=wide_search_limit,
-                belongs_to_nodesets=node_names,
+                belongs_to_set=node_names,
             )
         except CollectionNotFoundError:
             return []

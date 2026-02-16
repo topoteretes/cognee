@@ -138,7 +138,7 @@ async def test_vector_engine_search_with_nodeset_filtering():
         collection_name="DocumentChunk_text",
         query_vector=query_vector,
         include_payload=True,
-        belongs_to_nodesets=node_set_a,
+        belongs_to_set=node_set_a,
     )
 
     assert all(nodeset in node_set_a for nodeset in result[0].payload["belongs_to_set"]), (
@@ -191,7 +191,7 @@ async def main():
 
     vector_engine = get_vector_engine()
     random_node = (
-        await vector_engine.search("DocumentChunk_text", "Quantum computer", include_payload=True)
+        await vector_engine.search("Entity_name", "Quantum computer", include_payload=True)
     )[0]
     random_node_name = random_node.payload["text"]
 

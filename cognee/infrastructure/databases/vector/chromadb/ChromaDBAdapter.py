@@ -283,9 +283,7 @@ class ChromaDBAdapter(VectorDBInterface):
             ids=ids, embeddings=embeddings, metadatas=metadatas, documents=texts
         )
 
-    async def create_vector_index(
-        self, index_name: str, index_property_name: str, payload_schema: BaseModel = None
-    ):
+    async def create_vector_index(self, index_name: str, index_property_name: str):
         """
         Create a vector index as a ChromaDB collection based on provided names.
 
