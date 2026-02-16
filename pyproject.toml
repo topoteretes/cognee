@@ -63,6 +63,7 @@ dependencies = [
     "urllib3>=2.6.0",
     "cbor2>=5.8.0",
     "langdetect>=1.0.9",
+    "datamodel-code-generator>=0.54.0",
 ]
 
 [project.optional-dependencies]
@@ -197,7 +198,7 @@ packages = ["cognee", "distributed"]
 
 [tool.uv]
 constraint-dependencies = [
-    "protobuf>=6.33.5",
+    "protobuf>=5.29.6, !=6.30.*, !=6.31.*, !=6.32.*, !=6.33.1, !=6.33.2, !=6.33.3, !=6.33.4", # protobuf 6.33.5 and higher versions + version 5.29.6
     "pyasn1>=0.6.2",
     "wheel>=0.46.2",
 ]

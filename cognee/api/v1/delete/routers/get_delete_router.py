@@ -16,7 +16,7 @@ logger = get_logger()
 def get_delete_router() -> APIRouter:
     router = APIRouter()
 
-    @router.delete("", response_model=None)
+    @router.delete("", response_model=None, deprecated=True)
     @deprecated(
         reason="DELETE /v1/delete is deprecated. Use DELETE /v1/datasets/{dataset_id}/data/{data_id} instead.",
         version="0.3.9",

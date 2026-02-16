@@ -39,8 +39,10 @@ services:
     build:
       context: .
       dockerfile: cognee-mcp/Dockerfile
+    command: --no-migration
     volumes:
       - .env:/app/.env
+      - ./cognee:/app/cognee
     environment:
       - DEBUG=false # Change to true if debugging
       - ENVIRONMENT=local
