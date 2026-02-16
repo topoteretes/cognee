@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -92,7 +92,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -139,7 +139,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -150,7 +150,6 @@ jobs:
       - name: Run Deduplication Example
         env:
           ENV: 'dev'
-          ENABLE_BACKEND_ACCESS_CONTROL: 'false'
           LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }} # Test needs OpenAI endpoint to handle multimedia
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EMBEDDING_DIMENSIONS: 300
@@ -165,7 +164,7 @@ jobs:
       runs-on: ubuntu-22.04
       steps:
         - name: Check out repository
-          uses: actions/checkout@v4
+          uses: actions/checkout@v6
 
         - name: Cognee Setup
           uses: ./.github/actions/cognee_setup
@@ -194,7 +193,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -223,7 +222,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -249,7 +248,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -275,7 +274,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -304,7 +303,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -330,7 +329,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -351,12 +350,313 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_custom_data_label.py
 
+  test-delete-permission:
+    name: Test delete permission assigned from dataset owner
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run delete persmission test
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_delete_permission.py
+
+  test-deletion-on-default-graph:
+    name: Delete default graph data test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run deletion on default graph
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_delete_default_graph.py
+
+  test-deletion-on-default-graph-non-mocked:
+    name: Delete default graph data test (non-mocked)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run deletion on default graph non mocked
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_delete_default_graph_non_mocked.py
+
+  test-deletion-on-custom-graph:
+    name: Delete custom graph data test
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run deletion on custom graph
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_delete_custom_graph.py
+
+  test-deletion-on-default-graph_with_legacy_data_1_default:
+    name: Delete default graph with legacy data test 1 in Kuzu case
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run deletion on custom graph
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_1.py
+
+  test-deletion-on-default-graph_with_legacy_data_1_neo4j:
+    name: Delete default graph with legacy data test 1 in Neo4j case
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
+
+      - name: Run delete dataset test in Neo4j case
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          GRAPH_DATABASE_PROVIDER: "neo4j"
+          GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
+          GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
+          GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
+        run: uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_1.py
+
+  test-deletion-on-default-graph_with_legacy_data_2:
+    name: Delete default graph with legacy data test 2
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run deletion on custom graph
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_2.py
+
+  test-delete-two-users-with-legacy-data:
+    name: Delete data from two users operating on different datasets
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run delete test with two users with legacy data
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_delete_two_users_with_legacy_data.py
+
+  test-delete-two-users-on-same-dataset:
+    name: Delete data from two users operating on same dataset
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run delete test with two users operating on same dataset
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_delete_two_users_same_dataset.py
+
+  test-delete-dataset-default:
+    name: Delete dataset in Kuzu graph case
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run delete dataset test in Kuzu case
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_delete_dataset_kuzu.py
+
+  test-delete-dataset-neo4j:
+    name: Delete dataset in Neo4j graph case
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@master
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Setup Neo4j with GDS
+        uses: ./.github/actions/setup_neo4j
+        id: neo4j
+
+      - name: Run delete dataset test in Neo4j case
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          GRAPH_DATABASE_PROVIDER: "neo4j"
+          GRAPH_DATABASE_URL: ${{ steps.neo4j.outputs.neo4j-url }}
+          GRAPH_DATABASE_USERNAME: ${{ steps.neo4j.outputs.neo4j-username }}
+          GRAPH_DATABASE_PASSWORD: ${{ steps.neo4j.outputs.neo4j-password }}
+        run: uv run python ./cognee/tests/test_delete_dataset_neo4j.py
+
   test-graph-edges:
     name: Test graph edge ingestion
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -413,7 +713,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -450,7 +750,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -479,7 +779,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -537,7 +837,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -591,7 +891,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -627,7 +927,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -650,6 +950,62 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_pipeline_cache.py
 
+  run-graph-model-from-schema-test:
+    name: Test Graph Model Generation From Schema
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Graph Model Generation From Schema Test
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_graph_model_from_schema.py
+
+  run-custom-model-test:
+    name: Test Custom Model Cognify
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.11.x'
+
+      - name: Run Custom Model Test
+        env:
+          ENV: 'dev'
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+          EMBEDDING_DIMENSIONS: 300
+          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+        run: uv run python ./cognee/tests/test_custom_model.py
+
   run_usage_logger_test:
     name: Usage logger test (API/MCP)
     runs-on: ubuntu-latest
@@ -669,7 +1025,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup

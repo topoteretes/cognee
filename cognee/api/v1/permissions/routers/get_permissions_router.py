@@ -1,9 +1,24 @@
 from uuid import UUID
-from typing import List, Union
+from typing import List
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from cognee.modules.users.tenants.methods.get_tenant_roles import (
+    get_tenant_roles as method_get_tenant_roles,
+)
+from cognee.modules.users.tenants.methods.get_users_in_role import (
+    get_users_in_role as method_get_users_in_roles,
+)
+from cognee.modules.users.tenants.methods.get_user_roles import (
+    get_user_roles as method_get_user_roles,
+)
+from cognee.modules.users.tenants.methods.get_user_tenants import (
+    get_user_tenants as method_get_user_tenants,
+)
+from cognee.modules.users.tenants.methods.get_users_in_tenant import (
+    get_users_in_tenant as method_get_users_in_tenant,
+)
 from cognee.modules.users.models import User
 from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
@@ -96,6 +111,7 @@ def get_permissions_router() -> APIRouter:
             additional_properties={
                 "endpoint": "POST /v1/permissions/roles",
                 "role_name": role_name,
+                "tenant_id": str(user.tenant_id),
                 "cognee_version": cognee_version,
             },
         )
@@ -105,7 +121,12 @@ def get_permissions_router() -> APIRouter:
         role_id = await create_role_method(role_name=role_name, owner_id=user.id)
 
         return JSONResponse(
-            status_code=200, content={"message": "Role created for tenant", "role_id": str(role_id)}
+            status_code=200,
+            content={
+                "message": "Role created for tenant",
+                "role_id": str(role_id),
+                "tenant_id": str(user.tenant_id),
+            },
         )
 
     @permissions_router.post("/users/{user_id}/roles")
@@ -265,5 +286,48 @@ def get_permissions_router() -> APIRouter:
             status_code=200,
             content={"message": "Tenant selected.", "tenant_id": str(payload.tenant_id)},
         )
+
+    @permissions_router.get("/tenants/{tenant_id}/roles")
+    async def get_tenant_roles(
+        tenant_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        role_list = await method_get_tenant_roles(tenant_id=tenant_id, user=user)
+
+        return JSONResponse(status_code=200, content=role_list)
+
+    @permissions_router.get("/tenants/{tenant_id}/roles/{role_id}/users")
+    async def get_users_in_role(
+        tenant_id: UUID,
+        role_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        user_list = await method_get_users_in_roles(tenant_id=tenant_id, role_id=role_id, user=user)
+        return JSONResponse(status_code=200, content=user_list)
+
+    @permissions_router.get("/tenants/{tenant_id}/roles/users/{user_id}")
+    async def get_user_roles(
+        tenant_id: UUID,
+        user_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        role_list = await method_get_user_roles(tenant_id=tenant_id, user_id=user_id, user=user)
+        return JSONResponse(status_code=200, content=role_list)
+
+    @permissions_router.get("/tenants/{tenant_id}/users")
+    async def get_users_in_tenant(
+        tenant_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        user_list = await method_get_users_in_tenant(tenant_id=tenant_id, user=user)
+
+        return JSONResponse(status_code=200, content=user_list)
+
+    @permissions_router.get("/tenants/me")
+    async def get_my_tenants(
+        user: User = Depends(get_authenticated_user),
+    ):
+        tenants_list = await method_get_user_tenants(user=user)
+        return JSONResponse(status_code=200, content=tenants_list)
 
     return permissions_router
