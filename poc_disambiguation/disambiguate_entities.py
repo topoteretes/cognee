@@ -251,6 +251,7 @@ async def disambiguate_entities_pipeline(
     # Run the run_pipeline in the background or blocking based on executor
     return await run_custom_pipeline(
         tasks=tasks,
+        dataset=datasets,
         user=user,
         vector_db_config=vector_db_config,
         graph_db_config=graph_db_config,

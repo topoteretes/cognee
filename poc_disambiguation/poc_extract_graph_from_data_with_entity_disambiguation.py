@@ -129,7 +129,10 @@ async def integrate_chunk_graphs(
                 _stamp_provenance_deep(node, pipeline_name, task_name)
 
         await add_data_points(
-            data_points=graph_nodes, custom_edges=context, embed_triplets=embed_triplets
+            data_points=graph_nodes,
+            context=context,
+            custom_edges=graph_edges,
+            embed_triplets=embed_triplets,
         )
 
     if len(graph_edges) > 0:
@@ -148,6 +151,25 @@ async def integrate_chunk_graphs(
             )
 
     return data_chunks
+
+
+async def build_prompt(chunk, vector_search_limit, custom_prompt) -> Optional[str]:
+    vector_engine = get_vector_engine()
+    exists = await vector_engine.has_collection(collection_name="Entity_name")
+
+    if not (exists and custom_prompt):
+        return custom_prompt
+
+    results_per_chunk = await vector_engine.search(
+        collection_name="Entity_name",
+        query_text=chunk.text,
+        limit=vector_search_limit,
+        include_payload=True,
+    )
+    prompt = custom_prompt
+    for result in results_per_chunk:
+        prompt = prompt + "\n  -" + result.payload["text"]
+    return prompt
 
 
 async def extract_graph_from_data_with_entity_disambiguation(
@@ -170,23 +192,14 @@ async def extract_graph_from_data_with_entity_disambiguation(
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
 
-    vector_engine = get_vector_engine()
-    exists = await vector_engine.has_collection(collection_name="Entity_name")
-
-    if exists and custom_prompt:
-        results_per_chunk = await vector_engine.search(
-            collection_name="Entity_name",
-            query_text=data_chunks[0].text,
-            limit=vector_search_limit,
-            include_payload=True,
-        )
-        for result in results_per_chunk:
-            custom_prompt = custom_prompt + "\n  -" + result.payload["text"]
+    chunk_prompts = await asyncio.gather(
+        *[build_prompt(chunk, vector_search_limit, custom_prompt) for chunk in data_chunks]
+    )
 
     chunk_graphs = await asyncio.gather(
         *[
-            extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt)
-            for chunk in data_chunks
+            extract_content_graph(chunk.text, graph_model, custom_prompt=prompt)
+            for chunk, prompt in zip(data_chunks, chunk_prompts)
         ]
     )
 
