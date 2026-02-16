@@ -1,5 +1,8 @@
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any
+
+from dlt.extract import DltResource, SourceFactory
+
 from cognee.modules.users.models import User
 from cognee.modules.pipelines import Task, run_pipeline
 from cognee.modules.pipelines.layers.resolve_authorized_user_dataset import (
@@ -17,7 +20,16 @@ logger = get_logger()
 
 
 async def add(
-    data: Union[BinaryIO, list[BinaryIO], str, list[str], DataItem, list[DataItem]],
+    data: Union[
+        BinaryIO,
+        list[BinaryIO],
+        str,
+        list[str],
+        DataItem,
+        list[DataItem],
+        DltResource,
+        SourceFactory,
+    ],
     dataset_name: str = "main_dataset",
     user: User = None,
     node_set: Optional[List[str]] = None,

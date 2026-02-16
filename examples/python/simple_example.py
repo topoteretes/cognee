@@ -46,6 +46,15 @@ async def main():
     await cognee.cognify()
     print("Cognify process complete.\n")
 
+    await cognee.add("""
+    Natural language processing (NLP) is an interdisciplinary
+    subfield of computer science and information retrieval.
+
+    Andrej is an expert in NLP.
+    """)
+
+    await cognee.cognify()
+
     query_text = "Tell me about NLP"
     print(f"Searching cognee for insights with query: '{query_text}'")
     # Query cognee for insights on the added text

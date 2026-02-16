@@ -3,6 +3,7 @@ import inspect
 from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 
+from dlt.extract import DltResource, SourceFactory
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data
@@ -17,6 +18,7 @@ from cognee.modules.data.methods import (
     get_dataset_data,
     load_or_create_datasets,
 )
+from .ingest_dlt_source import ingest_dlt_source
 
 from .save_data_item_to_storage import save_data_item_to_storage
 from .data_item_to_text_file import data_item_to_text_file
@@ -78,7 +80,17 @@ async def ingest_data(
         dataset_data: list[Data] = await get_dataset_data(dataset.id)
         dataset_data_map = {str(data.id): True for data in dataset_data}
 
+        processed_data = []
         for data_item in data:
+            if isinstance(data_item, DltResource) or isinstance(data_item, SourceFactory):
+                processed_data.extend(await ingest_dlt_source(data_item, dataset.name))
+            else:
+                processed_data.append(data_item)
+
+        for data_item in processed_data:
+            # if isinstance(data_item, DltResource) or isinstance(data_item, SourceFactory):
+            #     await ingest_dlt_source(data_item, dataset.name)
+            # else:
             # Support for DataItem (custom label + data wrapper)
             current_label = None
             underlying_data = data_item
