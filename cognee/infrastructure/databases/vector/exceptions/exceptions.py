@@ -20,24 +20,3 @@ class CollectionNotFoundError(CogneeValidationError):
         log_level="DEBUG",
     ):
         super().__init__(message, name, status_code, log, log_level)
-
-
-class MissingPayloadSchemaError(CogneeValidationError):
-    """
-    Represents an error that occurs when the payload schema is missing, and it is needed
-    for the creation of vector indexes and collections.
-
-    This class extends the CogneeValidationError to handle specific cases where a payload
-    schema is missing. It can be initialized with a custom message and allows for
-    logging options including log level and whether to log the error.
-    """
-
-    def __init__(
-        self,
-        message,
-        name: str = "MissingPayloadSchemaError",
-        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
-        log=True,
-        log_level="DEBUG",
-    ):
-        super().__init__(message, name, status_code, log, log_level)
