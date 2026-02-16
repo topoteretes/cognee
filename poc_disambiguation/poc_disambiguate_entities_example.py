@@ -1,4 +1,6 @@
 import asyncio
+from typing import Optional
+
 import cognee
 from cognee.api.v1.visualize.visualize import visualize_graph
 from disambiguate_entities import disambiguate_entities_pipeline
@@ -6,7 +8,9 @@ from pathlib import Path
 import os
 
 
-async def main(example, vector_search_limit, custom_prompt, use_poc):
+async def main(
+    example, use_poc, vector_search_limit: Optional[int] = None, custom_prompt: Optional[str] = None
+):
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
@@ -44,10 +48,16 @@ if __name__ == "__main__":
             # loop.run_until_complete(main(example="example"+str(i), use_poc=False))
             loop.run_until_complete(
                 main(
-                    example="example" + str(i),
+                    example="data/example" + str(i),
+                    use_poc=True,
                     vector_search_limit=5,
                     custom_prompt=custom_prompt_text,
-                    use_poc=True,
+                )
+            )
+            loop.run_until_complete(
+                main(
+                    example="data/example" + str(i),
+                    use_poc=False,
                 )
             )
     finally:

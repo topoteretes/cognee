@@ -54,7 +54,6 @@ async def disambiguate_entities_pipeline(
     run_in_background: bool = False,
     incremental_loading: bool = True,
     custom_prompt: Optional[str] = None,
-    serach_limit: Optional[int] = 5,
     temporal_cognify: bool = False,
     data_per_batch: int = 20,
     **kwargs,
