@@ -9,7 +9,7 @@ jobs:
 
     # needs 32 Gb RAM for phi4 in a container
     runs-on: buildjet-8vcpu-ubuntu-2204
-
+    # runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -17,7 +17,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
+          python-version: '3.13.x'
 
       - name: Install torch dependency
         run: |
@@ -25,7 +25,7 @@ jobs:
 
       - name: Install nix
         run: |
-          sh <(curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install) --no-daemon
+          sh <(curl --proto '=https' --tlsv1.2 -L https://nixos.org/nix/install) --daemon --yes
 
       - name: Install llama-cpp
         run: nix profile install nixpkgs#llama-cpp
