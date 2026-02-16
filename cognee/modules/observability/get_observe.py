@@ -23,3 +23,16 @@ def get_observe():
                 return decorator
 
         return no_op_decorator
+    else:
+        # Unsupported observer (e.g. LLMLITE, LANGSMITH) — fall back to no-op
+        # to avoid returning None, which would crash @observe(...) decorators.
+        def no_op_decorator(*args, **kwargs):
+            if len(args) == 1 and callable(args[0]) and not kwargs:
+                return args[0]
+            else:
+                def decorator(func):
+                    return func
+
+                return decorator
+
+        return no_op_decorator
