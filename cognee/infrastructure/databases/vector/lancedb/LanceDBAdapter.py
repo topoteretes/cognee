@@ -390,8 +390,6 @@ class LanceDBAdapter(VectorDBInterface):
             model_type,
             include_fields={
                 "id": (str, ...),
-                # Explicitly include belongs_to_set to avoid complicating code in this function
-                # "belongs_to_set": (Optional[List[str]], None),
             },
             exclude_fields=["metadata"] + related_models_fields,
         )
