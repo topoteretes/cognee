@@ -39,9 +39,6 @@ def _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes):
     ]
 
     for entity_node in graph_entity_nodes.values():
-        if isinstance(entity_node, GraphEntityType):
-            continue
-
         data_chunk.contains.append(
             (
                 Edge(relationship_type="contains"),
@@ -51,6 +48,8 @@ def _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes):
 
 
 def _to_graph_entity(node):
+    if isinstance(node, GraphEntity) or isinstance(node, GraphEntityType):
+        return node
     if isinstance(node, Entity):
         return GraphEntity(**node.model_dump(), relations=getattr(node, "relations", []))
     if isinstance(node, EntityType):
@@ -58,9 +57,9 @@ def _to_graph_entity(node):
     return None
 
 
-def _convert_entities_to_graph_entities(added_nodes_map, added_ontology_nodes_map):
+def _convert_entities_to_graph_entities(added_ontology_nodes_map):
     graph_entity_nodes = {}
-    for node in chain(added_nodes_map.values(), added_ontology_nodes_map.values()):
+    for node in added_ontology_nodes_map.values():
         if node.id in graph_entity_nodes:
             continue
         graph_node = _to_graph_entity(node)
@@ -69,26 +68,37 @@ def _convert_entities_to_graph_entities(added_nodes_map, added_ontology_nodes_ma
     return graph_entity_nodes
 
 
-def _populate_graph_entities_entity_relations(graph_entity_nodes, relationships):
+def _find_entity_by_id(node_id, data_chunks, graph_entity_nodes):
+    if node_id in graph_entity_nodes:
+        return graph_entity_nodes.get(node_id)
+    for data_chunk in data_chunks:
+        result = next((t for t in data_chunk.contains if t[1].id == node_id), None)
+        if result:
+            new_entity = _to_graph_entity(result[1])
+            graph_entity_nodes[node_id] = new_entity
+            return new_entity
+
+    return None
+
+
+def _populate_graph_entities_entity_relations(data_chunks, graph_entity_nodes, relationships):
     for edge in relationships:
-        source_entity = graph_entity_nodes.get(edge[0])
-        target_entity = graph_entity_nodes.get(edge[1])
+        source_entity = _find_entity_by_id(edge[0], data_chunks, graph_entity_nodes)
+        target_entity = _find_entity_by_id(edge[1], data_chunks, graph_entity_nodes)
         if source_entity is None or target_entity is None:
             continue
         source_entity.relations.append((Edge(relationship_type=edge[2]), target_entity))
 
 
 def _build_graph_entities_with_relations(
-    added_nodes_map, added_ontology_nodes_map, relationships, ontology_relationships
+    data_chunks, added_ontology_nodes_map, relationships, ontology_relationships
 ):
     # Create Graph Entity nodes from added_nodes_map and added_ontology_nodes_map
-    graph_entity_nodes = _convert_entities_to_graph_entities(
-        added_nodes_map, added_ontology_nodes_map
-    )
+    graph_entity_nodes = _convert_entities_to_graph_entities(added_ontology_nodes_map)
 
     # Fill relations between each Graph Entity based off of relationships
     _populate_graph_entities_entity_relations(
-        graph_entity_nodes, chain(relationships, ontology_relationships)
+        data_chunks, graph_entity_nodes, chain(relationships, ontology_relationships)
     )
 
     return graph_entity_nodes
@@ -145,14 +155,13 @@ def poc_expand_with_nodes_and_edges(
 
         # Transform newly created nodes into GraphEntities and populate with relations
         graph_entity_nodes = _build_graph_entities_with_relations(
-            added_nodes_map, added_ontology_nodes_map, relationships, ontology_relationships
+            data_chunks, added_ontology_nodes_map, relationships, ontology_relationships
         )
 
         # Link Graph Entities to their respective data_chunk using contains and reset maps
         _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes)
 
         # Reset maps to keep track of which nodes and relationships were added in current document chunk
-        added_nodes_map.clear()
         added_ontology_nodes_map.clear()
         relationships.clear()
         ontology_relationships.clear()
