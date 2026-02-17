@@ -17,6 +17,7 @@ async def ingest_dlt_source(
     storage_config = get_storage_config()
     os.environ["BUCKET_URL"] = storage_config["data_root_directory"]
 
+    dlt_source.max_table_nesting = 0
     pipeline = dlt.pipeline(
         pipeline_name="ingest_dlt_source",
         destination="filesystem",
