@@ -30,10 +30,10 @@ def _stamp_provenance(data, pipeline_name, task_name, visited=None, note_set=Non
 
         # Propagate note_set from parent or pick up from this data point
         current_note_set = note_set
-        if data.source_note_set is not None:
-            current_note_set = data.source_note_set
-        elif current_note_set is not None and data.source_note_set is None:
-            data.source_note_set = current_note_set
+        if data.source_node_set is not None:
+            current_note_set = data.source_node_set
+        elif current_note_set is not None and data.source_node_set is None:
+            data.source_node_set = current_note_set
 
         # Recurse into DataPoint model fields to stamp nested DataPoints
         for field_name in data.model_fields:
@@ -54,14 +54,14 @@ def _stamp_provenance(data, pipeline_name, task_name, visited=None, note_set=Non
 
 
 def _extract_note_set(args):
-    """Extract source_note_set from input args to propagate across task boundaries."""
+    """Extract source_node_set from input args to propagate across task boundaries."""
     for arg in args:
-        if isinstance(arg, DataPoint) and arg.source_note_set is not None:
-            return arg.source_note_set
+        if isinstance(arg, DataPoint) and arg.source_node_set is not None:
+            return arg.source_node_set
         if isinstance(arg, (list, tuple)):
             for item in arg:
-                if isinstance(item, DataPoint) and item.source_note_set is not None:
-                    return item.source_note_set
+                if isinstance(item, DataPoint) and item.source_node_set is not None:
+                    return item.source_node_set
     return None
 
 
