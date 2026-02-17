@@ -1,19 +1,29 @@
-from uuid import UUID
 from typing import List, Union
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from cognee.modules.users.permissions.methods import get_tenant
-from cognee.modules.users.exceptions import PermissionDeniedError
-from cognee.infrastructure.databases.relational import get_relational_engine
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from cognee import __version__ as cognee_version
+from cognee.modules.users.tenants.methods.get_tenant_roles import (
+    get_tenant_roles as method_get_tenant_roles,
+)
+from cognee.modules.users.tenants.methods.get_users_in_role import (
+    get_users_in_role as method_get_users_in_roles,
+)
+from cognee.modules.users.tenants.methods.get_user_roles import (
+    get_user_roles as method_get_user_roles,
+)
+from cognee.modules.users.tenants.methods.get_user_tenants import (
+    get_user_tenants as method_get_user_tenants,
+)
+from cognee.modules.users.tenants.methods.get_users_in_tenant import (
+    get_users_in_tenant as method_get_users_in_tenant,
+)
 from cognee.modules.users.models import User
 from cognee.api.DTO import InDTO
 from cognee.modules.users.methods import get_authenticated_user
 from cognee.shared.utils import send_telemetry
-from cognee import __version__ as cognee_version
 
 
 class SelectTenantDTO(InDTO):
@@ -205,6 +215,51 @@ def get_permissions_router() -> APIRouter:
 
         return JSONResponse(status_code=200, content={"message": "User added to tenant"})
 
+    @permissions_router.delete("/tenants/{tenant_id}/users/{user_id}")
+    async def remove_user_from_tenant_endpoint(
+        tenant_id: UUID, user_id: UUID, user: User = Depends(get_authenticated_user)
+    ):
+        """
+        Remove a user from a tenant.
+
+        The tenant owner or any user with ``has_user_management_permission`` in the
+        tenant (e.g. users in the Admin role) can remove users from the tenant. The
+        tenant owner cannot be removed from their own tenant. This removes the user
+        from all roles in the tenant and revokes their permissions on datasets
+        belonging to the tenant. Data owned by the removed user (e.g. datasets they
+        created) remains in the tenant.
+
+        ## Path Parameters
+        - **tenant_id** (UUID): The UUID of the tenant
+        - **user_id** (UUID): The UUID of the user to remove from the tenant
+
+        ## Response
+        Returns a success message indicating the user was removed from the tenant.
+
+        ## Error Codes
+        - **400 Bad Request**: Attempt to remove the tenant owner from their own tenant
+        - **403 Forbidden**: Requester is not the tenant owner and does not have
+          ``has_user_management_permission`` (e.g. Admin role) in the tenant
+        - **404 Not Found**: Tenant not found, user not found, or user not in tenant
+        - **500 Internal Server Error**: Error removing user from tenant
+        """
+        send_telemetry(
+            "Permissions API Endpoint Invoked",
+            user.id,
+            additional_properties={
+                "endpoint": f"DELETE /v1/permissions/tenants/{str(tenant_id)}/users/{str(user_id)}",
+                "tenant_id": str(tenant_id),
+                "user_id": str(user_id),
+                "cognee_version": cognee_version,
+            },
+        )
+
+        from cognee.modules.users.tenants.methods import remove_user_from_tenant
+
+        await remove_user_from_tenant(user_id=user_id, tenant_id=tenant_id, owner_id=user.id)
+
+        return JSONResponse(status_code=200, content={"message": "User removed from tenant"})
+
     @permissions_router.post("/tenants")
     async def create_tenant(tenant_name: str, user: User = Depends(get_authenticated_user)):
         """
@@ -282,31 +337,42 @@ def get_permissions_router() -> APIRouter:
         tenant_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):
-        tenant = await get_tenant(tenant_id)
-        if tenant.owner_id != user.id:
-            raise PermissionDeniedError("Only tenant owners can view roles")
+        role_list = await method_get_tenant_roles(tenant_id=tenant_id, user=user)
 
-        db_engine = get_relational_engine()
-        async with db_engine.get_async_session() as session:
-            from cognee.modules.users.models import Role
+        return JSONResponse(status_code=200, content=role_list)
 
-            roles_result = await session.execute(
-                select(Role).options(selectinload(Role.users)).where(Role.tenant_id == tenant_id)
-            )
-            roles = roles_result.scalars().all()
+    @permissions_router.get("/tenants/{tenant_id}/roles/{role_id}/users")
+    async def get_users_in_role(
+        tenant_id: UUID,
+        role_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        user_list = await method_get_users_in_roles(tenant_id=tenant_id, role_id=role_id, user=user)
+        return JSONResponse(status_code=200, content=user_list)
 
-            # Format response
-            role_list = []
-            for role in roles:
-                role_list.append(
-                    {
-                        "id": str(role.id),
-                        "name": role.name,
-                        "description": getattr(role, "description", None),
-                        "user_count": len(role.users) if role.users else 0,
-                    }
-                )
+    @permissions_router.get("/tenants/{tenant_id}/roles/users/{user_id}")
+    async def get_user_roles(
+        tenant_id: UUID,
+        user_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        role_list = await method_get_user_roles(tenant_id=tenant_id, user_id=user_id, user=user)
+        return JSONResponse(status_code=200, content=role_list)
 
-            return JSONResponse(status_code=200, content={"roles": role_list})
+    @permissions_router.get("/tenants/{tenant_id}/users")
+    async def get_users_in_tenant(
+        tenant_id: UUID,
+        user: User = Depends(get_authenticated_user),
+    ):
+        user_list = await method_get_users_in_tenant(tenant_id=tenant_id, user=user)
+
+        return JSONResponse(status_code=200, content=user_list)
+
+    @permissions_router.get("/tenants/me")
+    async def get_my_tenants(
+        user: User = Depends(get_authenticated_user),
+    ):
+        tenants_list = await method_get_user_tenants(user=user)
+        return JSONResponse(status_code=200, content=tenants_list)
 
     return permissions_router
