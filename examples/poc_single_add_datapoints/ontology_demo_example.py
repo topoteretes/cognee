@@ -61,7 +61,7 @@ async def main(use_poc):
     # Step 3: Create knowledge graph
 
     ontology_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "ontology_input_example/basic_ontology.owl"
+        os.path.dirname(os.path.abspath(__file__)), "data/ontology_input_example/basic_ontology.owl"
     )
 
     # Create full config structure manually

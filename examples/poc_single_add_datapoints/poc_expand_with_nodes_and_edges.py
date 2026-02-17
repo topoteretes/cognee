@@ -66,6 +66,8 @@ def _replace_is_a_with_graph_nodes(data_chunk, graph_entity_nodes):
         data_chunk.contains = []
 
     for entity_node in data_chunk.contains:
+        if not entity_node[1].is_a:
+            continue
         if entity_node[1].is_a.id in graph_entity_nodes:
             entity_node[1].is_a = graph_entity_nodes[entity_node[1].is_a.id]
 

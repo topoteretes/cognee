@@ -46,7 +46,7 @@ Both pipelines use the same task order, but they differ in how graph entities ar
 
 This section lists the exact line ranges that differ between the two file pairings.
 
-- `cognee/api/v1/cognify/cognify.py` vs `poc_single_add_datapoints/poc_single_add_datapoints_pipeline.py`
+- `cognee/api/v1/cognify/cognify.py` vs `examples/poc_single_add_datapoints/poc_single_add_datapoints_pipeline.py`
   - Import source for `extract_graph_from_data`: line 26 vs line 26.
   - Entry function name: `cognify` line 41 vs `poc_cognify` line 41.
   - POC-only parameter `use_single_add_datapoints_poc`: present at line 56 (POC only).
@@ -54,13 +54,13 @@ This section lists the exact line ranges that differ between the two file pairin
   - `get_default_tasks` signature includes POC flag: line 258 (POC only).
   - `Task(extract_graph_from_data, ...)` includes POC flag: line 298 (POC only).
 
-- `cognee/tasks/graph/extract_graph_from_data.py` vs `poc_single_add_datapoints/poc_extract_graph_from_data.py`
+- `cognee/tasks/graph/extract_graph_from_data.py` vs `examples/poc_single_add_datapoints/poc_extract_graph_from_data.py`
   - POC import: `poc_expand_with_nodes_and_edges` at line 31 (POC only).
   - `integrate_chunk_graphs` signature adds `use_single_add_datapoints_poc`: line 66 (POC only).
-  - POC branching in graph integration: lines 117–151 (POC only); default writes graph nodes/edges
+  - POC branching in graph integration: lines 117–152 (POC only); default writes graph nodes/edges
     unconditionally at lines 115–145.
   - `extract_graph_from_data` signature adds `use_single_add_datapoints_poc`: line 162 (POC only).
-  - Call into `integrate_chunk_graphs` passes POC flag: line 222 (POC only).
+  - Call into `integrate_chunk_graphs` passes POC flag: line 216 (POC only).
 
 ## POC Pipeline Flow
 
@@ -76,17 +76,25 @@ This section lists the exact line ranges that differ between the two file pairin
 - `ontology_demo_example.py` — Demonstrates ontology-driven graph extraction using
   `ontology_input_example/basic_ontology.owl`, comparing standard vs. POC output.
 
+## Tests
+
+- `tests/test_compare_simple_add_datapoints.py` — Compares non-POC vs POC graph nodes/edges.
+- `tests/test_compare_ontology_add_datapoints.py` — Same comparison with ontology resolution.
+- `tests/kg_from_text.py` — Utility to build a KG from text and run POC vs non-POC paths.
+- `tests/utils.py` — Graph snapshot + diff helpers.
+
 ## Files Added for This POC
 
 - `poc_single_add_datapoints_pipeline.py` — POC pipeline entrypoint and task wiring
   (`poc_cognify`, `get_default_tasks`, `get_temporal_tasks`).
 - `poc_extract_graph_from_data.py` — POC version of `extract_graph_from_data` that can
   avoid DB writes and attach graph entities to chunks when the POC flag is enabled.
-- `poc_expand_with_nodes_and_edges.py` (in `cognee/modules/graph/utils/`) — Builds
-  `GraphEntity`/`GraphEntityType` with `relations` and links them into chunk `contains`.
+- `poc_expand_with_nodes_and_edges.py` — Builds `GraphEntity`/`GraphEntityType` with
+  `relations` and links them into chunk `contains`.
 
 ## Inputs & Outputs
 
 - `data/` — Input documents used by demos.
 - `ontology_input_example/` — Sample ontology files for ontology-based extraction.
 - `results/` — Example HTML visualizations produced by the demos (generated artifacts).
+- `tests/data/` — Ontology fixtures used by the POC comparison tests.

@@ -23,7 +23,7 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
-from poc_single_add_datapoints.poc_extract_graph_from_data import extract_graph_from_data
+from poc_extract_graph_from_data import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor

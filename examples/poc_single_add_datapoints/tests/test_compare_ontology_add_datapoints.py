@@ -6,7 +6,7 @@ import pytest
 from pathlib import Path
 
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
-from examples.poc_single_add_datapoints.tests.kg_from_text_demo import get_demo_kg, run_with_kg
+from examples.poc_single_add_datapoints.tests.kg_from_text import get_demo_kg, run_with_kg
 from utils import _get_graph_snapshot, _diff_message
 
 ONTOLOGY_PATH = Path(__file__).resolve().parent / "data" / "simple_ontology.owl"

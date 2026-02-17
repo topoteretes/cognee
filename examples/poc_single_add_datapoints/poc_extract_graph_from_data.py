@@ -28,9 +28,7 @@ from cognee.tasks.graph.exceptions import (
     InvalidOntologyAdapterError,
 )
 from cognee.modules.cognify.config import get_cognify_config
-from poc_single_add_datapoints.poc_expand_with_nodes_and_edges import (
-    poc_expand_with_nodes_and_edges,
-)
+from poc_expand_with_nodes_and_edges import poc_expand_with_nodes_and_edges
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
