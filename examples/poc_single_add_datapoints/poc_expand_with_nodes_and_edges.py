@@ -39,6 +39,9 @@ def _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes):
     ]
 
     for entity_node in graph_entity_nodes.values():
+        if isinstance(entity_node, GraphEntityType):
+            continue
+
         edge_text = "; ".join(
             [
                 "relationship_name: contains",
@@ -56,6 +59,15 @@ def _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes):
                 entity_node,
             )
         )
+
+
+def _replace_is_a_with_graph_nodes(data_chunk, graph_entity_nodes):
+    if data_chunk.contains is None:
+        data_chunk.contains = []
+
+    for entity_node in data_chunk.contains:
+        if entity_node[1].is_a.id in graph_entity_nodes:
+            entity_node[1].is_a = graph_entity_nodes[entity_node[1].is_a.id]
 
 
 def _to_graph_entity(node):
@@ -87,6 +99,12 @@ def _find_entity_by_id(node_id, data_chunks, graph_entity_nodes):
         if result:
             new_entity = _to_graph_entity(result[1])
             graph_entity_nodes[node_id] = new_entity
+            return new_entity
+        result = next((t for t in data_chunk.contains if t[1].is_a.id == node_id), None)
+        if result:
+            new_entity = _to_graph_entity(result[1].is_a)
+            graph_entity_nodes[node_id] = new_entity
+            result[1].is_a = new_entity
             return new_entity
 
     return None
@@ -183,6 +201,7 @@ def poc_expand_with_nodes_and_edges(
 
         # Link Graph Entities to their respective data_chunk using contains and reset maps
         _link_graph_entities_to_data_chunk(data_chunk, graph_entity_nodes)
+        _replace_is_a_with_graph_nodes(data_chunk, graph_entity_nodes)
 
         # Reset per-chunk edge collections only; keep node maps for cross-chunk deduplication
         relationships.clear()
