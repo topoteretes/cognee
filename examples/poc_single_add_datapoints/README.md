@@ -4,6 +4,18 @@ This folder contains a proof-of-concept (POC) pipeline and demos that modify the
 `cognee.cognify()` flow to avoid double `add_data_points()` calls, instead creating graph
 entities and relations attached to document chunks.
 
+## POC Notes
+- **Relationship de-duplication (required for tests):** The POC tests expect relationship-aware
+  de-duplication in `cognee/modules/graph/utils/get_graph_from_model.py` so distinct relations
+  on the same field are not collapsed (because `GraphEntity.relations` can include multiple
+  relationships to the same target). If tests fail with missing relations, re-apply the following
+  change by using a relationship-aware key instead of `field_name` for visited/edge keys:
+  Line 233 in `get_graph_from_model.py` needs to be replaced with:
+  ```diff
+  - edge_key = f"{data_point_id}_{target_datapoint.id}_{field_name}"
+  + edge_key = f"{data_point_id}_{target_datapoint.id}_{relationship_name}"
+  ```
+
 ## POC vs. Default Cognify Pipeline
 
 Both pipelines use the same task order, but they differ in how graph entities are persisted.

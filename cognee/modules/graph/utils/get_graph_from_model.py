@@ -88,9 +88,9 @@ def _get_relationship_key(field_name: str, edge_metadata: Optional[Edge]) -> str
     return field_name
 
 
-def _generate_property_key(data_point_id: str, relationship_key: str, target_id: str) -> str:
+def _generate_property_key(data_point_id: str, field_name: str, target_id: str) -> str:
     """Generate a unique property key for visited_properties tracking."""
-    return f"{data_point_id}_{relationship_key}_{target_id}"
+    return f"{data_point_id}_{field_name}_{target_id}"
 
 
 def _process_datapoint_field(
@@ -105,12 +105,8 @@ def _process_datapoint_field(
     excluded_properties.add(field_name)
 
     for edge_metadata, datapoints in edge_datapoint_pairs:
-        relationship_key = _get_relationship_key(field_name, edge_metadata)
-
         for datapoint in datapoints:
-            property_key = _generate_property_key(
-                data_point_id, relationship_key, str(datapoint.id)
-            )
+            property_key = _generate_property_key(data_point_id, field_name, str(datapoint.id))
             if property_key in visited_properties:
                 continue
 
@@ -230,8 +226,7 @@ async def get_graph_from_model(
         relationship_name = _get_relationship_key(field_name, edge_metadata)
 
         # Create edge if not already added
-        # Use relationship_name to avoid collapsing distinct relations on the same field.
-        edge_key = f"{data_point_id}_{target_datapoint.id}_{relationship_name}"
+        edge_key = f"{data_point_id}_{target_datapoint.id}_{field_name}"
         if edge_key not in added_edges:
             edge_properties = _create_edge_properties(
                 data_point.id, target_datapoint.id, relationship_name, edge_metadata
@@ -249,9 +244,7 @@ async def get_graph_from_model(
             added_edges[edge_key] = True
 
         # Mark property as visited - CRITICAL for preventing infinite loops
-        property_key = _generate_property_key(
-            data_point_id, relationship_name, str(target_datapoint.id)
-        )
+        property_key = _generate_property_key(data_point_id, field_name, str(target_datapoint.id))
         visited_properties[property_key] = True
 
         # Recursively process target node if not already processed
