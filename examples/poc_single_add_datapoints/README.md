@@ -90,8 +90,8 @@ This section lists the exact line ranges that differ between the two file pairin
 
 ## Tests
 
-- `tests/test_compare_simple_add_datapoints.py` — Compares non-POC vs POC graph nodes/edges.
-- `tests/test_compare_ontology_add_datapoints.py` — Same comparison with ontology resolution.
+- `tests/compare_simple_add_datapoints.py` — Compares non-POC vs POC graph nodes/edges.
+- `tests/compare_ontology_add_datapoints.py` — Same comparison with ontology resolution.
 - `tests/kg_from_text.py` — Utility to build a KG from text and run POC vs non-POC paths.
 - `tests/utils.py` — Graph snapshot + diff helpers.
 

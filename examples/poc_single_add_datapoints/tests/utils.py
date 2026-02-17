@@ -44,3 +44,17 @@ def _diff_message(name_a: str, set_a: set, name_b: str, set_b: set) -> str:
         f"Only in {name_a}: {only_a[:10]}{'...' if len(only_a) > 10 else ''}. "
         f"Only in {name_b}: {only_b[:10]}{'...' if len(only_b) > 10 else ''}."
     )
+
+
+def _compare(name_a: str, set_a: set, name_b: str, set_b: set) -> None:
+    """Print diff between two sets (only in A, only in B, same)."""
+    only_a = set_a - set_b
+    only_b = set_b - set_a
+    common = set_a & set_b
+    print(f"  {name_a} vs {name_b}: {len(set_a)} total, {len(common)} common")
+    if only_a:
+        print(f"    Only in {name_a}: {sorted(only_a)[:10]}{'...' if len(only_a) > 10 else ''}")
+    if only_b:
+        print(f"    Only in {name_b}: {sorted(only_b)[:10]}{'...' if len(only_b) > 10 else ''}")
+    if not only_a and not only_b:
+        print("    Identical.")

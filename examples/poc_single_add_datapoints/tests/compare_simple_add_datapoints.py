@@ -2,10 +2,9 @@
 Run non-POC and POC add_data_points with the same KG, query graph DB for nodes/edges, compare.
 """
 
-import pytest
-
+import asyncio
 from examples.poc_single_add_datapoints.tests.kg_from_text import get_demo_kg, run_with_kg
-from utils import _get_graph_snapshot, _diff_message
+from utils import _get_graph_snapshot, _compare
 
 
 async def run_non_poc(kg) -> tuple[set, set]:
@@ -20,8 +19,7 @@ async def run_poc(kg) -> tuple[set, set]:
     return await _get_graph_snapshot()
 
 
-@pytest.mark.asyncio
-async def test_compare_kg_from_text_runs():
+async def compare_kg_from_text_runs():
     kg = await get_demo_kg()
 
     print("Running non-POC...")
@@ -32,9 +30,14 @@ async def test_compare_kg_from_text_runs():
     poc_nodes, poc_edges = await run_poc(kg)
     print(f"  POC: {len(poc_nodes)} nodes, {len(poc_edges)} edges")
 
-    assert non_poc_nodes == poc_nodes, _diff_message(
-        "non-POC nodes", non_poc_nodes, "POC nodes", poc_nodes
-    )
-    assert non_poc_edges == poc_edges, _diff_message(
-        "non-POC edges", non_poc_edges, "POC edges", poc_edges
-    )
+    _compare("non-POC nodes", non_poc_nodes, "POC nodes", poc_nodes)
+    _compare("non-POC edges", non_poc_edges, "POC edges", poc_edges)
+
+
+if __name__ == "__main__":
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(compare_kg_from_text_runs())
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
