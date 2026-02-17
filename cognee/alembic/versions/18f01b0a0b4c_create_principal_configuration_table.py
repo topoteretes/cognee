@@ -48,7 +48,7 @@ def downgrade() -> None:
     connection = op.get_bind()
     inspector = sa.inspect(connection)
 
-    if table_name not in inspector.get_table_names():
+    if table_name in inspector.get_table_names():
         op.drop_table(table_name)
     else:
         print(f"{table_name} table doesn't exist, skipping downgrade")
