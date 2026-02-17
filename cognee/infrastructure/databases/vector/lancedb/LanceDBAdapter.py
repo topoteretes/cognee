@@ -262,9 +262,14 @@ class LanceDBAdapter(VectorDBInterface):
             else ["id", "vector", "_distance"]
         )
         if node_name:
+            # Escape quotes to make this input safer, since it's coming from the user
+            # At the time of writing this, no specific binding instructions found on LanceDB docs
+            escaped_node_names = [name.replace("'", "''") for name in node_name]
+            literal_node_names = "[" + ", ".join(f"'{name}'" for name in escaped_node_names) + "]"
+
             result_values = (
                 await collection.vector_search(query_vector)
-                .where(f"array_has_any(payload.belongs_to_set, {node_name})")
+                .where(f"array_has_any(payload.belongs_to_set, {literal_node_names})")
                 .select(select_columns)
                 .limit(limit)
                 .to_list()
