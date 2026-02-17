@@ -230,8 +230,7 @@ async def get_graph_from_model(
         relationship_name = _get_relationship_key(field_name, edge_metadata)
 
         # Create edge if not already added
-        # Use relationship_name to avoid collapsing distinct relations on the same field.
-        edge_key = f"{data_point_id}_{target_datapoint.id}_{relationship_name}"
+        edge_key = f"{data_point_id}_{target_datapoint.id}_{field_name}"
         if edge_key not in added_edges:
             edge_properties = _create_edge_properties(
                 data_point.id, target_datapoint.id, relationship_name, edge_metadata
