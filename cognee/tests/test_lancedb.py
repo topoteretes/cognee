@@ -146,6 +146,42 @@ async def test_vector_engine_search_with_nodeset_filtering():
     )
 
 
+async def test_vector_nodeset_filtering_retriever_integration():
+    file_path_quantum = os.path.join(
+        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
+    )
+
+    file_path_nlp = os.path.join(
+        pathlib.Path(__file__).parent,
+        "test_data/Natural_language_processing.txt",
+    )
+
+    node_set_a = ["NLP"]
+    node_set_b = ["Quantum", "Computers"]
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    await cognee.add(file_path_quantum, node_set=node_set_b)
+
+    await cognee.add(file_path_nlp, node_set=node_set_a)
+
+    await cognee.cognify()
+
+    query_text = "Tell me about Quantum computers"
+
+    from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+
+    retriever = GraphCompletionRetriever(node_name=node_set_a)
+    retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
+    context = await retriever.get_context_from_objects(
+        query=query_text, retrieved_objects=retrieved_objects
+    )
+
+    assert "Quantum" not in context
+    assert "NLP" in context
+
+
 async def main():
     cognee.config.set_vector_db_config(
         {
@@ -244,6 +280,8 @@ async def main():
     await test_vector_engine_search_none_limit()
 
     await test_vector_engine_search_with_nodeset_filtering()
+
+    await test_vector_nodeset_filtering_retriever_integration()
 
 
 if __name__ == "__main__":
