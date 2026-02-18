@@ -13,6 +13,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
+from cognee.modules.observability import get_tracer_if_enabled
 
 logger = get_logger()
 
@@ -174,47 +175,79 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
-    # We use lists from now on for datasets
-    if isinstance(datasets, UUID) or isinstance(datasets, str):
-        datasets = [datasets]
+    tracer = get_tracer_if_enabled()
 
-    if user is None:
-        try:
-            user = await get_default_user()
-        except (DatabaseNotCreatedError, UserNotFoundError) as error:
-            # Provide a clear, actionable message instead of surfacing low-level stacktraces
-            raise CogneeValidationError(
-                message=(
-                    "Search prerequisites not met: no database/default user found. "
-                    "Initialize Cognee before searching by:\n"
-                    "• running `await cognee.add(...)` followed by `await cognee.cognify()`."
-                ),
-                name="SearchPreconditionError",
-            ) from error
+    if tracer is not None:
+        from cognee.modules.observability import (
+            COGNEE_SEARCH_QUERY,
+            COGNEE_SEARCH_TYPE,
+        )
 
-    await set_session_user_context_variable(user)
+        span_ctx = tracer.start_as_current_span("cognee.api.search")
+    else:
+        from contextlib import nullcontext
 
-    # Transform string based datasets to UUID - String based datasets can only be found for current user
-    if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
-        datasets = await get_authorized_existing_datasets(datasets, "read", user)
-        datasets = [dataset.id for dataset in datasets]
+        span_ctx = nullcontext()
 
-    filtered_search_results = await search_function(
-        query_text=query_text,
-        query_type=query_type,
-        dataset_ids=dataset_ids if dataset_ids else datasets,
-        user=user,
-        system_prompt_path=system_prompt_path,
-        system_prompt=system_prompt,
-        top_k=top_k,
-        node_type=node_type,
-        node_name=node_name,
-        only_context=only_context,
-        session_id=session_id,
-        wide_search_top_k=wide_search_top_k,
-        triplet_distance_penalty=triplet_distance_penalty,
-        verbose=verbose,
-        retriever_specific_config=retriever_specific_config,
-    )
+    with span_ctx as span:
+        if span is not None:
+            span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
+            span.set_attribute(COGNEE_SEARCH_TYPE, str(query_type.value))
+            span.set_attribute("cognee.search.top_k", top_k)
 
-    return filtered_search_results
+        # We use lists from now on for datasets
+        if isinstance(datasets, UUID) or isinstance(datasets, str):
+            datasets = [datasets]
+
+        if user is None:
+            try:
+                user = await get_default_user()
+            except (DatabaseNotCreatedError, UserNotFoundError) as error:
+                # Provide a clear, actionable message instead of surfacing low-level stacktraces
+                raise CogneeValidationError(
+                    message=(
+                        "Search prerequisites not met: no database/default user found. "
+                        "Initialize Cognee before searching by:\n"
+                        "• running `await cognee.add(...)` followed by `await cognee.cognify()`."
+                    ),
+                    name="SearchPreconditionError",
+                ) from error
+
+        await set_session_user_context_variable(user)
+
+        # Transform string based datasets to UUID - String based datasets can only be found for current user
+        if datasets is not None and [all(isinstance(dataset, str) for dataset in datasets)]:
+            datasets = await get_authorized_existing_datasets(datasets, "read", user)
+            datasets = [dataset.id for dataset in datasets]
+            if not datasets:
+                raise DatasetNotFoundError(message="No datasets found.")
+
+        filtered_search_results = await search_function(
+            query_text=query_text,
+            query_type=query_type,
+            dataset_ids=dataset_ids if dataset_ids else datasets,
+            user=user,
+            system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
+            top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
+            only_context=only_context,
+            session_id=session_id,
+            wide_search_top_k=wide_search_top_k,
+            triplet_distance_penalty=triplet_distance_penalty,
+            verbose=verbose,
+            retriever_specific_config=retriever_specific_config,
+        )
+
+        if span is not None:
+            from cognee.modules.observability import COGNEE_RESULT_SUMMARY, COGNEE_RESULT_COUNT
+
+            n = len(filtered_search_results) if filtered_search_results else 0
+            span.set_attribute(COGNEE_RESULT_COUNT, n)
+            span.set_attribute(
+                COGNEE_RESULT_SUMMARY,
+                f"Found {n} result(s) via {query_type.value}",
+            )
+
+        return filtered_search_results

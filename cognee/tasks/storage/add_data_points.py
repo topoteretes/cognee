@@ -1,5 +1,7 @@
 import asyncio
 from typing import Any, Dict, List, Optional
+
+from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
@@ -17,6 +19,7 @@ from ...modules.engine.utils import generate_node_id
 logger = get_logger("add_data_points")
 
 
+@task_summary("Stored {n} data point(s)")
 async def add_data_points(
     data_points: List[DataPoint],
     context: Optional[Dict[str, Any]] = None,

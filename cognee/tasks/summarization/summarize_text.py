@@ -10,6 +10,10 @@ from cognee.modules.cognify.config import get_cognify_config
 from cognee.tasks.summarization.models import TextSummary
 
 
+from cognee.modules.pipelines.tasks.task import task_summary
+
+
+@task_summary("Summarized {n} chunk(s)")
 async def summarize_text(
     data_chunks: list[DocumentChunk], summarization_model: Type[BaseModel] = None
 ):

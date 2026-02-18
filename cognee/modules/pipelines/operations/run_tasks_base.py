@@ -3,6 +3,7 @@ from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
+from cognee.modules.observability import get_tracer_if_enabled
 
 from cognee.infrastructure.engine import DataPoint
 from ..tasks.task import Task
@@ -10,59 +11,16 @@ from ..tasks.task import Task
 logger = get_logger("run_tasks_base")
 
 
-def _stamp_provenance(data, pipeline_name, task_name, visited=None, note_set=None, user_label=None):
-    """Recursively stamp DataPoints with provenance. Only sets if currently None."""
-    if visited is None:
-        visited = set()
+def _build_result_summary(executable, task_name: str, count: int) -> str:
+    """Build a human-readable result summary for a completed task.
 
-    if isinstance(data, DataPoint):
-        obj_id = id(data)
-        if obj_id in visited:
-            return
-        visited.add(obj_id)
-
-        if data.source_pipeline is None:
-            data.source_pipeline = pipeline_name
-        if data.source_task is None:
-            data.source_task = task_name
-        if data.source_user is None and user_label is not None:
-            data.source_user = user_label
-
-        # Propagate note_set from parent or pick up from this data point
-        current_note_set = note_set
-        if data.source_note_set is not None:
-            current_note_set = data.source_note_set
-        elif current_note_set is not None and data.source_note_set is None:
-            data.source_note_set = current_note_set
-
-        # Recurse into DataPoint model fields to stamp nested DataPoints
-        for field_name in data.model_fields:
-            field_value = getattr(data, field_name, None)
-            if field_value is not None:
-                _stamp_provenance(
-                    field_value,
-                    pipeline_name,
-                    task_name,
-                    visited,
-                    current_note_set,
-                    user_label,
-                )
-
-    elif isinstance(data, (list, tuple)):
-        for item in data:
-            _stamp_provenance(item, pipeline_name, task_name, visited, note_set, user_label)
-
-
-def _extract_note_set(args):
-    """Extract source_note_set from input args to propagate across task boundaries."""
-    for arg in args:
-        if isinstance(arg, DataPoint) and arg.source_note_set is not None:
-            return arg.source_note_set
-        if isinstance(arg, (list, tuple)):
-            for item in arg:
-                if isinstance(item, DataPoint) and item.source_note_set is not None:
-                    return item.source_note_set
-    return None
+    Reads the ``__task_summary__`` attribute set by the ``@task_summary``
+    decorator.  Falls back to a generic message when no template is defined.
+    """
+    template = getattr(executable, "__task_summary__", None)
+    if template:
+        return template.format(n=count)
+    return f"{task_name} produced {count} result(s)"
 
 
 async def handle_task(
@@ -96,48 +54,73 @@ async def handle_task(
     if has_context:
         kwargs["context"] = context
 
-    try:
-        task_name = running_task.executable.__name__
-        pipe_name = context.get("pipeline_name") if isinstance(context, dict) else None
-        input_note_set = _extract_note_set(args)
-        user_label = getattr(user, "email", None) or (str(user.id) if user else None)
+    tracer = get_tracer_if_enabled()
+    task_name = running_task.executable.__name__
 
-        async for result_data in running_task.execute(args, kwargs, next_task_batch_size):
-            _stamp_provenance(
-                result_data,
-                pipe_name,
-                task_name,
-                note_set=input_note_set,
-                user_label=user_label,
+    if tracer is not None:
+        from cognee.modules.observability import COGNEE_PIPELINE_TASK_NAME
+
+        span_ctx = tracer.start_as_current_span(f"cognee.pipeline.task.{task_name}")
+    else:
+        from contextlib import nullcontext
+
+        span_ctx = nullcontext()
+
+    with span_ctx as span:
+        if span is not None:
+            span.set_attribute(COGNEE_PIPELINE_TASK_NAME, task_name)
+
+        try:
+            result_count = 0
+
+            async for result_data in running_task.execute(args, next_task_batch_size):
+                if isinstance(result_data, list):
+                    result_count += len(result_data)
+                else:
+                    result_count += 1
+
+                async for result in run_tasks_base(leftover_tasks, result_data, user, context):
+                    yield result
+
+            if span is not None:
+                from cognee.modules.observability import COGNEE_RESULT_SUMMARY, COGNEE_RESULT_COUNT
+
+                span.set_attribute(COGNEE_RESULT_COUNT, result_count)
+                span.set_attribute(
+                    COGNEE_RESULT_SUMMARY,
+                    _build_result_summary(running_task.executable, task_name, result_count),
+                )
+
+            logger.info(f"{task_type} task completed: `{task_name}`")
+            send_telemetry(
+                f"{task_type} Task Completed",
+                user_id=user.id,
+                additional_properties={
+                    "task_name": task_name,
+                    "cognee_version": cognee_version,
+                    "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
+                },
             )
-            async for result in run_tasks_base(leftover_tasks, result_data, user, context):
-                yield result
+        except Exception as error:
+            if span is not None:
+                from opentelemetry.trace import StatusCode
 
-        logger.info(f"{task_type} task completed: `{running_task.executable.__name__}`")
-        send_telemetry(
-            f"{task_type} Task Completed",
-            user_id=user.id,
-            additional_properties={
-                "task_name": running_task.executable.__name__,
-                "cognee_version": cognee_version,
-                "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
-            },
-        )
-    except Exception as error:
-        logger.error(
-            f"{task_type} task errored: `{running_task.executable.__name__}`\n{str(error)}\n",
-            exc_info=True,
-        )
-        send_telemetry(
-            f"{task_type} Task Errored",
-            user_id=user.id,
-            additional_properties={
-                "task_name": running_task.executable.__name__,
-                "cognee_version": cognee_version,
-                "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
-            },
-        )
-        raise error
+                span.set_status(StatusCode.ERROR, str(error))
+                span.record_exception(error)
+            logger.error(
+                f"{task_type} task errored: `{task_name}`\n{str(error)}\n",
+                exc_info=True,
+            )
+            send_telemetry(
+                f"{task_type} Task Errored",
+                user_id=user.id,
+                additional_properties={
+                    "task_name": task_name,
+                    "cognee_version": cognee_version,
+                    "tenant_id": str(user.tenant_id) if user.tenant_id else "Single User Tenant",
+                },
+            )
+            raise error
 
 
 async def run_tasks_base(tasks: list[Task], data=None, user: User = None, context: dict = None):

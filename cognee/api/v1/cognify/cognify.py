@@ -31,9 +31,11 @@ from cognee.tasks.temporal_graph.extract_events_and_entities import extract_even
 from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
     extract_knowledge_graph_from_events,
 )
+from cognee.modules.observability import get_tracer_if_enabled
 
 
 logger = get_logger("cognify")
+
 
 update_status_lock = asyncio.Lock()
 
@@ -194,55 +196,88 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
-    if config is None:
-        ontology_config = get_ontology_env_config()
-        if (
-            ontology_config.ontology_file_path
-            and ontology_config.ontology_resolver
-            and ontology_config.matching_strategy
-        ):
-            config: Config = {
-                "ontology_config": {
-                    "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
-                }
-            }
-        else:
-            config: Config = {
-                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
-            }
+    tracer = get_tracer_if_enabled()
 
-    if temporal_cognify:
-        tasks = await get_temporal_tasks(
-            user=user, chunker=chunker, chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
-        )
+    if tracer is not None:
+        from cognee.modules.observability import COGNEE_PIPELINE_NAME
+
+        span_ctx = tracer.start_as_current_span("cognee.api.cognify")
     else:
-        tasks = await get_default_tasks(
+        from contextlib import nullcontext
+
+        span_ctx = nullcontext()
+
+    with span_ctx as span:
+        if span is not None:
+            span.set_attribute(COGNEE_PIPELINE_NAME, "cognify")
+            if datasets is not None:
+                span.set_attribute("cognee.cognify.datasets", str(datasets))
+
+        if config is None:
+            ontology_config = get_ontology_env_config()
+            if (
+                ontology_config.ontology_file_path
+                and ontology_config.ontology_resolver
+                and ontology_config.matching_strategy
+            ):
+                config: Config = {
+                    "ontology_config": {
+                        "ontology_resolver": get_ontology_resolver_from_env(
+                            **ontology_config.to_dict()
+                        )
+                    }
+                }
+            else:
+                config: Config = {
+                    "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
+                }
+
+        if temporal_cognify:
+            tasks = await get_temporal_tasks(
+                user=user,
+                chunker=chunker,
+                chunk_size=chunk_size,
+                chunks_per_batch=chunks_per_batch,
+            )
+        else:
+            tasks = await get_default_tasks(
+                user=user,
+                graph_model=graph_model,
+                chunker=chunker,
+                chunk_size=chunk_size,
+                config=config,
+                custom_prompt=custom_prompt,
+                chunks_per_batch=chunks_per_batch,
+                **kwargs,
+            )
+
+        # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
+        pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
+
+        # Run the run_pipeline in the background or blocking based on executor
+        result = await pipeline_executor_func(
+            pipeline=run_pipeline,
+            tasks=tasks,
             user=user,
-            graph_model=graph_model,
-            chunker=chunker,
-            chunk_size=chunk_size,
-            config=config,
-            custom_prompt=custom_prompt,
-            chunks_per_batch=chunks_per_batch,
-            **kwargs,
+            datasets=datasets,
+            vector_db_config=vector_db_config,
+            graph_db_config=graph_db_config,
+            incremental_loading=incremental_loading,
+            use_pipeline_cache=True,
+            pipeline_name="cognify_pipeline",
+            data_per_batch=data_per_batch,
         )
 
-    # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
-    pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
+        if span is not None:
+            from cognee.modules.observability import COGNEE_RESULT_SUMMARY
 
-    # Run the run_pipeline in the background or blocking based on executor
-    return await pipeline_executor_func(
-        pipeline=run_pipeline,
-        tasks=tasks,
-        user=user,
-        datasets=datasets,
-        vector_db_config=vector_db_config,
-        graph_db_config=graph_db_config,
-        incremental_loading=incremental_loading,
-        use_pipeline_cache=True,
-        pipeline_name="cognify_pipeline",
-        data_per_batch=data_per_batch,
-    )
+            dataset_desc = str(datasets) if datasets else "all datasets"
+            span.set_attribute(
+                COGNEE_RESULT_SUMMARY,
+                f"Cognify completed for {dataset_desc}",
+            )
+
+        return result
 
 
 async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)

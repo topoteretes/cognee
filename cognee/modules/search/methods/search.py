@@ -26,6 +26,11 @@ from cognee.modules.data.methods.get_authorized_existing_datasets import (
 )
 from cognee import __version__ as cognee_version
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
+from cognee.modules.observability import (
+    get_tracer_if_enabled,
+    COGNEE_SEARCH_TYPE,
+    COGNEE_SEARCH_QUERY,
+)
 
 logger = get_logger()
 
@@ -72,22 +77,43 @@ async def search(
         },
     )
 
-    search_results = await authorized_search(
-        query_type=query_type,
-        query_text=query_text,
-        user=user,
-        dataset_ids=dataset_ids,
-        system_prompt_path=system_prompt_path,
-        system_prompt=system_prompt,
-        top_k=top_k,
-        node_type=node_type,
-        node_name=node_name,
-        only_context=only_context,
-        session_id=session_id,
-        wide_search_top_k=wide_search_top_k,
-        triplet_distance_penalty=triplet_distance_penalty,
-        retriever_specific_config=retriever_specific_config,
-    )
+    tracer = get_tracer_if_enabled()
+    if tracer is not None:
+        span_ctx = tracer.start_as_current_span("cognee.search.authorize")
+    else:
+        from contextlib import nullcontext
+
+        span_ctx = nullcontext()
+
+    with span_ctx as span:
+        if span is not None:
+            span.set_attribute(COGNEE_SEARCH_TYPE, query_type.value)
+            span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
+            span.set_attribute("cognee.search.top_k", top_k)
+            span.set_attribute(
+                "cognee.search.dataset_count",
+                len(dataset_ids) if dataset_ids else 0,
+            )
+
+        search_results = await authorized_search(
+            query_type=query_type,
+            query_text=query_text,
+            user=user,
+            dataset_ids=dataset_ids,
+            system_prompt_path=system_prompt_path,
+            system_prompt=system_prompt,
+            top_k=top_k,
+            node_type=node_type,
+            node_name=node_name,
+            only_context=only_context,
+            session_id=session_id,
+            wide_search_top_k=wide_search_top_k,
+            triplet_distance_penalty=triplet_distance_penalty,
+            retriever_specific_config=retriever_specific_config,
+        )
+
+        if span is not None:
+            span.set_attribute("cognee.search.result_count", len(search_results))
 
     send_telemetry(
         "cognee.search EXECUTION COMPLETED",
@@ -187,44 +213,60 @@ async def search_in_datasets_context(
         triplet_distance_penalty: Optional[float] = 3.5,
         retriever_specific_config: Optional[dict] = None,
     ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
-        # Set database configuration in async context for each dataset user has access for
-        await set_database_global_context_variables(dataset.id, dataset.owner_id)
+        tracer = get_tracer_if_enabled()
+        if tracer is not None:
+            span_ctx = tracer.start_as_current_span("cognee.search.dataset")
+        else:
+            from contextlib import nullcontext
 
-        # Check if graph for dataset is empty and log warnings if necessary
-        graph_engine = await get_graph_engine()
-        is_empty = await graph_engine.is_empty()
-        if is_empty:
-            # TODO: we can log here, but not all search types use graph. Still keeping this here for reviewer input
-            from cognee.modules.data.methods import get_dataset_data
+            span_ctx = nullcontext()
 
-            dataset_data = await get_dataset_data(dataset.id)
+        with span_ctx as span:
+            if span is not None:
+                span.set_attribute("cognee.search.dataset_name", dataset.name or "")
+                span.set_attribute("cognee.search.dataset_id", str(dataset.id))
 
-            if len(dataset_data) > 0:
-                logger.warning(
-                    f"Dataset '{dataset.name}' has {len(dataset_data)} data item(s) but the knowledge graph is empty. "
-                    "Please run cognify to process the data before searching."
-                )
-            else:
-                logger.warning(
-                    f"Search attempt on an empty knowledge graph - no data has been added to this dataset: {dataset.name}"
-                )
+            # Set database configuration in async context for each dataset user has access for
+            await set_database_global_context_variables(dataset.id, dataset.owner_id)
 
-        # Get retriever output in the context of the current dataset
-        return await get_retriever_output(
-            query_type=query_type,
-            query_text=query_text,
-            dataset=dataset,
-            system_prompt_path=system_prompt_path,
-            system_prompt=system_prompt,
-            top_k=top_k,
-            node_type=node_type,
-            node_name=node_name,
-            only_context=only_context,
-            session_id=session_id,
-            wide_search_top_k=wide_search_top_k,
-            triplet_distance_penalty=triplet_distance_penalty,
-            retriever_specific_config=retriever_specific_config,
-        )
+            # Check if graph for dataset is empty and log warnings if necessary
+            graph_engine = await get_graph_engine()
+            is_empty = await graph_engine.is_empty()
+            if is_empty:
+                # TODO: we can log here, but not all search types use graph. Still keeping this here for reviewer input
+                from cognee.modules.data.methods import get_dataset_data
+
+                dataset_data = await get_dataset_data(dataset.id)
+
+                if len(dataset_data) > 0:
+                    logger.warning(
+                        f"Dataset '{dataset.name}' has {len(dataset_data)} data item(s) but the knowledge graph is empty. "
+                        "Please run cognify to process the data before searching."
+                    )
+                else:
+                    logger.warning(
+                        f"Search attempt on an empty knowledge graph - no data has been added to this dataset: {dataset.name}"
+                    )
+
+                if span is not None:
+                    span.set_attribute("cognee.search.graph_empty", True)
+
+            # Get retriever output in the context of the current dataset
+            return await get_retriever_output(
+                query_type=query_type,
+                query_text=query_text,
+                dataset=dataset,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                top_k=top_k,
+                node_type=node_type,
+                node_name=node_name,
+                only_context=only_context,
+                session_id=session_id,
+                wide_search_top_k=wide_search_top_k,
+                triplet_distance_penalty=triplet_distance_penalty,
+                retriever_specific_config=retriever_specific_config,
+            )
 
     # Search every dataset async based on query and appropriate database configuration
     tasks = []

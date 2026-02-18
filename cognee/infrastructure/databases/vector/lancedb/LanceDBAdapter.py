@@ -18,6 +18,8 @@ from ..models.ScoredResult import ScoredResult
 from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
 
+from cognee.modules.observability import get_tracer_if_enabled
+
 
 class IndexSchema(DataPoint):
     """
@@ -238,46 +240,75 @@ class LanceDBAdapter(VectorDBInterface):
         normalized: bool = True,
         include_payload: bool = False,
     ):
-        if query_text is None and query_vector is None:
-            raise MissingQueryParameterError()
+        tracer = get_tracer_if_enabled()
 
-        if query_text and not query_vector:
-            query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
-
-        collection = await self.get_collection(collection_name)
-
-        if limit is None:
-            limit = await collection.count_rows()
-
-        # LanceDB search will break if limit is 0 so we must return
-        if limit <= 0:
-            return []
-
-        # Note: Exclude payload if not needed to optimize performance
-        select_columns = (
-            ["id", "vector", "payload", "_distance"]
-            if include_payload
-            else ["id", "vector", "_distance"]
-        )
-        result_values = (
-            await collection.vector_search(query_vector)
-            .select(select_columns)
-            .limit(limit)
-            .to_list()
-        )
-
-        if not result_values:
-            return []
-        normalized_values = normalize_distances(result_values)
-
-        return [
-            ScoredResult(
-                id=parse_id(result["id"]),
-                payload=result["payload"] if include_payload else None,
-                score=normalized_values[value_index],
+        if tracer is not None:
+            from cognee.modules.observability.tracing import (
+                COGNEE_DB_SYSTEM,
+                COGNEE_VECTOR_COLLECTION,
+                COGNEE_VECTOR_RESULT_COUNT,
             )
-            for value_index, result in enumerate(result_values)
-        ]
+
+            span_ctx = tracer.start_as_current_span("cognee.db.vector.search")
+        else:
+            from contextlib import nullcontext
+
+            span_ctx = nullcontext()
+
+        with span_ctx as otel_span:
+            if otel_span is not None:
+                otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
+                otel_span.set_attribute(COGNEE_VECTOR_COLLECTION, collection_name)
+
+            if query_text is None and query_vector is None:
+                raise MissingQueryParameterError()
+
+            if query_text and not query_vector:
+                query_vector = (await self.embedding_engine.embed_text([query_text]))[0]
+
+            collection = await self.get_collection(collection_name)
+
+            if limit is None:
+                limit = await collection.count_rows()
+
+            # LanceDB search will break if limit is 0 so we must return
+            if limit <= 0:
+                if otel_span is not None:
+                    otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
+                return []
+
+            # Note: Exclude payload if not needed to optimize performance
+            select_columns = (
+                ["id", "vector", "payload", "_distance"]
+                if include_payload
+                else ["id", "vector", "_distance"]
+            )
+            result_values = (
+                await collection.vector_search(query_vector)
+                .select(select_columns)
+                .limit(limit)
+                .to_list()
+            )
+
+            if not result_values:
+                if otel_span is not None:
+                    otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
+                return []
+            normalized_values = normalize_distances(result_values)
+
+            results = [
+                ScoredResult(
+                    id=parse_id(result["id"]),
+                    payload=result["payload"] if include_payload else None,
+                    score=normalized_values[value_index],
+                )
+                for value_index, result in enumerate(result_values)
+            ]
+
+            if otel_span is not None:
+                otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, len(results))
+
+            return results
 
     async def batch_search(
         self,
