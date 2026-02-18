@@ -69,24 +69,6 @@ async def test_getting_of_documents(dataset_name_1):
 
 
 async def test_vector_engine_search_none_limit():
-    file_path_quantum = os.path.join(
-        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
-    )
-
-    file_path_nlp = os.path.join(
-        pathlib.Path(__file__).parent,
-        "test_data/Natural_language_processing.txt",
-    )
-
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
-    await cognee.add(file_path_quantum)
-
-    await cognee.add(file_path_nlp)
-
-    await cognee.cognify()
-
     query_text = "Tell me about Quantum computers"
 
     from cognee.infrastructure.databases.vector import get_vector_engine
@@ -107,27 +89,7 @@ async def test_vector_engine_search_none_limit():
 
 
 async def test_vector_engine_search_with_nodeset_filtering():
-    file_path_quantum = os.path.join(
-        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
-    )
-
-    file_path_nlp = os.path.join(
-        pathlib.Path(__file__).parent,
-        "test_data/Natural_language_processing.txt",
-    )
-
-    node_set_a = ["NLP"]
-    node_set_b = ["Quantum", "Computers"]
-
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
-    await cognee.add(file_path_quantum, node_set=node_set_b)
-
-    await cognee.add(file_path_nlp, node_set=node_set_a)
-
-    await cognee.cognify()
-
+    node_set = ["Quantum", "Computers"]
     query_text = "Tell me about Quantum computers"
 
     from cognee.infrastructure.databases.vector import get_vector_engine
@@ -139,36 +101,16 @@ async def test_vector_engine_search_with_nodeset_filtering():
         collection_name="DocumentChunk_text",
         query_vector=query_vector,
         include_payload=True,
-        belongs_to_set=node_set_a,
+        belongs_to_set=node_set,
     )
 
-    assert all(nodeset in node_set_a for nodeset in result[0].payload["belongs_to_set"]), (
+    assert all(nodeset in node_set for nodeset in result[0].payload["belongs_to_set"]), (
         "Only results from relevant nodesets should be returned"
     )
 
 
 async def test_vector_nodeset_filtering_retriever_integration():
-    file_path_quantum = os.path.join(
-        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
-    )
-
-    file_path_nlp = os.path.join(
-        pathlib.Path(__file__).parent,
-        "test_data/Natural_language_processing.txt",
-    )
-
     node_set_a = ["NLP"]
-    node_set_b = ["Quantum", "Computers"]
-
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
-    await cognee.add(file_path_quantum, node_set=node_set_b)
-
-    await cognee.add(file_path_nlp, node_set=node_set_a)
-
-    await cognee.cognify()
-
     query_text = "Tell me about Quantum computers"
 
     from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -212,6 +154,9 @@ async def main():
     )
     cognee.config.system_root_directory(cognee_directory_path)
 
+    node_set_a = ["NLP"]
+    node_set_b = ["Quantum", "Computers"]
+
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
@@ -221,7 +166,7 @@ async def main():
     explanation_file_path_nlp = os.path.join(
         pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
     )
-    await cognee.add([explanation_file_path_nlp], dataset_name_1)
+    await cognee.add([explanation_file_path_nlp], dataset_name_1, node_set=node_set_a)
 
     text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
     At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
@@ -231,7 +176,7 @@ async def main():
     In principle, a non-quantum (classical) computer can solve the same computational problems as a quantum computer, given enough time. Quantum advantage comes in the form of time complexity rather than computability, and quantum complexity theory shows that some quantum algorithms for carefully selected tasks require exponentially fewer computational steps than the best known non-quantum algorithms. Such tasks can in theory be solved on a large-scale quantum computer whereas classical computers would not finish computations in any reasonable amount of time. However, quantum speedup is not universal or even typical across computational tasks, since basic tasks such as sorting are proven to not allow any asymptotic quantum speedup. Claims of quantum supremacy have drawn significant attention to the discipline, but are demonstrated on contrived tasks, while near-term practical use cases remain limited.
     """
 
-    await cognee.add([text], dataset_name_2)
+    await cognee.add([text], dataset_name_2, node_set=node_set_b)
 
     await cognee.cognify([dataset_name_2, dataset_name_1])
 
@@ -281,6 +226,12 @@ async def main():
     history = await get_history(user.id)
     assert len(history) == 8, "Search history is not correct."
 
+    await test_vector_engine_search_none_limit()
+
+    await test_vector_engine_search_with_nodeset_filtering()
+
+    await test_vector_nodeset_filtering_retriever_integration()
+
     await test_local_file_deletion(text, explanation_file_path_nlp)
 
     await cognee.prune.prune_data()
@@ -290,12 +241,6 @@ async def main():
     await cognee.prune.prune_system(metadata=True)
     tables_in_database = await vector_engine.get_table_names()
     assert len(tables_in_database) == 0, "PostgreSQL database is not empty"
-
-    await test_vector_engine_search_none_limit()
-
-    await test_vector_engine_search_with_nodeset_filtering()
-
-    await test_vector_nodeset_filtering_retriever_integration()
 
 
 if __name__ == "__main__":

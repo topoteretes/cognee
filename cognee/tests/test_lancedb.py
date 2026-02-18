@@ -68,30 +68,11 @@ async def test_getting_of_documents(dataset_name_1):
 
 
 async def test_vector_engine_search_none_limit():
-    file_path_quantum = os.path.join(
-        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
-    )
-
-    file_path_nlp = os.path.join(
-        pathlib.Path(__file__).parent,
-        "test_data/Natural_language_processing.txt",
-    )
-
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
-    await cognee.add(file_path_quantum)
-
-    await cognee.add(file_path_nlp)
-
-    await cognee.cognify()
-
     query_text = "Tell me about Quantum computers"
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
     vector_engine = get_vector_engine()
-
     collection_name = "Entity_name"
 
     query_vector = (await vector_engine.embedding_engine.embed_text([query_text]))[0]
@@ -106,27 +87,7 @@ async def test_vector_engine_search_none_limit():
 
 
 async def test_vector_engine_search_with_nodeset_filtering():
-    file_path_quantum = os.path.join(
-        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
-    )
-
-    file_path_nlp = os.path.join(
-        pathlib.Path(__file__).parent,
-        "test_data/Natural_language_processing.txt",
-    )
-
-    node_set_a = ["NLP"]
-    node_set_b = ["Quantum", "Computers"]
-
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
-    await cognee.add(file_path_quantum, node_set=node_set_b)
-
-    await cognee.add(file_path_nlp, node_set=node_set_a)
-
-    await cognee.cognify()
-
+    node_set = ["Quantum", "Computers"]
     query_text = "Tell me about Quantum computers"
 
     from cognee.infrastructure.databases.vector import get_vector_engine
@@ -138,41 +99,21 @@ async def test_vector_engine_search_with_nodeset_filtering():
         collection_name="DocumentChunk_text",
         query_vector=query_vector,
         include_payload=True,
-        belongs_to_set=node_set_a,
+        belongs_to_set=node_set,
     )
 
-    assert all(nodeset in node_set_a for nodeset in result[0].payload["belongs_to_set"]), (
+    assert all(nodeset in node_set for nodeset in result[0].payload["belongs_to_set"]), (
         "Only results from relevant nodesets should be returned"
     )
 
 
 async def test_vector_nodeset_filtering_retriever_integration():
-    file_path_quantum = os.path.join(
-        pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
-    )
-
-    file_path_nlp = os.path.join(
-        pathlib.Path(__file__).parent,
-        "test_data/Natural_language_processing.txt",
-    )
-
-    node_set_a = ["NLP"]
-    node_set_b = ["Quantum", "Computers"]
-
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
-    await cognee.add(file_path_quantum, node_set=node_set_b)
-
-    await cognee.add(file_path_nlp, node_set=node_set_a)
-
-    await cognee.cognify()
-
+    node_set = ["NLP"]
     query_text = "Tell me about Quantum computers"
 
     from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 
-    retriever = GraphCompletionRetriever(node_name=node_set_a)
+    retriever = GraphCompletionRetriever(node_name=node_set)
     retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
     context = await retriever.get_context_from_objects(
         query=query_text, retrieved_objects=retrieved_objects
@@ -202,6 +143,9 @@ async def main():
     )
     cognee.config.system_root_directory(cognee_directory_path)
 
+    node_set_a = ["NLP"]
+    node_set_b = ["Quantum", "Computers"]
+
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 
@@ -211,13 +155,13 @@ async def main():
     explanation_file_path_nlp = os.path.join(
         pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
     )
-    await cognee.add([explanation_file_path_nlp], dataset_name_1)
+    await cognee.add([explanation_file_path_nlp], dataset_name_1, node_set=node_set_a)
 
     explanation_file_path_quantum = os.path.join(
         pathlib.Path(__file__).parent, "test_data/Quantum_computers.txt"
     )
 
-    await cognee.add([explanation_file_path_quantum], dataset_name_2)
+    await cognee.add([explanation_file_path_quantum], dataset_name_2, node_set=node_set_b)
 
     await cognee.cognify([dataset_name_2, dataset_name_1])
 
@@ -268,6 +212,12 @@ async def main():
     history = await get_history(user.id)
     assert len(history) == 8, "Search history is not correct."
 
+    await test_vector_engine_search_none_limit()
+
+    await test_vector_engine_search_with_nodeset_filtering()
+
+    await test_vector_nodeset_filtering_retriever_integration()
+
     await cognee.prune.prune_data()
     data_root_directory = get_storage_config()["data_root_directory"]
     assert not os.path.isdir(data_root_directory), "Local data files are not deleted"
@@ -276,12 +226,6 @@ async def main():
     connection = await vector_engine.get_connection()
     tables_in_database = await connection.table_names()
     assert len(tables_in_database) == 0, "LanceDB database is not empty"
-
-    await test_vector_engine_search_none_limit()
-
-    await test_vector_engine_search_with_nodeset_filtering()
-
-    await test_vector_nodeset_filtering_retriever_integration()
 
 
 if __name__ == "__main__":
