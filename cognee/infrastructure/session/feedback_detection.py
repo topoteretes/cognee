@@ -36,5 +36,7 @@ async def detect_feedback(user_message: str) -> FeedbackDetectionResult:
             else FeedbackDetectionResult(feedback_detected=False)
         )
     except Exception as e:
-        logger.warning("Feedback detection failed, proceeding with no feedback detected: %s", e, exc_info=False)
+        logger.warning(
+            "Feedback detection failed, proceeding with no feedback detected: %s", e, exc_info=False
+        )
         return FeedbackDetectionResult(feedback_detected=False)
