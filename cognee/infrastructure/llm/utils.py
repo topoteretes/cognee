@@ -80,19 +80,25 @@ async def test_llm_connection():
     produce instructor-compatible structured JSON. The call is wrapped in a timeout
     to prevent indefinite hangs.
     """
-    from cognee.infrastructure.llm.config import get_llm_config
+    from cognee.infrastructure.llm.LLMGateway import LLMGateway
+    # from cognee.infrastructure.llm.config import get_llm_config
 
-    config = get_llm_config()
+    # config = get_llm_config()
     try:
-        await asyncio.wait_for(
-            litellm.acompletion(
-                model=config.llm_model,
-                messages=[{"role": "user", "content": "Say ok"}],
-                api_key=config.llm_api_key,
-                api_base=config.llm_endpoint,
-                max_tokens=5,
-            ),
-            timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
+        # await asyncio.wait_for(
+        #     litellm.acompletion(
+        #         model=config.llm_model,
+        #         messages=[{"role": "user", "content": "Say ok"}],
+        #         api_key=config.llm_api_key,
+        #         api_base=config.llm_endpoint,
+        #         max_tokens=5,
+        #     ),
+        #     timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
+        # )
+        await LLMGateway.acreate_structured_output(
+            text_input="test",
+            system_prompt='Respond to me with the following string: "test"',
+            response_model=str,
         )
     except asyncio.TimeoutError:
         msg = (
