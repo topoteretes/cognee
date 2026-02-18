@@ -5,8 +5,9 @@ Run from repo root with LLM configured (e.g. LLM_API_KEY in .env):
 
   uv run python examples/python/feedback_detection_example.py
 
-Covers: new questions (no feedback), praise/thanks, criticism, ratings,
-short reactive feedback, and follow-up questions that reference the answer.
+Only messages that validate the correctness/quality of the previous answer
+count as feedback. Covers: new questions, follow-ups, topic reactions (not
+feedback), praise/criticism/ratings/short reactive (feedback).
 """
 
 import asyncio
@@ -23,6 +24,10 @@ SAMPLES = [
     ("Follow-up question", "can you elaborate on the second point?"),
     ("Follow-up question", "what about the other approach?"),
     ("Follow-up question", "do you have more details on that?"),
+    # Not feedback: topic reaction (does not validate correctness of answer)
+    ("Topic reaction (not feedback)", "oooh that place is nice"),
+    ("Topic reaction (not feedback)", "interesting, I've been there"),
+    ("Topic reaction (not feedback)", "cool story"),
     # Praise / thanks
     ("Praise / thanks", "thanks, that was helpful!"),
     ("Praise / thanks", "Perfect, exactly what I needed."),
