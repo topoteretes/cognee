@@ -6,7 +6,7 @@ from cognee.infrastructure.databases.cache.config import CacheConfig
 from cognee.infrastructure.databases.exceptions import SessionParameterValidationError
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
-    generate_completion_with_optional_summary,
+    generate_session_completion_with_optional_summary,
 )
 from cognee.shared.logging_utils import get_logger
 
@@ -174,7 +174,7 @@ class SessionManager:
 
         resolved_session_id = self._resolve_session_id(session_id)
         conversation_history = await self._get_formatted_history(str(user_id), resolved_session_id)
-        completion, context_to_store = await generate_completion_with_optional_summary(
+        completion, context_to_store = await generate_session_completion_with_optional_summary(
             query=query,
             context=context,
             conversation_history=conversation_history,

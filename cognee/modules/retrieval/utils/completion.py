@@ -54,7 +54,7 @@ async def generate_completion_batch(
     )
 
 
-async def generate_completion_with_optional_summary(
+async def generate_session_completion_with_optional_summary(
     *,
     query: str,
     context: str,
@@ -66,7 +66,8 @@ async def generate_completion_with_optional_summary(
     summarize_context: bool = False,
 ) -> Tuple[Any, str]:
     """
-    Run LLM completion (and optionally summarization). Returns (completion, context_to_store).
+    Run LLM completion (and optionally summarization) for the session-manager flow.
+    Returns (completion, context_to_store).
     When summarize_context is True, context_to_store is the summarized context; otherwise "".
     """
     if summarize_context:
