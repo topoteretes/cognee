@@ -14,11 +14,9 @@ from cognee.modules.retrieval.utils.completion import (
 )
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
-from cognee.modules.graph.utils import get_entity_nodes_from_triplets
 
 logger = get_logger("GraphCompletionRetriever")
 
@@ -113,9 +111,6 @@ class GraphCompletionRetriever(BaseRetriever):
         if len(triplets) == 0:
             logger.warning("Empty context was provided to the completion")
             return []
-        # TODO: Remove when refactor of timestamps tracking is merged
-        entity_nodes = get_entity_nodes_from_triplets(triplets)
-        await update_node_access_timestamps(entity_nodes)
 
         return triplets
 
