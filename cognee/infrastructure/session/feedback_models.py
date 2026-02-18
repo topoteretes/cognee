@@ -14,7 +14,7 @@ class FeedbackDetectionResult(BaseModel):
     )
     feedback_text: Optional[str] = Field(
         default=None,
-        description="When feedback_detected is True: required. Extracted or normalized feedback text (e.g. summary of what the user said). Use empty string if the message is only a score or very short.",
+        description="When feedback_detected is True: required, must never be empty. Short description that includes or summarizes the user's message (e.g. 'User gave a positive rating' for '5/5').",
     )
     feedback_score: Optional[float] = Field(
         default=None,
