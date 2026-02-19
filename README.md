@@ -70,7 +70,7 @@ Use our knowledge engine to build personalized and dynamic memory for AI Agents.
 
 Cognee is an open-source knowledge engine that transforms your raw data into persistent and dynamic AI memory for Agents. It combines vector search, graph databases and self-improvement to make your documents both searchable by meaning and connected by relationships as they change and evolve.
 
-Cognee offers default knowledge creation and search which we describe bellow. But with Cognee you can build your modular knowledge blocks!
+Cognee offers default knowledge creation and search which we describe below. But with Cognee you can build your modular knowledge blocks!
 
 
 :star: _Help us reach more developers and grow the cognee community. Star this repo!_
