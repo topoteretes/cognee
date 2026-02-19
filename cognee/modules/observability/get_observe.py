@@ -1,5 +1,6 @@
 from cognee.base_config import get_base_config
 from .observers import Observer
+from .exceptions import UnsupportedObserverError
 
 
 def get_observe():
@@ -23,3 +24,6 @@ def get_observe():
                 return decorator
 
         return no_op_decorator
+    else:
+        observer_str = getattr(monitoring, "value", str(monitoring))
+        raise UnsupportedObserverError(observer_str)
