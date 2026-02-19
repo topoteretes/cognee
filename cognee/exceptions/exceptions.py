@@ -95,7 +95,6 @@ class InvalidObserverError(CogneeApiError):
         super().__init__(
             message=(
                 f"Observer '{observer_value}' is not supported by get_observe(). "
-                "Supported values are: NONE and LANGFUSE. "
                 "Please update your monitoring_tool configuration."
             ),
             name="InvalidObserverError",
