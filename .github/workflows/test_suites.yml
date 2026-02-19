@@ -162,6 +162,7 @@ jobs:
       relational-db-migration-tests,
       docker-compose-test,
       docker-ci-test,
+      integration-tests
     ]
     uses: ./.github/workflows/test_ollama.yml
     secrets: inherit
@@ -185,6 +186,7 @@ jobs:
       relational-db-migration-tests,
       docker-compose-test,
       docker-ci-test,
+      integration-tests
     ]
     runs-on: ubuntu-latest
     if: always()
@@ -211,3 +213,33 @@ jobs:
             echo "One or more test suites failed."
             exit 1
           fi
+
+  integration-tests:
+    name: Run Integration Tests
+    runs-on: ubuntu-22.04
+    env:
+      ENV: 'dev'
+      LLM_PROVIDER: openai
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
+      EMBEDDING_DIMENSIONS: 300
+      EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
+      EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: ${{ inputs.python-version }}
+          extra-dependencies: "scraping"
+
+      - name: Run Integration Tests
+        run: uv run pytest cognee/tests/integration/
