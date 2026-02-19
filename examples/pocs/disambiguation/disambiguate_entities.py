@@ -25,8 +25,8 @@ from cognee.tasks.documents import (
 )
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
-from poc_extract_graph_from_data_with_entity_disambiguation import (
-    extract_graph_from_data_with_entity_disambiguation,
+from extract_graph_from_data_with_entity_disambiguation import (
+    extract_graph_from_data_with_entity_disambiguation_task,
 )
 
 logger = get_logger("cognify")
@@ -221,7 +221,7 @@ async def disambiguate_entities_pipeline(
             chunker=chunker,
         ),  # Extract text chunks based on the document type.
         Task(
-            extract_graph_from_data_with_entity_disambiguation,
+            extract_graph_from_data_with_entity_disambiguation_task,
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,

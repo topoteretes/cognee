@@ -170,7 +170,7 @@ async def build_prompt(chunk, vector_search_limit, custom_prompt) -> Optional[st
     return prompt
 
 
-async def extract_graph_from_data_with_entity_disambiguation(
+async def extract_graph_from_data_with_entity_disambiguation_task(
     data_chunks: List[DocumentChunk],
     context: Dict,
     graph_model: Type[BaseModel],
