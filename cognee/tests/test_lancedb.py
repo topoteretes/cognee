@@ -87,8 +87,8 @@ async def test_vector_engine_search_none_limit():
 
 
 async def test_vector_engine_search_with_nodeset_filtering():
-    node_set = ["Quantum", "Computers"]
-    query_text = "Tell me about Quantum computers"
+    node_set = ["NLP"]
+    query_text = "Tell me about NLP"
 
     from cognee.infrastructure.databases.vector import get_vector_engine
 
@@ -99,7 +99,7 @@ async def test_vector_engine_search_with_nodeset_filtering():
         collection_name="DocumentChunk_text",
         query_vector=query_vector,
         include_payload=True,
-        belongs_to_set=node_set,
+        node_name=node_set,
     )
 
     assert all(nodeset in node_set for nodeset in result[0].payload["belongs_to_set"]), (

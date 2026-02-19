@@ -362,6 +362,7 @@ class ChromaDBAdapter(VectorDBInterface):
         with_vector: bool = False,
         normalized: bool = True,
         include_payload: bool = False,  # TODO: Add support for this parameter when set to False
+        node_name: Optional[List[str]] = None,  # TODO: Add support/functionality for this parameter
     ):
         """
         Search for items in a collection using either a text or a vector query.

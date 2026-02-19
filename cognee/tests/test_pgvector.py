@@ -101,7 +101,7 @@ async def test_vector_engine_search_with_nodeset_filtering():
         collection_name="DocumentChunk_text",
         query_vector=query_vector,
         include_payload=True,
-        belongs_to_set=node_set,
+        node_name=node_set,
     )
 
     assert all(nodeset in node_set for nodeset in result[0].payload["belongs_to_set"]), (

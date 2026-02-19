@@ -302,6 +302,7 @@ class LanceDBAdapter(VectorDBInterface):
         limit: Optional[int] = None,
         with_vectors: bool = False,
         include_payload: bool = False,
+        node_name: Optional[List[str]] = None,
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
@@ -313,6 +314,7 @@ class LanceDBAdapter(VectorDBInterface):
                     limit=limit,
                     with_vector=with_vectors,
                     include_payload=include_payload,
+                    node_name=node_name,
                 )
                 for query_vector in query_vectors
             ]
