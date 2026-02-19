@@ -20,3 +20,7 @@ class FeedbackDetectionResult(BaseModel):
         default=None,
         description="When feedback_detected is True: required. Numeric score 1-5 (1=negative, 5=positive); normalized to int when persisting.",
     )
+    response_to_user: Optional[str] = Field(
+        default=None,
+        description="When feedback_detected is True: required. Brief, friendly message to show the user (e.g. thanking them for feedback). One sentence; can adapt tone or language to the user's message.",
+    )
