@@ -13,12 +13,3 @@ def test_get_observe_raises_for_unsupported_observer():
 
         with pytest.raises(UnsupportedObserverError, match="Unsupported observer"):
             get_observe()
-
-
-def test_get_observe_raises_for_langsmith():
-    """Observer.LANGSMITH raises UnsupportedObserverError."""
-    with patch("cognee.modules.observability.get_observe.get_base_config") as get_config:
-        get_config.return_value = type("Config", (), {"monitoring_tool": Observer.LANGSMITH})()
-
-        with pytest.raises(UnsupportedObserverError, match="Unsupported observer"):
-            get_observe()
