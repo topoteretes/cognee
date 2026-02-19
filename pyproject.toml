@@ -79,7 +79,8 @@ scraping = [
     "lxml>=4.9.3,<5 ; python_version < '3.13'",
     "lxml>=5,<6 ; python_version >= '3.13'",
     "protego>=0.1",
-    "APScheduler>=3.10.0,<=3.11.0"
+    "APScheduler>=3.10.0,<=3.11.0",
+    "scrapegraph-py>=1.0.0"
 ]
 
 neo4j = ["neo4j>=5.28.0,<6"]

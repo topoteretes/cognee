@@ -95,6 +95,27 @@ async def test_web_scraping_using_tavily():
     print("Test passed! Found Albert Einstein in scraped data.")
 
 
+async def test_web_scraping_using_scrapegraphai():
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    url = "https://quotes.toscrape.com/"
+
+    await cognee.add(
+        data=url,
+        incremental_loading=False,
+    )
+
+    await cognee.cognify()
+
+    results = await cognee.search(
+        "Who said 'The world as we have created it is a process of our thinking. It cannot be changed without changing our thinking'?",
+        query_type=cognee.SearchType.GRAPH_COMPLETION,
+    )
+    assert "Albert Einstein" in results[0]
+    print("Test passed! Found Albert Einstein in ScrapeGraphAI-scraped data.")
+
+
 async def test_web_scraping_using_tavily_and_incremental_loading():
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -163,6 +184,9 @@ async def main():
 
     print("Starting Tavily normal test...")
     await test_web_scraping_using_tavily()
+
+    print("Starting ScrapeGraphAI test...")
+    await test_web_scraping_using_scrapegraphai()
 
     print("Starting cron job test...")
     await test_cron_web_scraper()

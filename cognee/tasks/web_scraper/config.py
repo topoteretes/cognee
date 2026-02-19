@@ -10,6 +10,12 @@ class TavilyConfig(BaseModel):
     timeout: Optional[int] = Field(default=10, ge=1, le=60)
 
 
+class ScrapeGraphAIConfig(BaseModel):
+    api_key: Optional[str] = os.getenv("SGAI_API_KEY")
+    stealth: bool = False
+    render_heavy_js: bool = False
+
+
 class DefaultCrawlerConfig(BaseModel):
     concurrency: int = 5
     crawl_delay: float = 0.5

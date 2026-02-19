@@ -4,12 +4,13 @@ This module provides functions to fetch and extract content from web pages, supp
 both BeautifulSoup for custom extraction rules and Tavily for API-based scraping.
 """
 
+import asyncio
 import os
 from typing import List, Union
 from cognee.shared.logging_utils import get_logger
 from cognee.tasks.web_scraper.types import UrlsToHtmls
 from .default_url_crawler import DefaultUrlCrawler
-from .config import DefaultCrawlerConfig, TavilyConfig
+from .config import DefaultCrawlerConfig, ScrapeGraphAIConfig, TavilyConfig
 
 logger = get_logger(__name__)
 
@@ -43,7 +44,10 @@ async def fetch_page_content(urls: Union[str, List[str]]) -> UrlsToHtmls:
     """
     url_list = [urls] if isinstance(urls, str) else urls
 
-    if os.getenv("TAVILY_API_KEY"):
+    if os.getenv("SGAI_API_KEY"):
+        logger.info("Using ScrapeGraphAI API for url fetching")
+        return await fetch_with_scrapegraphai(urls)
+    elif os.getenv("TAVILY_API_KEY"):
         logger.info("Using Tavily API for url fetching")
         return await fetch_with_tavily(urls)
     else:
@@ -139,4 +143,61 @@ async def fetch_with_tavily(urls: Union[str, List[str]]) -> UrlsToHtmls:
         return_results[result["url"]] = result["raw_content"]
 
     logger.info(f"Successfully fetched content from {len(return_results)} URL(s) via Tavily")
+    return return_results
+
+
+async def fetch_with_scrapegraphai(urls: Union[str, List[str]]) -> UrlsToHtmls:
+    """Fetch content from URLs using the ScrapeGraphAI Markdownify API.
+
+    Args:
+        urls: A single URL (str) or a list of URLs (List[str]) to scrape.
+
+    Returns:
+        Dict[str, str]: A dictionary mapping each URL to its markdown content.
+
+    Raises:
+        ImportError: If scrapegraph-py is not installed.
+        Exception: If the ScrapeGraphAI API request fails.
+    """
+    try:
+        from scrapegraph_py import AsyncClient
+    except ImportError:
+        logger.error(
+            "Failed to import scrapegraph_py, make sure to install using pip install scrapegraph-py>=1.0.0"
+        )
+        raise
+
+    config = ScrapeGraphAIConfig()
+    url_list = [urls] if isinstance(urls, str) else urls
+
+    logger.info(
+        f"Initializing ScrapeGraphAI client (stealth={config.stealth}, render_heavy_js={config.render_heavy_js})"
+    )
+
+    return_results = {}
+    async with AsyncClient(api_key=config.api_key) as client:
+        logger.info(f"Sending markdownify request to ScrapeGraphAI API for {len(url_list)} URL(s)")
+        tasks = [
+            client.markdownify(
+                website_url=url,
+                stealth=config.stealth,
+                render_heavy_js=config.render_heavy_js,
+            )
+            for url in url_list
+        ]
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for url, response in zip(url_list, responses):
+            if isinstance(response, Exception):
+                logger.warning(f"ScrapeGraphAI failed to fetch {url}: {response}")
+                continue
+            result = response.get("result", "")
+            if result:
+                return_results[url] = result
+            else:
+                logger.warning(f"ScrapeGraphAI returned empty result for {url}")
+
+    logger.info(
+        f"Successfully fetched content from {len(return_results)} URL(s) via ScrapeGraphAI"
+    )
     return return_results
