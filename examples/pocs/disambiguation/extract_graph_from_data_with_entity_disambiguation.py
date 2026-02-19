@@ -1,8 +1,9 @@
 import asyncio
-from typing import Dict, Type, List, Optional
+from typing import Type, List, Optional, Dict
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.modules.graph.methods import upsert_edges
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.tasks.storage import index_graph_edges
@@ -20,7 +21,6 @@ from cognee.modules.graph.utils import (
 )
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
-from cognee.infrastructure.engine import DataPoint
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
     InvalidDataChunksError,
@@ -28,7 +28,8 @@ from cognee.tasks.graph.exceptions import (
     InvalidOntologyAdapterError,
 )
 from cognee.modules.cognify.config import get_cognify_config
-from poc_expand_with_nodes_and_edges import poc_expand_with_nodes_and_edges
+
+from cognee.infrastructure.databases.vector import get_vector_engine
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -63,7 +64,6 @@ async def integrate_chunk_graphs(
     graph_model: Type[BaseModel],
     ontology_resolver: BaseOntologyResolver,
     context: Dict,
-    use_single_add_datapoints_poc,
     pipeline_name: str = None,
     task_name: str = None,
 ) -> List[DocumentChunk]:
@@ -114,57 +114,74 @@ async def integrate_chunk_graphs(
         chunk_graphs,
     )
 
-    if use_single_add_datapoints_poc:
-        poc_expand_with_nodes_and_edges(
-            data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
+    graph_nodes, graph_edges = expand_with_nodes_and_edges(
+        data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
+    )
+
+    cognify_config = get_cognify_config()
+    embed_triplets = cognify_config.triplet_embedding
+
+    if len(graph_nodes) > 0:
+        if pipeline_name or task_name:
+            for node in graph_nodes:
+                _stamp_provenance_deep(node, pipeline_name, task_name)
+
+        await add_data_points(
+            data_points=graph_nodes,
+            context=context,
+            custom_edges=graph_edges,
+            embed_triplets=embed_triplets,
         )
-    else:
-        graph_nodes, graph_edges = expand_with_nodes_and_edges(
-            data_chunks, chunk_graphs, ontology_resolver, existing_edges_map
-        )
 
-        cognify_config = get_cognify_config()
-        embed_triplets = cognify_config.triplet_embedding
+    if len(graph_edges) > 0:
+        await graph_engine.add_edges(graph_edges)
+        await index_graph_edges(graph_edges)
 
-        if len(graph_nodes) > 0:
-            if pipeline_name or task_name:
-                for node in graph_nodes:
-                    _stamp_provenance_deep(node, pipeline_name, task_name)
+        user = context["user"] if "user" in context else None
 
-            await add_data_points(
-                data_points=graph_nodes, custom_edges=context, embed_triplets=embed_triplets
+        if user:
+            await upsert_edges(
+                graph_edges,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=context["dataset"].id,
+                data_id=context["data"].id,
             )
-
-        if len(graph_edges) > 0:
-            await graph_engine.add_edges(graph_edges)
-            await index_graph_edges(graph_edges)
-
-            user = context["user"] if "user" in context else None
-
-            if user:
-                await upsert_edges(
-                    graph_edges,
-                    tenant_id=user.tenant_id,
-                    user_id=user.id,
-                    dataset_id=context["dataset"].id,
-                    data_id=context["data"].id,
-                )
 
     return data_chunks
 
 
-async def extract_graph_from_data(
+async def build_prompt(chunk, vector_search_limit, custom_prompt) -> Optional[str]:
+    vector_engine = get_vector_engine()
+    exists = await vector_engine.has_collection(collection_name="Entity_name")
+
+    if not (exists and custom_prompt):
+        return custom_prompt
+
+    results_per_chunk = await vector_engine.search(
+        collection_name="Entity_name",
+        query_text=chunk.text,
+        limit=vector_search_limit,
+        include_payload=True,
+    )
+    prompt = custom_prompt
+    for result in results_per_chunk:
+        prompt = prompt + "\n  -" + result.payload["text"]
+    return prompt
+
+
+async def extract_graph_from_data_with_entity_disambiguation_task(
     data_chunks: List[DocumentChunk],
     context: Dict,
     graph_model: Type[BaseModel],
-    config: Optional[Config] = None,
+    config: Config = None,
     custom_prompt: Optional[str] = None,
-    use_single_add_datapoints_poc: bool = False,
     **kwargs,
 ) -> List[DocumentChunk]:
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
+    vector_search_limit = kwargs.get("vector_search_limit") or 5
 
     if not isinstance(data_chunks, list) or not data_chunks:
         raise InvalidDataChunksError("must be a non-empty list of DocumentChunk.")
@@ -173,10 +190,14 @@ async def extract_graph_from_data(
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
 
+    chunk_prompts = await asyncio.gather(
+        *[build_prompt(chunk, vector_search_limit, custom_prompt) for chunk in data_chunks]
+    )
+
     chunk_graphs = await asyncio.gather(
         *[
-            extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs)
-            for chunk in data_chunks
+            extract_content_graph(chunk.text, graph_model, custom_prompt=prompt)
+            for chunk, prompt in zip(data_chunks, chunk_prompts)
         ]
     )
 
@@ -219,7 +240,6 @@ async def extract_graph_from_data(
         graph_model,
         ontology_resolver,
         context,
-        use_single_add_datapoints_poc,
         pipeline_name=pipeline_name,
         task_name=task_name,
     )

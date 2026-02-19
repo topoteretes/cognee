@@ -3,12 +3,10 @@ import os
 
 import cognee
 from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.shared.logging_utils import setup_logging
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.ontology.ontology_config import Config
 from os import path
-from poc_single_add_datapoints_pipeline import poc_cognify
+from single_add_datapoints_pipeline import single_add_datapoints_pipeline
 
 text_1 = """
 1. Audi
@@ -64,6 +62,7 @@ async def main(use_poc):
         os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
             "..",
+            "..",
             "python",
             "ontology_input_example",
             "basic_ontology.owl",
@@ -78,7 +77,7 @@ async def main(use_poc):
     }
 
     if use_poc:
-        await poc_cognify(config=config, use_single_add_datapoints_poc=True)
+        await single_add_datapoints_pipeline(config=config, use_single_add_datapoints_poc=True)
     else:
         await cognee.cognify(config=config)
 

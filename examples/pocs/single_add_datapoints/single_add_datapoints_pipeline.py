@@ -3,13 +3,13 @@ from pydantic import BaseModel
 from typing import Union, Optional
 from uuid import UUID
 
-from cognee import run_custom_pipeline
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.shared.logging_utils import get_logger
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm import get_max_chunk_tokens
 
+from cognee.modules.pipelines import run_pipeline
 from cognee.modules.pipelines.tasks.task import Task
 from cognee.modules.chunking.TextChunker import TextChunker
 from cognee.modules.ontology.ontology_config import Config
@@ -23,18 +23,22 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
+from extract_graph_from_data import poc_extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
-from poc_extract_graph_from_data_with_entity_disambiguation import (
-    extract_graph_from_data_with_entity_disambiguation,
+from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
+from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
+from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
+    extract_knowledge_graph_from_events,
 )
+
 
 logger = get_logger("cognify")
 
 update_status_lock = asyncio.Lock()
 
 
-async def disambiguate_entities_pipeline(
+async def single_add_datapoints_pipeline(
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
@@ -44,9 +48,12 @@ async def disambiguate_entities_pipeline(
     config: Config = None,
     vector_db_config: dict = None,
     graph_db_config: dict = None,
+    run_in_background: bool = False,
     incremental_loading: bool = True,
     custom_prompt: Optional[str] = None,
+    temporal_cognify: bool = False,
     data_per_batch: int = 20,
+    use_single_add_datapoints_poc: bool = False,
     **kwargs,
 ):
     """
@@ -205,6 +212,69 @@ async def disambiguate_entities_pipeline(
                 "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
             }
 
+    if temporal_cognify:
+        tasks = await get_temporal_tasks(
+            user=user, chunker=chunker, chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
+        )
+    else:
+        tasks = await get_default_tasks(
+            user=user,
+            graph_model=graph_model,
+            chunker=chunker,
+            chunk_size=chunk_size,
+            config=config,
+            custom_prompt=custom_prompt,
+            chunks_per_batch=chunks_per_batch,
+            use_single_add_datapoints_poc=use_single_add_datapoints_poc,
+            **kwargs,
+        )
+
+    # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
+    pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
+
+    # Run the run_pipeline in the background or blocking based on executor
+    return await pipeline_executor_func(
+        pipeline=run_pipeline,
+        tasks=tasks,
+        user=user,
+        datasets=datasets,
+        vector_db_config=vector_db_config,
+        graph_db_config=graph_db_config,
+        incremental_loading=incremental_loading,
+        use_pipeline_cache=True,
+        pipeline_name="cognify_pipeline",
+        data_per_batch=data_per_batch,
+    )
+
+
+async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
+    user: User = None,
+    graph_model: BaseModel = KnowledgeGraph,
+    chunker=TextChunker,
+    chunk_size: int = None,
+    config: Config = None,
+    custom_prompt: Optional[str] = None,
+    chunks_per_batch: int = None,
+    use_single_add_datapoints_poc: bool = False,
+    **kwargs,
+) -> list[Task]:
+    if config is None:
+        ontology_config = get_ontology_env_config()
+        if (
+            ontology_config.ontology_file_path
+            and ontology_config.ontology_resolver
+            and ontology_config.matching_strategy
+        ):
+            config: Config = {
+                "ontology_config": {
+                    "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
+                }
+            }
+        else:
+            config: Config = {
+                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
+            }
+
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
 
@@ -213,7 +283,7 @@ async def disambiguate_entities_pipeline(
             cognify_config.chunks_per_batch if cognify_config.chunks_per_batch is not None else 100
         )
 
-    tasks = [
+    default_tasks = [
         Task(classify_documents),
         Task(
             extract_chunks_from_documents,
@@ -221,10 +291,11 @@ async def disambiguate_entities_pipeline(
             chunker=chunker,
         ),  # Extract text chunks based on the document type.
         Task(
-            extract_graph_from_data_with_entity_disambiguation,
+            poc_extract_graph_from_data,
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,
+            use_single_add_datapoints_poc=use_single_add_datapoints_poc,
             task_config={"batch_size": chunks_per_batch},
             **kwargs,
         ),  # Generate knowledge graphs from the document chunks.
@@ -239,15 +310,47 @@ async def disambiguate_entities_pipeline(
         ),
     ]
 
-    # Run the run_pipeline in the background or blocking based on executor
-    return await run_custom_pipeline(
-        tasks=tasks,
-        dataset=datasets,
-        user=user,
-        vector_db_config=vector_db_config,
-        graph_db_config=graph_db_config,
-        incremental_loading=incremental_loading,
-        use_pipeline_cache=True,
-        pipeline_name="cognify_pipeline",
-        data_per_batch=data_per_batch,
-    )
+    return default_tasks
+
+
+async def get_temporal_tasks(
+    user: User = None, chunker=TextChunker, chunk_size: int = None, chunks_per_batch: int = None
+) -> list[Task]:
+    """
+    Builds and returns a list of temporal processing tasks to be executed in sequence.
+
+    The pipeline includes:
+    1. Document classification.
+    2. Document chunking with a specified or default chunk size.
+    3. Event and timestamp extraction from chunks.
+    4. Knowledge graph extraction from events.
+    5. Batched insertion of data points.
+
+    Args:
+        user (User, optional): The user requesting task execution.
+        chunker (Callable, optional): A text chunking function/class to split documents. Defaults to TextChunker.
+        chunk_size (int, optional): Maximum token size per chunk. If not provided, uses system default.
+        chunks_per_batch (int, optional): Number of chunks to process in a single batch in Cognify
+
+    Returns:
+        list[Task]: A list of Task objects representing the temporal processing pipeline.
+    """
+    if chunks_per_batch is None:
+        from cognee.modules.cognify.config import get_cognify_config
+
+        configured = get_cognify_config().chunks_per_batch
+        chunks_per_batch = configured if configured is not None else 10
+
+    temporal_tasks = [
+        Task(classify_documents),
+        Task(
+            extract_chunks_from_documents,
+            max_chunk_size=chunk_size or get_max_chunk_tokens(),
+            chunker=chunker,
+        ),
+        Task(extract_events_and_timestamps, task_config={"batch_size": chunks_per_batch}),
+        Task(extract_knowledge_graph_from_events),
+        Task(add_data_points, task_config={"batch_size": chunks_per_batch}),
+    ]
+
+    return temporal_tasks
