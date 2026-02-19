@@ -13,10 +13,11 @@ from poc_single_add_datapoints_pipeline import poc_cognify
 
 async def main(use_poc):
     # Get file path to document to process
-    from pathlib import Path
-
-    current_directory = Path(__file__).resolve().parent
-    file_path = os.path.join(current_directory, "data", "alice_in_wonderland.txt")
+    file_path = os.path.abspath(
+        os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "data", "alice_in_wonderland.txt"
+        )
+    )
 
     graph_visualization_path = path.join(
         path.dirname(__file__), f"results/{'poc_' if use_poc else ''}simple_example_result.html"
