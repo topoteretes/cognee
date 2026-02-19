@@ -1,9 +1,9 @@
 from sqlalchemy import URL
 from .sqlalchemy.SqlAlchemyAdapter import SQLAlchemyAdapter
-from functools import lru_cache
+from functools import cache
 
 
-@lru_cache
+@cache
 def create_relational_engine(
     db_path: str,
     db_name: str,
@@ -13,6 +13,7 @@ def create_relational_engine(
     db_password: str,
     db_provider: str,
     database_connect_args: dict = None,
+    pool_args: dict = None,
 ):
     """
     Create a relational database engine based on the specified parameters.
@@ -41,7 +42,7 @@ def create_relational_engine(
     if db_provider == "sqlite":
         connection_string = f"sqlite+aiosqlite:///{db_path}/{db_name}"
 
-    if db_provider == "postgres":
+    elif db_provider == "postgres":
         try:
             # Test if asyncpg is available
             import asyncpg
@@ -61,4 +62,11 @@ def create_relational_engine(
                 "PostgreSQL dependencies are not installed. Please install with 'pip install cognee\"[postgres]\"' or 'pip install cognee\"[postgres-binary]\"' to use PostgreSQL functionality."
             )
 
-    return SQLAlchemyAdapter(connection_string, connect_args=database_connect_args)
+    else:
+        raise ConnectionError("unsupported DB type: " + db_provider)
+
+    return SQLAlchemyAdapter(
+        connection_string,
+        connect_args=database_connect_args,
+        pool_args=pool_args,
+    )

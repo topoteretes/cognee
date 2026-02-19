@@ -29,7 +29,7 @@ class SQLAlchemyAdapter:
     functions.
     """
 
-    def __init__(self, connection_string: str, connect_args: dict = None):
+    def __init__(self, connection_string: str, connect_args: dict = None, pool_args: dict = None):
         """
         Initialize the SQLAlchemy adapter with connection settings.
 
@@ -79,11 +79,7 @@ class SQLAlchemyAdapter:
         else:
             self.engine = create_async_engine(
                 connection_string,
-                pool_size=20,
-                max_overflow=20,
-                pool_recycle=280,
-                pool_pre_ping=True,
-                pool_timeout=280,
+                **pool_args,
                 connect_args=final_connect_args,
             )
 
