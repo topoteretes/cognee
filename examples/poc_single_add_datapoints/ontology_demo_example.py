@@ -90,13 +90,10 @@ async def main(use_poc):
     await visualize_graph(graph_visualization_path)
 
 
-if __name__ == "__main__":
-    logger = setup_logging()
+async def _run():
+    await main(use_poc=False)
+    await main(use_poc=True)
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(main(use_poc=False))
-        loop.run_until_complete(main(use_poc=True))
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
+
+if __name__ == "__main__":
+    asyncio.run(_run())
