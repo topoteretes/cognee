@@ -37,28 +37,22 @@ async def main(
     await visualize_graph(graph_visualization_path)
 
 
-if __name__ == "__main__":
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+async def _run(example_id):
     with open("prompts/prompt1.txt", "r") as f:
         custom_prompt_text = f.read()
 
-    try:
-        for i in range(1, 2):
-            # loop.run_until_complete(main(example="example"+str(i), use_poc=False))
-            loop.run_until_complete(
-                main(
-                    example="data/example" + str(i),
-                    use_poc=True,
-                    vector_search_limit=5,
-                    custom_prompt=custom_prompt_text,
-                )
-            )
-            loop.run_until_complete(
-                main(
-                    example="data/example" + str(i),
-                    use_poc=False,
-                )
-            )
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
+        await main(
+            example="data/example" + example_id,
+            use_poc=True,
+            vector_search_limit=5,
+            custom_prompt=custom_prompt_text,
+        )
+        await main(
+            example="data/example" + example_id,
+            use_poc=False,
+        )
+
+
+if __name__ == "__main__":
+    for i in range(1, 5):
+        asyncio.run(_run(example_id=str(i)))
