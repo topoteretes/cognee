@@ -100,7 +100,7 @@ langchain = [
     "langchain_text_splitters>=0.3.2,<1.0.0",
     "langchain-core>=1.2.5"
 ]
-llama-index = ["llama-index-core>=0.12.11,<0.13"]
+llama-index = ["llama-index-core>=0.12.11,<0.14"]
 huggingface = ["transformers>=4.46.3,<5"]
 ollama = ["transformers>=4.46.3,<5"]
 mistral = ["mistral-common>=1.5.2,<2"]
