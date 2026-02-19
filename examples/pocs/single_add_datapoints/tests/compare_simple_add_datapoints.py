@@ -3,7 +3,7 @@ Run non-POC and POC add_data_points with the same KG, query graph DB for nodes/e
 """
 
 import asyncio
-from examples.poc_single_add_datapoints.tests.kg_from_text import get_demo_kg, run_with_kg
+from kg_from_text import get_demo_kg, run_with_kg
 from utils import _get_graph_snapshot, _compare
 
 

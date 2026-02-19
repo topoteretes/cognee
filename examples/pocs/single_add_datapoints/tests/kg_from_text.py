@@ -17,7 +17,7 @@ from cognee.modules.ontology.base_ontology_resolver import BaseOntologyResolver
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.tasks.storage import add_data_points, index_graph_edges
 
-from examples.poc_single_add_datapoints.poc_expand_with_nodes_and_edges import (
+from examples.pocs.single_add_datapoints.expand_with_nodes_and_edges import (
     poc_expand_with_nodes_and_edges,
 )
 
