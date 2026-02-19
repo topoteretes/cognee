@@ -297,7 +297,7 @@ class TestSessionManager:
             patch(
                 "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
                 new_callable=AsyncMock,
-                return_value=("Generated answer", ""),
+                return_value=("Generated answer", "", None),
             ) as mock_generate,
         ):
             mock_user = MagicMock()
