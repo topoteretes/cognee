@@ -23,7 +23,7 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
-from poc_extract_graph_from_data import extract_graph_from_data
+from extract_graph_from_data import poc_extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
@@ -38,7 +38,7 @@ logger = get_logger("cognify")
 update_status_lock = asyncio.Lock()
 
 
-async def poc_cognify(
+async def single_add_datapoints_pipeline(
     datasets: Union[str, list[str], list[UUID]] = None,
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
@@ -291,7 +291,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             chunker=chunker,
         ),  # Extract text chunks based on the document type.
         Task(
-            extract_graph_from_data,
+            poc_extract_graph_from_data,
             graph_model=graph_model,
             config=config,
             custom_prompt=custom_prompt,

@@ -28,7 +28,7 @@ from cognee.tasks.graph.exceptions import (
     InvalidOntologyAdapterError,
 )
 from cognee.modules.cognify.config import get_cognify_config
-from poc_expand_with_nodes_and_edges import poc_expand_with_nodes_and_edges
+from expand_with_nodes_and_edges import poc_expand_with_nodes_and_edges
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -153,7 +153,7 @@ async def integrate_chunk_graphs(
     return data_chunks
 
 
-async def extract_graph_from_data(
+async def poc_extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     context: Dict,
     graph_model: Type[BaseModel],
