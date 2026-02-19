@@ -6,3 +6,4 @@ from .get_users_in_role import get_users_in_role
 from .get_user_tenants import get_user_tenants
 from .get_user_roles import get_user_roles
 from .get_users_in_tenant import get_users_in_tenant
+from .remove_user_from_tenant import remove_user_from_tenant
