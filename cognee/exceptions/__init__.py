@@ -11,4 +11,5 @@ from .exceptions import (
     CogneeValidationError,
     CogneeConfigurationError,
     CogneeTransientError,
+    InvalidObserverError,
 )

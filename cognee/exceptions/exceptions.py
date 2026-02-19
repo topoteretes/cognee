@@ -89,3 +89,15 @@ class CogneeTransientError(CogneeApiError):
         log_level="ERROR",
     ):
         super().__init__(message, name, status_code, log, log_level)
+
+class InvalidObserverError(CogneeApiError):
+    def __init__(self, observer_value: str) -> None:
+        super().__init__(
+            message=(
+                f"Observer '{observer_value}' is not supported by get_observe(). "
+                "Supported values are: NONE and LANGFUSE. "
+                "Please update your monitoring_tool configuration."
+            ),
+            name="InvalidObserverError",
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
