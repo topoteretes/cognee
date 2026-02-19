@@ -174,7 +174,27 @@ class SessionManager:
 
         resolved_session_id = self._resolve_session_id(session_id)
         conversation_history = await self._get_formatted_history(str(user_id), resolved_session_id)
-        completion, context_to_store = await generate_session_completion_with_optional_summary(
+
+        cache_config = CacheConfig()
+        run_auto_feedback = cache_config.caching and cache_config.auto_feedback
+
+        last_qa_id: Optional[str] = None
+        if run_auto_feedback:
+            entries = await self.get_session(
+                user_id=str(user_id),
+                session_id=resolved_session_id,
+                formatted=False,
+                last_n=1,
+            )
+            if isinstance(entries, list) and entries:
+                last_entry = entries[-1]
+                last_qa_id = (
+                    last_entry.get("qa_id")
+                    if isinstance(last_entry, dict)
+                    else None
+                )
+
+        completion, context_to_store, feedback_result = await generate_session_completion_with_optional_summary(
             query=query,
             context=context,
             conversation_history=conversation_history,
@@ -183,7 +203,41 @@ class SessionManager:
             system_prompt=system_prompt,
             response_model=response_model,
             summarize_context=summarize_context,
+            run_feedback_detection=run_auto_feedback,
         )
+
+        feedback_detected = (
+            run_auto_feedback
+            and feedback_result is not None
+            and feedback_result.feedback_detected
+            and last_qa_id is not None
+        )
+
+        if feedback_detected:
+            try:
+                score: Optional[int] = None
+                if feedback_result.feedback_score is not None:
+                    s = float(feedback_result.feedback_score)
+                    score = int(round(min(5, max(1, s))))
+                feedback_text = (feedback_result.feedback_text or "").strip()
+                if not feedback_text:
+                    feedback_text = f"User message: {query.strip()[:500]}"
+                await self.add_feedback(
+                    user_id=str(user_id),
+                    session_id=resolved_session_id,
+                    qa_id=last_qa_id,
+                    feedback_text=feedback_text,
+                    feedback_score=score,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Auto-feedback persistence failed, proceeding without storing feedback: %s",
+                    e,
+                    exc_info=False,
+                )
+            response = (feedback_result.response_to_user or "").strip()
+            return response if response else "Thanks for your feedback."
+
         await self.add_qa(
             user_id=str(user_id),
             question=query,
