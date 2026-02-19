@@ -18,8 +18,6 @@ async def main(
         os.path.dirname(__file__),
         f"results/cognify_simple_{example}{'_poc' if use_poc else ''}_graph.html",
     )
-    # with open("results/"+example, "w") as f:
-    #     print("", file=f)
 
     with open(
         os.path.join(Path(__file__).resolve().parent, example + ".txt"), "r", encoding="utf-8"
@@ -42,13 +40,13 @@ async def _run(example_id):
         custom_prompt_text = f.read()
 
         await main(
-            example="data/example" + example_id,
+            example="example" + example_id,
             use_poc=True,
             vector_search_limit=5,
             custom_prompt=custom_prompt_text,
         )
         await main(
-            example="data/example" + example_id,
+            example="example" + example_id,
             use_poc=False,
         )
 
