@@ -1,13 +1,12 @@
 import asyncio
 import os
-from pprint import pprint
 
 import cognee
-from cognee.api.v1.search import SearchType
 from cognee.api.v1.visualize.visualize import visualize_graph
-from cognee.shared.logging_utils import setup_logging
 from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 from cognee.modules.ontology.ontology_config import Config
+from os import path
+from single_add_datapoints_pipeline import single_add_datapoints_pipeline
 
 text_1 = """
 1. Audi
@@ -48,7 +47,7 @@ Each of these companies has significantly impacted the technology landscape, dri
 """
 
 
-async def main():
+async def main(use_poc):
     # Step 1: Reset data and system state
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -59,9 +58,15 @@ async def main():
 
     # Step 3: Create knowledge graph
 
-    ontology_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "../data/ontology_input_example/basic_ontology.owl",
+    ontology_path = os.path.abspath(
+        os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "..",
+            "..",
+            "python",
+            "ontology_input_example",
+            "basic_ontology.owl",
+        )
     )
 
     # Create full config structure manually
@@ -71,25 +76,23 @@ async def main():
         }
     }
 
-    await cognee.cognify(config=config)
-    print("Knowledge with ontology created.")
+    if use_poc:
+        await single_add_datapoints_pipeline(config=config, use_single_add_datapoints_poc=True)
+    else:
+        await cognee.cognify(config=config)
 
-    # Step 4: Query insights
-    search_results = await cognee.search(
-        query_type=SearchType.GRAPH_COMPLETION,
-        query_text="What are the exact cars and their types produced by Audi?",
+    graph_visualization_path = path.join(
+        path.dirname(__file__),
+        f"results/{'poc_' if use_poc else ''}cognify_result_text.html",
     )
-    pprint(search_results)
 
-    await visualize_graph()
+    await visualize_graph(graph_visualization_path)
+
+
+async def _run():
+    await main(use_poc=False)
+    await main(use_poc=True)
 
 
 if __name__ == "__main__":
-    logger = setup_logging()
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(main())
-    finally:
-        loop.run_until_complete(loop.shutdown_asyncgens())
+    asyncio.run(_run())

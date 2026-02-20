@@ -43,6 +43,7 @@ class IndexSchema(DataPoint):
     text: str
 
     metadata: dict = {"index_fields": ["text"]}
+    belongs_to_set: List[str] = []
 
 
 class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
@@ -258,6 +259,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                 IndexSchema(
                     id=data_point.id,
                     text=DataPoint.get_embeddable_data(data_point),
+                    belongs_to_set=(data_point.belongs_to_set or []),
                 )
                 for data_point in data_points
             ],
@@ -307,6 +309,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         limit: Optional[int] = 15,
         with_vector: bool = False,
         include_payload: bool = False,
+        node_name: Optional[List[str]] = None,
     ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
@@ -338,10 +341,30 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         )
         # Use async session to connect to the database
         async with self.get_async_session() as session:
-            query = select(
-                *select_columns,
-                PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
-            ).order_by("similarity")
+            if node_name:
+                from sqlalchemy import cast, bindparam
+                from sqlalchemy.dialects.postgresql import JSONB, ARRAY, TEXT
+
+                target = bindparam("target", value=node_name, type_=ARRAY(TEXT()))
+                query = (
+                    select(
+                        *select_columns,
+                        PGVectorDataPoint.c.vector.cosine_distance(query_vector).label(
+                            "similarity"
+                        ),
+                    )
+                    .where(
+                        cast(PGVectorDataPoint.c.payload, JSONB)
+                        .op("->")("belongs_to_set")
+                        .op("?|")(target)
+                    )
+                    .order_by("similarity")
+                )
+            else:
+                query = select(
+                    *select_columns,
+                    PGVectorDataPoint.c.vector.cosine_distance(query_vector).label("similarity"),
+                ).order_by("similarity")
 
             if limit > 0:
                 query = query.limit(limit)
@@ -386,6 +409,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         limit: int = None,
         with_vectors: bool = False,
         include_payload: bool = False,
+        node_name: Optional[List[str]] = None,
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
@@ -397,6 +421,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     limit=limit,
                     with_vector=with_vectors,
                     include_payload=include_payload,
+                    node_name=node_name,
                 )
                 for query_vector in query_vectors
             ]
