@@ -33,6 +33,7 @@ class NodeEdgeVectorSearch:
         query_batch: Optional[List[str]] = None,
         collections: List[str] = None,
         wide_search_limit: Optional[int] = None,
+        node_name: Optional[List[str]] = None,
     ):
         """Embeds query/queries and retrieves vector distances from all collections."""
         if query is not None and query_batch is not None:
@@ -49,7 +50,9 @@ class NodeEdgeVectorSearch:
             search_results = await self._run_batch_search(collections, query_batch)
         else:
             self.query_list_length = None
-            search_results = await self._run_single_search(collections, query, wide_search_limit)
+            search_results = await self._run_single_search(
+                collections, query, wide_search_limit, node_name
+            )
 
         elapsed_time = time.time() - start_time
         collections_with_results = sum(1 for result in search_results if any(result))
@@ -140,7 +143,11 @@ class NodeEdgeVectorSearch:
             return [[]] * len(query_batch)
 
     async def _run_single_search(
-        self, collections: List[str], query: str, wide_search_limit: Optional[int]
+        self,
+        collections: List[str],
+        query: str,
+        wide_search_limit: Optional[int],
+        node_name: Optional[List[str]],
     ) -> List[List[Any]]:
         """Runs single query search and returns flat lists per collection.
 
@@ -149,7 +156,9 @@ class NodeEdgeVectorSearch:
         """
         await self._embed_query(query)
         search_tasks = [
-            self._search_single_collection(self.vector_engine, wide_search_limit, collection)
+            self._search_single_collection(
+                self.vector_engine, wide_search_limit, collection, node_name
+            )
             for collection in collections
         ]
         search_results = await asyncio.gather(*search_tasks)
@@ -161,7 +170,11 @@ class NodeEdgeVectorSearch:
         self.query_vector = query_embeddings[0]
 
     async def _search_single_collection(
-        self, vector_engine: Any, wide_search_limit: Optional[int], collection_name: str
+        self,
+        vector_engine: Any,
+        wide_search_limit: Optional[int],
+        collection_name: str,
+        node_name: Optional[List[str]],
     ):
         """Searches one collection and returns results or empty list if not found."""
         try:
@@ -169,6 +182,7 @@ class NodeEdgeVectorSearch:
                 collection_name=collection_name,
                 query_vector=self.query_vector,
                 limit=wide_search_limit,
+                node_name=node_name,
             )
         except CollectionNotFoundError:
             return []

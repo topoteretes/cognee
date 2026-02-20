@@ -16,11 +16,13 @@ async def main(
 
     graph_visualization_path = os.path.join(
         os.path.dirname(__file__),
-        f"results/cognify_simple_{example}{'_poc' if use_poc else ''}_graph.html",
+        f"results/{'poc_' if use_poc else ''}cognify_disambiguate_{example}_result.html",
     )
 
     with open(
-        os.path.join(Path(__file__).resolve().parent, example + ".txt"), "r", encoding="utf-8"
+        os.path.join(Path(__file__).resolve().parent, "data/" + example + ".txt"),
+        "r",
+        encoding="utf-8",
     ) as f:
         text = f.read()
     text = text.split("\n")
@@ -35,10 +37,12 @@ async def main(
     await visualize_graph(graph_visualization_path)
 
 
-async def _run(example_id):
+async def _run():
     with open("prompts/prompt1.txt", "r") as f:
         custom_prompt_text = f.read()
 
+    for i in range(1, 5):
+        example_id = str(i)
         await main(
             example="example" + example_id,
             use_poc=True,
@@ -52,5 +56,4 @@ async def _run(example_id):
 
 
 if __name__ == "__main__":
-    for i in range(1, 5):
-        asyncio.run(_run(example_id=str(i)))
+    asyncio.run(_run())

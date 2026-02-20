@@ -5,17 +5,18 @@ import os
 from os import path
 
 from cognee import visualize_graph
-from cognee.infrastructure.databases.graph import get_graph_engine
-from poc_single_add_datapoints_pipeline import poc_cognify
-# By default cognee uses OpenAI's gpt-5-mini LLM model
-# Provide your OpenAI LLM API KEY
+from single_add_datapoints_pipeline import single_add_datapoints_pipeline
 
 
 async def main(use_poc):
     # Get file path to document to process
     file_path = os.path.abspath(
         os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "data", "alice_in_wonderland.txt"
+            os.path.dirname(os.path.abspath(__file__)),
+            "..",
+            "..",
+            "data",
+            "alice_in_wonderland.txt",
         )
     )
 
@@ -30,7 +31,7 @@ async def main(use_poc):
     await cognee.add(file_path)
 
     if use_poc:
-        await poc_cognify(use_single_add_datapoints_poc=True)
+        await single_add_datapoints_pipeline(use_single_add_datapoints_poc=True)
     else:
         await cognee.cognify()
 
