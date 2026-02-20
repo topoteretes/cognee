@@ -83,7 +83,7 @@ async def main():
 
     ontology_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        "ontology_input_example/enriched_medical_ontology_with_classes.owl",
+        "../data/ontology_input_example/enriched_medical_ontology_with_classes.owl",
     )
 
     logger.info("\n--- Generating answers WITH ontology ---\n")

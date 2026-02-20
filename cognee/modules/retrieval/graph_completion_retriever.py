@@ -11,18 +11,12 @@ from cognee.modules.retrieval.utils.brute_force_triplet_search import brute_forc
 from cognee.modules.retrieval.utils.completion import (
     generate_completion,
     generate_completion_batch,
-    summarize_and_generate_completion,
 )
-from cognee.modules.retrieval.utils.session_cache import (
-    save_conversation_history,
-    get_conversation_history,
-)
+from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.shared.logging_utils import get_logger
-from cognee.modules.retrieval.utils.access_tracking import update_node_access_timestamps
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
-from cognee.modules.graph.utils import get_entity_nodes_from_triplets
 
 logger = get_logger("GraphCompletionRetriever")
 
@@ -117,9 +111,6 @@ class GraphCompletionRetriever(BaseRetriever):
         if len(triplets) == 0:
             logger.warning("Empty context was provided to the completion")
             return []
-        # TODO: Remove when refactor of timestamps tracking is merged
-        entity_nodes = get_entity_nodes_from_triplets(triplets)
-        await update_node_access_timestamps(entity_nodes)
 
         return triplets
 
@@ -210,6 +201,29 @@ class GraphCompletionRetriever(BaseRetriever):
 
         return await self.resolve_edges_to_text(triplets)
 
+    def _completion_kwargs(self, context: str) -> dict:
+        """Common kwargs for completion calls (no session)."""
+        return {
+            "context": context,
+            "user_prompt_path": self.user_prompt_path,
+            "system_prompt_path": self.system_prompt_path,
+            "system_prompt": self.system_prompt,
+            "response_model": self.response_model,
+        }
+
+    async def _generate_completion_without_session(
+        self,
+        query: Optional[str],
+        query_batch: Optional[List[str]],
+        context: str,
+    ) -> List[Any]:
+        """Generate completion(s) without session; returns list of completions."""
+        kwargs = self._completion_kwargs(context)
+        if query_batch:
+            return await generate_completion_batch(query_batch=query_batch, **kwargs)
+        completion = await generate_completion(query=query, **kwargs)
+        return [completion]
+
     async def get_completion_from_context(
         self,
         query: Optional[str] = None,
@@ -235,36 +249,21 @@ class GraphCompletionRetriever(BaseRetriever):
         Note: To avoid duplicate retrievals, ensure that retrieved_objects and context
               are provided from previous method calls.
         """
-        session_save = self._use_session_cache()
-        completion_kwargs = {
-            "context": context,
-            "user_prompt_path": self.user_prompt_path,
-            "system_prompt_path": self.system_prompt_path,
-            "system_prompt": self.system_prompt,
-            "response_model": self.response_model,
-        }
-
-        if session_save:
-            conversation_history = await get_conversation_history(session_id=self.session_id)
-            context_summary, completion = await summarize_and_generate_completion(
-                query=query, conversation_history=conversation_history, **completion_kwargs
-            )
-        elif query_batch:
-            completion = await generate_completion_batch(
-                query_batch=query_batch, **completion_kwargs
-            )
-        else:
-            completion = await generate_completion(query=query, **completion_kwargs)
-
-        if session_save:
-            await save_conversation_history(
-                query=query,
-                context_summary=context_summary,
-                answer=completion,
+        use_session = self._use_session_cache() and not query_batch
+        if use_session:
+            sm = get_session_manager()
+            completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
+                query=query,
+                context=context,
+                user_prompt_path=self.user_prompt_path,
+                system_prompt_path=self.system_prompt_path,
+                system_prompt=self.system_prompt,
+                response_model=self.response_model,
+                summarize_context=False,
             )
-
-        return completion if query_batch else [completion]
+            return [completion]
+        return await self._generate_completion_without_session(query, query_batch, context)
 
     async def get_completion(
         self, query: Optional[str] = None, query_batch: Optional[List[str]] = None

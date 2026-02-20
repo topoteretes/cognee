@@ -5,19 +5,11 @@ from datetime import datetime
 
 from operator import itemgetter
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
-from cognee.modules.retrieval.utils.session_cache import (
-    save_conversation_history,
-    get_conversation_history,
-)
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 from cognee.shared.logging_utils import get_logger
-from cognee.context_global_variables import session_user
-from cognee.infrastructure.databases.cache.config import CacheConfig
 
 from cognee.tasks.temporal_graph.models import QueryInterval
 
@@ -165,64 +157,3 @@ class TemporalRetriever(GraphCompletionRetriever):
             triplets = retrieved_objects.get("triplets", [])
             context_text = await self.resolve_edges_to_text(triplets)
             return context_text
-
-    async def get_completion_from_context(
-        self, query: str, retrieved_objects: Any = None, context: Optional[str] = None
-    ) -> List[Any]:
-        """
-        Generates a response using the query and optional context.
-
-        Parameters:
-        -----------
-
-            - query (str): The query string for which a completion is generated.
-            - context (Optional[str]): Optional context to use; if None, it will be
-              retrieved based on the query. (default None)
-            - session_id (Optional[str]): Optional session identifier for caching. If None,
-              defaults to 'default_session'. (default None)
-            - response_model (Type): The Pydantic model type for structured output. (default str)
-
-        Returns:
-        --------
-
-            - List[str]: A list containing the generated completion.
-        """
-
-        # Check if we need to generate context summary for caching
-        cache_config = CacheConfig()
-        user = session_user.get()
-        user_id = getattr(user, "id", None)
-        session_save = user_id and cache_config.caching
-
-        if session_save:
-            conversation_history = await get_conversation_history(session_id=self.session_id)
-
-            context_summary, completion = await asyncio.gather(
-                summarize_text(context),
-                generate_completion(
-                    query=query,
-                    context=context,
-                    user_prompt_path=self.user_prompt_path,
-                    system_prompt_path=self.system_prompt_path,
-                    conversation_history=conversation_history,
-                    response_model=self.response_model,
-                ),
-            )
-        else:
-            completion = await generate_completion(
-                query=query,
-                context=context,
-                user_prompt_path=self.user_prompt_path,
-                system_prompt_path=self.system_prompt_path,
-                response_model=self.response_model,
-            )
-
-        if session_save:
-            await save_conversation_history(
-                query=query,
-                context_summary=context_summary,
-                answer=completion,
-                session_id=self.session_id,
-            )
-
-        return [completion]

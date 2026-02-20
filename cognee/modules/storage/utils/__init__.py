@@ -48,7 +48,11 @@ def get_own_properties(data_point: DataPoint):
             field_name == "metadata"
             or isinstance(field_value, dict)
             or isinstance(field_value, DataPoint)
-            or (isinstance(field_value, list) and isinstance(field_value[0], DataPoint))
+            or (
+                isinstance(field_value, list)
+                and len(field_value) > 0
+                and isinstance(field_value[0], DataPoint)
+            )
         ):
             continue
 
