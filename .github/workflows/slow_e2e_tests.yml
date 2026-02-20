@@ -1,4 +1,4 @@
-name: Reusable Integration Tests
+name: Slow Integration Tests
 permissions:
   contents: read
 
@@ -26,12 +26,6 @@ on:
         required: true
       EMBEDDING_API_VERSION:
         required: true
-      OPENAI_API_KEY:
-        required: true
-      AWS_ACCESS_KEY_ID:
-        required: true
-      AWS_SECRET_ACCESS_KEY:
-        required: true
 
 jobs:
   test-edge-centered-payload:
@@ -44,7 +38,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
+          python-version: ${{ inputs.python-version }}
 
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
@@ -76,7 +70,7 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
+          python-version: ${{ inputs.python-version }}
 
       - name: Run deletion on custom graph
         env:
