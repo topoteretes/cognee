@@ -3,6 +3,7 @@
 from io import BytesIO
 import time
 import asyncio
+from sqlalchemy import text
 from datetime import datetime, timezone
 from typing import Dict
 from enum import Enum
@@ -51,9 +52,11 @@ class HealthChecker:
             config = get_relational_config()
             engine = get_relational_engine()
 
-            # Test connection by creating a session
-            session = engine.get_session()
-            if session:
+            try:
+                async with engine.get_async_session() as session:
+                    # This works for both SQLite and PostgreSQL
+                    await session.execute(text("SELECT 1"))
+            finally:
                 session.close()
 
             response_time = int((time.time() - start_time) * 1000)
