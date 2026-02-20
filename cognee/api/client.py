@@ -245,7 +245,7 @@ app.include_router(
 
 app.include_router(
     get_health_router(),
-    prefix="/api/v1/health",
+    prefix="/health",
     tags=["health"],
 )
 
