@@ -1,11 +1,17 @@
-import unittest
 import os
-import uuid
-from unittest.mock import patch, MagicMock
 import sys
+import time
+import unittest
+import uuid
+from unittest.mock import MagicMock, patch
 
-# Import the telemetry function to test
-from cognee.shared.utils import send_telemetry
+import requests
+
+from cognee.shared.utils import (
+    TELEMETRY_REQUEST_TIMEOUT,
+    _send_telemetry_request,
+    send_telemetry,
+)
 
 
 class TestTelemetry(unittest.TestCase):
@@ -82,6 +88,8 @@ class TestTelemetry(unittest.TestCase):
         else:
             del os.environ["ENV"]
 
+        time.sleep(0.3)  # allow background thread to call mock_post
+
     @patch("cognee.shared.utils.requests.post")
     def test_telemetry_disabled(self, mock_post):
         # Enable the TELEMETRY_DISABLED environment variable
@@ -116,6 +124,71 @@ class TestTelemetry(unittest.TestCase):
             os.environ["ENV"] = original_env
         else:
             del os.environ["ENV"]
+
+    @patch("cognee.shared.utils.requests.post")
+    def test_telemetry_request_called_with_timeout(self, mock_post):
+        """requests.post must be called with timeout to avoid blocking indefinitely."""
+        mock_post.return_value = MagicMock(status_code=200)
+        original_env = os.environ.get("ENV")
+        os.environ["ENV"] = "prod"
+        if "TELEMETRY_DISABLED" in os.environ:
+            del os.environ["TELEMETRY_DISABLED"]
+
+        send_telemetry("timeout_test", "user-1", {})
+        time.sleep(0.3)
+
+        mock_post.assert_called_once()
+        _, kwargs = mock_post.call_args
+        self.assertIn("timeout", kwargs)
+        self.assertEqual(kwargs["timeout"], TELEMETRY_REQUEST_TIMEOUT)
+
+        if original_env is not None:
+            os.environ["ENV"] = original_env
+        else:
+            del os.environ["ENV"]
+
+    @patch("cognee.shared.utils.requests.post")
+    def test_send_telemetry_request_handles_timeout(self, mock_post):
+        """Timeout from requests.post is caught and does not propagate."""
+        mock_post.side_effect = requests.exceptions.Timeout("Connection timed out")
+        payload = {"event_name": "test", "user_id": "u1", "properties": {}}
+
+        _send_telemetry_request(payload)  # should not raise
+
+        mock_post.assert_called_once()
+        _, kwargs = mock_post.call_args
+        self.assertIn("timeout", kwargs)
+
+    @patch("cognee.shared.utils.requests.post")
+    def test_send_telemetry_request_handles_connection_error(self, mock_post):
+        """ConnectionError from requests.post is caught and does not propagate."""
+        mock_post.side_effect = requests.exceptions.ConnectionError("Failed to connect")
+        payload = {"event_name": "test", "user_id": "u1", "properties": {}}
+
+        _send_telemetry_request(payload)  # should not raise
+
+        mock_post.assert_called_once()
+
+    @patch("cognee.shared.utils.requests.post")
+    def test_send_telemetry_request_handles_request_exception(self, mock_post):
+        """Generic RequestException is caught and does not propagate."""
+        mock_post.side_effect = requests.exceptions.RequestException("Generic error")
+        payload = {"event_name": "test", "user_id": "u1", "properties": {}}
+
+        _send_telemetry_request(payload)  # should not raise
+
+        mock_post.assert_called_once()
+
+    @patch("cognee.shared.utils.requests.post")
+    def test_send_telemetry_request_handles_non_200_response(self, mock_post):
+        """Non-200 response is handled without raising."""
+        mock_post.return_value = MagicMock(status_code=503)
+        payload = {"event_name": "test", "user_id": "u1", "properties": {}}
+
+        _send_telemetry_request(payload)  # should not raise
+
+        mock_post.assert_called_once()
+        self.assertEqual(mock_post.return_value.status_code, 503)
 
 
 if __name__ == "__main__":
