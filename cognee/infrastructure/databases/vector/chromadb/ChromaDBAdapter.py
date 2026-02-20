@@ -3,6 +3,7 @@ import asyncio
 from uuid import UUID
 from typing import List, Optional
 from chromadb import AsyncHttpClient, Settings
+from pydantic import BaseModel
 
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.storage.utils import get_own_properties
@@ -361,6 +362,7 @@ class ChromaDBAdapter(VectorDBInterface):
         with_vector: bool = False,
         normalized: bool = True,
         include_payload: bool = False,  # TODO: Add support for this parameter when set to False
+        node_name: Optional[List[str]] = None,  # TODO: Add support/functionality for this parameter
     ):
         """
         Search for items in a collection using either a text or a vector query.
