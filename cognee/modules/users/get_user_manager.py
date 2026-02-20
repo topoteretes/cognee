@@ -12,6 +12,12 @@ from contextlib import asynccontextmanager
 from .models import User
 from .get_user_db import get_user_db
 from .methods.get_user_by_email import get_user_by_email
+from cognee.infrastructure.databases.relational import get_relational_engine
+from .authentication.token_refresh import (
+    create_refresh_token,
+    store_refresh_token,
+    get_access_token_lifetime_seconds,
+)
 
 
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
@@ -52,9 +58,19 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         )
         if match:
             access_token = match.group(2)
+            # Issue refresh token and store it
+            refresh_token, expires_at = create_refresh_token(user.id)
+            db_engine = get_relational_engine()
+            async with db_engine.get_async_session() as session:
+                await store_refresh_token(session, user.id, refresh_token, expires_at)
             response.status_code = 200
             response.body = json.dumps(
-                {"access_token": access_token, "token_type": "bearer"}
+                {
+                    "access_token": access_token,
+                    "refresh_token": refresh_token,
+                    "token_type": "bearer",
+                    "expires_in": get_access_token_lifetime_seconds(),
+                }
             ).encode(encoding="utf-8")
             response.headers.append("Content-Type", "application/json")
 

@@ -8,6 +8,7 @@ from fastapi_users.authentication import (
 )
 
 from .default import default_transport
+from .token_refresh import get_access_token_lifetime_seconds
 
 
 @lru_cache
@@ -18,7 +19,7 @@ def get_client_auth_backend():
         from .default.default_jwt_strategy import DefaultJWTStrategy
 
         secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
-        lifetime_seconds = int(os.getenv("JWT_LIFETIME_SECONDS", "3600"))
+        lifetime_seconds = get_access_token_lifetime_seconds()
 
         return DefaultJWTStrategy(secret, lifetime_seconds=lifetime_seconds)
 

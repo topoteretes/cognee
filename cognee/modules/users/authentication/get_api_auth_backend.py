@@ -8,6 +8,7 @@ from fastapi_users.authentication import (
 )
 
 from .api_bearer import api_bearer_transport, APIJWTStrategy
+from .token_refresh import get_access_token_lifetime_seconds
 
 
 @lru_cache
@@ -16,7 +17,7 @@ def get_api_auth_backend():
 
     def get_jwt_strategy() -> JWTStrategy[models.UP, models.ID]:
         secret = os.getenv("FASTAPI_USERS_JWT_SECRET", "super_secret")
-        lifetime_seconds = int(os.getenv("JWT_LIFETIME_SECONDS", "3600"))
+        lifetime_seconds = get_access_token_lifetime_seconds()
 
         return APIJWTStrategy(secret, lifetime_seconds=lifetime_seconds)
 
