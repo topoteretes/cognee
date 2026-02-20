@@ -35,6 +35,12 @@ jobs:
     needs: [ pre-test ]
     secrets: inherit
 
+  e2e-tests:
+    name: End-to-End Tests
+    uses: ./.github/workflows/slow_e2e_tests.yml
+    needs: [ e2e-test ]
+    secrets: inherit
+
   distributed-tests:
     name: Distributed Cognee Test
     needs: [ basic-tests, e2e-tests, graph-db-tests ]
@@ -163,6 +169,7 @@ jobs:
       docker-compose-test,
       docker-ci-test,
       integration-tests
+      slow-e2e-tests
     ]
     uses: ./.github/workflows/test_ollama.yml
     secrets: inherit
@@ -187,6 +194,7 @@ jobs:
       docker-compose-test,
       docker-ci-test,
       integration-tests
+      slow-e2e-tests
     ]
     runs-on: ubuntu-latest
     if: always()
