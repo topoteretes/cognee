@@ -6,7 +6,6 @@ on:
       python-version:
         required: false
         type: string
-        default: '3.11.x'
     secrets:
       LLM_PROVIDER:
         required: true

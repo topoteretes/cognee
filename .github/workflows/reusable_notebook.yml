@@ -45,7 +45,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: ${{ inputs.python-version }}
           extra-dependencies: "notebook"
 
       - name: Execute Jupyter Notebook
