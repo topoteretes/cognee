@@ -482,8 +482,6 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_delete_custom_graph.py
 
-  
-
   test-deletion-on-default-graph_with_legacy_data_1_neo4j:
     name: Delete default graph with legacy data test 1 in Neo4j case
     runs-on: ubuntu-22.04
