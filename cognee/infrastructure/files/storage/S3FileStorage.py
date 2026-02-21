@@ -1,4 +1,5 @@
 import os
+import time
 from typing import BinaryIO, Union, TYPE_CHECKING
 from contextlib import asynccontextmanager
 
@@ -6,6 +7,14 @@ from cognee.infrastructure.files.storage.s3_config import get_s3_config
 from cognee.infrastructure.utils.run_async import run_async
 from cognee.infrastructure.files.storage.FileBufferedReader import FileBufferedReader
 from .storage import Storage
+
+from cognee.shared.logging_utils import get_logger
+
+
+logger = get_logger(__name__)
+
+# Threshold in seconds above which S3 operations are logged as slow
+S3_SLOW_OPERATION_THRESHOLD_SEC = 30.0
 
 if TYPE_CHECKING:
     import s3fs
@@ -108,6 +117,15 @@ class S3FileStorage(Storage):
             The content of the retrieved file as bytes.
         """
         full_file_path = os.path.join(self.storage_path.replace("s3://", ""), file_path)
+        start_time = time.perf_counter()
+
+        logger.debug(
+            "Opening S3 file",
+            extra={
+                "storage_path": self.storage_path,
+                "file_path": file_path,
+            },
+        )
 
         def get_file():
             return self.s3.open(full_file_path, mode=mode)
@@ -115,10 +133,41 @@ class S3FileStorage(Storage):
         file = await run_async(get_file)
         file = FileBufferedReader(file, name="s3://" + full_file_path)
 
+        open_elapsed = time.perf_counter() - start_time
+        duration_sec = round(open_elapsed, 3)
+        if open_elapsed > S3_SLOW_OPERATION_THRESHOLD_SEC:
+            logger.warning(
+                "S3 file open slow",
+                extra={
+                    "storage_path": self.storage_path,
+                    "file_path": file_path,
+                    "duration_seconds": duration_sec,
+                    "threshold_seconds": S3_SLOW_OPERATION_THRESHOLD_SEC,
+                },
+            )
+        else:
+            logger.info(
+                "Opened S3 file",
+                extra={
+                    "storage_path": self.storage_path,
+                    "file_path": file_path,
+                    "open_duration_seconds": duration_sec,
+                },
+            )
+
         try:
             yield file
         finally:
             file.close()
+            total_elapsed = time.perf_counter() - start_time
+            logger.debug(
+                "Closed S3 file",
+                extra={
+                    "storage_path": self.storage_path,
+                    "file_path": file_path,
+                    "total_duration_seconds": round(total_elapsed, 3),
+                },
+            )
 
     async def file_exists(self, file_path: str):
         """

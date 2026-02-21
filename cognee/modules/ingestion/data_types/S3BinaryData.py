@@ -1,9 +1,16 @@
 import os
+import time
 from typing import Optional
 from contextlib import asynccontextmanager
 from cognee.infrastructure.files import get_file_metadata, FileMetadata
-from cognee.infrastructure.utils import run_sync
+from cognee.infrastructure.utils.run_sync import run_sync
 from .IngestionData import IngestionData
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger(__name__)
+
+# Threshold in seconds above which S3 operations are logged as slow
+S3_SLOW_OPERATION_THRESHOLD_SEC = 30.0
 
 
 def create_s3_binary_data(s3_path: str, name: Optional[str] = None) -> "S3BinaryData":
@@ -19,28 +26,73 @@ class S3BinaryData(IngestionData):
         self.s3_path = s3_path
         self.name = name
 
-    def get_identifier(self):
+    def get_identifier(self) -> str:
         metadata = self.get_metadata()
         return metadata["content_hash"]
 
-    def get_metadata(self):
+    def get_metadata(self) -> Optional[FileMetadata]:
         run_sync(self.ensure_metadata())
         return self.metadata
 
-    async def ensure_metadata(self):
-        if self.metadata is None:
-            from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
+    async def ensure_metadata(self) -> None:
+        if self.metadata is not None:
+            return
 
-            file_dir_path = os.path.dirname(self.s3_path)
-            file_path = os.path.basename(self.s3_path)
+        from cognee.infrastructure.files.storage.S3FileStorage import S3FileStorage
 
+        file_dir_path = os.path.dirname(self.s3_path)
+        file_path = os.path.basename(self.s3_path)
+
+        logger.debug(
+            "Fetching S3 metadata",
+            extra={"s3_path": self.s3_path, "file_path": file_path},
+        )
+
+        from botocore.exceptions import ClientError, NoCredentialsError
+
+        start_time = time.perf_counter()
+        try:
             file_storage = S3FileStorage(file_dir_path)
-
             async with file_storage.open(file_path, "rb") as file:
                 self.metadata = await get_file_metadata(file)
+        except (OSError, ValueError, ClientError, NoCredentialsError) as error:
+            logger.error(
+                "S3 metadata fetch failed",
+                extra={
+                    "s3_path": self.s3_path,
+                    "file_path": file_path,
+                    "error": str(error),
+                },
+                exc_info=True,
+            )
+            raise
 
-            if self.metadata.get("name") is None:
-                self.metadata["name"] = self.name or file_path
+        elapsed = time.perf_counter() - start_time
+        duration_sec = round(elapsed, 3)
+        if elapsed > S3_SLOW_OPERATION_THRESHOLD_SEC:
+            logger.warning(
+                "S3 metadata fetch slow",
+                extra={
+                    "s3_path": self.s3_path,
+                    "file_path": file_path,
+                    "duration_seconds": duration_sec,
+                    "threshold_seconds": S3_SLOW_OPERATION_THRESHOLD_SEC,
+                },
+            )
+        else:
+            file_size = self.metadata.get("file_size") if self.metadata else None
+            logger.info(
+                "S3 metadata fetched",
+                extra={
+                    "s3_path": self.s3_path,
+                    "file_path": file_path,
+                    "file_size_bytes": file_size,
+                    "duration_seconds": duration_sec,
+                },
+            )
+
+        if self.metadata is not None and self.metadata.get("name") is None:
+            self.metadata["name"] = self.name or file_path
 
     @asynccontextmanager
     async def get_data(self):
@@ -48,8 +100,6 @@ class S3BinaryData(IngestionData):
 
         file_dir_path = os.path.dirname(self.s3_path)
         file_path = os.path.basename(self.s3_path)
-
         file_storage = S3FileStorage(file_dir_path)
-
         async with file_storage.open(file_path, "rb") as file:
             yield file
