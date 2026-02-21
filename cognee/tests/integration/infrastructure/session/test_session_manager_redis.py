@@ -173,9 +173,9 @@ async def test_generate_completion_with_session_saves_qa(session_manager):
         patch("cognee.infrastructure.session.session_manager.session_user") as mock_session_user,
         patch("cognee.infrastructure.session.session_manager.CacheConfig") as mock_config_cls,
         patch(
-            "cognee.infrastructure.session.session_manager.generate_completion_with_optional_summary",
+            "cognee.infrastructure.session.session_manager.generate_session_completion_with_optional_summary",
             new_callable=AsyncMock,
-            return_value=("Integration test answer", ""),
+            return_value=("Integration test answer", "", None),
         ),
     ):
         mock_session_user.get.return_value = mock_user

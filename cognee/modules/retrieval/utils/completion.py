@@ -1,5 +1,6 @@
 import asyncio
-from typing import Optional, Type, Any, List, Tuple
+from typing import TYPE_CHECKING, Any, List, Optional, Tuple, Type
+
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 
@@ -54,7 +55,7 @@ async def generate_completion_batch(
     )
 
 
-async def generate_completion_with_optional_summary(
+async def generate_session_completion_with_optional_summary(
     *,
     query: str,
     context: str,
@@ -64,12 +65,34 @@ async def generate_completion_with_optional_summary(
     system_prompt: Optional[str] = None,
     response_model: Type = str,
     summarize_context: bool = False,
-) -> Tuple[Any, str]:
+    run_feedback_detection: bool = False,
+) -> Tuple[Any, str, Optional["FeedbackDetectionResult"]]:
     """
-    Run LLM completion (and optionally summarization). Returns (completion, context_to_store).
+    Run LLM completion (and optionally summarization) for the session-manager flow.
+    Returns (completion, context_to_store, feedback_result).
     When summarize_context is True, context_to_store is the summarized context; otherwise "".
+    When run_feedback_detection is True, runs feedback detection in parallel; feedback_result
+    is the detection result, otherwise None.
     """
+    from cognee.infrastructure.session.feedback_detection import detect_feedback
+    from cognee.infrastructure.session.feedback_models import FeedbackDetectionResult
+
     if summarize_context:
+        if run_feedback_detection:
+            context_summary, completion, feedback_result = await asyncio.gather(
+                summarize_text(context),
+                generate_completion(
+                    query=query,
+                    context=context,
+                    user_prompt_path=user_prompt_path,
+                    system_prompt_path=system_prompt_path,
+                    system_prompt=system_prompt,
+                    conversation_history=conversation_history,
+                    response_model=response_model,
+                ),
+                detect_feedback(query),
+            )
+            return (completion, context_summary, feedback_result)
         context_summary, completion = await asyncio.gather(
             summarize_text(context),
             generate_completion(
@@ -82,7 +105,22 @@ async def generate_completion_with_optional_summary(
                 response_model=response_model,
             ),
         )
-        return (completion, context_summary)
+        return (completion, context_summary, None)
+
+    if run_feedback_detection:
+        completion, feedback_result = await asyncio.gather(
+            generate_completion(
+                query=query,
+                context=context,
+                user_prompt_path=user_prompt_path,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                conversation_history=conversation_history,
+                response_model=response_model,
+            ),
+            detect_feedback(query),
+        )
+        return (completion, "", feedback_result)
     completion = await generate_completion(
         query=query,
         context=context,
@@ -92,7 +130,7 @@ async def generate_completion_with_optional_summary(
         conversation_history=conversation_history,
         response_model=response_model,
     )
-    return (completion, "")
+    return (completion, "", None)
 
 
 async def batch_llm_completion(
