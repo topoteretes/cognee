@@ -10,10 +10,7 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("get_authenticated_user")
 
 # Check environment variable to determine authentication requirement
-REQUIRE_AUTHENTICATION = (
-    os.getenv("REQUIRE_AUTHENTICATION", "true").lower() == "true"
-    or os.environ.get("ENABLE_BACKEND_ACCESS_CONTROL", "true").lower() == "true"
-)
+REQUIRE_AUTHENTICATION = os.getenv("REQUIRE_AUTHENTICATION", "true").lower() == "true"
 
 fastapi_users = get_fastapi_users()
 
