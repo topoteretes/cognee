@@ -211,3 +211,8 @@ exclude = [
 
 [tool.ruff.lint]
 ignore = ["F401"]
+
+[dependency-groups]
+dev = [
+    "pytest-asyncio>=0.21.2",
+]

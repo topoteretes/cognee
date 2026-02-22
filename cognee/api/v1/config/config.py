@@ -12,9 +12,28 @@ from cognee.infrastructure.llm.config import (
 from cognee.infrastructure.databases.relational import get_relational_config, get_migration_config
 from cognee.tasks.translation.config import get_translation_config
 from cognee.api.v1.exceptions.exceptions import InvalidConfigAttributeError
-
+from typing import Callable, Optional
 
 class config:
+    @staticmethod
+    def _update_config(config_obj, config_dict: dict, *, on_invalid: Optional[Callable[[str], Exception]] = None):
+        """
+        Generic config update with validation.
+
+        - Updates existing attributes on config_obj using values from config_dict
+        - If an invalid key is provided:
+            - raises InvalidConfigAttributeError by default
+            - or raises the exception returned by on_invalid(key) if provided
+        """
+        for key, value in config_dict.items():
+            if hasattr(config_obj, key):
+                object.__setattr__(config_obj, key, value)
+            else:
+                if on_invalid is None:
+                    raise InvalidConfigAttributeError(attribute=key)
+                raise on_invalid(key)    
+        return config_obj        
+
     @staticmethod
     def system_root_directory(system_root_directory: str):
         base_config = get_base_config()
@@ -88,12 +107,7 @@ class config:
         """
         Updates the llm config with values from config_dict.
         """
-        llm_config = get_llm_config()
-        for key, value in config_dict.items():
-            if hasattr(llm_config, key):
-                object.__setattr__(llm_config, key, value)
-            else:
-                raise InvalidConfigAttributeError(attribute=key)
+        config._update_config(get_llm_config(), config_dict)
 
     @staticmethod
     def set_chunk_strategy(chunk_strategy: object):
@@ -125,48 +139,32 @@ class config:
         """
         Updates the relational db config with values from config_dict.
         """
-        relational_db_config = get_relational_config()
-        for key, value in config_dict.items():
-            if hasattr(relational_db_config, key):
-                object.__setattr__(relational_db_config, key, value)
-            else:
-                raise InvalidConfigAttributeError(attribute=key)
+        config._update_config(get_relational_config(), config_dict)
 
     @staticmethod
     def set_migration_db_config(config_dict: dict):
         """
         Updates the relational db config with values from config_dict.
         """
-        migration_db_config = get_migration_config()
-        for key, value in config_dict.items():
-            if hasattr(migration_db_config, key):
-                object.__setattr__(migration_db_config, key, value)
-            else:
-                raise InvalidConfigAttributeError(attribute=key)
+        config._update_config(get_migration_config(), config_dict)
 
     @staticmethod
     def set_graph_db_config(config_dict: dict) -> None:
         """
         Updates the graph db config with values from config_dict.
         """
-        graph_db_config = get_graph_config()
-        for key, value in config_dict.items():
-            if hasattr(graph_db_config, key):
-                object.__setattr__(graph_db_config, key, value)
-            else:
-                raise AttributeError(f"'{key}' is not a valid attribute of the config.")
+        config._update_config(
+            get_graph_config(),
+            config_dict,
+            on_invalid=lambda key: AttributeError(f"'{key}' is not a valid attribute of the config."),
+        )
 
     @staticmethod
     def set_vector_db_config(config_dict: dict):
         """
         Updates the vector db config with values from config_dict.
         """
-        vector_db_config = get_vectordb_config()
-        for key, value in config_dict.items():
-            if hasattr(vector_db_config, key):
-                object.__setattr__(vector_db_config, key, value)
-            else:
-                InvalidConfigAttributeError(attribute=key)
+        config._update_config(get_vectordb_config(), config_dict)
 
     @staticmethod
     def set_vector_db_key(db_key: str):
@@ -197,12 +195,7 @@ class config:
         """
         Updates the translation config with values from config_dict.
         """
-        translation_config = get_translation_config()
-        for key, value in config_dict.items():
-            if hasattr(translation_config, key):
-                object.__setattr__(translation_config, key, value)
-            else:
-                raise InvalidConfigAttributeError(attribute=key)
+        config._update_config(get_translation_config(), config_dict)
 
     def set(key: str, value):
         """
