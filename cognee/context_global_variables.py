@@ -87,7 +87,8 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     """
     If backend access control is enabled this function will ensure all datasets have their own databases,
     access to which will be enforced by given permissions.
-    Database name will be determined by dataset_id and LanceDB and KuzuDB use will be enforced.
+    Database name will be determined by dataset and the appropriate vector and
+    graph database handlers will be enforced.
 
     Note: This is only currently supported by the following databases:
           Relational: SQLite, Postgres
