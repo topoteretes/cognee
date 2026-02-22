@@ -1,0 +1,41 @@
+name: install_cognee
+description: "Installs Cognee from local source or PyPI depending on specified version"
+
+inputs:
+  python-version:
+    description: "Which Python version to use"
+    required: false
+    default: "3.11.x"
+  cognee_version:
+    description: "Pypi-compatible version of cognee to use. For example, 0.5.2.dev0. `local` (default) - Installing Cognee from local source"
+    required: false
+    default: "local"
+
+runs:
+  using: "composite"
+  steps:
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        enable-cache: true
+
+    - name: (Re)Install Cognee
+      shell: bash
+      working-directory: cognee-mcp
+      run: |
+        uv pip uninstall cognee
+        if [ "${{ inputs.cognee_version }}" = "local" ]; then
+          echo "Installing Cognee from local source ..."
+          uv pip install --force-reinstall -e ../
+        else
+          echo "Installing Cognee version ${{ inputs.cognee_version }} from PyPI..."
+          uv pip install --force-reinstall "cognee==${{ inputs.cognee_version }}"
+        fi
+        echo "Installed Cognee version:"
+        uv pip show cognee | grep Version
