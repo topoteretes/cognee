@@ -102,7 +102,8 @@ def _process_datapoint_field(
     excluded_properties: set,
 ) -> None:
     """Process a field containing DataPoints, always working with lists."""
-    excluded_properties.add(field_name)
+    if field_name != "belongs_to_set":
+        excluded_properties.add(field_name)
 
     for edge_metadata, datapoints in edge_datapoint_pairs:
         relationship_key = _get_relationship_key(field_name, edge_metadata)
@@ -206,6 +207,13 @@ async def get_graph_from_model(
                 properties_to_visit,
                 excluded_properties,
             )
+
+            # We want to enable nodeset filtering on the vector database side
+            if field_name == "belongs_to_set":
+                node_set_names = []
+                for node_set in field_value:
+                    node_set_names.append(node_set.name)
+                data_point_properties[field_name] = node_set_names
 
     # Create node for current DataPoint if needed
     if include_root and data_point_id not in added_nodes:

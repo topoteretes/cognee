@@ -20,6 +20,7 @@ from cognee.modules.graph.utils import (
 )
 from cognee.shared.data_models import KnowledgeGraph
 from cognee.infrastructure.llm.extraction import extract_content_graph
+from cognee.infrastructure.engine import DataPoint
 from cognee.tasks.graph.exceptions import (
     InvalidGraphModelError,
     InvalidDataChunksError,
@@ -29,12 +30,40 @@ from cognee.tasks.graph.exceptions import (
 from cognee.modules.cognify.config import get_cognify_config
 
 
+def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
+    """Recursively stamp all reachable DataPoints with provenance info."""
+    if visited is None:
+        visited = set()
+
+    if isinstance(data, DataPoint):
+        obj_id = id(data)
+        if obj_id in visited:
+            return
+        visited.add(obj_id)
+
+        if data.source_pipeline is None:
+            data.source_pipeline = pipeline_name
+        if data.source_task is None:
+            data.source_task = task_name
+
+        for field_name in data.model_fields:
+            field_value = getattr(data, field_name, None)
+            if field_value is not None:
+                _stamp_provenance_deep(field_value, pipeline_name, task_name, visited)
+
+    elif isinstance(data, (list, tuple)):
+        for item in data:
+            _stamp_provenance_deep(item, pipeline_name, task_name, visited)
+
+
 async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
     graph_model: Type[BaseModel],
     ontology_resolver: BaseOntologyResolver,
     context: Dict,
+    pipeline_name: str = None,
+    task_name: str = None,
 ) -> List[DocumentChunk]:
     """Integrate chunk graphs with ontology validation and store in databases.
 
@@ -91,6 +120,10 @@ async def integrate_chunk_graphs(
     embed_triplets = cognify_config.triplet_embedding
 
     if len(graph_nodes) > 0:
+        if pipeline_name or task_name:
+            for node in graph_nodes:
+                _stamp_provenance_deep(node, pipeline_name, task_name)
+
         await add_data_points(
             data_points=graph_nodes, custom_edges=context, embed_triplets=embed_triplets
         )
@@ -169,6 +202,15 @@ async def extract_graph_from_data(
 
     ontology_resolver = config["ontology_config"]["ontology_resolver"]
 
+    pipeline_name = context.get("pipeline_name") if isinstance(context, dict) else None
+    task_name = "extract_graph_from_data"
+
     return await integrate_chunk_graphs(
-        data_chunks, chunk_graphs, graph_model, ontology_resolver, context
+        data_chunks,
+        chunk_graphs,
+        graph_model,
+        ontology_resolver,
+        context,
+        pipeline_name=pipeline_name,
+        task_name=task_name,
     )

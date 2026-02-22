@@ -19,7 +19,7 @@ jobs:
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu/lance/sqlite') }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -110,7 +110,7 @@ jobs:
             - 5432:5432
       steps:
         - name: Check out
-          uses: actions/checkout@v4
+          uses: actions/checkout@v6
           with:
             fetch-depth: 0
 
@@ -178,7 +178,7 @@ jobs:
           --health-retries=5
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 

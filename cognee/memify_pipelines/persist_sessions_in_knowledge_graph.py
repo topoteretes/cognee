@@ -22,6 +22,19 @@ async def persist_sessions_in_knowledge_graph_pipeline(
     dataset: str = "main_dataset",
     run_in_background: bool = False,
 ):
+    """
+    Persist user sessions into the knowledge graph via memify pipeline.
+
+    Reads session data via SessionManager (caching must be enabled). Each session
+    is cognified and added to the graph with node_set "user_sessions_from_cache".
+
+    Args:
+        user: Authenticated user with write access to the dataset.
+        session_ids: Optional list of session IDs to persist. If None, no sessions
+            are extracted (caller must specify which sessions to persist).
+        dataset: Dataset name for write access. Defaults to "main_dataset".
+        run_in_background: If True, runs memify asynchronously and returns immediately.
+    """
     await set_session_user_context_variable(user)
     dataset_to_write = await get_authorized_existing_datasets(
         user=user, datasets=[dataset], permission_type="write"

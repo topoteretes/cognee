@@ -33,6 +33,12 @@ dev = [
     "debugpy>=1.8.12,<2.0.0",
 ]
 
+postgres-binary = [
+    "psycopg2-binary>=2.9.10,<3.0.0",
+    "pgvector>=0.3.5,<0.4",
+    "asyncpg>=0.30.0,<1.0.0",
+]
+
 [tool.hatch.metadata]
 allow-direct-references = true
 

@@ -7,7 +7,7 @@ on:
       python-version:
         required: false
         type: string
-        default: '3.11.x'
+        default: '3.13.x'
     secrets:
       LLM_MODEL:
         required: true
@@ -34,14 +34,14 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
+          python-version: '3.13.x'
           extra-dependencies: "distributed postgres"
 
       - name: Run Distributed Cognee (Modal)

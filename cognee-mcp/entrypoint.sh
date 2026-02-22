@@ -1,7 +1,6 @@
 #!/bin/bash
 
 set -e  # Exit on error
-echo "Debug mode: $DEBUG"
 echo "Environment: $ENVIRONMENT"
 
 # Install optional dependencies if EXTRAS is set
@@ -40,55 +39,32 @@ else
     echo "No optional dependencies specified"
 fi
 
+ARGS=("$@") #forward any args passed to the container at runtime
+
 # Set default transport mode if not specified
 TRANSPORT_MODE=${TRANSPORT_MODE:-"stdio"}
 echo "Transport mode: $TRANSPORT_MODE"
 
 # Set default ports if not specified
-DEBUG_PORT=${DEBUG_PORT:-5678}
-HTTP_PORT=${HTTP_PORT:-8000}
-echo "Debug port: $DEBUG_PORT"
-echo "HTTP port: $HTTP_PORT"
 
-# Check if API mode is enabled
-if [ -n "$API_URL" ]; then
-    echo "API mode enabled: $API_URL"
-    echo "Skipping database migrations (API server handles its own database)"
-else
-    echo "Direct mode: Using local cognee instance"
-    echo "Running database migrations..."
-
-    set +e # Disable exit on error to handle specific migration errors
-    MIGRATION_OUTPUT=$(cd cognee && alembic upgrade head)
-    MIGRATION_EXIT_CODE=$?
-    set -e
-
-    if [[ $MIGRATION_EXIT_CODE -ne 0 ]]; then
-
-        echo "Migration failed with unexpected error. Trying to run Cognee without migrations."
-        echo "Initializing database tables..."
-        python /app/src/run_cognee_database_setup.py
-        INIT_EXIT_CODE=$?
-
-        if [[ $INIT_EXIT_CODE -ne 0 ]]; then
-            echo "Database initialization failed!"
-            exit 1
-        fi
-    fi
-
-    echo "Database migrations done."
+if [ "$TRANSPORT_MODE" != "stdio" ]; then
+    HTTP_PORT=${HTTP_PORT:-8000}
+    echo "HTTP port: $HTTP_PORT"
+    ARGS+=("--host" "0.0.0.0" "--port" "$HTTP_PORT")
 fi
 
 echo "Starting Cognee MCP Server with transport mode: $TRANSPORT_MODE"
+ARGS+=("--transport" "$TRANSPORT_MODE")
 
 # Add startup delay to ensure DB is ready
 sleep 2
 
 # Build API arguments if API_URL is set
-API_ARGS=""
 if [ -n "$API_URL" ]; then
+    echo "API mode enabled: $API_URL"
+
     # Handle localhost in API_URL - convert to host-accessible address
-    if echo "$API_URL" | grep -q "localhost" || echo "$API_URL" | grep -q "127.0.0.1"; then
+    if [[ "$API_URL" =~ "localhost" || "$API_URL" =~ "127.0.0.1" ]]; then
         echo "⚠️  Warning: API_URL contains localhost/127.0.0.1"
         echo "   Original: $API_URL"
 
@@ -104,38 +80,22 @@ if [ -n "$API_URL" ]; then
         API_URL="$FIXED_API_URL"
     fi
 
-    API_ARGS="--api-url $API_URL"
+    ARGS+=("--api-url" "$API_URL")
     if [ -n "$API_TOKEN" ]; then
-        API_ARGS="$API_ARGS --api-token $API_TOKEN"
-    fi
-fi
-
-# Modified startup with transport mode selection and error handling
-if [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; then
-    if [ "$DEBUG" = "true" ]; then
-        echo "Waiting for the debugger to attach..."
-        if [ "$TRANSPORT_MODE" = "sse" ]; then
-            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee-mcp --transport sse --host 0.0.0.0 --port $HTTP_PORT --no-migration $API_ARGS
-        elif [ "$TRANSPORT_MODE" = "http" ]; then
-            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee-mcp --transport http --host 0.0.0.0 --port $HTTP_PORT --no-migration $API_ARGS
-        else
-            exec python -m debugpy --wait-for-client --listen 0.0.0.0:$DEBUG_PORT -m cognee-mcp --transport stdio --no-migration $API_ARGS
-        fi
-    else
-        if [ "$TRANSPORT_MODE" = "sse" ]; then
-            exec cognee-mcp --transport sse --host 0.0.0.0 --port $HTTP_PORT --no-migration $API_ARGS
-        elif [ "$TRANSPORT_MODE" = "http" ]; then
-            exec cognee-mcp --transport http --host 0.0.0.0 --port $HTTP_PORT --no-migration $API_ARGS
-        else
-            exec cognee-mcp --transport stdio --no-migration $API_ARGS
-        fi
+        ARGS+=("--api-token" "$API_TOKEN")
     fi
 else
-    if [ "$TRANSPORT_MODE" = "sse" ]; then
-        exec cognee-mcp --transport sse --host 0.0.0.0 --port $HTTP_PORT --no-migration $API_ARGS
-    elif [ "$TRANSPORT_MODE" = "http" ]; then
-        exec cognee-mcp --transport http --host 0.0.0.0 --port $HTTP_PORT --no-migration $API_ARGS
-    else
-        exec cognee-mcp --transport stdio --no-migration $API_ARGS
-    fi
+    echo "Direct mode: Using local cognee instance"
+fi
+
+echo "calling cognee-mcp" "${ARGS[@]}"
+
+if [ "$DEBUG" = "true" ] && { [ "$ENVIRONMENT" = "dev" ] || [ "$ENVIRONMENT" = "local" ]; }; then
+    DEBUG_PORT=${DEBUG_PORT:-5678}
+    echo "Running in debug mode"
+    echo "Debug port: $DEBUG_PORT"
+    echo "Waiting for the debugger to attach..."
+    exec python -m debugpy --wait-for-client --listen 0.0.0.0:"$DEBUG_PORT" -m cognee-mcp "${ARGS[@]}"
+else
+    exec cognee-mcp "${ARGS[@]}"
 fi

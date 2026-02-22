@@ -20,7 +20,7 @@ class Rule(DataPoint):
     """A single developer rule extracted from text."""
 
     text: str = Field(..., description="The coding rule associated with the conversation")
-    belongs_to_set: Optional[NodeSet] = None
+    belongs_to_set: Optional[List[NodeSet] | List[str]] = None
     metadata: dict = {"index_fields": ["rule"]}
 
 
@@ -118,7 +118,7 @@ async def add_rule_associations(
         id=uuid5(NAMESPACE_OID, name=rules_nodeset_name), name=rules_nodeset_name
     )
     for rule in rule_list.rules:
-        rule.belongs_to_set = rules_nodeset
+        rule.belongs_to_set = [rules_nodeset]
 
     edges_to_save = await get_origin_edges(data=data, rules=rule_list.rules)
 

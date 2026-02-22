@@ -1,3 +1,4 @@
+import os
 import asyncio
 from cognee.context_global_variables import (
     graph_db_config as context_graph_db_config,
@@ -10,6 +11,9 @@ from cognee.infrastructure.databases.relational import (
 from cognee.infrastructure.databases.vector.pgvector import (
     create_db_and_tables as create_pgvector_db_and_tables,
 )
+from cognee.shared.logging_utils import get_logger
+
+logger = get_logger()
 
 _first_run_done = False
 _first_run_lock = asyncio.Lock()
@@ -31,11 +35,21 @@ async def setup_and_check_environment(
     global _first_run_done
     async with _first_run_lock:
         if not _first_run_done:
-            from cognee.infrastructure.llm.utils import (
-                test_llm_connection,
-                test_embedding_connection,
+            skip_test = os.getenv("COGNEE_SKIP_CONNECTION_TEST", "false").lower() in (
+                "true",
+                "1",
+                "yes",
             )
+            if skip_test:
+                logger.info(
+                    "Skipping LLM/embedding connection tests (COGNEE_SKIP_CONNECTION_TEST is set)."
+                )
+            else:
+                from cognee.infrastructure.llm.utils import (
+                    test_llm_connection,
+                    test_embedding_connection,
+                )
 
-            await test_llm_connection()
-            await test_embedding_connection()
+                await test_llm_connection()
+                await test_embedding_connection()
             _first_run_done = True

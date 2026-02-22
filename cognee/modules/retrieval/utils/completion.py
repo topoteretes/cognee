@@ -1,4 +1,5 @@
-from typing import Optional, Type, Any
+import asyncio
+from typing import Optional, Type, Any, List, Tuple
 from cognee.infrastructure.llm.LLMGateway import LLMGateway
 from cognee.infrastructure.llm.prompts import render_prompt, read_query_prompt
 
@@ -18,13 +19,97 @@ async def generate_completion(
     system_prompt = system_prompt if system_prompt else read_query_prompt(system_prompt_path)
 
     if conversation_history:
-        #:TODO: I would separate the history and put it into the system prompt but we have to test what works best with longer convos
         system_prompt = conversation_history + "\nTASK:" + system_prompt
 
     return await LLMGateway.acreate_structured_output(
         text_input=user_prompt,
         system_prompt=system_prompt,
         response_model=response_model,
+    )
+
+
+async def generate_completion_batch(
+    query_batch: List[str],
+    context: List[str],
+    user_prompt_path: str,
+    system_prompt_path: str,
+    system_prompt: Optional[str] = None,
+    conversation_history: Optional[str] = "",
+    response_model: Type = str,
+) -> List[Any]:
+    """Generates completions for a batch of queries in parallel."""
+    return await asyncio.gather(
+        *[
+            generate_completion(
+                query=q,
+                context=c,
+                user_prompt_path=user_prompt_path,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                conversation_history=conversation_history,
+                response_model=response_model,
+            )
+            for q, c in zip(query_batch, context)
+        ]
+    )
+
+
+async def generate_completion_with_optional_summary(
+    *,
+    query: str,
+    context: str,
+    conversation_history: str,
+    user_prompt_path: str,
+    system_prompt_path: str,
+    system_prompt: Optional[str] = None,
+    response_model: Type = str,
+    summarize_context: bool = False,
+) -> Tuple[Any, str]:
+    """
+    Run LLM completion (and optionally summarization). Returns (completion, context_to_store).
+    When summarize_context is True, context_to_store is the summarized context; otherwise "".
+    """
+    if summarize_context:
+        context_summary, completion = await asyncio.gather(
+            summarize_text(context),
+            generate_completion(
+                query=query,
+                context=context,
+                user_prompt_path=user_prompt_path,
+                system_prompt_path=system_prompt_path,
+                system_prompt=system_prompt,
+                conversation_history=conversation_history,
+                response_model=response_model,
+            ),
+        )
+        return (completion, context_summary)
+    completion = await generate_completion(
+        query=query,
+        context=context,
+        user_prompt_path=user_prompt_path,
+        system_prompt_path=system_prompt_path,
+        system_prompt=system_prompt,
+        conversation_history=conversation_history,
+        response_model=response_model,
+    )
+    return (completion, "")
+
+
+async def batch_llm_completion(
+    user_prompts: List[str],
+    system_prompt: str,
+    response_model: Type = str,
+) -> List[Any]:
+    """Run a batch of pre-built prompts through the LLM in parallel."""
+    return list(
+        await asyncio.gather(
+            *[
+                LLMGateway.acreate_structured_output(
+                    text_input=prompt, system_prompt=system_prompt, response_model=response_model
+                )
+                for prompt in user_prompts
+            ]
+        )
     )
 
 

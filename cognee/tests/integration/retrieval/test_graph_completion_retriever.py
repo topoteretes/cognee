@@ -10,6 +10,66 @@ from cognee.tasks.storage import add_data_points
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
 
 
+def _detailed_context_check(context: str):
+    # Ensure the top-level sections are present
+    assert "Nodes:" in context, "Missing 'Nodes:' section in context"
+    assert "Connections:" in context, "Missing 'Connections:' section in context"
+
+    # --- Nodes headers ---
+    assert "Node: Steve Rodger" in context, "Missing node header for Steve Rodger"
+    assert "Node: Figma" in context, "Missing node header for Figma"
+    assert "Node: Ike Loma" in context, "Missing node header for Ike Loma"
+    assert "Node: Jason Statham" in context, "Missing node header for Jason Statham"
+    assert "Node: Mike Broski" in context, "Missing node header for Mike Broski"
+    assert "Node: Canva" in context, "Missing node header for Canva"
+    assert "Node: Christina Mayer" in context, "Missing node header for Christina Mayer"
+
+    # --- Node contents ---
+    assert (
+        "__node_content_start__\nThis is description about Steve Rodger\n__node_content_end__"
+        in context
+    ), "Description block for Steve Rodger altered"
+    assert "__node_content_start__\nFigma is a company\n__node_content_end__" in context, (
+        "Description block for Figma altered"
+    )
+    assert (
+        "__node_content_start__\nThis is description about Ike Loma\n__node_content_end__"
+        in context
+    ), "Description block for Ike Loma altered"
+    assert (
+        "__node_content_start__\nThis is description about Jason Statham\n__node_content_end__"
+        in context
+    ), "Description block for Jason Statham altered"
+    assert (
+        "__node_content_start__\nThis is description about Mike Broski\n__node_content_end__"
+        in context
+    ), "Description block for Mike Broski altered"
+    assert "__node_content_start__\nCanvas is a company\n__node_content_end__" in context, (
+        "Description block for Canva altered"
+    )
+    assert (
+        "__node_content_start__\nThis is description about Christina Mayer\n__node_content_end__"
+        in context
+    ), "Description block for Christina Mayer altered"
+
+    # --- Connections ---
+    assert "Steve Rodger --[works_for]--> Figma" in context, (
+        "Connection Steve Rodger→Figma missing or changed"
+    )
+    assert "Ike Loma --[works_for]--> Figma" in context, (
+        "Connection Ike Loma→Figma missing or changed"
+    )
+    assert "Jason Statham --[works_for]--> Figma" in context, (
+        "Connection Jason Statham→Figma missing or changed"
+    )
+    assert "Mike Broski --[works_for]--> Canva" in context, (
+        "Connection Mike Broski→Canva missing or changed"
+    )
+    assert "Christina Mayer --[works_for]--> Canva" in context, (
+        "Connection Christina Mayer→Canva missing or changed"
+    )
+
+
 @pytest_asyncio.fixture
 async def setup_test_environment_simple():
     """Set up a clean test environment with simple graph data."""
@@ -179,63 +239,7 @@ async def test_graph_completion_context_simple(setup_test_environment_simple):
 
     context = await retriever.get_context_from_objects(query=query, retrieved_objects=triplets)
 
-    # Ensure the top-level sections are present
-    assert "Nodes:" in context, "Missing 'Nodes:' section in context"
-    assert "Connections:" in context, "Missing 'Connections:' section in context"
-
-    # --- Nodes headers ---
-    assert "Node: Steve Rodger" in context, "Missing node header for Steve Rodger"
-    assert "Node: Figma" in context, "Missing node header for Figma"
-    assert "Node: Ike Loma" in context, "Missing node header for Ike Loma"
-    assert "Node: Jason Statham" in context, "Missing node header for Jason Statham"
-    assert "Node: Mike Broski" in context, "Missing node header for Mike Broski"
-    assert "Node: Canva" in context, "Missing node header for Canva"
-    assert "Node: Christina Mayer" in context, "Missing node header for Christina Mayer"
-
-    # --- Node contents ---
-    assert (
-        "__node_content_start__\nThis is description about Steve Rodger\n__node_content_end__"
-        in context
-    ), "Description block for Steve Rodger altered"
-    assert "__node_content_start__\nFigma is a company\n__node_content_end__" in context, (
-        "Description block for Figma altered"
-    )
-    assert (
-        "__node_content_start__\nThis is description about Ike Loma\n__node_content_end__"
-        in context
-    ), "Description block for Ike Loma altered"
-    assert (
-        "__node_content_start__\nThis is description about Jason Statham\n__node_content_end__"
-        in context
-    ), "Description block for Jason Statham altered"
-    assert (
-        "__node_content_start__\nThis is description about Mike Broski\n__node_content_end__"
-        in context
-    ), "Description block for Mike Broski altered"
-    assert "__node_content_start__\nCanvas is a company\n__node_content_end__" in context, (
-        "Description block for Canva altered"
-    )
-    assert (
-        "__node_content_start__\nThis is description about Christina Mayer\n__node_content_end__"
-        in context
-    ), "Description block for Christina Mayer altered"
-
-    # --- Connections ---
-    assert "Steve Rodger --[works_for]--> Figma" in context, (
-        "Connection Steve Rodger→Figma missing or changed"
-    )
-    assert "Ike Loma --[works_for]--> Figma" in context, (
-        "Connection Ike Loma→Figma missing or changed"
-    )
-    assert "Jason Statham --[works_for]--> Figma" in context, (
-        "Connection Jason Statham→Figma missing or changed"
-    )
-    assert "Mike Broski --[works_for]--> Canva" in context, (
-        "Connection Mike Broski→Canva missing or changed"
-    )
-    assert "Christina Mayer --[works_for]--> Canva" in context, (
-        "Connection Christina Mayer→Canva missing or changed"
-    )
+    _detailed_context_check(context)
 
 
 @pytest.mark.asyncio
@@ -274,3 +278,99 @@ async def test_graph_completion_get_triplets_empty(setup_test_environment_empty)
 
     assert isinstance(triplets, list), "Triplets should be a list"
     assert len(triplets) == 0, "Should return empty list on empty graph"
+
+
+@pytest.mark.asyncio
+async def test_graph_completion_batch_queries_context_simple(setup_test_environment_simple):
+    """Integration test: verify GraphCompletionRetriever can retrieve context with multiple queries (simple)."""
+    retriever = GraphCompletionRetriever()
+    query_batch = ["Who works at Canva?", "Who works at Figma?"]
+
+    triplets = await retriever.get_retrieved_objects(query_batch=query_batch)
+
+    context = await retriever.get_context_from_objects(
+        query_batch=query_batch, retrieved_objects=triplets
+    )
+
+    assert len(context) == 2, "Should return results for each query"
+
+    for batched_context in context:
+        _detailed_context_check(batched_context)
+
+
+@pytest.mark.asyncio
+async def test_graph_completion_batch_queries_context_complex(setup_test_environment_complex):
+    """Integration test: verify GraphCompletionRetriever can retrieve context for multiple queries (complex)."""
+    retriever = GraphCompletionRetriever(top_k=20)
+    query_batch = ["Who works at Canva?", "Who works at Figma?"]
+
+    triplets = await retriever.get_retrieved_objects(query_batch=query_batch)
+
+    context = await retriever.get_context_from_objects(
+        query_batch=query_batch, retrieved_objects=triplets
+    )
+
+    assert len(context) == 2, "Should return results for each query"
+
+    assert "Mike Broski --[works_for]--> Canva" in context[0], "Failed to get Mike Broski"
+    assert "Christina Mayer --[works_for]--> Canva" in context[0], "Failed to get Christina Mayer"
+
+    assert "Mike Rodger --[works_for]--> Figma" in context[1], "Failed to get Mike Rodger"
+    assert "Ike Loma --[works_for]--> Figma" in context[1], "Failed to get Ike Loma"
+    assert "Jason Statham --[works_for]--> Figma" in context[1], "Failed to get Jason Statham"
+
+
+@pytest.mark.asyncio
+async def test_get_graph_completion_batch_queries_context_on_empty_graph(
+    setup_test_environment_empty,
+):
+    """Integration test: verify GraphCompletionRetriever handles empty graph correctly for multiple queries."""
+    retriever = GraphCompletionRetriever()
+    query_batch = ["Who works at Canva?", "Who works at Figma?"]
+
+    triplets = await retriever.get_retrieved_objects(query_batch=query_batch)
+
+    context = await retriever.get_context_from_objects(
+        query_batch=query_batch, retrieved_objects=triplets
+    )
+    assert len(context) == 2, "Should return results for each query"
+    assert context[0] == "" and context[1] == "", "Context should be empty on an empty graph"
+
+
+@pytest.mark.asyncio
+async def test_graph_completion_batch_queries_get_triplets_empty(setup_test_environment_empty):
+    """Integration test: verify GraphCompletionRetriever get_triplets handles empty graph."""
+    retriever = GraphCompletionRetriever()
+    query_batch = ["Who works at Canva?", "Who works at Figma?"]
+
+    triplets = await retriever.get_triplets(query_batch=query_batch)
+
+    assert isinstance(triplets, list), "Triplets should be a list"
+    assert len(triplets) == 2, "Should return results for each query"
+    assert len(triplets[0]) == 0 and len(triplets[1]) == 0, (
+        "Should return empty list on empty graph for each query"
+    )
+
+
+@pytest.mark.asyncio
+async def test_graph_completion_context_complex_duplicate_queries(setup_test_environment_complex):
+    """Integration test: verify GraphCompletionRetriever can retrieve context for duplicate queries (complex)."""
+    retriever = GraphCompletionRetriever(top_k=20)
+    query_batch = ["Who works at Figma?", "Who works at Figma?"]
+
+    triplets = await retriever.get_retrieved_objects(query_batch=query_batch)
+
+    context = await retriever.get_context_from_objects(
+        query_batch=query_batch, retrieved_objects=triplets
+    )
+
+    assert len(context) == 2, "Should return results for each query"
+    assert context[0] == context[1], "Contexts should be the same for duplicate queries"
+
+    assert "Mike Rodger --[works_for]--> Figma" in context[0], "Failed to get Mike Rodger"
+    assert "Ike Loma --[works_for]--> Figma" in context[0], "Failed to get Ike Loma"
+    assert "Jason Statham --[works_for]--> Figma" in context[0], "Failed to get Jason Statham"
+
+    assert "Mike Rodger --[works_for]--> Figma" in context[1], "Failed to get Mike Rodger"
+    assert "Ike Loma --[works_for]--> Figma" in context[1], "Failed to get Ike Loma"
+    assert "Jason Statham --[works_for]--> Figma" in context[1], "Failed to get Jason Statham"

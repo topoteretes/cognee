@@ -52,7 +52,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -115,7 +115,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
@@ -180,7 +180,7 @@ jobs:
           - 5432:5432
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup

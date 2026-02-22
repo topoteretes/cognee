@@ -55,7 +55,7 @@ async def run_pipeline(
             tasks=tasks,
             data=data,
             pipeline_name=pipeline_name,
-            context={"dataset": dataset},
+            context={"dataset": dataset, "pipeline_name": pipeline_name},
             use_pipeline_cache=use_pipeline_cache,
             incremental_loading=incremental_loading,
             data_per_batch=data_per_batch,
