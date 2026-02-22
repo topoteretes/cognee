@@ -5,6 +5,15 @@ from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionR
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 
 
+def _make_unified_mock(graph_engine=None):
+    if graph_engine is None:
+        graph_engine = AsyncMock()
+    unified = AsyncMock()
+    unified.graph = graph_engine
+    unified.vector = MagicMock()
+    return unified
+
+
 @pytest.fixture
 def mock_edge():
     """Create a mock edge."""
@@ -73,14 +82,15 @@ async def test_get_context_success(mock_edge):
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+        ) as mock_get_unified,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
             return_value=[mock_edge],
         ),
     ):
+        mock_get_unified.return_value = _make_unified_mock(mock_graph_engine)
         context = await retriever.get_context_from_objects(
             query="test query", retrieved_objects=[mock_edge]
         )
@@ -98,14 +108,15 @@ async def test_get_context_empty_results():
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+        ) as mock_get_unified,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
             return_value=[],
         ),
     ):
+        mock_get_unified.return_value = _make_unified_mock(mock_graph_engine)
         context = await retriever.get_context_from_objects(query="test query", retrieved_objects=[])
 
     assert context == ""
@@ -120,9 +131,10 @@ async def test_get_context_empty_graph():
     mock_graph_engine.is_empty = AsyncMock(return_value=True)
 
     with patch(
-        "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-        return_value=mock_graph_engine,
-    ):
+        "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+        new_callable=AsyncMock,
+    ) as mock_get_unified:
+        mock_get_unified.return_value = _make_unified_mock(mock_graph_engine)
         context = await retriever.get_context_from_objects(query="test query", retrieved_objects=[])
 
     assert context == ""
@@ -197,9 +209,9 @@ async def test_get_completion_without_context(mock_edge):
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+        ) as mock_get_unified,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
             return_value=[mock_edge],
@@ -216,6 +228,7 @@ async def test_get_completion_without_context(mock_edge):
             "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
+        mock_get_unified.return_value = _make_unified_mock(mock_graph_engine)
         mock_config = MagicMock()
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
@@ -273,9 +286,9 @@ async def test_get_completion_with_session(mock_edge):
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+        ) as mock_get_unified,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
             return_value=[mock_edge],
@@ -294,6 +307,7 @@ async def test_get_completion_with_session(mock_edge):
             "cognee.modules.retrieval.graph_completion_retriever.session_user"
         ) as mock_session_user,
     ):
+        mock_get_unified.return_value = _make_unified_mock(mock_graph_engine)
         mock_config = MagicMock()
         mock_config.caching = True
         mock_cache_config.return_value = mock_config
@@ -327,9 +341,9 @@ async def test_get_completion_with_response_model(mock_edge):
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+        ) as mock_get_unified,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
             return_value=[mock_edge],
@@ -346,6 +360,7 @@ async def test_get_completion_with_response_model(mock_edge):
             "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
+        mock_get_unified.return_value = _make_unified_mock(mock_graph_engine)
         mock_config = MagicMock()
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
@@ -369,9 +384,9 @@ async def test_get_completion_empty_context(mock_edge):
 
     with (
         patch(
-            "cognee.modules.retrieval.graph_completion_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+        ) as mock_get_unified,
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.brute_force_triplet_search",
             return_value=[],
@@ -388,6 +403,7 @@ async def test_get_completion_empty_context(mock_edge):
             "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
         ) as mock_cache_config,
     ):
+        mock_get_unified.return_value = _make_unified_mock(mock_graph_engine)
         mock_config = MagicMock()
         mock_config.caching = False
         mock_cache_config.return_value = mock_config
