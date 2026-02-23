@@ -1,8 +1,12 @@
 import asyncio
 from typing import Dict, Type, List, Optional
+
+from pandas import DataFrame
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.methods import upsert_edges
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.tasks.storage import index_graph_edges
@@ -56,12 +60,24 @@ def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
             _stamp_provenance_deep(item, pipeline_name, task_name, visited)
 
 
+async def cache_nodes(df, nodes):
+    if df is not None:
+        return
+    vector_engine = get_vector_engine()
+    for chunk in nodes:
+        for _, node in chunk.contains:
+            if node and (isinstance(node, Entity) or isinstance(node, EntityType)):
+                vector = await vector_engine.embed_data(node.name)
+                df[node.name] = vector
+
+
 async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
     graph_model: Type[BaseModel],
     ontology_resolver: BaseOntologyResolver,
     context: Dict,
+    df: DataFrame = None,
     pipeline_name: str = None,
     task_name: str = None,
 ) -> List[DocumentChunk]:
@@ -128,6 +144,8 @@ async def integrate_chunk_graphs(
             data_points=graph_nodes, custom_edges=context, embed_triplets=embed_triplets
         )
 
+        await cache_nodes(df, graph_nodes)
+
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
         await index_graph_edges(graph_edges)
@@ -146,6 +164,25 @@ async def integrate_chunk_graphs(
     return data_chunks
 
 
+async def build_prompt(chunk, vector_search_limit, custom_prompt) -> Optional[str]:
+    vector_engine = get_vector_engine()
+    exists = await vector_engine.has_collection(collection_name="Entity_name")
+
+    if not (exists and custom_prompt):
+        return custom_prompt
+
+    results_per_chunk = await vector_engine.search(
+        collection_name="Entity_name",
+        query_text=chunk.text,
+        limit=vector_search_limit,
+        include_payload=True,
+    )
+    prompt = custom_prompt
+    for result in results_per_chunk:
+        prompt = prompt + "\n  -" + result.payload["text"]
+    return prompt
+
+
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     context: Dict,
@@ -157,6 +194,9 @@ async def extract_graph_from_data(
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
+    vector_search_limit = kwargs.get("vector_search_limit") or 5
+    df = kwargs.get("df", None)
+    use_poc = kwargs.get("use_poc") or False
 
     if not isinstance(data_chunks, list) or not data_chunks:
         raise InvalidDataChunksError("must be a non-empty list of DocumentChunk.")
@@ -165,12 +205,25 @@ async def extract_graph_from_data(
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
 
-    chunk_graphs = await asyncio.gather(
-        *[
-            extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs)
-            for chunk in data_chunks
-        ]
-    )
+    if use_poc:
+        chunk_prompts = await asyncio.gather(
+            *[build_prompt(chunk, vector_search_limit, custom_prompt) for chunk in data_chunks]
+        )
+        chunk_graphs = await asyncio.gather(
+            *[
+                extract_content_graph(chunk.text, graph_model, custom_prompt=prompt)
+                for chunk, prompt in zip(data_chunks, chunk_prompts)
+            ]
+        )
+    else:
+        chunk_graphs = await asyncio.gather(
+            *[
+                extract_content_graph(
+                    chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
+                )
+                for chunk in data_chunks
+            ]
+        )
 
     # Note: Filter edges with missing source or target nodes
     if graph_model == KnowledgeGraph:
@@ -211,6 +264,7 @@ async def extract_graph_from_data(
         graph_model,
         ontology_resolver,
         context,
+        df,
         pipeline_name=pipeline_name,
         task_name=task_name,
     )
