@@ -35,8 +35,6 @@ jobs:
 
   #     - name: Cognee Setup
   #       uses: ./.github/actions/cognee_setup
-  #       with:
-  #         python-version: ${{ inputs.python-version }}
 
   #     - name: Install specific db dependency
   #       run: |
@@ -86,7 +84,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: ${{ inputs.python-version }}
           extra-dependencies: "postgres"
 
       - name: Run PGVector Tests
@@ -164,8 +161,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: ${{ inputs.python-version }}
 
       - name: Run LanceDB Tests
         env:

@@ -57,7 +57,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
           extra-dependencies: "postgres"
 
       - name: Install specific db dependency
@@ -120,7 +119,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
           extra-dependencies: "postgres"
 
       - name: Install specific db dependency
@@ -185,7 +183,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
           extra-dependencies: "postgres"
 
       - name: Setup Neo4j with GDS

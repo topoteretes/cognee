@@ -25,8 +25,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: ${{ inputs.python-version }}
 
       - name: Dependencies already installed
         run: echo "Dependencies already installed in setup"
@@ -70,8 +68,6 @@ jobs:
 
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
-        with:
-          python-version: ${{ inputs.python-version }}
 
       - name: Setup Neo4j with GDS
         uses: ./.github/actions/setup_neo4j

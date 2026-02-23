@@ -42,7 +42,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
           extra-dependencies: "aws"
 
       - name: Verify File Descriptor Limit

@@ -41,7 +41,6 @@ jobs:
       - name: Cognee Setup
         uses: ./.github/actions/cognee_setup
         with:
-          python-version: '3.11.x'
           extra-dependencies: "distributed postgres"
 
       - name: Run Distributed Cognee (Modal)
