@@ -166,6 +166,27 @@ jobs:
     uses: ./.github/workflows/test_ollama.yml
     secrets: inherit
 
+    # Ollama tests moved to the end
+  llamacpp-tests:
+    name: Llama-cpp Tests
+    needs: [
+      basic-tests,
+      e2e-tests,
+      graph-db-tests,
+      notebook-tests,
+      different-os-tests-basic,
+      different-os-tests-extended,
+      vector-db-tests,
+      example-tests,
+      llm-tests,
+      mcp-test,
+      relational-db-migration-tests,
+      docker-compose-test,
+      docker-ci-test,
+    ]
+    uses: ./.github/workflows/test_llamacpp.yml
+    secrets: inherit
+
   notify:
     name: Test Completion Status
     needs: [
@@ -182,6 +203,7 @@ jobs:
       mcp-test,
       llm-tests,
       ollama-tests,
+      llamacpp-tests,
       relational-db-migration-tests,
       docker-compose-test,
       docker-ci-test,

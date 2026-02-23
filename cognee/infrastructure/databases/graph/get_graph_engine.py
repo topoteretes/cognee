@@ -99,6 +99,8 @@ def _create_graph_engine(
             graph_database_url=graph_database_url,
             graph_database_username=graph_database_username,
             graph_database_password=graph_database_password,
+            graph_database_port=graph_database_port,
+            graph_database_key=graph_database_key,
             database_name=graph_database_name,
         )
 

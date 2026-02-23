@@ -64,6 +64,9 @@ def _extract_nodes_from_edges(retrieved_edges: List[Edge]) -> dict:
 
 async def resolve_edges_to_text(retrieved_edges: List[Edge]) -> str:
     """Converts retrieved graph edges into a human-readable string format."""
+    if not retrieved_edges:
+        return ""
+
     nodes = _extract_nodes_from_edges(retrieved_edges)
 
     node_section = "\n".join(

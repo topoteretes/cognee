@@ -1,0 +1,13 @@
+Compare these two text chunks and determine their semantic similarity:
+
+**Chunk 1:**
+```
+{{ chunk_1 }}
+```
+
+**Chunk 2:**
+```
+{{ chunk_2 }}
+```
+
+Analyze their relationship and provide your assessment.

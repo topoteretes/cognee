@@ -1,0 +1,44 @@
+name: test | ollama
+
+on:
+  workflow_call:
+
+jobs:
+
+  run_llama-cpp_test:
+
+    # needs 4 Gb RAM for phi3-mini in a container which the smallest runner has
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Cognee Setup
+        uses: ./.github/actions/cognee_setup
+        with:
+          python-version: '3.13.x'
+          extra-dependencies: postgres llama-cpp
+
+      - name: Install torch dependency
+        run: |
+          uv add torch
+
+      - name: Pull required Ollama models
+        run: |
+          wget https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf
+
+      - name: Run example test
+        env:
+          PYTHONFAULTHANDLER: 1
+          LLM_PROVIDER: "llama_cpp"
+          LLAMA_CPP_MODEL_PATH: "./Phi-3-mini-4k-instruct-q4.gguf"
+          LLM_ENDPOINT: ""
+          LLAMA_CPP_N_CTX: 4096
+          EMBEDDING_PROVIDER: "openai"
+          LLM_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDING_MODEL: "openai/text-embedding-3-large"
+          EMBEDDING_DIMENSIONS: "3072"
+          EMBEDDING_MAX_TOKENS: "8191"
+          STRUCTURED_OUTPUT_FRAMEWORK: "instructor"
+          LLM_INSTRUCTOR_MODE: ""
+        run: uv run python ./examples/python/simple_example.py

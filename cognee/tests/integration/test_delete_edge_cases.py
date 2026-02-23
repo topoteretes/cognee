@@ -100,7 +100,7 @@ async def test_last_accessed_updates_on_search():
     # Perform search to trigger last_accessed update
     logger.info("Performing search to trigger last_accessed update...")
     search_results = await cognee.search(
-        query_type=SearchType.CHUNKS,
+        query_type=SearchType.GRAPH_COMPLETION,
         query_text="Apple technology",
         datasets=[dataset_name],
         user=user,
