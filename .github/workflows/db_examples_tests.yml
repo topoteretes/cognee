@@ -12,6 +12,10 @@ on:
         required: false
         type: string
         default: "3.11.x"
+      ci-image:
+        required: false
+        type: string
+        default: ''
     secrets:
       LLM_MODEL:
         required: true
@@ -81,6 +85,7 @@ jobs:
   run-db-example-kuzu:
     name: "Kuzu DB Example Test"
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu') }}
 
     steps:
@@ -114,6 +119,7 @@ jobs:
   run-db-example-pgvector:
     name: "PostgreSQL PGVector DB Example Test"
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'postgres') }}
     services:
       postgres:
@@ -155,5 +161,6 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
         run: |
           uv run python examples/database_examples/pgvector_example.py

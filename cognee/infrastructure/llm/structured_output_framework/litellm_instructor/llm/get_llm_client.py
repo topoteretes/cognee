@@ -194,11 +194,10 @@ def get_llm_client(raise_api_key_error: bool = True):
         )
 
         # Get optional local mode parameters (will be None if not set)
-        # TODO: refactor llm_config to include these parameters, currently they cannot be defined and defaults are used
-        model_path = getattr(llm_config, "llama_cpp_model_path", None)
-        n_ctx = getattr(llm_config, "llama_cpp_n_ctx", 2048)
-        n_gpu_layers = getattr(llm_config, "llama_cpp_n_gpu_layers", 0)
-        chat_format = getattr(llm_config, "llama_cpp_chat_format", "chatml")
+        model_path = llm_config.llama_cpp_model_path
+        n_ctx = llm_config.llama_cpp_n_ctx
+        n_gpu_layers = llm_config.llama_cpp_n_gpu_layers
+        chat_format = llm_config.llama_cpp_chat_format
 
         return LlamaCppAPIAdapter(
             model=llm_config.llm_model,

@@ -2,9 +2,15 @@ name: LLM Test Suites
 
 permissions:
   contents: read
+  packages: read
 
 on:
   workflow_call:
+    inputs:
+      ci-image:
+        required: false
+        type: string
+        default: ''
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
@@ -14,6 +20,7 @@ jobs:
   test-gemini:
     name: Run Gemini Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -38,6 +45,7 @@ jobs:
   test-fastembed:
     name: Run Fastembed Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -63,6 +71,7 @@ jobs:
   test-openrouter:
     name: Run OpenRouter Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -88,6 +97,7 @@ jobs:
   test-bedrock-api-key:
     name: Run Bedrock API Key Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -115,6 +125,7 @@ jobs:
   test-bedrock-aws-credentials:
     name: Run Bedrock AWS Credentials Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -143,6 +154,7 @@ jobs:
   test-bedrock-aws-profile:
     name: Run Bedrock AWS Profile Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6

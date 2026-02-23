@@ -19,6 +19,11 @@ from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
 
 from cognee.modules.observability import get_tracer_if_enabled
+from cognee.modules.observability.tracing import (
+    COGNEE_DB_SYSTEM,
+    COGNEE_VECTOR_COLLECTION,
+    COGNEE_VECTOR_RESULT_COUNT,
+)
 
 
 class IndexSchema(DataPoint):
@@ -37,6 +42,7 @@ class IndexSchema(DataPoint):
     text: str
 
     metadata: dict = {"index_fields": ["text"]}
+    belongs_to_set: List[str] = []
 
 
 class LanceDBAdapter(VectorDBInterface):
@@ -239,16 +245,11 @@ class LanceDBAdapter(VectorDBInterface):
         with_vector: bool = False,
         normalized: bool = True,
         include_payload: bool = False,
+        node_name: Optional[List[str]] = None,
     ):
         tracer = get_tracer_if_enabled()
 
         if tracer is not None:
-            from cognee.modules.observability.tracing import (
-                COGNEE_DB_SYSTEM,
-                COGNEE_VECTOR_COLLECTION,
-                COGNEE_VECTOR_RESULT_COUNT,
-            )
-
             span_ctx = tracer.start_as_current_span("cognee.db.vector.search")
         else:
             from contextlib import nullcontext
@@ -283,17 +284,35 @@ class LanceDBAdapter(VectorDBInterface):
                 if include_payload
                 else ["id", "vector", "_distance"]
             )
-            result_values = (
-                await collection.vector_search(query_vector)
-                .select(select_columns)
-                .limit(limit)
-                .to_list()
-            )
+
+            if node_name:
+                # Escape quotes to make this input safer, since it's coming from the user
+                # At the time of writing this, no specific binding instructions found on LanceDB docs
+                escaped_node_names = [name.replace("'", "''") for name in node_name]
+                literal_node_names = (
+                    "[" + ", ".join(f"'{name}'" for name in escaped_node_names) + "]"
+                )
+
+                result_values = (
+                    await collection.vector_search(query_vector)
+                    .where(f"array_has_any(payload.belongs_to_set, {literal_node_names})")
+                    .select(select_columns)
+                    .limit(limit)
+                    .to_list()
+                )
+            else:
+                result_values = (
+                    await collection.vector_search(query_vector)
+                    .select(select_columns)
+                    .limit(limit)
+                    .to_list()
+                )
 
             if not result_values:
                 if otel_span is not None:
                     otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
                 return []
+
             normalized_values = normalize_distances(result_values)
 
             results = [
@@ -317,6 +336,7 @@ class LanceDBAdapter(VectorDBInterface):
         limit: Optional[int] = None,
         with_vectors: bool = False,
         include_payload: bool = False,
+        node_name: Optional[List[str]] = None,
     ):
         query_vectors = await self.embedding_engine.embed_text(query_texts)
 
@@ -328,6 +348,7 @@ class LanceDBAdapter(VectorDBInterface):
                     limit=limit,
                     with_vector=with_vectors,
                     include_payload=include_payload,
+                    node_name=node_name,
                 )
                 for query_vector in query_vectors
             ]
@@ -358,6 +379,7 @@ class LanceDBAdapter(VectorDBInterface):
                 IndexSchema(
                     id=str(data_point.id),
                     text=getattr(data_point, data_point.metadata["index_fields"][0]),
+                    belongs_to_set=(data_point.belongs_to_set or []),
                 )
                 for data_point in data_points
             ],

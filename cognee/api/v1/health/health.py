@@ -3,6 +3,7 @@
 from io import BytesIO
 import time
 import asyncio
+from sqlalchemy import text
 from datetime import datetime, timezone
 from typing import Dict
 from enum import Enum
@@ -51,9 +52,11 @@ class HealthChecker:
             config = get_relational_config()
             engine = get_relational_engine()
 
-            # Test connection by creating a session
-            session = engine.get_session()
-            if session:
+            try:
+                async with engine.get_async_session() as session:
+                    # This works for both SQLite and PostgreSQL
+                    await session.execute(text("SELECT 1"))
+            finally:
                 session.close()
 
             response_time = int((time.time() - start_time) * 1000)
@@ -246,12 +249,7 @@ class HealthChecker:
             ("vector_db", self.check_vector_db()),
             ("graph_db", self.check_graph_db()),
             ("file_storage", self.check_file_storage()),
-            ("llm_provider", self.check_llm_provider()),
-            ("embedding_service", self.check_embedding_service()),
         ]
-
-        # Non-critical services (only for detailed checks)
-        non_critical_checks = []
 
         # Run critical checks
         critical_results = await asyncio.gather(
@@ -270,7 +268,13 @@ class HealthChecker:
                 components[name] = result
 
         # Run non-critical checks if detailed (currently none)
-        if detailed and non_critical_checks:
+        if detailed:
+            # Non-critical services (only for detailed checks)
+            non_critical_checks = [
+                ("llm_provider", self.check_llm_provider()),
+                ("embedding_service", self.check_embedding_service()),
+            ]
+
             non_critical_results = await asyncio.gather(
                 *[check for _, check in non_critical_checks], return_exceptions=True
             )

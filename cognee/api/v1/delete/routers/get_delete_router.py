@@ -26,6 +26,7 @@ def get_delete_router() -> APIRouter:
         dataset_id: UUID,
         mode: str = "soft",
         user: User = Depends(get_authenticated_user),
+        delete_dataset_if_empty: bool = False,
     ):
         """Delete data by its ID from the specified dataset.
 
@@ -34,6 +35,7 @@ def get_delete_router() -> APIRouter:
             dataset_id: The UUID of the dataset containing the data
             mode: "soft" (default) or "hard" - hard mode also deletes degree-one entity nodes
             user: Authenticated user
+            delete_dataset_if_empty: If True, deletes the dataset if it is left empty after data deletion
 
         Returns:
             JSON response indicating success or failure
@@ -58,6 +60,7 @@ def get_delete_router() -> APIRouter:
                 data_id=data_id,
                 user=user,
                 mode=mode,
+                delete_dataset_if_empty=delete_dataset_if_empty,
             )
             return result
 

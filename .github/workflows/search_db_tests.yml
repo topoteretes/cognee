@@ -2,6 +2,7 @@ name: Reusable Search DB Tests
 
 permissions:
   contents: read
+  packages: read
 
 on:
   workflow_call:
@@ -16,11 +17,17 @@ on:
         type: string
         default: '["3.10", "3.11", "3.12", "3.13"]'
         description: "Python versions to test (JSON array)"
+      ci-image:
+        required: false
+        type: string
+        default: ''
+        description: "Container image for CI (empty string means no container)"
 
 jobs:
   run-kuzu-lance-sqlite-search-tests:
     name: Search test for Kuzu/LanceDB/Sqlite (Python ${{ matrix.python-version }})
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu/lance/sqlite') }}
     strategy:
       matrix:
@@ -106,6 +113,7 @@ jobs:
   run-kuzu-pgvector-postgres-search-tests:
       name: Search test for Kuzu/PGVector/Postgres (Python ${{ matrix.python-version }})
       runs-on: ubuntu-22.04
+      container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
       if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu/pgvector/postgres') }}
       strategy:
         matrix:
@@ -157,7 +165,7 @@ jobs:
             ENABLE_BACKEND_ACCESS_CONTROL: 'false'
             DB_PROVIDER: 'postgres'
             DB_NAME: 'cognee_db'
-            DB_HOST: '127.0.0.1'
+            DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
             DB_PORT: 5432
             DB_USERNAME: cognee
             DB_PASSWORD: cognee

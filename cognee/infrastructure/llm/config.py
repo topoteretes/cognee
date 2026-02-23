@@ -66,6 +66,11 @@ class LLMConfig(BaseSettings):
     embedding_rate_limit_requests: int = 60
     embedding_rate_limit_interval: int = 60  # in seconds (default is 60 requests per minute)
 
+    llama_cpp_model_path: Optional[str] = None
+    llama_cpp_n_ctx: int = 2048
+    llama_cpp_n_gpu_layers: int = 0
+    llama_cpp_chat_format: str = "chatml"
+
     fallback_api_key: str = ""
     fallback_endpoint: str = ""
     fallback_model: str = ""
@@ -96,6 +101,8 @@ class LLMConfig(BaseSettings):
             "llm_model",
             "baml_llm_provider",
             "baml_llm_model",
+            "llama_cpp_model_path",
+            "llama_cpp_chat_format",
         ]
 
         cls = self.__class__
@@ -237,6 +244,10 @@ class LLMConfig(BaseSettings):
             "fallback_api_key": self.fallback_api_key,
             "fallback_endpoint": self.fallback_endpoint,
             "fallback_model": self.fallback_model,
+            "llama_cpp_model_path": self.llama_cpp_model_path,
+            "llama_cpp_n_ctx": self.llama_cpp_n_ctx,
+            "llama_cpp_n_gpu_layers": self.llama_cpp_n_gpu_layers,
+            "llama_cpp_chat_format": self.llama_cpp_chat_format,
         }
 
 
