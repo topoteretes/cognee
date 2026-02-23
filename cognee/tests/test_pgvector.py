@@ -133,7 +133,7 @@ async def main():
         {
             "db_path": "",
             "db_name": "cognee_db",
-            "db_host": "127.0.0.1",
+            "db_host": os.environ.get("DB_HOST", "127.0.0.1"),
             "db_port": "5432",
             "db_username": "cognee",
             "db_password": "cognee",

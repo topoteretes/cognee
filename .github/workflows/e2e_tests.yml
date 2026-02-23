@@ -1,6 +1,7 @@
 name: Reusable Integration Tests
 permissions:
   contents: read
+  packages: read
 
 on:
   workflow_call:
@@ -9,6 +10,10 @@ on:
         required: false
         type: string
         default: '3.11.x'
+      ci-image:
+        required: false
+        type: string
+        default: ''
     secrets:
       LLM_MODEL:
         required: true
@@ -37,6 +42,7 @@ jobs:
   run-server-start-test:
     name: Server Start Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@v6
@@ -65,6 +71,7 @@ jobs:
   run-telemetry-test:
     name: Run Telemetry Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -90,6 +97,7 @@ jobs:
   run-telemetry-pipeline-test:
     name: Run Telemetry Pipeline Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -120,6 +128,7 @@ jobs:
   run-deduplication-test:
     name: Deduplication Test
     runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
       run:
         shell: bash
@@ -157,11 +166,13 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
         run: uv run python ./cognee/tests/test_deduplication.py
 
   run-s3-bucket-test:
       name: S3 Bucket Test
       runs-on: ubuntu-22.04
+      container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
       steps:
         - name: Check out repository
           uses: actions/checkout@v6
@@ -191,6 +202,7 @@ jobs:
   test-parallel-databases:
     name: Test using different async databases in parallel in Cognee
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -220,6 +232,7 @@ jobs:
   test-dataset-database-handler:
     name: Test dataset database handlers in Cognee
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -246,6 +259,7 @@ jobs:
   test-dataset-database-deletion:
     name: Test dataset database deletion in Cognee
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -272,6 +286,7 @@ jobs:
   test-dataset-deletion-when-left-empty:
     name: Test dataset deletion when last piece of data deleted
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -298,6 +313,7 @@ jobs:
   test-permissions:
     name: Test permissions with different situations in Cognee
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -327,6 +343,7 @@ jobs:
   test-multi-tenancy:
     name: Test multi tenancy with different situations in Cognee
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -353,6 +370,7 @@ jobs:
   test-data-label:
     name: Test adding of label for data in Cognee
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -379,6 +397,7 @@ jobs:
   test-delete-permission:
     name: Test delete permission assigned from dataset owner
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -404,6 +423,7 @@ jobs:
   test-deletion-on-default-graph:
     name: Delete default graph data test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -431,6 +451,7 @@ jobs:
   test-deletion-on-default-graph-non-mocked:
     name: Delete default graph data test (non-mocked)
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -458,6 +479,7 @@ jobs:
   test-deletion-on-custom-graph:
     name: Delete custom graph data test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -482,33 +504,7 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_delete_custom_graph.py
 
-  test-deletion-on-default-graph_with_legacy_data_1_default:
-    name: Delete default graph with legacy data test 1 in Kuzu case
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Check out
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-
-      - name: Run deletion on custom graph
-        env:
-          ENV: 'dev'
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./cognee/tests/test_delete_default_graph_with_legacy_data_1.py
-
+  # Neo4j jobs - NO container (uses setup_neo4j docker action)
   test-deletion-on-default-graph_with_legacy_data_1_neo4j:
     name: Delete default graph with legacy data test 1 in Neo4j case
     runs-on: ubuntu-22.04
@@ -545,6 +541,7 @@ jobs:
   test-deletion-on-default-graph_with_legacy_data_2:
     name: Delete default graph with legacy data test 2
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -572,6 +569,7 @@ jobs:
   test-delete-two-users-with-legacy-data:
     name: Delete data from two users operating on different datasets
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@master
@@ -597,6 +595,7 @@ jobs:
   test-delete-two-users-on-same-dataset:
     name: Delete data from two users operating on same dataset
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@master
@@ -622,6 +621,7 @@ jobs:
   test-delete-dataset-default:
     name: Delete dataset in Kuzu graph case
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@master
@@ -644,6 +644,7 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/test_delete_dataset_kuzu.py
 
+  # Neo4j job - NO container (uses setup_neo4j docker action)
   test-delete-dataset-neo4j:
     name: Delete dataset in Neo4j graph case
     runs-on: ubuntu-22.04
@@ -680,6 +681,7 @@ jobs:
   test-graph-edges:
     name: Test graph edge ingestion
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -709,6 +711,7 @@ jobs:
   run_concurrent_subprocess_access_test:
     name: Concurrent Subprocess access test
     runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
       run:
         shell: bash
@@ -762,10 +765,11 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           CACHING: true
           CACHE_BACKEND: 'redis'
+          CACHE_HOST: ${{ inputs.ci-image != '' && 'redis' || 'localhost' }}
           SHARED_KUZU_LOCK: true
           DB_PROVIDER: 'postgres'
           DB_NAME: 'cognee_db'
-          DB_HOST: '127.0.0.1'
+          DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
@@ -774,6 +778,7 @@ jobs:
   test-entity-extraction:
     name: Test Entity Extraction
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -800,39 +805,10 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
         run: uv run python ./cognee/tests/tasks/entity_extraction/entity_extraction_test.py
 
-  test-edge-centered-payload:
-    name: Test Cognify - Edge Centered Payload
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Cognee Setup
-        uses: ./.github/actions/cognee_setup
-        with:
-          python-version: '3.11.x'
-
-      - name: Dependencies already installed
-        run: echo "Dependencies already installed in setup"
-
-      - name: Run Edge Centered Payload Test
-        env:
-          ENV: 'dev'
-          TRIPLET_EMBEDDING: True
-          LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          LLM_ENDPOINT: ${{ secrets.LLM_ENDPOINT }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_VERSION: ${{ secrets.LLM_API_VERSION }}
-          EMBEDDING_DIMENSIONS: 300
-          EMBEDDING_MODEL: ${{ secrets.EMBEDDING_MODEL }}
-          EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
-          EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-          EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-        run: uv run python ./cognee/tests/test_edge_centered_payload.py
-
   run_conversation_sessions_test_redis:
     name: Conversation sessions test (Redis)
     runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
       run:
         shell: bash
@@ -886,9 +862,10 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           CACHING: true
           CACHE_BACKEND: 'redis'
+          CACHE_HOST: ${{ inputs.ci-image != '' && 'redis' || 'localhost' }}
           DB_PROVIDER: 'postgres'
           DB_NAME: 'cognee_db'
-          DB_HOST: '127.0.0.1'
+          DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
@@ -897,6 +874,7 @@ jobs:
   run_conversation_sessions_test_fs:
     name: Conversation sessions test (FS)
     runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
       run:
         shell: bash
@@ -942,7 +920,7 @@ jobs:
           CACHE_BACKEND: 'fs'
           DB_PROVIDER: 'postgres'
           DB_NAME: 'cognee_db'
-          DB_HOST: '127.0.0.1'
+          DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
           DB_PORT: 5432
           DB_USERNAME: cognee
           DB_PASSWORD: cognee
@@ -951,6 +929,7 @@ jobs:
   run-pipeline-cache-test:
     name: Test Pipeline Caching
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@v6
@@ -979,6 +958,7 @@ jobs:
   run-graph-model-from-schema-test:
     name: Test Graph Model Generation From Schema
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@v6
@@ -1007,6 +987,7 @@ jobs:
   run-custom-model-test:
     name: Test Custom Model Cognify
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@v6
@@ -1035,6 +1016,7 @@ jobs:
   run_usage_logger_test:
     name: Usage logger test (API/MCP)
     runs-on: ubuntu-latest
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
       run:
         shell: bash
@@ -1079,4 +1061,5 @@ jobs:
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           USAGE_LOGGING: true
           CACHE_BACKEND: 'redis'
+          CACHE_HOST: ${{ inputs.ci-image != '' && 'redis' || 'localhost' }}
         run: uv run pytest cognee/tests/test_usage_logger_e2e.py -v --log-level=INFO

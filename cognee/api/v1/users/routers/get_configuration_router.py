@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from fastapi import Form, Depends
+from uuid import UUID
 
 from cognee.api.DTO import InDTO
 from cognee.modules.users.models import User
@@ -11,6 +12,7 @@ from cognee.modules.users.methods import (
 )
 from cognee.modules.users.methods import (
     get_principal_configuration as method_get_principal_configuration,
+    get_principal_all_configuration as method_get_principal_all_configuration,
 )
 
 logger = get_logger()
@@ -36,11 +38,17 @@ def get_configuration_router() -> APIRouter:
             principal_id=user.id, name=payload.name, configuration=payload.config
         )
 
-    @router.get("/get_user_configuration/{name}", response_model=dict)
+    @router.get("/get_user_configuration/{config_id}", response_model=dict)
     async def get_user_configuration(
-        name: str,
+        config_id: UUID,
         user: User = Depends(get_authenticated_user),
     ):
-        return await method_get_principal_configuration(principal_id=user.id, name=name)
+        return await method_get_principal_configuration(config_id=config_id)
+
+    @router.get("/get_user_configuration/", response_model=list)
+    async def get_user_all_configuration(
+        user: User = Depends(get_authenticated_user),
+    ):
+        return await method_get_principal_all_configuration(principal_id=user.id)
 
     return router

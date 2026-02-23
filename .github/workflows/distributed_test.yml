@@ -1,6 +1,7 @@
 name: Distributed Cognee test with modal
 permissions:
   contents: read
+  packages: read
 on:
   workflow_call:
     inputs:
@@ -8,6 +9,10 @@ on:
         required: false
         type: string
         default: '3.13.x'
+      ci-image:
+        required: false
+        type: string
+        default: ''
     secrets:
       LLM_MODEL:
         required: true
@@ -32,6 +37,7 @@ jobs:
   run-server-start-test:
     name: Distributed Cognee test (Modal)
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@v6
