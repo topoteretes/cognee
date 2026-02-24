@@ -160,6 +160,26 @@ class GraphCompletionRetriever(BaseRetriever):
             triplet_distance_penalty=self.triplet_distance_penalty,
         )
 
+    async def get_triplets_batch(
+        self,
+        queries: List[str],
+    ) -> List[List[Edge]]:
+        """
+        Retrieves triplets for a list of queries, using single-query mode when
+        possible to enable ID-filtered graph projection.
+
+        When there is only one query, delegates to single-query mode (query=)
+        which computes relevant node IDs and filters the graph projection.
+        For multiple queries, uses batch mode (query_batch=).
+
+        Returns:
+            List[List[Edge]]: One list of edges per query.
+        """
+        if len(queries) == 1:
+            triplets = await self.get_triplets(query=queries[0])
+            return [triplets]
+        return await self.get_triplets(query_batch=queries)
+
     async def get_context_from_objects(
         self,
         query: Optional[str] = None,
