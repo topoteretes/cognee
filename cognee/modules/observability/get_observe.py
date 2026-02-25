@@ -2,6 +2,7 @@ import functools
 
 from cognee.base_config import get_base_config
 from .observers import Observer
+from .exceptions import UnsupportedObserverError
 
 
 def _wrap_with_otel(inner_decorator):
@@ -135,3 +136,7 @@ def get_observe():
                 return decorator
 
         return _wrap_with_otel(no_op_decorator)
+
+    else:
+        observer_str = getattr(monitoring, "value", str(monitoring))
+        raise UnsupportedObserverError(observer_str)

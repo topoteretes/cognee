@@ -41,6 +41,8 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         node_info = node_info.copy()
         node_info["id"] = str(node_id)
         node_info["color"] = color_map.get(node_info.get("type", "default"), "#DBD8D8")
+        if node_info.get("ontology_valid") is True:
+            node_info["color"] = "#D8D8D8"
         node_info["name"] = node_info.get("name", str(node_id))
         node_info.pop("updated_at", None)
         node_info.pop("created_at", None)
@@ -444,6 +446,10 @@ nodes.forEach(function(n){
     }
   }
   n._rgb=typeRgbCache[n.type];
+  if(n.ontology_valid===true){
+    n.color="#D8D8D8";
+    n._rgb=[216,216,216];
+  }
 });
 
 // ── Color-by mode ──
@@ -462,12 +468,17 @@ function recolorNodes(){
     }else if(colorByMode==="user"){
       n.color=userColors[n.source_user||"Unknown"]||"#DBD8D8";
     }
-    // Recache RGB
-    if(n.color.indexOf("hsl")===0){
-      var m=n.color.match(/[\d.]+/g);
-      n._rgb=hslToRgb(+m[0],+m[1],+m[2]);
+    if(colorByMode==="type"&&n.ontology_valid===true){
+      n.color="#D8D8D8";
+      n._rgb=[216,216,216];
     }else{
-      n._rgb=hexToRgb(n.color);
+      // Recache RGB
+      if(n.color.indexOf("hsl")===0){
+        var m=n.color.match(/[\d.]+/g);
+        n._rgb=hslToRgb(+m[0],+m[1],+m[2]);
+      }else{
+        n._rgb=hexToRgb(n.color);
+      }
     }
   });
 }
@@ -798,6 +809,7 @@ function showNodeInfo(n){
   if(n.source_pipeline)html+='<div class="panel-row"><span class="k">Source Pipeline</span><span class="v">'+esc(n.source_pipeline)+"</span></div>";
   if(n.source_node_set)html+='<div class="panel-row"><span class="k">Source Node Set</span><span class="v">'+esc(n.source_node_set)+"</span></div>";
   if(n.source_user)html+='<div class="panel-row"><span class="k">Source User</span><span class="v">'+esc(n.source_user)+"</span></div>";
+  if(n.ontology_valid!==undefined&&n.ontology_valid!==null){var ovStyle=n.ontology_valid===true?'color:#D8D8D8;font-weight:600':'color:var(--text2)';html+='<div class="panel-row"><span class="k">Ontology Valid</span><span class="v" style="'+ovStyle+'">'+esc(String(n.ontology_valid))+"</span></div>";}
 
   if(n.properties){
     Object.keys(n.properties).slice(0,10).forEach(function(key){
