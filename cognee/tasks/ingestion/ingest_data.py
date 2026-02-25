@@ -88,9 +88,6 @@ async def ingest_data(
                 processed_data.append(data_item)
 
         for data_item in processed_data:
-            # if isinstance(data_item, DltResource) or isinstance(data_item, SourceFactory):
-            #     await ingest_dlt_source(data_item, dataset.name)
-            # else:
             # Support for DataItem (custom label + data wrapper)
             current_label = None
             underlying_data = data_item
