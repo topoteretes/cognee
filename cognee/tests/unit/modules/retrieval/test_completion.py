@@ -341,3 +341,160 @@ class TestSummarizeText:
                 system_prompt="Custom system prompt",
                 response_model=str,
             )
+
+
+class TestGenerateSessionCompletionWithOptionalSummary:
+    """Tests for generate_session_completion_with_optional_summary (session + optional feedback)."""
+
+    @pytest.mark.asyncio
+    async def test_run_feedback_detection_false_returns_none_feedback(self):
+        """When run_feedback_detection=False, returns (completion, context_to_store, None)."""
+        with (
+            patch(
+                "cognee.modules.retrieval.utils.completion.render_prompt",
+                return_value="User prompt text",
+            ),
+            patch(
+                "cognee.modules.retrieval.utils.completion.read_query_prompt",
+                return_value="System prompt from file",
+            ),
+            patch(
+                "cognee.modules.retrieval.utils.completion.LLMGateway.acreate_structured_output",
+                new_callable=AsyncMock,
+                return_value="Generated answer",
+            ) as mock_llm,
+        ):
+            from cognee.modules.retrieval.utils.completion import (
+                generate_session_completion_with_optional_summary,
+            )
+
+            (
+                completion,
+                context_to_store,
+                feedback_result,
+            ) = await generate_session_completion_with_optional_summary(
+                query="Q?",
+                context="ctx",
+                conversation_history="",
+                user_prompt_path="user.txt",
+                system_prompt_path="sys.txt",
+                summarize_context=False,
+                run_feedback_detection=False,
+            )
+
+        assert completion == "Generated answer"
+        assert context_to_store == ""
+        assert feedback_result is None
+        assert mock_llm.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_run_feedback_detection_true_runs_detect_feedback_in_parallel(self):
+        """When run_feedback_detection=True, runs completion and detect_feedback in parallel."""
+        from cognee.infrastructure.session.feedback_models import FeedbackDetectionResult
+
+        with (
+            patch(
+                "cognee.modules.retrieval.utils.completion.render_prompt",
+                return_value="User prompt text",
+            ),
+            patch(
+                "cognee.modules.retrieval.utils.completion.read_query_prompt",
+                return_value="System prompt from file",
+            ),
+            patch(
+                "cognee.modules.retrieval.utils.completion.LLMGateway.acreate_structured_output",
+                new_callable=AsyncMock,
+                return_value="Generated answer",
+            ) as mock_llm,
+            patch(
+                "cognee.infrastructure.session.feedback_detection.detect_feedback",
+                new_callable=AsyncMock,
+                return_value=FeedbackDetectionResult(
+                    feedback_detected=True,
+                    feedback_text="User said thanks.",
+                    feedback_score=5.0,
+                    response_to_user="Thanks!",
+                    contains_followup_question=False,
+                ),
+            ) as mock_detect,
+        ):
+            from cognee.modules.retrieval.utils.completion import (
+                generate_session_completion_with_optional_summary,
+            )
+
+            (
+                completion,
+                context_to_store,
+                feedback_result,
+            ) = await generate_session_completion_with_optional_summary(
+                query="thanks!",
+                context="ctx",
+                conversation_history="",
+                user_prompt_path="user.txt",
+                system_prompt_path="sys.txt",
+                summarize_context=False,
+                run_feedback_detection=True,
+            )
+
+        assert completion == "Generated answer"
+        assert context_to_store == ""
+        assert feedback_result is not None
+        assert feedback_result.feedback_detected is True
+        assert feedback_result.feedback_text == "User said thanks."
+        mock_llm.assert_awaited_once()
+        mock_detect.assert_awaited_once_with("thanks!")
+
+    @pytest.mark.asyncio
+    async def test_summarize_context_true_run_feedback_detection_true_returns_three_tuple(self):
+        """With summarize_context and run_feedback_detection True, returns (completion, summary, feedback_result)."""
+        from cognee.infrastructure.session.feedback_models import FeedbackDetectionResult
+
+        with (
+            patch(
+                "cognee.modules.retrieval.utils.completion.render_prompt",
+                return_value="User prompt text",
+            ),
+            patch(
+                "cognee.modules.retrieval.utils.completion.read_query_prompt",
+                return_value="System prompt from file",
+            ),
+            patch(
+                "cognee.modules.retrieval.utils.completion.summarize_text",
+                new_callable=AsyncMock,
+                return_value="Summarized context",
+            ) as mock_summarize,
+            patch(
+                "cognee.modules.retrieval.utils.completion.LLMGateway.acreate_structured_output",
+                new_callable=AsyncMock,
+                return_value="Generated answer",
+            ),
+            patch(
+                "cognee.infrastructure.session.feedback_detection.detect_feedback",
+                new_callable=AsyncMock,
+                return_value=FeedbackDetectionResult(feedback_detected=False),
+            ) as mock_detect,
+        ):
+            from cognee.modules.retrieval.utils.completion import (
+                generate_session_completion_with_optional_summary,
+            )
+
+            (
+                completion,
+                context_to_store,
+                feedback_result,
+            ) = await generate_session_completion_with_optional_summary(
+                query="Q?",
+                context="long context",
+                conversation_history="",
+                user_prompt_path="user.txt",
+                system_prompt_path="sys.txt",
+                summarize_context=True,
+                run_feedback_detection=True,
+            )
+
+        assert completion == "Generated answer"
+        assert context_to_store == "Summarized context"
+        assert feedback_result is not None
+        assert feedback_result.feedback_detected is False
+        mock_summarize.assert_awaited_once()
+        mock_detect.assert_awaited_once_with("Q?")

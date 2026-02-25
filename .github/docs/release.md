@@ -5,7 +5,8 @@
 #### Prepare release
 1. Set the project version that will be released in [pyproject.toml](https://github.com/topoteretes/cognee/blob/dev/pyproject.toml#L4)
 2. Update `uv.lock` with `uv lock` lock command
-3. Create a PR with the changes mentioned above to `dev` and merge it.
+3. Update `poetry.lock` by deleting the `poetry.lock` file first and then running the `poetry lock` command. This is required to update the `poetry.lock` file with the new version of the dependencies, otherwise it does not properly update and mostly uses the cached dependency versions in the existing `poetry.lock` file.
+4. Create a PR with the changes mentioned above to `dev` and merge it.
 
 #### Perform Release
 1. Go to [Release action](https://github.com/topoteretes/cognee/actions/workflows/release.yml)
@@ -17,7 +18,8 @@
 #### Prepare release
 1. Set the project version that will be released in [pyproject.toml](https://github.com/topoteretes/cognee/blob/dev/pyproject.toml#L4)
 2. Update `uv.lock` with `uv lock` lock command
-3. Create a PR with the changes mentioned above to `dev` and merge it.
+3. Update `poetry.lock` by deleting the `poetry.lock` file first and then running the `poetry lock` command. This is required to update the `poetry.lock` file with the new version of the dependencies, otherwise it does not properly update and mostly uses the cached dependency versions in the existing `poetry.lock` file.
+4. Create a PR with the changes mentioned above to `dev` and merge it.
 
 #### Perform Release
 1. Go to [Release action](https://github.com/topoteretes/cognee/actions/workflows/release.yml)

@@ -21,6 +21,7 @@ class RelationalConfig(BaseSettings):
     db_password: Union[str, None] = None  # "cognee"
     db_provider: str = "sqlite"
     database_connect_args: Union[str, None] = None
+    pool_args: Union[str, None] = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="allow")
 
@@ -42,6 +43,17 @@ class RelationalConfig(BaseSettings):
                     self.database_connect_args = {}
             except json.JSONDecodeError:
                 self.database_connect_args = {}
+
+        # Parse pool_args if provided as JSON string
+        if self.pool_args and isinstance(self.pool_args, str):
+            try:
+                parsed_args = json.loads(self.pool_args)
+                if isinstance(parsed_args, dict):
+                    self.pool_args = parsed_args
+                else:
+                    self.pool_args = {}
+            except json.JSONDecodeError:
+                self.pool_args = {}
 
         return self
 
@@ -65,6 +77,7 @@ class RelationalConfig(BaseSettings):
             "db_password": self.db_password,
             "db_provider": self.db_provider,
             "database_connect_args": self.database_connect_args,
+            "pool_args": self.pool_args,
         }
 
 

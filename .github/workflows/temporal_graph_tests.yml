@@ -2,6 +2,7 @@ name: Temporal Graph Tests
 
 permissions:
   contents: read
+  packages: read
 
 on:
   workflow_call:
@@ -11,12 +12,18 @@ on:
         type: string
         default: "all"
         description: "Which vector databases to test (comma-separated list or 'all')"
+      ci-image:
+        required: false
+        type: string
+        default: ''
+        description: "Optional container image for CI"
 
 jobs:
   run_temporal_graph_kuzu_lance_sqlite:
     name: Temporal Graph test Kuzu (lancedb + sqlite)
     runs-on: ubuntu-22.04
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu/lance/sqlite') }}
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@v6
@@ -94,6 +101,7 @@ jobs:
       name: Temporal Graph test Kuzu (postgres + pgvector)
       runs-on: ubuntu-22.04
       if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu/pgvector/postgres') }}
+      container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
       services:
         postgres:
           image: pgvector/pgvector:pg17
@@ -139,7 +147,7 @@ jobs:
             VECTOR_DB_PROVIDER: 'pgvector'
             DB_PROVIDER: 'postgres'
             DB_NAME: 'cognee_db'
-            DB_HOST: '127.0.0.1'
+            DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
             DB_PORT: 5432
             DB_USERNAME: cognee
             DB_PASSWORD: cognee
