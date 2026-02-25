@@ -79,6 +79,13 @@ class SQLAlchemyAdapter:
         else:
             if pool_args is None:
                 pool_args = {}
+
+            if "max_overflow" not in pool_args or pool_args["max_overflow"] is None:
+                pool_args["max_overflow"] = 20
+
+            if "pool_pre_ping" not in pool_args or pool_args["pool_pre_ping"] is None:
+                pool_args["pool_pre_ping"] = True
+
             self.engine = create_async_engine(
                 connection_string,
                 **pool_args,
