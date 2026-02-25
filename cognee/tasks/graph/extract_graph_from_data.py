@@ -1,6 +1,8 @@
 import asyncio
 from typing import Dict, Type, List, Optional
+import numpy as np
 
+import pandas as pd
 from pandas import DataFrame
 from pydantic import BaseModel
 
@@ -61,14 +63,20 @@ def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
 
 
 async def cache_nodes(df, nodes):
-    if df is not None:
+    if df is None:
         return
     vector_engine = get_vector_engine()
+    df_new = pd.DataFrame()
     for chunk in nodes:
         for _, node in chunk.contains:
             if node and (isinstance(node, Entity) or isinstance(node, EntityType)):
                 vector = await vector_engine.embed_data(node.name)
-                df[node.name] = vector
+                # Store as numeric column (not list-in-cell) for fast vectorized ops.
+                df_new[node.name] = pd.Series(vector[0], dtype=float)
+    # avoid fragmentation, improve speed, keep the same df
+    combined = pd.concat([df, df_new], axis=1)
+    df._mgr = combined._mgr
+    df._item_cache.clear()
 
 
 async def integrate_chunk_graphs(
@@ -164,22 +172,45 @@ async def integrate_chunk_graphs(
     return data_chunks
 
 
-async def build_prompt(chunk, vector_search_limit, custom_prompt) -> Optional[str]:
+def top_k_by_cosine(df: DataFrame, query_vector, k: int = 5) -> List[str]:
+    """
+    Returns top-k (name, cosine_similarity) pairs where each column of df is a vector.
+    Assumes df columns are named by vector key and each column is a 1D vector.
+    """
+    if df is None or df.empty:
+        return []
+
+    # columns are vectors; shape: (dim, n)
+    M = df.to_numpy(dtype=float)  # shape (dim, n_cols)
+    q = np.asarray(query_vector, dtype=float)  # shape (dim,)
+
+    q_norm = np.linalg.norm(q)
+    if q_norm == 0 or M.size == 0:
+        return []
+
+    # cosine similarity for all columns at once
+    denom = np.linalg.norm(M, axis=0) * q_norm
+    # avoid divide-by-zero
+    denom = np.where(denom == 0, np.inf, denom)
+    sims = (M.T @ q) / denom  # shape (n_cols,)
+
+    # top-k indices
+    k = min(k, sims.shape[0])
+    idx = np.argpartition(-sims, k - 1)[:k]
+    idx = idx[np.argsort(-sims[idx])]
+
+    names = df.columns.to_numpy()
+    return [names[i] for i in idx]
+
+
+async def build_prompt(chunk, df, vector_search_limit, custom_prompt) -> Optional[str]:
     vector_engine = get_vector_engine()
-    exists = await vector_engine.has_collection(collection_name="Entity_name")
+    query_vector = (await vector_engine.embedding_engine.embed_text([chunk.text]))[0]
+    closest_matches = top_k_by_cosine(df, query_vector)
 
-    if not (exists and custom_prompt):
-        return custom_prompt
-
-    results_per_chunk = await vector_engine.search(
-        collection_name="Entity_name",
-        query_text=chunk.text,
-        limit=vector_search_limit,
-        include_payload=True,
-    )
     prompt = custom_prompt
-    for result in results_per_chunk:
-        prompt = prompt + "\n  -" + result.payload["text"]
+    for match in closest_matches:
+        prompt = prompt + "\n  -" + match
     return prompt
 
 
@@ -207,7 +238,7 @@ async def extract_graph_from_data(
 
     if use_poc:
         chunk_prompts = await asyncio.gather(
-            *[build_prompt(chunk, vector_search_limit, custom_prompt) for chunk in data_chunks]
+            *[build_prompt(chunk, df, vector_search_limit, custom_prompt) for chunk in data_chunks]
         )
         chunk_graphs = await asyncio.gather(
             *[

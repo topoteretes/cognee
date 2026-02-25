@@ -43,7 +43,7 @@ async def _run():
     with open("prompts/prompt1.txt", "r") as f:
         custom_prompt_text = f.read()
 
-    for i in range(1, 2):
+    for i in range(2, 5):
         example_id = str(i)
         df = pd.DataFrame()
         await main(
