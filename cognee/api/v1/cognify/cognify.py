@@ -31,7 +31,7 @@ from cognee.tasks.temporal_graph.extract_events_and_entities import extract_even
 from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
     extract_knowledge_graph_from_events,
 )
-from cognee.modules.observability import get_tracer_if_enabled
+from cognee.modules.observability import new_span, COGNEE_PIPELINE_NAME, COGNEE_RESULT_SUMMARY
 
 
 logger = get_logger("cognify")
@@ -196,22 +196,10 @@ async def cognify(
         - LLM_RATE_LIMIT_ENABLED: Enable rate limiting (default: False)
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
-    tracer = get_tracer_if_enabled()
-
-    if tracer is not None:
-        from cognee.modules.observability import COGNEE_PIPELINE_NAME
-
-        span_ctx = tracer.start_as_current_span("cognee.api.cognify")
-    else:
-        from contextlib import nullcontext
-
-        span_ctx = nullcontext()
-
-    with span_ctx as span:
-        if span is not None:
-            span.set_attribute(COGNEE_PIPELINE_NAME, "cognify")
-            if datasets is not None:
-                span.set_attribute("cognee.cognify.datasets", str(datasets))
+    with new_span("cognee.api.cognify") as span:
+        span.set_attribute(COGNEE_PIPELINE_NAME, "cognify")
+        if datasets is not None:
+            span.set_attribute("cognee.cognify.datasets", str(datasets))
 
         if config is None:
             ontology_config = get_ontology_env_config()
@@ -268,14 +256,11 @@ async def cognify(
             data_per_batch=data_per_batch,
         )
 
-        if span is not None:
-            from cognee.modules.observability import COGNEE_RESULT_SUMMARY
-
-            dataset_desc = str(datasets) if datasets else "all datasets"
-            span.set_attribute(
-                COGNEE_RESULT_SUMMARY,
-                f"Cognify completed for {dataset_desc}",
-            )
+        dataset_desc = str(datasets) if datasets else "all datasets"
+        span.set_attribute(
+            COGNEE_RESULT_SUMMARY,
+            f"Cognify completed for {dataset_desc}",
+        )
 
         return result
 

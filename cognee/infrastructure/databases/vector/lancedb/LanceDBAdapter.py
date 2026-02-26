@@ -18,7 +18,7 @@ from ..models.ScoredResult import ScoredResult
 from ..utils import normalize_distances
 from ..vector_db_interface import VectorDBInterface
 
-from cognee.modules.observability import get_tracer_if_enabled
+from cognee.modules.observability import new_span
 from cognee.modules.observability.tracing import (
     COGNEE_DB_SYSTEM,
     COGNEE_VECTOR_COLLECTION,
@@ -247,19 +247,9 @@ class LanceDBAdapter(VectorDBInterface):
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
     ):
-        tracer = get_tracer_if_enabled()
-
-        if tracer is not None:
-            span_ctx = tracer.start_as_current_span("cognee.db.vector.search")
-        else:
-            from contextlib import nullcontext
-
-            span_ctx = nullcontext()
-
-        with span_ctx as otel_span:
-            if otel_span is not None:
-                otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
-                otel_span.set_attribute(COGNEE_VECTOR_COLLECTION, collection_name)
+        with new_span("cognee.db.vector.search") as otel_span:
+            otel_span.set_attribute(COGNEE_DB_SYSTEM, "lancedb")
+            otel_span.set_attribute(COGNEE_VECTOR_COLLECTION, collection_name)
 
             if query_text is None and query_vector is None:
                 raise MissingQueryParameterError()
@@ -274,8 +264,7 @@ class LanceDBAdapter(VectorDBInterface):
 
             # LanceDB search will break if limit is 0 so we must return
             if limit <= 0:
-                if otel_span is not None:
-                    otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
+                otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
                 return []
 
             # Note: Exclude payload if not needed to optimize performance
@@ -309,8 +298,7 @@ class LanceDBAdapter(VectorDBInterface):
                 )
 
             if not result_values:
-                if otel_span is not None:
-                    otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
+                otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
                 return []
 
             normalized_values = normalize_distances(result_values)
@@ -324,8 +312,7 @@ class LanceDBAdapter(VectorDBInterface):
                 for value_index, result in enumerate(result_values)
             ]
 
-            if otel_span is not None:
-                otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, len(results))
+            otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, len(results))
 
             return results
 

@@ -1,4 +1,5 @@
 from typing import Optional
+from contextlib import contextmanager
 
 from .trace_context import (
     enable_tracing,
@@ -29,8 +30,26 @@ from .tracing import (
 )
 
 
+class _NullSpan:
+    """No-op span used when tracing is disabled."""
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
 def get_tracer_if_enabled() -> Optional[object]:
     """Return the OTEL tracer if tracing is enabled, None otherwise."""
     if is_tracing_enabled():
         return get_tracer()
     return None
+
+
+@contextmanager
+def new_span(name: str):
+    """Context manager that creates an OTEL span if tracing is enabled, or yields None."""
+    tracer = get_tracer_if_enabled()
+    if tracer is not None:
+        with tracer.start_as_current_span(name) as span:
+            yield span
+    else:
+        yield _NullSpan()

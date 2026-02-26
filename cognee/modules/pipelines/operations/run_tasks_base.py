@@ -1,10 +1,11 @@
 import inspect
+from opentelemetry.trace import StatusCode
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry
 from cognee import __version__ as cognee_version
-from cognee.modules.observability import get_tracer_if_enabled
 from cognee.modules.observability import (
+    new_span,
     COGNEE_PIPELINE_TASK_NAME,
     COGNEE_RESULT_SUMMARY,
     COGNEE_RESULT_COUNT,
@@ -111,19 +112,10 @@ async def handle_task(
     if has_context:
         kwargs["context"] = context
 
-    tracer = get_tracer_if_enabled()
     task_name = running_task.executable.__name__
 
-    if tracer is not None:
-        span_ctx = tracer.start_as_current_span(f"cognee.pipeline.task.{task_name}")
-    else:
-        from contextlib import nullcontext
-
-        span_ctx = nullcontext()
-
-    with span_ctx as span:
-        if span is not None:
-            span.set_attribute(COGNEE_PIPELINE_TASK_NAME, task_name)
+    with new_span(f"cognee.pipeline.task.{task_name}") as span:
+        span.set_attribute(COGNEE_PIPELINE_TASK_NAME, task_name)
 
         try:
             result_count = 0
@@ -137,12 +129,11 @@ async def handle_task(
                 async for result in run_tasks_base(leftover_tasks, result_data, user, context):
                     yield result
 
-            if span is not None:
-                span.set_attribute(COGNEE_RESULT_COUNT, result_count)
-                span.set_attribute(
-                    COGNEE_RESULT_SUMMARY,
-                    _build_result_summary(running_task.executable, task_name, result_count),
-                )
+            span.set_attribute(COGNEE_RESULT_COUNT, result_count)
+            span.set_attribute(
+                COGNEE_RESULT_SUMMARY,
+                _build_result_summary(running_task.executable, task_name, result_count),
+            )
 
             pipe_name = context.get("pipeline_name") if isinstance(context, dict) else None
             input_node_set = _extract_node_set(args)
@@ -169,11 +160,8 @@ async def handle_task(
             )
 
         except Exception as error:
-            if span is not None:
-                from opentelemetry.trace import StatusCode
-
-                span.set_status(StatusCode.ERROR, str(error))
-                span.record_exception(error)
+            span.set_status(StatusCode.ERROR, str(error))
+            span.record_exception(error)
 
             logger.error(
                 f"{task_type} task errored: `{task_name}`\n{str(error)}\n",

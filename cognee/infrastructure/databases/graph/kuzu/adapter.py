@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, Union, Optional, Tuple, Type
-
+from opentelemetry.trace import StatusCode
 from cognee.exceptions import CogneeValidationError
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
@@ -24,7 +24,13 @@ from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.tasks.temporal_graph.models import Timestamp
 from cognee.infrastructure.databases.cache.config import get_cache_config
-from cognee.modules.observability import get_tracer_if_enabled
+from cognee.modules.observability import new_span
+from cognee.modules.observability.tracing import (
+    COGNEE_DB_SYSTEM,
+    COGNEE_DB_QUERY,
+    COGNEE_DB_ROW_COUNT,
+    redact_secrets,
+)
 
 logger = get_logger()
 
@@ -229,26 +235,9 @@ class KuzuAdapter(GraphDBInterface):
 
             - List[Tuple]: A list of tuples representing the query results.
         """
-        tracer = get_tracer_if_enabled()
-
-        if tracer is not None:
-            from cognee.modules.observability.tracing import (
-                COGNEE_DB_SYSTEM,
-                COGNEE_DB_QUERY,
-                COGNEE_DB_ROW_COUNT,
-                redact_secrets,
-            )
-
-            span_ctx = tracer.start_as_current_span("cognee.db.graph.query")
-        else:
-            from contextlib import nullcontext
-
-            span_ctx = nullcontext()
-
-        with span_ctx as otel_span:
-            if otel_span is not None:
-                otel_span.set_attribute(COGNEE_DB_SYSTEM, "kuzu")
-                otel_span.set_attribute(COGNEE_DB_QUERY, redact_secrets(query[:500]))
+        with new_span("cognee.db.graph.query") as otel_span:
+            otel_span.set_attribute(COGNEE_DB_SYSTEM, "kuzu")
+            otel_span.set_attribute(COGNEE_DB_QUERY, redact_secrets(query[:500]))
 
             loop = asyncio.get_running_loop()
             params = params or {}
@@ -299,16 +288,11 @@ class KuzuAdapter(GraphDBInterface):
                 else:
                     result = await loop.run_in_executor(self.executor, blocking_query)
 
-                if otel_span is not None:
-                    otel_span.set_attribute(COGNEE_DB_ROW_COUNT, len(result))
+                otel_span.set_attribute(COGNEE_DB_ROW_COUNT, len(result))
                 return result
             except Exception as e:
-                if otel_span is not None:
-                    from opentelemetry.trace import StatusCode
-
-                    otel_span.set_status(StatusCode.ERROR, str(e))
-                    otel_span.record_exception(e)
-                raise
+                otel_span.set_status(StatusCode.ERROR, str(e))
+                otel_span.record_exception(e)
 
     def close(self):
         if self.connection:

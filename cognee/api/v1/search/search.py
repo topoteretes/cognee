@@ -13,7 +13,13 @@ from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
 from cognee.exceptions import CogneeValidationError
 from cognee.modules.users.exceptions.exceptions import UserNotFoundError
-from cognee.modules.observability import get_tracer_if_enabled
+from cognee.modules.observability import (
+    new_span,
+    COGNEE_SEARCH_QUERY,
+    COGNEE_SEARCH_TYPE,
+    COGNEE_RESULT_SUMMARY,
+    COGNEE_RESULT_COUNT,
+)
 
 logger = get_logger()
 
@@ -175,25 +181,10 @@ async def search(
         - GRAPH_DATABASE_PROVIDER: Must match what was used during cognify
 
     """
-    tracer = get_tracer_if_enabled()
-
-    if tracer is not None:
-        from cognee.modules.observability import (
-            COGNEE_SEARCH_QUERY,
-            COGNEE_SEARCH_TYPE,
-        )
-
-        span_ctx = tracer.start_as_current_span("cognee.api.search")
-    else:
-        from contextlib import nullcontext
-
-        span_ctx = nullcontext()
-
-    with span_ctx as span:
-        if span is not None:
-            span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
-            span.set_attribute(COGNEE_SEARCH_TYPE, str(query_type.value))
-            span.set_attribute("cognee.search.top_k", top_k)
+    with new_span("cognee.api.search") as span:
+        span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
+        span.set_attribute(COGNEE_SEARCH_TYPE, str(query_type.value))
+        span.set_attribute("cognee.search.top_k", top_k)
 
         # We use lists from now on for datasets
         if isinstance(datasets, UUID) or isinstance(datasets, str):
@@ -240,14 +231,11 @@ async def search(
             retriever_specific_config=retriever_specific_config,
         )
 
-        if span is not None:
-            from cognee.modules.observability import COGNEE_RESULT_SUMMARY, COGNEE_RESULT_COUNT
-
-            n = len(filtered_search_results) if filtered_search_results else 0
-            span.set_attribute(COGNEE_RESULT_COUNT, n)
-            span.set_attribute(
-                COGNEE_RESULT_SUMMARY,
-                f"Found {n} result(s) via {query_type.value}",
-            )
+        n = len(filtered_search_results) if filtered_search_results else 0
+        span.set_attribute(COGNEE_RESULT_COUNT, n)
+        span.set_attribute(
+            COGNEE_RESULT_SUMMARY,
+            f"Found {n} result(s) via {query_type.value}",
+        )
 
         return filtered_search_results

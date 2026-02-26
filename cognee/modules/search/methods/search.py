@@ -27,7 +27,7 @@ from cognee.modules.data.methods.get_authorized_existing_datasets import (
 from cognee import __version__ as cognee_version
 from cognee.modules.search.methods.get_retriever_output import get_retriever_output
 from cognee.modules.observability import (
-    get_tracer_if_enabled,
+    new_span,
     COGNEE_SEARCH_TYPE,
     COGNEE_SEARCH_QUERY,
 )
@@ -77,23 +77,14 @@ async def search(
         },
     )
 
-    tracer = get_tracer_if_enabled()
-    if tracer is not None:
-        span_ctx = tracer.start_as_current_span("cognee.search.authorize")
-    else:
-        from contextlib import nullcontext
-
-        span_ctx = nullcontext()
-
-    with span_ctx as span:
-        if span is not None:
-            span.set_attribute(COGNEE_SEARCH_TYPE, query_type.value)
-            span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
-            span.set_attribute("cognee.search.top_k", top_k)
-            span.set_attribute(
-                "cognee.search.dataset_count",
-                len(dataset_ids) if dataset_ids else 0,
-            )
+    with new_span("cognee.search.authorize") as span:
+        span.set_attribute(COGNEE_SEARCH_TYPE, query_type.value)
+        span.set_attribute(COGNEE_SEARCH_QUERY, query_text[:500])
+        span.set_attribute("cognee.search.top_k", top_k)
+        span.set_attribute(
+            "cognee.search.dataset_count",
+            len(dataset_ids) if dataset_ids else 0,
+        )
 
         search_results = await authorized_search(
             query_type=query_type,
@@ -112,8 +103,7 @@ async def search(
             retriever_specific_config=retriever_specific_config,
         )
 
-        if span is not None:
-            span.set_attribute("cognee.search.result_count", len(search_results))
+        span.set_attribute("cognee.search.result_count", len(search_results))
 
     send_telemetry(
         "cognee.search EXECUTION COMPLETED",
@@ -213,18 +203,9 @@ async def search_in_datasets_context(
         triplet_distance_penalty: Optional[float] = 3.5,
         retriever_specific_config: Optional[dict] = None,
     ) -> Tuple[Any, Union[str, List[Edge]], List[Dataset]]:
-        tracer = get_tracer_if_enabled()
-        if tracer is not None:
-            span_ctx = tracer.start_as_current_span("cognee.search.dataset")
-        else:
-            from contextlib import nullcontext
-
-            span_ctx = nullcontext()
-
-        with span_ctx as span:
-            if span is not None:
-                span.set_attribute("cognee.search.dataset_name", dataset.name or "")
-                span.set_attribute("cognee.search.dataset_id", str(dataset.id))
+        with new_span("cognee.search.dataset") as span:
+            span.set_attribute("cognee.search.dataset_name", dataset.name or "")
+            span.set_attribute("cognee.search.dataset_id", str(dataset.id))
 
             # Set database configuration in async context for each dataset user has access for
             await set_database_global_context_variables(dataset.id, dataset.owner_id)
@@ -248,8 +229,7 @@ async def search_in_datasets_context(
                         f"Search attempt on an empty knowledge graph - no data has been added to this dataset: {dataset.name}"
                     )
 
-                if span is not None:
-                    span.set_attribute("cognee.search.graph_empty", True)
+                span.set_attribute("cognee.search.graph_empty", True)
 
             # Get retriever output in the context of the current dataset
             return await get_retriever_output(
