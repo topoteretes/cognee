@@ -197,7 +197,7 @@ async def cognify(
     """
 
     # TODO: An ugly solution for now, this should be changed
-    if kwargs["dlt_ingestion"]:
+    if "dlt_ingestion" in kwargs:
         tasks = await get_dlt_ingestion_tasks()
     else:
         if config is None:
