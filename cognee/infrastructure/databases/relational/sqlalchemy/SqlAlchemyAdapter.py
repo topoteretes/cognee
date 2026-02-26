@@ -80,11 +80,20 @@ class SQLAlchemyAdapter:
             if pool_args is None:
                 pool_args = {}
 
-            if "max_overflow" not in pool_args or pool_args["max_overflow"] is None:
+            if pool_args.get("pool_size") is None:
+                pool_args["pool_size"] = 20
+
+            if pool_args.get("max_overflow") is None:
                 pool_args["max_overflow"] = 20
 
-            if "pool_pre_ping" not in pool_args or pool_args["pool_pre_ping"] is None:
+            if pool_args.get("pool_pre_ping") is None:
                 pool_args["pool_pre_ping"] = True
+
+            if pool_args.get("pool_recycle") is None:
+                pool_args["pool_recycle"] = 280
+
+            if pool_args.get("pool_timeout") is None:
+                pool_args["pool_timeout"] = 280
 
             self.engine = create_async_engine(
                 connection_string,
