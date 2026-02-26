@@ -330,6 +330,43 @@ async def main():
     logger.info("Session SDK e2e tests (get_session, add_feedback, delete_feedback) passed")
     ###### END E2E: NEW SESSION SDK #####
 
+    ###### E2E: Automatic feedback detection (when caching and auto_feedback enabled) ######
+    logger.info("Starting e2e tests for automatic feedback detection")
+    session_id_autofeedback = "test_session_autofeedback"
+    await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="What is TechCorp?",
+        session_id=session_id_autofeedback,
+    )
+    result_autofeedback = await cognee.search(
+        query_type=SearchType.GRAPH_COMPLETION,
+        query_text="Thanks, that was really helpful!",
+        session_id=session_id_autofeedback,
+    )
+    assert result_autofeedback is not None, (
+        "Second search (feedback-like message) should return a result"
+    )
+    entries_autofeedback = await cognee.session.get_session(
+        session_id=session_id_autofeedback, user=user, last_n=10
+    )
+    assert len(entries_autofeedback) == 1, (
+        "With auto_feedback enabled, a feedback-only message must not create a new QA; "
+        f"expected 1 entry, got {len(entries_autofeedback)}"
+    )
+    entry_autofeedback = entries_autofeedback[0]
+    assert entry_autofeedback.question == "What is TechCorp?", (
+        "Single entry must be the first question (feedback was attached to it, not stored as new QA)"
+    )
+    assert getattr(entry_autofeedback, "feedback_text", None) and getattr(
+        entry_autofeedback, "feedback_score", None
+    ), "Automatic feedback must be stored on the previous QA (feedback_text or feedback_score set)"
+    logger.info(
+        "Automatic feedback detection e2e passed: feedback_text=%s, feedback_score=%s",
+        getattr(entry_autofeedback, "feedback_text", None),
+        getattr(entry_autofeedback, "feedback_score", None),
+    )
+    ###### END E2E: Automatic feedback detection #####
+
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
 

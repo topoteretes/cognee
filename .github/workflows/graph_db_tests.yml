@@ -2,6 +2,7 @@ name: Reusable Graph DB Tests
 
 permissions:
   contents: read
+  packages: read
 
 on:
   workflow_call:
@@ -11,11 +12,16 @@ on:
         type: string
         default: "all"
         description: "Which vector databases to test (comma-separated list or 'all')"
+      ci-image:
+        required: false
+        type: string
+        default: ''
 
 jobs:
   run-kuzu-tests:
     name: Kuzu Tests
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'kuzu') }}
     steps:
       - name: Check out

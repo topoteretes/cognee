@@ -8,6 +8,10 @@ on:
         type: string
         default: "all"
         description: "Which vector databases to test (comma-separated list or 'all')"
+      ci-image:
+        required: false
+        type: string
+        default: ''
     secrets:
 
       POSTGRES_PASSWORD:
@@ -62,6 +66,7 @@ jobs:
   run-postgres-tests:
     name: PostgreSQL Tests
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'postgres') }}
     services:
       postgres:
@@ -102,11 +107,13 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
+          DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
         run: uv run python ./cognee/tests/test_pgvector.py
 
   run-pgvector-multi-user-tests:
     name: PGVector Multi-User Tests
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     if: ${{ inputs.databases == 'all' || contains(inputs.databases, 'postgres') }}
     services:
       postgres:
@@ -146,7 +153,7 @@ jobs:
           EMBEDDING_ENDPOINT: ${{ secrets.EMBEDDING_ENDPOINT }}
           EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
-          VECTOR_DB_HOST: 127.0.0.1
+          VECTOR_DB_HOST: ${{ inputs.ci-image != '' && 'postgres' || '127.0.0.1' }}
           VECTOR_DB_PORT: 5432
           VECTOR_DB_USERNAME: cognee
           VECTOR_DB_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
@@ -156,6 +163,7 @@ jobs:
   run-lancedb-tests:
     name: LanceDB Tests
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out
         uses: actions/checkout@v6

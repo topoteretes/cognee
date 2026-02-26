@@ -6,6 +6,7 @@ from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.ll
     get_llm_client,
 )
 from cognee.shared.logging_utils import get_logger
+from cognee.infrastructure.llm.LLMGateway import LLMGateway
 
 logger = get_logger()
 
@@ -74,25 +75,13 @@ def get_model_max_completion_tokens(model_name: str):
 async def test_llm_connection():
     """
     Test connectivity to the LLM endpoint using a simple completion call.
-
-    Uses a lightweight litellm.acompletion() call instead of the full instructor
-    structured output pipeline to avoid failures with local models that cannot
-    produce instructor-compatible structured JSON. The call is wrapped in a timeout
-    to prevent indefinite hangs.
     """
-    from cognee.infrastructure.llm.config import get_llm_config
-
-    config = get_llm_config()
     try:
-        await asyncio.wait_for(
-            litellm.acompletion(
-                model=config.llm_model,
-                messages=[{"role": "user", "content": "Say ok"}],
-                api_key=config.llm_api_key,
-                api_base=config.llm_endpoint,
-                max_tokens=5,
-            ),
-            timeout=CONNECTION_TEST_TIMEOUT_SECONDS,
+        logger.info("Testing connection to LLM endpoint...")
+        await LLMGateway.acreate_structured_output(
+            text_input="test",
+            system_prompt='Respond to me with the following string: "test"',
+            response_model=str,
         )
     except asyncio.TimeoutError:
         msg = (
@@ -127,6 +116,7 @@ async def test_embedding_connection():
         # NOTE: Vector engine import must be done in function to avoid circular import issue
         from cognee.infrastructure.databases.vector import get_vector_engine
 
+        logger.info("Testing connection to Embedding endpoint...")
         await asyncio.wait_for(
             get_vector_engine().embedding_engine.embed_text("test"),
             timeout=CONNECTION_TEST_TIMEOUT_SECONDS,

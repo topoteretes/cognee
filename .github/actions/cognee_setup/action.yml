@@ -19,12 +19,24 @@ runs:
   using: "composite"
   steps:
 
+    - name: Detect CI container
+      id: detect-env
+      shell: bash
+      run: |
+        if [ -f "/app/.anon_id" ] && command -v uv &> /dev/null && [ -d "/app/.venv" ]; then
+          echo "in-container=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "in-container=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Set up Python
+      if: steps.detect-env.outputs.in-container != 'true'
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
 
     - name: Install uv
+      if: steps.detect-env.outputs.in-container != 'true'
       uses: astral-sh/setup-uv@v4
       with:
         enable-cache: true
@@ -36,7 +48,8 @@ runs:
         rm uv.lock
         uv lock
 
-    - name: Install dependencies
+    - name: Install dependencies (bare runner)
+      if: steps.detect-env.outputs.in-container != 'true'
       shell: bash
       run: |
         EXTRA_ARGS=""
@@ -47,6 +60,19 @@ runs:
           done
         fi
         uv sync --extra api --extra docs --extra evals --extra codegraph --extra ollama --extra dev --extra neo4j --extra redis $EXTRA_ARGS
+
+    - name: Install dependencies (container - link project only)
+      if: steps.detect-env.outputs.in-container == 'true'
+      shell: bash
+      env:
+        UV_PROJECT_ENVIRONMENT: /app/.venv
+      run: |
+        # Persist for all subsequent steps so uv run uses /app/.venv
+        echo "UV_PROJECT_ENVIRONMENT=/app/.venv" >> "$GITHUB_ENV"
+        # Install project into the pre-built venv; --inexact keeps pre-installed extras intact
+        uv sync --frozen --inexact
+        # Prevent uv run from re-syncing and stripping extras
+        echo "UV_NO_SYNC=true" >> "$GITHUB_ENV"
 
     - name: Add telemetry identifier for telemetry test and in case telemetry is enabled by accident
       shell: bash

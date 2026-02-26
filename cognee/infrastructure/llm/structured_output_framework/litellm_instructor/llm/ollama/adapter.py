@@ -126,7 +126,7 @@ class OllamaAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def create_transcript(self, input_file: str, **kwargs) -> str:
+    async def create_transcript(self, input: str, **kwargs) -> str:
         """
         Generate an audio transcript from a user query.
 
@@ -137,7 +137,7 @@ class OllamaAPIAdapter(LLMInterface):
         Parameters:
         -----------
 
-            - input_file (str): The path to the audio file to be transcribed.
+            - input (str): The path to the audio file to be transcribed.
 
         Returns:
         --------
@@ -145,7 +145,7 @@ class OllamaAPIAdapter(LLMInterface):
             - str: The transcription of the audio as a string.
         """
 
-        async with open_data_file(input_file, mode="rb") as audio_file:
+        async with open_data_file(input, mode="rb") as audio_file:
             transcription = self.aclient.audio.transcriptions.create(
                 model="whisper-1",  # Ensure the correct model for transcription
                 file=audio_file,
@@ -167,7 +167,7 @@ class OllamaAPIAdapter(LLMInterface):
         before_sleep=before_sleep_log(logger, logging.DEBUG),
         reraise=True,
     )
-    async def transcribe_image(self, input_file: str, **kwargs) -> str:
+    async def transcribe_image(self, input: str, **kwargs) -> str:
         """
         Transcribe content from an image using base64 encoding.
 
@@ -179,7 +179,7 @@ class OllamaAPIAdapter(LLMInterface):
         Parameters:
         -----------
 
-            - input_file (str): The path to the image file to be transcribed.
+            - input (str): The path to the image file to be transcribed.
 
         Returns:
         --------
@@ -187,7 +187,7 @@ class OllamaAPIAdapter(LLMInterface):
             - str: The transcription of the image's content as a string.
         """
 
-        async with open_data_file(input_file, mode="rb") as image_file:
+        async with open_data_file(input, mode="rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
 
         response = self.aclient.chat.completions.create(
