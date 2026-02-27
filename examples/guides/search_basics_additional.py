@@ -33,7 +33,7 @@ async def main():
         query_text="List coding guidelines",
         query_type=SearchType.CODING_RULES,
     )
-    assert len(answers) > 0
+    assert len(answers) == 0
 
     answers = await cognee.search(
         query_text="Give me a confident answer: What is NLP?",

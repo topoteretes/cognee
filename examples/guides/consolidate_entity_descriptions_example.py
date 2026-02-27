@@ -14,10 +14,10 @@ Ignore all other entities.
 """
 
 graph_visualization_path_before_enrichment = path.join(
-    path.dirname(__file__), "before_enrichment.html"
+    path.dirname(__file__), ".artifacts", "before_consolidate_enrichment_entity_descriptions.html"
 )
 graph_visualization_path_after_enrichment = path.join(
-    path.dirname(__file__), "after_enrichment.html"
+    path.dirname(__file__), ".artifacts", "after_consolidate_enrichment_entity_descriptions.html"
 )
 
 

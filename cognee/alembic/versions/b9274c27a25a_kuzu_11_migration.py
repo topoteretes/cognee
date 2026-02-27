@@ -31,7 +31,7 @@ def upgrade() -> None:
 
         databases_root = os.path.join(base_config.system_root_directory, "databases")
         if not os.path.isdir(databases_root):
-            raise FileNotFoundError(f"Directory not found: {databases_root}")
+            return
 
         for current_path, dirnames, _ in os.walk(databases_root):
             # If file is kuzu graph database
