@@ -62,6 +62,7 @@ def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
 
 
 _df_lock = asyncio.Lock()
+_reused_items_lock = asyncio.Lock()
 
 
 async def cache_nodes(df, nodes):
@@ -225,6 +226,27 @@ async def build_prompt(chunk, df, vector_search_limit, custom_prompt) -> Optiona
     return prompt
 
 
+def _count_reused_items_in_prompt_tail(prompt: Optional[str], graph, vector_search_limit) -> int:
+    if not prompt or not getattr(graph, "nodes", None):
+        return 0
+    lines = [line.strip() for line in prompt.splitlines() if line.strip()]
+    if not lines:
+        return 0
+
+    # Consider the last vector_search_limit lines (or fewer if prompt is shorter).
+    tail_lines = lines[-vector_search_limit:]
+    tail_blob = "\n".join(tail_lines).casefold()
+
+    count = 0
+    for node in graph.nodes:
+        name = getattr(node, "name", None)
+        if not name:
+            continue
+        if name.casefold() in tail_blob:
+            count += 1
+    return count
+
+
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     context: Dict,
@@ -266,6 +288,18 @@ async def extract_graph_from_data(
                 for chunk in data_chunks
             ]
         )
+
+    if use_poc:
+        reused_total = sum(
+            _count_reused_items_in_prompt_tail(prompt, graph, vector_search_limit)
+            for prompt, graph in zip(chunk_prompts, chunk_graphs)
+        )
+        if reused_total:
+            # "Atomic" update for shared kwargs dict across async tasks.
+            async with _reused_items_lock:
+                stats = kwargs.get("stats")
+                if isinstance(stats, dict):
+                    stats["reused_entities"] = (stats.get("reused_entities") or 0) + reused_total
 
     # Note: Filter edges with missing source or target nodes
     if graph_model == KnowledgeGraph:
