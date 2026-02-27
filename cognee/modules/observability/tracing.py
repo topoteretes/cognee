@@ -250,7 +250,7 @@ def setup_tracing(console_output: bool = False) -> "trace.Tracer":
         _provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
 
     trace.set_tracer_provider(_provider)
-    _tracer = trace.get_tracer("cognee", version)
+    _tracer = _provider.get_tracer("cognee", version)
     return _tracer
 
 

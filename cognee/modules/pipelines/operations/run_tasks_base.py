@@ -119,12 +119,23 @@ async def handle_task(
 
         try:
             result_count = 0
+            pipe_name = context.get("pipeline_name") if isinstance(context, dict) else None
+            input_node_set = _extract_node_set(args)
+            user_label = getattr(user, "email", None) or (str(user.id) if user else None)
 
-            async for result_data in running_task.execute(args, next_task_batch_size):
+            async for result_data in running_task.execute(args, kwargs, next_task_batch_size):
                 if isinstance(result_data, list):
                     result_count += len(result_data)
                 else:
                     result_count += 1
+
+                _stamp_provenance(
+                    result_data,
+                    pipe_name,
+                    task_name,
+                    node_set=input_node_set,
+                    user_label=user_label,
+                )
 
                 async for result in run_tasks_base(leftover_tasks, result_data, user, context):
                     yield result
@@ -134,19 +145,6 @@ async def handle_task(
                 COGNEE_RESULT_SUMMARY,
                 _build_result_summary(running_task.executable, task_name, result_count),
             )
-
-            pipe_name = context.get("pipeline_name") if isinstance(context, dict) else None
-            input_node_set = _extract_node_set(args)
-            user_label = getattr(user, "email", None) or (str(user.id) if user else None)
-
-            async for result_data in running_task.execute(args, kwargs, next_task_batch_size):
-                _stamp_provenance(
-                    result_data,
-                    pipe_name,
-                    task_name,
-                    node_set=input_node_set,
-                    user_label=user_label,
-                )
 
             logger.info(f"{task_type} task completed: `{task_name}`")
             send_telemetry(
