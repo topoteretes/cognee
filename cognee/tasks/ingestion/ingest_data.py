@@ -3,7 +3,11 @@ import inspect
 from uuid import UUID
 from typing import Union, BinaryIO, Any, List, Optional
 
-from dlt.extract import DltResource, SourceFactory
+try:
+    from dlt.extract import DltResource, SourceFactory
+except ImportError:  # ImportError or missing dlt
+    DltResource = type("DltResource", (), {})
+    SourceFactory = type("SourceFactory", (), {})
 import cognee.modules.ingestion as ingestion
 from cognee.infrastructure.databases.relational import get_relational_engine
 from cognee.modules.data.models import Data

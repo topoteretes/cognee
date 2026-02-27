@@ -1,7 +1,11 @@
 from uuid import UUID
 from typing import Union, BinaryIO, List, Optional, Any
 
-from dlt.extract import DltResource, SourceFactory
+try:
+    from dlt.extract import DltResource, SourceFactory
+except ImportError:  # ImportError or missing dlt
+    DltResource = type("DltResource", (), {})
+    SourceFactory = type("SourceFactory", (), {})
 
 from cognee.modules.users.models import User
 from cognee.modules.pipelines import Task, run_pipeline

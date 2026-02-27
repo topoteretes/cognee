@@ -8,7 +8,11 @@ from cognee.infrastructure.databases.relational.create_relational_engine import 
 )
 from cognee.modules.data.models import Data
 from cognee.infrastructure.databases.relational.config import get_relational_config
-import dlt
+
+try:
+    import dlt
+except ImportError:
+    pass
 
 
 async def ingest_dlt_source(
