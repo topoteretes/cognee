@@ -120,7 +120,9 @@ async def classify_documents(data_documents: list[Data]) -> list[Document]:
 
     documents = []
     for data_item in data_documents:
-        document = EXTENSION_TO_DOCUMENT_CLASS[data_item.extension](
+        doc_class = EXTENSION_TO_DOCUMENT_CLASS[data_item.extension]
+
+        document = doc_class(
             id=data_item.id,
             title=f"{data_item.name}.{data_item.extension}",
             raw_data_location=data_item.raw_data_location,
