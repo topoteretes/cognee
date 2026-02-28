@@ -18,15 +18,9 @@ from urllib.parse import urlparse
 import httpx
 from cognee.infrastructure.databases.vector.embeddings.EmbeddingEngine import EmbeddingEngine
 from cognee.infrastructure.databases.exceptions import EmbeddingException
-from cognee.infrastructure.llm.tokenizer.HuggingFace import (
-    HuggingFaceTokenizer,
-)
-from cognee.infrastructure.llm.tokenizer.Mistral import (
-    MistralTokenizer,
-)
-from cognee.infrastructure.llm.tokenizer.TikToken import (
-    TikTokenTokenizer,
-)
+from cognee.infrastructure.llm.tokenizer.HuggingFace import HuggingFaceTokenizer
+from cognee.infrastructure.llm.tokenizer.Mistral import MistralTokenizer
+from cognee.infrastructure.llm.tokenizer.TikToken import TikTokenTokenizer
 from cognee.shared.rate_limiting import embedding_rate_limiter_context_manager
 
 litellm.set_verbose = False
@@ -127,7 +121,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         # Keep output aligned to the original input list to avoid breaking downstream callers.
         def _is_embeddable(s: str) -> bool:
             s = s.strip()
-            return bool(s) and any(ch.isalnum() for ch in s)
+            alnum_count = sum(ch.isalnum() for ch in s)
+            return alnum_count >= 2
 
         indexed_valid = [
             (i, s)
@@ -145,13 +140,14 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         # -------------------------------------------------------------------------------
 
         try:
+            # Guard against dimensions being unset (None)
+            dims = self.dimensions or 0
+
             if self.mock:
-                response = {
-                    "data": [{"embedding": [0.0] * self.dimensions} for _ in valid_texts]
-                }
+                response = {"data": [{"embedding": [0.0] * dims} for _ in valid_texts]}
                 valid_vecs = [data["embedding"] for data in response["data"]]
 
-                out = [[0.0] * self.dimensions for _ in text]
+                out = [[0.0] * dims for _ in text]
                 for idx, vec in zip(valid_indices, valid_vecs):
                     out[idx] = vec
                 return out
@@ -241,7 +237,9 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
             litellm.exceptions.NotFoundError,
         ) as e:
             logger.error(f"Embedding error with model {self.model}: {str(e)}")
-            raise EmbeddingException(f"Failed to index data points using model {self.model}") from e
+            raise EmbeddingException(
+                f"Failed to index data points using model {self.model}"
+            ) from e
 
         except Exception as error:
             # Fall back to a clear, actionable message for connectivity/misconfiguration issues
@@ -322,4 +320,4 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         logger.debug(f"Tokenizer loaded for model: {self.model}")
         return tokenizer
 
-        
+    
