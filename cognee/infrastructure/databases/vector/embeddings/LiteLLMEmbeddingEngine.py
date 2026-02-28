@@ -123,15 +123,43 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
             - List[List[float]]: A list of vectors representing the embedded texts.
         """
+        # --- #2191 fix: sanitize embedding inputs to avoid 422 from punctuation/empty strings ---
+        # Keep output aligned to the original input list to avoid breaking downstream callers.
+        def _is_embeddable(s: str) -> bool:
+            s = s.strip()
+            return bool(s) and any(ch.isalnum() for ch in s)
+
+        indexed_valid = [
+            (i, s)
+            for i, s in enumerate(text)
+            if isinstance(s, str) and _is_embeddable(s)
+        ]
+
+        # If nothing is valid, return stable zero-vectors (when dimensions known)
+        if not indexed_valid:
+            dims = self.dimensions or 0
+            return [[0.0] * dims for _ in text]
+
+        valid_indices = [i for i, _ in indexed_valid]
+        valid_texts = [s for _, s in indexed_valid]
+        # -------------------------------------------------------------------------------
+
         try:
             if self.mock:
-                response = {"data": [{"embedding": [0.0] * self.dimensions} for _ in text]}
-                return [data["embedding"] for data in response["data"]]
+                response = {
+                    "data": [{"embedding": [0.0] * self.dimensions} for _ in valid_texts]
+                }
+                valid_vecs = [data["embedding"] for data in response["data"]]
+
+                out = [[0.0] * self.dimensions for _ in text]
+                for idx, vec in zip(valid_indices, valid_vecs):
+                    out[idx] = vec
+                return out
             else:
                 async with embedding_rate_limiter_context_manager():
                     embedding_kwargs = {
                         "model": self.model,
-                        "input": text,
+                        "input": valid_texts,
                         "api_key": self.api_key,
                         "api_base": self.endpoint,
                         "api_version": self.api_version,
@@ -146,7 +174,13 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
                         timeout=30.0,
                     )
 
-                return [data["embedding"] for data in response.data]
+                valid_vecs = [data["embedding"] for data in response.data]
+
+                dims = self.dimensions or (len(valid_vecs[0]) if valid_vecs else 0)
+                out = [[0.0] * dims for _ in text]
+                for idx, vec in zip(valid_indices, valid_vecs):
+                    out[idx] = vec
+                return out
 
         except litellm.exceptions.ContextWindowExceededError as error:
             if isinstance(text, list) and len(text) > 1:
@@ -287,3 +321,5 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
 
         logger.debug(f"Tokenizer loaded for model: {self.model}")
         return tokenizer
+
+        
