@@ -57,7 +57,7 @@ jobs:
         id: generate_notes
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_MODEL: ${{ secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL != '' && secrets.LLM_MODEL || 'openai/gpt-4o-mini' }}
         run: |
           # Set PYTHONPATH to include project root
           export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH}"

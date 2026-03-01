@@ -9,10 +9,12 @@ and uses an LLM to generate readable, user-focused release notes.
 import argparse
 import asyncio
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 def run_git_command(command: list[str]) -> str:
@@ -31,7 +33,7 @@ def run_git_command(command: list[str]) -> str:
         sys.exit(1)
 
 
-def get_latest_release_tag() -> str:
+def get_latest_release_tag() -> str | None:
     """Get the latest release tag."""
     try:
         # Get the latest tag that matches version pattern (vX.Y.Z)
@@ -90,8 +92,6 @@ def get_pr_list(base_ref: str, target_ref: str) -> str:
     commits = run_git_command(command)
 
     # Extract PR numbers (matches #1234 pattern)
-    import re
-
     pr_numbers = set(re.findall(r"#(\d+)", commits))
     return ", ".join(f"#{pr}" for pr in sorted(pr_numbers))
 
@@ -101,8 +101,8 @@ async def generate_release_notes_with_llm(
     commits: str,
     base_ref: str,
     target_ref: str,
-    version: str = None,
-) -> str:
+    version: str | None = None,
+) -> Any:
     """Use LLM to generate human-friendly release notes."""
     try:
         # Import here to avoid startup delays
@@ -135,7 +135,7 @@ async def generate_release_notes_with_llm(
     if len(diff) > max_diff_size:
         diff = diff[:max_diff_size] + f"\n... (truncated, showing first {max_diff_size} characters)"
 
-    system_prompt = f"""You are a technical writer creating release notes for Cognee, an AI memory platform.
+    system_prompt = """You are a technical writer creating release notes for Cognee, an AI memory platform.
 
 Analyze the git diff and commit history to create clear, user-friendly release notes.
 
@@ -179,7 +179,7 @@ Create engaging release notes that help users understand what's new and improved
 
 
 def format_release_notes(
-    notes: any, version: str, base_ref: str, target_ref: str, pr_list: str
+    notes: Any, version: str, base_ref: str, target_ref: str, pr_list: str
 ) -> str:
     """Format structured release notes into markdown."""
     date_str = datetime.now().strftime("%Y-%m-%d")
@@ -277,16 +277,13 @@ async def main():
     if not version:
         try:
             # Read version directly from pyproject.toml
-            import re
-
             pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
-            with open(pyproject_path, "r") as f:
-                content = f.read()
-                match = re.search(r'^version\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE)
-                if match:
-                    version = match.group(1)
-                else:
-                    version = "unknown"
+            content = pyproject_path.read_text()
+            match = re.search(r'^version\s*=\s*["\']([^"\']+)["\']', content, re.MULTILINE)
+            if match:
+                version = match.group(1)
+            else:
+                version = "unknown"
         except Exception as e:
             print(f"Warning: Could not extract version: {e}", file=sys.stderr)
             version = "unknown"
