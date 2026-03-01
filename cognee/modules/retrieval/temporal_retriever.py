@@ -4,8 +4,7 @@ from typing import Any, Optional, List, Type
 from datetime import datetime
 
 from operator import itemgetter
-from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
@@ -109,7 +108,8 @@ class TemporalRetriever(GraphCompletionRetriever):
     async def get_retrieved_objects(self, query: str) -> dict:
         time_from, time_to = await self.extract_time_from_query(query)
 
-        graph_engine = await get_graph_engine()
+        unified = await get_unified_engine()
+        graph_engine = unified.graph
 
         if time_from and time_to:
             ids = await graph_engine.collect_time_ids(time_from=time_from, time_to=time_to)
@@ -133,7 +133,7 @@ class TemporalRetriever(GraphCompletionRetriever):
             triplets = await self.get_triplets(query)
             return {"triplets": triplets}
 
-        vector_engine = get_vector_engine()
+        vector_engine = unified.vector
         query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
 
         vector_search_results = await vector_engine.search(

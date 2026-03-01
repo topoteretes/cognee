@@ -1,4 +1,6 @@
-from typing import List, Optional, Type, Union
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, List, Optional, Type, Union
 
 from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.shared.logging_utils import get_logger, ERROR
@@ -8,6 +10,9 @@ from cognee.infrastructure.databases.vector.exceptions import CollectionNotFound
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
 from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
+
+if TYPE_CHECKING:
+    from cognee.infrastructure.databases.unified import UnifiedStoreEngine
 
 logger = get_logger(level=ERROR)
 
@@ -38,6 +43,7 @@ async def get_memory_fragment(
     node_name: Optional[List[str]] = None,
     relevant_ids_to_filter: Optional[List[str]] = None,
     triplet_distance_penalty: Optional[float] = 3.5,
+    graph_engine=None,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
     if properties_to_project is None:
@@ -46,7 +52,8 @@ async def get_memory_fragment(
     memory_fragment = CogneeGraph()
 
     try:
-        graph_engine = await get_graph_engine()
+        if graph_engine is None:
+            graph_engine = await get_graph_engine()
         await memory_fragment.project_graph_from_db(
             graph_engine,
             node_properties_to_project=properties_to_project,
@@ -74,12 +81,15 @@ async def _get_top_triplet_importances(
     wide_search_limit: Optional[int],
     top_k: int,
     query_list_length: Optional[int] = None,
+    graph_engine=None,
 ) -> Union[List[Edge], List[List[Edge]]]:
     """Creates memory fragment (if needed), maps distances, and calculates top triplet importances.
 
     Args:
         query_list_length: Number of queries in batch mode (None for single-query mode).
             When None, node_distances/edge_distances are flat lists; when set, they are list-of-lists.
+        graph_engine: Optional pre-created graph engine to pass through to
+            ``get_memory_fragment()``.
 
     Returns:
         List[Edge]: For single-query mode (query_list_length is None).
@@ -97,6 +107,7 @@ async def _get_top_triplet_importances(
             node_name=node_name,
             relevant_ids_to_filter=relevant_node_ids,
             triplet_distance_penalty=triplet_distance_penalty,
+            graph_engine=graph_engine,
         )
 
     await memory_fragment.map_vector_distances_to_graph_nodes(
@@ -122,6 +133,7 @@ async def brute_force_triplet_search(
     node_name: Optional[List[str]] = None,
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
+    unified_engine: Optional[UnifiedStoreEngine] = None,
 ) -> Union[List[Edge], List[List[Edge]]]:
     """
     Performs a brute force search to retrieve the top triplets from the graph.
@@ -171,7 +183,10 @@ async def brute_force_triplet_search(
         collections.append("EdgeType_relationship_name")
 
     try:
-        vector_search = NodeEdgeVectorSearch()
+        vector_engine = unified_engine.vector if unified_engine else None
+        graph_engine = unified_engine.graph if unified_engine else None
+
+        vector_search = NodeEdgeVectorSearch(vector_engine=vector_engine)
 
         await vector_search.embed_and_retrieve_distances(
             query=None if query_list_length else query,
@@ -194,6 +209,7 @@ async def brute_force_triplet_search(
             wide_search_limit,
             top_k,
             query_list_length=query_list_length,
+            graph_engine=graph_engine,
         )
 
         return results
