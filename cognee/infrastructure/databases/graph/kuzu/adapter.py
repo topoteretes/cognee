@@ -859,7 +859,22 @@ class KuzuAdapter(GraphDBInterface):
             - List[Dict[str, Any]]: A list of dictionaries representing neighboring nodes'
               properties.
         """
-        return await self.get_neighbours(node_id)
+        query_str = """
+        MATCH (n:Node)-[r]-(m:Node)
+        WHERE n.id = $id
+        RETURN DISTINCT {
+            id: m.id,
+            name: m.name,
+            type: m.type,
+            properties: m.properties
+        }
+        """
+        try:
+            result = await self.query(query_str, {"id": node_id})
+            return [self._parse_node_properties(row[0]) for row in result] if result else []
+        except Exception as e:
+            logger.error(f"Failed to get neighbours for node {node_id}: {e}")
+            return []
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -932,37 +947,6 @@ class KuzuAdapter(GraphDBInterface):
             return [self._parse_node(row[0]) for row in results if row[0]]
         except Exception as e:
             logger.error(f"Failed to get nodes: {e}")
-            return []
-
-    async def get_neighbours(self, node_id: str) -> List[Dict[str, Any]]:
-        """
-        Get all neighbouring nodes.
-
-        This method retrieves all neighboring nodes connected to a specified node and returns
-        them as a list of dictionaries. It may return an empty list if no neighbors exist or an
-        error occurs.
-
-        Parameters:
-        -----------
-
-            - node_id (str): The identifier of the node for which to find neighbors.
-
-        Returns:
-        --------
-
-            - List[Dict[str, Any]]: A list of dictionaries representing neighboring nodes'
-              properties.
-        """
-        query_str = """
-        MATCH (n)-[r]-(m)
-        WHERE n.id = $id
-        RETURN DISTINCT properties(m)
-        """
-        try:
-            result = await self.query(query_str, {"id": node_id})
-            return [row[0] for row in result] if result else []
-        except Exception as e:
-            logger.error(f"Failed to get neighbours for node {node_id}: {e}")
             return []
 
     async def get_predecessors(
