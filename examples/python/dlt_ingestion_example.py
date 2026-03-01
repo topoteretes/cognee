@@ -1,10 +1,22 @@
 import asyncio
+import os
 import cognee
 import dlt
 
+from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
+from cognee.modules.visualization.cognee_network_visualization import cognee_network_visualization
+
 
 async def main():
-    # Sample data containing users and their pets
+    """Demonstrates all DLT-based data ingestion modes in Cognee."""
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
+
+    # ── Mode 1: Explicit dlt resource with nested data (merge/upsert) ──
+
+    print("\n=== Mode 1: Explicit dlt resource ===")
+
     data = [
         {
             "id": 1,
@@ -22,19 +34,129 @@ async def main():
     def users_and_pets():
         yield data
 
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
-    await cognee.add(users_and_pets, dataset_name="users_and_pets", incremental_loading=False)
-
-    await cognee.cognify(dlt_ingestion=True)
-
-    from cognee.api.v1.visualize import visualize_graph
-
-    await visualize_graph()
+    await cognee.add(
+        users_and_pets,
+        dataset_name="users_and_pets",
+        primary_key="id",
+        incremental_loading=False,
+    )
+    await cognee.cognify()
 
     result = await cognee.search("Which pet does Alice have?")
-    print(result)
+    print("Mode 1 results:", result)
+
+    # ── Mode 2: CSV auto-detection ──
+
+    print("\n=== Mode 2: CSV auto-detection ===")
+
+    csv_path = os.path.join(os.path.dirname(__file__), "test_data", "employees.csv")
+
+    await cognee.add(
+        csv_path,
+        dataset_name="employees",
+        primary_key="id",
+        incremental_loading=False,
+    )
+    await cognee.cognify()
+
+    result = await cognee.search("Who works in Engineering?")
+    print("Mode 2 results:", result)
+
+    # ── Mode 3: Write disposition - append (always insert, no dedup) ──
+
+    print("\n=== Mode 3: Write disposition - append ===")
+
+    batch_1 = [
+        {"id": 1, "event": "login", "user": "Alice", "timestamp": "2025-01-01"},
+        {"id": 2, "event": "purchase", "user": "Bob", "timestamp": "2025-01-02"},
+    ]
+    batch_2 = [
+        {"id": 3, "event": "logout", "user": "Alice", "timestamp": "2025-01-03"},
+        {"id": 4, "event": "signup", "user": "Diana", "timestamp": "2025-01-04"},
+    ]
+
+    @dlt.resource()
+    def event_batch_1():
+        yield batch_1
+
+    @dlt.resource()
+    def event_batch_2():
+        yield batch_2
+
+    # First batch
+    await cognee.add(
+        event_batch_1,
+        dataset_name="events_append",
+        primary_key="id",
+        write_disposition="append",
+        incremental_loading=False,
+    )
+    # Second batch appended (no dedup)
+    await cognee.add(
+        event_batch_2,
+        dataset_name="events_append",
+        primary_key="id",
+        write_disposition="append",
+        incremental_loading=False,
+    )
+    await cognee.cognify()
+
+    result = await cognee.search("What events happened?")
+    print("Mode 3 results:", result)
+
+    # ── Mode 4: Write disposition - replace (drop & recreate each run) ──
+
+    print("\n=== Mode 4: Write disposition - replace ===")
+
+    old_inventory = [
+        {"id": 1, "product": "Widget A", "stock": 100},
+        {"id": 2, "product": "Widget B", "stock": 50},
+    ]
+    new_inventory = [
+        {"id": 1, "product": "Widget A", "stock": 200},
+        {"id": 3, "product": "Widget C", "stock": 75},
+    ]
+
+    @dlt.resource()
+    def inventory_old():
+        yield old_inventory
+
+    @dlt.resource()
+    def inventory_new():
+        yield new_inventory
+
+    # First load
+    await cognee.add(
+        inventory_old,
+        dataset_name="inventory_replace",
+        primary_key="id",
+        write_disposition="replace",
+        incremental_loading=False,
+    )
+    # Replace entirely with new data
+    await cognee.add(
+        inventory_new,
+        dataset_name="inventory_replace",
+        primary_key="id",
+        write_disposition="replace",
+        incremental_loading=False,
+    )
+    await cognee.cognify()
+
+    result = await cognee.search("What products are in inventory?")
+    print("Mode 4 results:", result)
+
+    # ── Visualize the final graph ──
+
+    print("\n=== Generating visualization ===")
+    graph_engine = await get_graph_engine()
+    graph_data = await graph_engine.get_graph_data()
+    nodes, edges = graph_data
+    print(f"Final graph: {len(nodes)} nodes, {len(edges)} edges")
+
+    dest = os.path.join(os.path.dirname(__file__), "dlt_example_graph.html")
+    await cognee_network_visualization(graph_data, dest)
+    print(f"Visualization saved to {dest}")
 
 
 if __name__ == "__main__":

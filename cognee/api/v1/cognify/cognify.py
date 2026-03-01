@@ -23,10 +23,10 @@ from cognee.tasks.documents import (
     classify_documents,
     extract_chunks_from_documents,
 )
-from cognee.tasks.ingestion.ingest_dlt_source import migrate_dlt_database
 from cognee.tasks.graph import extract_graph_from_data
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.summarization import summarize_text
+from cognee.tasks.ingestion.extract_dlt_fk_edges import extract_dlt_fk_edges
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
 from cognee.tasks.temporal_graph.extract_events_and_entities import extract_events_and_timestamps
 from cognee.tasks.temporal_graph.extract_knowledge_graph_from_events import (
@@ -196,44 +196,38 @@ async def cognify(
         - LLM_RATE_LIMIT_REQUESTS: Max requests per interval (default: 60)
     """
 
-    # TODO: An ugly solution for now, this should be changed
-    if "dlt_ingestion" in kwargs:
-        tasks = await get_dlt_ingestion_tasks()
-    else:
-        if config is None:
-            ontology_config = get_ontology_env_config()
-            if (
-                ontology_config.ontology_file_path
-                and ontology_config.ontology_resolver
-                and ontology_config.matching_strategy
-            ):
-                config: Config = {
-                    "ontology_config": {
-                        "ontology_resolver": get_ontology_resolver_from_env(
-                            **ontology_config.to_dict()
-                        )
-                    }
+    if config is None:
+        ontology_config = get_ontology_env_config()
+        if (
+            ontology_config.ontology_file_path
+            and ontology_config.ontology_resolver
+            and ontology_config.matching_strategy
+        ):
+            config: Config = {
+                "ontology_config": {
+                    "ontology_resolver": get_ontology_resolver_from_env(**ontology_config.to_dict())
                 }
-            else:
-                config: Config = {
-                    "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
-                }
-
-        if temporal_cognify:
-            tasks = await get_temporal_tasks(
-                user=user, chunker=chunker, chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
-            )
+            }
         else:
-            tasks = await get_default_tasks(
-                user=user,
-                graph_model=graph_model,
-                chunker=chunker,
-                chunk_size=chunk_size,
-                config=config,
-                custom_prompt=custom_prompt,
-                chunks_per_batch=chunks_per_batch,
-                **kwargs,
-            )
+            config: Config = {
+                "ontology_config": {"ontology_resolver": get_default_ontology_resolver()}
+            }
+
+    if temporal_cognify:
+        tasks = await get_temporal_tasks(
+            user=user, chunker=chunker, chunk_size=chunk_size, chunks_per_batch=chunks_per_batch
+        )
+    else:
+        tasks = await get_default_tasks(
+            user=user,
+            graph_model=graph_model,
+            chunker=chunker,
+            chunk_size=chunk_size,
+            config=config,
+            custom_prompt=custom_prompt,
+            chunks_per_batch=chunks_per_batch,
+            **kwargs,
+        )
 
     # By calling get pipeline executor we get a function that will have the run_pipeline run in the background or a function that we will need to wait for
     pipeline_executor_func = get_pipeline_executor(run_in_background=run_in_background)
@@ -312,6 +306,7 @@ async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's 
             embed_triplets=embed_triplets,
             task_config={"batch_size": chunks_per_batch},
         ),
+        Task(extract_dlt_fk_edges),
     ]
 
     return default_tasks
@@ -358,15 +353,3 @@ async def get_temporal_tasks(
     ]
 
     return temporal_tasks
-
-
-async def get_dlt_ingestion_tasks():
-    """
-    Builds and returns a list of DLT ingestion tasks to be executed in sequence.
-
-    The pipeline includes a task for migrating a relational database created from a dlt pipeline
-    to a graph database to use with cognee.
-    """
-    dlt_ingestion_tasks = [Task(migrate_dlt_database)]
-
-    return dlt_ingestion_tasks

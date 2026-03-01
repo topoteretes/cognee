@@ -1,60 +1,131 @@
-from typing import List
+import hashlib
+import json
+import os
+from collections import Counter
+from typing import List, Optional
 
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from cognee.infrastructure.databases.relational.create_relational_engine import (
-    create_relational_engine,
-)
 from cognee.modules.data.models import Data
 from cognee.infrastructure.databases.relational.config import get_relational_config
+from cognee.tasks.ingestion.dlt_row_data import DltRowData
+from cognee.tasks.ingestion.get_dlt_destination import get_dlt_destination
+from cognee.shared.logging_utils import get_logger
+import dlt
 
-try:
-    import dlt
-except ImportError:
-    pass
+logger = get_logger("ingest_dlt_source")
 
 
 async def ingest_dlt_source(
     dlt_source,
     dataset_name: str,
-) -> List[str]:
+    primary_key: Optional[str] = None,
+    write_disposition: str = "merge",
+) -> List[DltRowData]:
     """
     Ingests a dlt (re)source by running the dlt pipeline on it.
-    The pipeline destination is an SQL database, SQLite or Postgres depending on the cognee configuration.
+    Returns a list of DltRowData, one per row in the ingested tables.
+
+    Supports both SQLite and PostgreSQL as the dlt destination, based on
+    the cognee relational config.
 
     Parameters:
-        dlt_source (str): The name of the dlt (re)source.
-        dataset_name (str): The name of the dataset.
+        dlt_source: The dlt resource or source to ingest.
+        dataset_name: The name of the dataset.
+        primary_key: Optional primary key column name. If not provided, auto-detected
+                     from schema or defaults to 'id' or first column.
+        write_disposition: DLT write disposition. One of:
+            - "merge" (default): Upsert rows by primary key. Existing rows with the same
+              PK are updated; new rows are inserted.
+            - "append": Always insert new rows without deduplication.
+            - "replace": Drop and recreate the table on each run.
     Returns:
-        List[str]: The schema of the ingested database, as a list.
+        List[DltRowData]: Per-row data objects for downstream processing.
     """
+
+    valid_dispositions = ("merge", "append", "replace")
+    if write_disposition not in valid_dispositions:
+        raise ValueError(
+            f"Invalid write_disposition '{write_disposition}'. Must be one of: {valid_dispositions}"
+        )
 
     relational_config = get_relational_config()
     dlt_db_name = f"dlt_database_{dataset_name}"
 
-    # TODO: For now works only for postgres, I will add sqlite tomorrow, had to catch the flight and couldn't debug til the end
-    # if relational_config.db_provider == "postgres":
+    if relational_config.db_provider == "postgres":
+        await _create_pg_database(dlt_db_name)
 
-    # Create postgres database for dlt data
-    await _create_pg_database(dlt_db_name)
+    destination = get_dlt_destination()
+    if destination is None:
+        raise RuntimeError(
+            f"Unsupported db_provider for DLT ingestion: {relational_config.db_provider}. "
+            "Only 'sqlite' and 'postgres' are supported."
+        )
 
-    # Set up postgres as the dlt destination
-    # dlt's postgres destination uses psycopg2, which expects a sync
-    # postgresql:// URL (not postgresql+asyncpg://).
-    dlt_connection_str = f"postgresql://{relational_config.db_username}:{relational_config.db_password}@{relational_config.db_host}:{int(relational_config.db_port)}/{dlt_db_name}"
-    destination = dlt.destinations.postgres(dlt_connection_str)
-
-    # Execute dlt pipeline
+    # Execute dlt pipeline with error handling
     pipeline = dlt.pipeline(
         pipeline_name="ingest_dlt_source",
         destination=destination,
         dataset_name=dataset_name,
     )
 
-    # TODO: In an example, where I create data for ingestion, I know the primary key for merging, what if I don't know it?
-    pipeline.run(dlt_source, write_disposition="merge", primary_key="id")
+    effective_pk = primary_key or "id"
 
+    # Build run kwargs based on disposition
+    run_kwargs = {
+        "write_disposition": write_disposition,
+    }
+    # Only pass primary_key for merge disposition (required for upsert)
+    if write_disposition == "merge":
+        run_kwargs["primary_key"] = effective_pk
+
+    try:
+        load_info = pipeline.run(dlt_source, **run_kwargs)
+    except Exception as e:
+        raise RuntimeError(
+            f"DLT pipeline execution failed for dataset '{dataset_name}': {e}"
+        ) from e
+
+    # Validate load_info for failed jobs
+    if load_info is not None:
+        for package in load_info.load_packages:
+            failed_jobs = [job for job in package.jobs.get("failed_jobs", [])]
+            if failed_jobs:
+                failure_messages = [
+                    f"Table '{job.job_file_info.table_name}': {job.failed_message}"
+                    for job in failed_jobs
+                ]
+                raise RuntimeError(
+                    f"DLT load had {len(failed_jobs)} failed job(s) for dataset "
+                    f"'{dataset_name}':\n" + "\n".join(failure_messages)
+                )
+
+    # Extract schema from the dlt database
+    try:
+        _, filtered_schema = await _extract_dlt_schema(relational_config, dlt_db_name, dataset_name)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to extract schema from DLT database '{dlt_db_name}': {e}"
+        ) from e
+
+    # Read rows from each table and produce DltRowData objects
+    try:
+        row_data_list = await _read_rows_from_tables(
+            dlt_db_name=dlt_db_name,
+            dataset_name=dataset_name,
+            schema=filtered_schema,
+            primary_key=primary_key,
+            relational_config=relational_config,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Failed to read rows from DLT database '{dlt_db_name}': {e}") from e
+
+    return row_data_list
+
+
+async def _extract_dlt_schema(relational_config, dlt_db_name: str, dataset_name: str):
+    """Extract and filter schema from the dlt-populated database."""
     from cognee.infrastructure.databases.relational.get_migration_relational_engine import (
         get_migration_relational_engine,
     )
@@ -62,24 +133,221 @@ async def ingest_dlt_source(
 
     migration_config = get_migration_config()
     migration_config.migration_db_provider = relational_config.db_provider
-    migration_config.migration_db_name = dlt_db_name
     migration_config.migration_db_host = relational_config.db_host
     migration_config.migration_db_port = relational_config.db_port
     migration_config.migration_db_username = relational_config.db_username
     migration_config.migration_db_password = relational_config.db_password
 
+    if relational_config.db_provider == "sqlite":
+        dlt_sqlite_db_name = f"{relational_config.db_name}__{dataset_name}"
+        migration_config.migration_db_path = relational_config.db_path
+        migration_config.migration_db_name = dlt_sqlite_db_name
+    else:
+        migration_config.migration_db_name = dlt_db_name
+
     engine = get_migration_relational_engine()
     schema = await engine.extract_schema()
-    # Remove keys from schema which have "dlt" and "staging" in them TODO: maybe find a more robust way of doing this
-    schema_keys = list(schema.keys())
-    for key in schema_keys:
-        if "dlt" in key or "staging" in key:
-            schema.pop(key, None)
-    import json
 
-    schema_str = json.dumps(schema)
+    # Filter out dlt internal tables (those starting with _dlt_ or containing staging)
+    filtered_schema = {
+        k: v for k, v in schema.items() if not k.startswith("_dlt_") and "staging" not in k
+    }
 
-    return [schema_str]
+    return schema, filtered_schema
+
+
+def _compute_schema_hash(schema_info) -> str:
+    """Compute a stable hash of the schema structure for evolution detection."""
+    if isinstance(schema_info, list):
+        # SQLite format: [{"name": "col", "type": "TEXT"}, ...]
+        normalized = [(c.get("name"), c.get("type")) for c in schema_info]
+    elif isinstance(schema_info, dict):
+        # Postgres format: {"col_name": {"type": "TEXT", ...}, ...}
+        normalized = sorted((k, str(v)) for k, v in schema_info.items())
+    else:
+        normalized = str(schema_info)
+    return hashlib.md5(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
+
+
+async def _read_rows_from_tables(
+    dlt_db_name: str,
+    dataset_name: str,
+    schema: dict,
+    primary_key: Optional[str],
+    relational_config,
+) -> List[DltRowData]:
+    """Read all rows from the dlt database tables and return DltRowData objects."""
+    if relational_config.db_provider == "sqlite":
+        # DLT creates a separate SQLite file: {db_name}__{dataset_name}
+        dlt_sqlite_db_name = f"{relational_config.db_name}__{dataset_name}"
+        db_path = os.path.join(relational_config.db_path, dlt_sqlite_db_name)
+        async_url = f"sqlite+aiosqlite:///{db_path}"
+    else:
+        async_url = URL.create(
+            "postgresql+asyncpg",
+            username=relational_config.db_username,
+            password=relational_config.db_password,
+            host=relational_config.db_host,
+            port=int(relational_config.db_port),
+            database=dlt_db_name,
+        )
+
+    async_engine = create_async_engine(async_url)
+    row_data_list = []
+
+    try:
+        async with async_engine.connect() as conn:
+            for table_name, table_info in schema.items():
+                try:
+                    table_rows = await _read_single_table(
+                        conn=conn,
+                        table_name=table_name,
+                        table_info=table_info,
+                        primary_key=primary_key,
+                        dataset_name=dataset_name,
+                        dlt_db_name=dlt_db_name,
+                        relational_config=relational_config,
+                    )
+                    row_data_list.extend(table_rows)
+                except Exception as e:
+                    logger.error(
+                        "Failed to read table '%s' from DLT database '%s': %s",
+                        table_name,
+                        dlt_db_name,
+                        e,
+                    )
+                    raise
+    finally:
+        await async_engine.dispose()
+
+    return row_data_list
+
+
+async def _read_single_table(
+    conn,
+    table_name: str,
+    table_info: dict,
+    primary_key: Optional[str],
+    dataset_name: str,
+    dlt_db_name: str,
+    relational_config,
+) -> List[DltRowData]:
+    """Read all rows from a single table and return DltRowData objects."""
+    raw_columns = table_info.get("columns", [])
+    foreign_keys = table_info.get("foreign_keys", [])
+
+    # extract_schema() returns columns as a list of dicts for SQLite
+    # (e.g. [{"name": "col", "type": "TEXT"}, ...]) or a dict for Postgres
+    if isinstance(raw_columns, list):
+        column_names = [c["name"] for c in raw_columns]
+    else:
+        column_names = list(raw_columns.keys())
+
+    # Auto-detect primary key with validation
+    pk_col = _resolve_primary_key(primary_key, table_info, column_names, table_name)
+
+    # Compute schema hash for evolution detection
+    schema_hash = _compute_schema_hash(raw_columns)
+
+    # For PostgreSQL, dlt uses dataset_name as schema prefix;
+    # for SQLite, dlt uses a separate database file and tables have no prefix.
+    if relational_config.db_provider == "sqlite":
+        query = f'SELECT * FROM "{table_name}"'
+    else:
+        qualified_table = f"{dataset_name}.{table_name}"
+        query = f'SELECT * FROM "{qualified_table}"'
+
+    result = await conn.execute(text(query))
+    rows = result.mappings().all()
+
+    # Validate PK uniqueness
+    if rows:
+        pk_values = [str(row.get(pk_col, "")) for row in rows]
+        pk_counts = Counter(pk_values)
+        duplicates = {v: c for v, c in pk_counts.items() if c > 1}
+        if duplicates:
+            dup_sample = dict(list(duplicates.items())[:5])
+            logger.warning(
+                "Table '%s': primary key column '%s' has %d duplicate values "
+                "(sample: %s). Rows with duplicate PKs will overwrite each other "
+                "during upsert. Consider specifying a unique primary_key.",
+                table_name,
+                pk_col,
+                len(duplicates),
+                dup_sample,
+            )
+
+    row_data_list = []
+    for row in rows:
+        row_dict = {k: v for k, v in row.items()}
+        pk_value = str(row_dict.get(pk_col, ""))
+
+        content_hash = hashlib.md5(
+            json.dumps(row_dict, sort_keys=True, default=str).encode()
+        ).hexdigest()
+
+        row_data_list.append(
+            DltRowData(
+                table_name=table_name,
+                primary_key_column=pk_col,
+                primary_key_value=pk_value,
+                row_data=row_dict,
+                content_hash=content_hash,
+                schema_info=raw_columns,
+                schema_hash=schema_hash,
+                foreign_keys=foreign_keys,
+                dlt_db_name=dlt_db_name,
+                dataset_name=dataset_name,
+            )
+        )
+
+    return row_data_list
+
+
+def _resolve_primary_key(
+    provided_pk: Optional[str],
+    table_info: dict,
+    column_names: list,
+    table_name: str = "",
+) -> str:
+    """Resolve the primary key column for a table with validation and logging."""
+    if provided_pk and provided_pk in column_names:
+        return provided_pk
+
+    if provided_pk and provided_pk not in column_names:
+        logger.warning(
+            "Table '%s': provided primary_key '%s' not found in columns %s. "
+            "Falling back to auto-detection.",
+            table_name,
+            provided_pk,
+            column_names,
+        )
+
+    # Check schema-level primary_key
+    schema_pk = table_info.get("primary_key")
+    if schema_pk:
+        if isinstance(schema_pk, list) and len(schema_pk) > 0:
+            return schema_pk[0]
+        if isinstance(schema_pk, str):
+            return schema_pk
+
+    # Fallback to 'id' column
+    if "id" in column_names:
+        logger.info("Table '%s': no explicit primary key found, using 'id' column.", table_name)
+        return "id"
+
+    # Last resort: first column (with warning)
+    if column_names:
+        logger.warning(
+            "Table '%s': no primary key detected, falling back to first column '%s'. "
+            "This may cause incorrect upsert behavior if values are not unique. "
+            "Specify primary_key explicitly for reliable deduplication.",
+            table_name,
+            column_names[0],
+        )
+        return column_names[0]
+
+    return "id"
 
 
 async def _create_pg_database(db_name):
@@ -95,26 +363,25 @@ async def _create_pg_database(db_name):
     )
     maintenance_engine = create_async_engine(maintenance_db_url)
 
-    # Connect to maintenance db in order to create new database
-    # Make sure to execute CREATE DATABASE outside of transaction block, and set AUTOCOMMIT isolation level
-    connection = await maintenance_engine.connect()
-    connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
-    exists_result = await connection.execute(
-        text("SELECT 1 FROM pg_database WHERE datname = :db_name"),
-        {"db_name": db_name},
-    )
-    if exists_result.scalar() is None:
-        await connection.execute(text(f'CREATE DATABASE "{db_name}";'))
-
-    # Clean up resources
-    await connection.close()
+    try:
+        connection = await maintenance_engine.connect()
+        connection = await connection.execution_options(isolation_level="AUTOCOMMIT")
+        exists_result = await connection.execute(
+            text("SELECT 1 FROM pg_database WHERE datname = :db_name"),
+            {"db_name": db_name},
+        )
+        if exists_result.scalar() is None:
+            await connection.execute(text(f'CREATE DATABASE "{db_name}";'))
+        await connection.close()
+    finally:
+        await maintenance_engine.dispose()
 
 
 async def migrate_dlt_database(data: List[Data]):
+    """Legacy function for migrating dlt database schema to graph database."""
     from cognee.tasks.ingestion.migrate_relational_database import migrate_relational_database
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
-    import json
 
     graph_engine = await get_graph_engine()
 
