@@ -666,12 +666,13 @@ async def get_chunk_neighbors(
     chunk_id: str,
     neighbor_count: int = 2,
     include_target: bool = True,
+    direction: str = "both",
 ) -> list:
     """
     Retrieve neighboring chunks around a target chunk by chunk_index position.
 
     Use this after a CHUNKS search to get surrounding context from the same document.
-    Fetches chunks before and after the target chunk to provide narrative context
+    Fetches chunks before and/or after the target chunk to provide narrative context
     around search results. Chunks are retrieved by sequential chunk_index values.
 
     Parameters
@@ -682,11 +683,21 @@ async def get_chunk_neighbors(
 
     neighbor_count : int, optional
         Number of chunks to retrieve on each side of the target (default: 2).
-        Maximum value: 10 (capped)
+        Maximum value: 10 (capped).
+        When direction is "forward" or "backward", this is the number of chunks
+        in that single direction.
 
     include_target : bool, optional
         Whether to include the target chunk in results (default: True).
         Set to False to retrieve only surrounding chunks without the target.
+
+    direction : str, optional
+        Which direction to fetch neighbors relative to the target (default: "both").
+        - "both": Retrieve neighbors before and after the target.
+        - "forward": Retrieve only chunks after the target (higher chunk_index).
+        - "backward": Retrieve only chunks before the target (lower chunk_index).
+        Use "forward"/"backward" for efficient iterative traversal to avoid
+        re-fetching chunks already seen.
 
     Returns
     -------
@@ -699,6 +710,7 @@ async def get_chunk_neighbors(
             "document_name": str,
             "target_chunk_index": int,
             "neighbor_count": int,
+            "direction": str,
             "chunks_returned": int,
             "chunks": [
                 {
@@ -721,9 +733,13 @@ async def get_chunk_neighbors(
     - Target chunk is marked with "is_target": true in results
     - Automatically handles document boundaries (first/last chunks)
     - Only retrieves chunks from the same parent document
+    - For iterative document reading: use direction="both" for initial discovery,
+      then direction="forward" or "backward" for subsequent reads
     """
 
-    async def get_neighbors_task(chunk_id: str, neighbor_count: int, include_target: bool) -> str:
+    async def get_neighbors_task(
+        chunk_id: str, neighbor_count: int, include_target: bool, direction: str
+    ) -> str:
         """
         Internal task to retrieve neighboring chunks from graph database.
 
@@ -732,9 +748,11 @@ async def get_chunk_neighbors(
         chunk_id : str
             Target chunk identifier
         neighbor_count : int
-            Chunks to retrieve on each side
+            Chunks to retrieve on each side (or in one direction)
         include_target : bool
             Whether to include target in results
+        direction : str
+            "both", "forward", or "backward"
 
         Returns
         -------
@@ -756,6 +774,11 @@ async def get_chunk_neighbors(
             try:
                 # validate / cap neighbor count, range 1 to 10
                 neighbor_count = min(max(neighbor_count, 1), 10)
+
+                # validate direction
+                valid_directions = ("both", "forward", "backward")
+                if direction not in valid_directions:
+                    direction = "both"
 
                 from cognee.infrastructure.databases.graph import get_graph_engine
 
@@ -790,9 +813,16 @@ async def get_chunk_neighbors(
                 doc_id = target_result[0]["doc_id"]
                 doc_name = target_result[0]["doc_name"]
 
-                # calculate index range and retrieve neighboring chunks
-                min_index = target_index - neighbor_count
-                max_index = target_index + neighbor_count
+                # calculate index range based on direction
+                if direction == "forward":
+                    min_index = target_index
+                    max_index = target_index + neighbor_count
+                elif direction == "backward":
+                    min_index = target_index - neighbor_count
+                    max_index = target_index
+                else:  # "both"
+                    min_index = target_index - neighbor_count
+                    max_index = target_index + neighbor_count
 
                 neighbors_query = """
                 MATCH (chunk:DocumentChunk)-[:is_part_of]->(doc:Document {id: $doc_id})
@@ -838,6 +868,7 @@ async def get_chunk_neighbors(
                     "document_name": doc_name,
                     "target_chunk_index": target_index,
                     "neighbor_count": neighbor_count,
+                    "direction": direction,
                     "chunks_returned": len(chunks),
                     "chunks": chunks,
                 }
@@ -858,7 +889,7 @@ async def get_chunk_neighbors(
                     cls=JSONEncoder,
                 )
 
-    result = await get_neighbors_task(chunk_id, neighbor_count, include_target)
+    result = await get_neighbors_task(chunk_id, neighbor_count, include_target, direction)
     return [types.TextContent(type="text", text=result)]
 
 
