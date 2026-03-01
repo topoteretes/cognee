@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 from cognee.modules.pipelines.tasks.task import task_summary
 from cognee.infrastructure.engine import DataPoint
-from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 from cognee.modules.graph.utils import deduplicate_nodes_and_edges, get_graph_from_model
 from cognee.modules.users.models import User
@@ -93,10 +93,12 @@ async def add_data_points(
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
-    graph_engine = await get_graph_engine()
+    unified = await get_unified_engine()
+    graph_engine = unified.graph
+    vector_engine = unified.vector
 
     await graph_engine.add_nodes(nodes)
-    await index_data_points(nodes)
+    await index_data_points(nodes, vector_engine=vector_engine)
 
     if user and dataset and data:
         await upsert_nodes(
@@ -107,18 +109,18 @@ async def add_data_points(
         )
 
     await graph_engine.add_edges(edges)
-    await index_graph_edges(edges)
+    await index_graph_edges(edges, vector_engine=vector_engine)
 
     if isinstance(custom_edges, list) and custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
         await graph_engine.add_edges(custom_edges)
-        await index_graph_edges(custom_edges)
+        await index_graph_edges(custom_edges, vector_engine=vector_engine)
         edges.extend(custom_edges)
 
     if embed_triplets:
         triplets = _create_triplets_from_graph(nodes, edges)
         if triplets:
-            await index_data_points(triplets)
+            await index_data_points(triplets, vector_engine=vector_engine)
             logger.info(f"Created and indexed {len(triplets)} triplets from graph structure")
 
     return data_points

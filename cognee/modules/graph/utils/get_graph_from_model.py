@@ -212,7 +212,10 @@ async def get_graph_from_model(
             if field_name == "belongs_to_set":
                 node_set_names = []
                 for node_set in field_value:
-                    node_set_names.append(node_set.name)
+                    if isinstance(node_set, str):
+                        node_set_names.append(node_set)
+                    elif hasattr(node_set, "name"):
+                        node_set_names.append(node_set.name)
                 data_point_properties[field_name] = node_set_names
 
     # Create node for current DataPoint if needed
