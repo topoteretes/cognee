@@ -40,3 +40,13 @@ class CollectionDistancesNotFoundError(CogneeValidationError):
         status_code: int = status.HTTP_404_NOT_FOUND,
     ):
         super().__init__(message, name, status_code)
+
+
+class QueryValidationError(CogneeValidationError):
+    def __init__(
+        self,
+        message: str = "Queries not supplied in the correct format.",
+        name: str = "QueryValidationError",
+        status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
+    ):
+        super().__init__(message, name, status_code)

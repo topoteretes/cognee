@@ -251,7 +251,8 @@ class LiteLLMEmbeddingEngine(EmbeddingEngine):
         """
         logger.debug(f"Loading tokenizer for model {self.model}...")
         # If model also contains provider information, extract only model information
-        model = self.model.split("/")[-1]
+        # Split only on the first "/" to preserve model names like "BAAI/bge-m3"
+        model = self.model.split("/", 1)[-1] if "/" in self.model else self.model
 
         if "openai" in self.provider.lower():
             tokenizer = TikTokenTokenizer(

@@ -24,7 +24,6 @@ class TestGraphSummaryCompletionRetriever:
         assert retriever.user_prompt_path == "graph_context_for_question.txt"
         assert retriever.system_prompt_path == "answer_simple_question.txt"
         assert retriever.top_k == 5
-        assert retriever.save_interaction is False
 
     @pytest.mark.asyncio
     async def test_init_custom_params(self):
@@ -35,7 +34,6 @@ class TestGraphSummaryCompletionRetriever:
             summarize_prompt_path="custom_summarize.txt",
             system_prompt="Custom system prompt",
             top_k=10,
-            save_interaction=True,
             wide_search_top_k=200,
             triplet_distance_penalty=2.5,
         )
@@ -44,7 +42,6 @@ class TestGraphSummaryCompletionRetriever:
         assert retriever.user_prompt_path == "custom_user.txt"
         assert retriever.system_prompt_path == "custom_system.txt"
         assert retriever.top_k == 10
-        assert retriever.save_interaction is True
 
     @pytest.mark.asyncio
     async def test_resolve_edges_to_text_calls_super_and_summarizes(self, mock_edge):

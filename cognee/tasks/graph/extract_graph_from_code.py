@@ -1,5 +1,5 @@
 import asyncio
-from typing import Type, List
+from typing import Dict, Type, List
 from pydantic import BaseModel
 
 from cognee.infrastructure.llm.extraction import extract_content_graph
@@ -8,7 +8,9 @@ from cognee.tasks.storage import add_data_points
 
 
 async def extract_graph_from_code(
-    data_chunks: list[DocumentChunk], graph_model: Type[BaseModel]
+    data_chunks: list[DocumentChunk],
+    graph_model: Type[BaseModel],
+    context: Dict,
 ) -> List[DocumentChunk]:
     """
     Extracts a knowledge graph from the text content of document chunks using a specified graph model.
@@ -23,6 +25,6 @@ async def extract_graph_from_code(
 
     for chunk_index, chunk in enumerate(data_chunks):
         chunk_graph = chunk_graphs[chunk_index]
-        await add_data_points(chunk_graph.nodes)
+        await add_data_points(chunk_graph.nodes, context)
 
     return data_chunks

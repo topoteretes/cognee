@@ -4,8 +4,11 @@ from typing import Union
 from uuid import UUID
 
 from cognee.base_config import get_base_config
-from cognee.infrastructure.databases.vector.config import get_vectordb_config
-from cognee.infrastructure.databases.graph.config import get_graph_config
+from cognee.infrastructure.databases.vector.config import (
+    get_vectordb_config,
+    get_vectordb_context_config,
+)
+from cognee.infrastructure.databases.graph.config import get_graph_config, get_graph_context_config
 from cognee.infrastructure.databases.utils import get_or_create_dataset_database
 from cognee.infrastructure.databases.utils import resolve_dataset_database_connection_info
 from cognee.infrastructure.files.storage.config import file_storage_config
@@ -83,11 +86,25 @@ def backend_access_control_enabled():
     return False
 
 
+VECTOR_DBS_WITH_MULTI_USER_SUPPORT = ["lancedb", "falkor"]
+GRAPH_DBS_WITH_MULTI_USER_SUPPORT = ["kuzu", "falkor"]
+
+
+def is_multi_user_support_possible():
+    graph_config = get_graph_context_config()
+    vector_config = get_vectordb_context_config()
+    return (
+        graph_config["graph_database_provider"] in GRAPH_DBS_WITH_MULTI_USER_SUPPORT
+        and vector_config["vector_db_provider"] in VECTOR_DBS_WITH_MULTI_USER_SUPPORT
+    )
+
+
 async def set_database_global_context_variables(dataset: Union[str, UUID], user_id: UUID):
     """
     If backend access control is enabled this function will ensure all datasets have their own databases,
     access to which will be enforced by given permissions.
-    Database name will be determined by dataset_id and LanceDB and KuzuDB use will be enforced.
+    Database name will be determined by dataset and the appropriate vector and
+    graph database handlers will be enforced.
 
     Note: This is only currently supported by the following databases:
           Relational: SQLite, Postgres

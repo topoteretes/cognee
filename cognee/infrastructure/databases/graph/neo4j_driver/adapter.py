@@ -16,7 +16,6 @@ from cognee.tasks.temporal_graph.models import Timestamp
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.infrastructure.databases.graph.graph_db_interface import (
     GraphDBInterface,
-    record_graph_changes,
 )
 from cognee.modules.storage.utils import JSONEncoder
 
@@ -184,7 +183,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return await self.query(query, params)
 
-    @record_graph_changes
     @override_distributed(queued_add_nodes)
     async def add_nodes(self, nodes: list[DataPoint]) -> None:
         """
@@ -455,7 +453,6 @@ class Neo4jAdapter(GraphDBInterface):
 
         return flattened
 
-    @record_graph_changes
     @override_distributed(queued_add_edges)
     async def add_edges(self, edges: list[tuple[str, str, str, dict[str, Any]]]) -> None:
         """
@@ -680,6 +677,10 @@ class Neo4jAdapter(GraphDBInterface):
         """
         Get all neighbors of a specified node, including all directly connected nodes.
 
+        This method retrieves all neighboring nodes connected to a specified node and returns
+        their properties as a list of dictionaries. It may return an empty list if no neighbors exist or an
+        error occurs.
+
         Parameters:
         -----------
 
@@ -690,7 +691,16 @@ class Neo4jAdapter(GraphDBInterface):
 
             - List[Dict[str, Any]]: A list of neighboring nodes represented as dictionaries.
         """
-        return await self.get_neighbours(node_id)
+        query = f"""
+           MATCH (n: `{BASE_LABEL}` {{id: $node_id}})--(m: `{BASE_LABEL}`)
+           RETURN DISTINCT properties(m) AS properties
+           """
+        try:
+            result = await self.query(query, {"node_id": node_id})
+            return [row["properties"] for row in result] if result else []
+        except Exception as exc:
+            logger.error(f"Failed to get neighbors for node {node_id}: {exc}")
+            raise exc
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -1391,55 +1401,6 @@ class Neo4jAdapter(GraphDBInterface):
         """
         result = await self.query(query)
         return [record["n"] for record in result] if result else []
-
-    async def get_last_user_interaction_ids(self, limit: int) -> List[str]:
-        """
-        Retrieve the IDs of the most recent CogneeUserInteraction nodes.
-        Parameters:
-        -----------
-        - limit (int): The maximum number of interaction IDs to return.
-        Returns:
-        --------
-        - List[str]: A list of interaction IDs, sorted by created_at descending.
-        """
-
-        query = """
-        MATCH (n)
-        WHERE n.type = 'CogneeUserInteraction'
-        RETURN n.id as id
-        ORDER BY n.created_at DESC
-        LIMIT $limit
-        """
-        rows = await self.query(query, {"limit": limit})
-
-        id_list = [row["id"] for row in rows if "id" in row]
-        return id_list
-
-    async def apply_feedback_weight(
-        self,
-        node_ids: List[str],
-        weight: float,
-    ) -> None:
-        """
-        Increment `feedback_weight` on relationships `:used_graph_element_to_answer`
-        outgoing from nodes whose `id` is in `node_ids`.
-
-        Args:
-            node_ids: List of node IDs to match.
-            weight: Amount to add to `r.feedback_weight` (can be negative).
-
-        Side effects:
-            Updates relationship property `feedback_weight`, defaulting missing values to 0.
-        """
-        query = """
-        MATCH (n)-[r]->()
-        WHERE n.id IN $node_ids AND r.relationship_name = 'used_graph_element_to_answer'
-        SET r.feedback_weight = coalesce(r.feedback_weight, 0) + $weight
-        """
-        await self.query(
-            query,
-            params={"weight": float(weight), "node_ids": list(node_ids)},
-        )
 
     async def collect_events(self, ids: List[str]) -> Any:
         """

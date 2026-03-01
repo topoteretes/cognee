@@ -32,12 +32,12 @@ class AnswerGeneratorExecutor:
             query_text = instance["question"]
             correct_answer = instance["answer"]
 
-            retrieved_objects = await retriever.get_retrieved_objects(query_text)
+            retrieved_objects = await retriever.get_retrieved_objects(query=query_text)
             retrieval_context = await retriever.get_context_from_objects(
-                query_text, retrieved_objects
+                query=query_text, retrieved_objects=retrieved_objects
             )
             search_results = await retriever.get_completion_from_context(
-                query_text, retrieved_objects, retrieval_context
+                query=query_text, retrieved_objects=retrieved_objects, context=retrieval_context
             )
 
             ############

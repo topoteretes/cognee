@@ -14,9 +14,9 @@ from cognee.modules.pipelines.layers.resolve_authorized_user_datasets import (
 )
 from cognee.modules.engine.operations.setup import setup
 from cognee.modules.pipelines.layers.pipeline_execution_mode import get_pipeline_executor
-from cognee.tasks.memify.extract_subgraph_chunks import extract_subgraph_chunks
-from cognee.tasks.codingagents.coding_rule_associations import (
-    add_rule_associations,
+from cognee.memify_pipelines.memify_default_tasks import (
+    get_default_memify_enrichment_tasks,
+    get_default_memify_extraction_tasks,
 )
 
 logger = get_logger("memify")
@@ -64,15 +64,9 @@ async def memify(
 
     # Use default coding rules tasks if no tasks were provided
     if not extraction_tasks:
-        extraction_tasks = [Task(extract_subgraph_chunks)]
+        extraction_tasks = get_default_memify_extraction_tasks()
     if not enrichment_tasks:
-        enrichment_tasks = [
-            Task(
-                add_rule_associations,
-                rules_nodeset_name="coding_agent_rules",
-                task_config={"batch_size": 1},
-            )
-        ]
+        enrichment_tasks = get_default_memify_enrichment_tasks()
 
     await setup()
 

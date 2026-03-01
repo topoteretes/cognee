@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Validate Developer Certificate of Origin statement
-        uses: actions/github-script@v6
+        uses: actions/github-script@v8
         with:
           # If using the built-in GITHUB_TOKEN, ensure it has 'read:org' permission.
           # In GitHub Enterprise or private orgs, you might need a PAT (personal access token) with read:org scope.

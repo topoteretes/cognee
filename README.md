@@ -41,7 +41,7 @@
   </a>
 </p>
 
-Use our knowledge engine to build personalized and dynamic memory for AI Agents. 
+Use our knowledge engine to build personalized and dynamic memory for AI Agents.
 
   <p align="center">
   🌐 Available Languages

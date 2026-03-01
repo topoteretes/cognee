@@ -11,22 +11,6 @@ logger = get_logger()
 
 
 async def main():
-    data_directory_path = str(
-        pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_custom_model")
-        ).resolve()
-    )
-    cognee.config.data_root_directory(data_directory_path)
-    cognee_directory_path = str(
-        pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_custom_model")
-        ).resolve()
-    )
-    cognee.config.system_root_directory(cognee_directory_path)
-
-    await cognee.prune.prune_data()
-    await cognee.prune.prune_system(metadata=True)
-
     # Define a custom graph model for programming languages.
     class FieldType(DataPoint):
         name: str = "Field"
@@ -46,6 +30,22 @@ async def main():
         used_in: list[Field] = []
         is_type: ProgrammingLanguageType
         metadata: dict = {"index_fields": ["name"]}
+
+    data_directory_path = str(
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_custom_model")
+        ).resolve()
+    )
+    cognee.config.data_root_directory(data_directory_path)
+    cognee_directory_path = str(
+        pathlib.Path(
+            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_custom_model")
+        ).resolve()
+    )
+    cognee.config.system_root_directory(cognee_directory_path)
+
+    await cognee.prune.prune_data()
+    await cognee.prune.prune_system(metadata=True)
 
     text = (
         "Python is an interpreted, high-level, general-purpose programming language. It was created by Guido van Rossum and first released in 1991. "
@@ -67,25 +67,25 @@ async def main():
     await cognee.visualize_graph(graph_file_path)
 
     # Completion query that uses graph data to form context.
-    completion = await cognee.search(SearchType.GRAPH_COMPLETION, "What is python?")
+    completion = await cognee.search("What is python?", SearchType.GRAPH_COMPLETION)
     assert len(completion) != 0, "Graph completion search didn't return any result."
     print("Graph completion result is:")
     print(completion)
 
     # Completion query that uses document chunks to form context.
-    completion = await cognee.search(SearchType.RAG_COMPLETION, "What is Python?")
+    completion = await cognee.search("What is Python?", SearchType.RAG_COMPLETION)
     assert len(completion) != 0, "Completion search didn't return any result."
     print("Completion result is:")
     print(completion)
 
     # Query all summaries related to query.
-    summaries = await cognee.search(SearchType.SUMMARIES, "Python")
+    summaries = await cognee.search("Python", SearchType.SUMMARIES)
     assert len(summaries) != 0, "Summaries search didn't return any results."
     print("Summary results are:")
     for summary in summaries:
         print(summary)
 
-    chunks = await cognee.search(SearchType.CHUNKS, query_text="Python")
+    chunks = await cognee.search("Python", SearchType.CHUNKS)
     assert len(chunks) != 0, "Chunks search didn't return any results."
     print("Chunk results are:")
     for chunk in chunks:

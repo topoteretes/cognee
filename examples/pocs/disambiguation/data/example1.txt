@@ -1,0 +1,4 @@
+OpenAI released a new model today.
+Later, Open AI announced pricing updates, and a researcher from OpenAI Labs gave a talk.
+Some outlets wrote about OpenAI’s “Safety Team,” while others mentioned the “Open A.I. safety group.”
+In one paragraph, the company is called OpenAI, in another it’s simply “the AI lab.”

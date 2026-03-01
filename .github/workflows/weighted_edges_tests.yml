@@ -2,12 +2,12 @@ name: Weighted Edges Tests
 
 on:
   push:
-    branches: [ main, dev, weighted_edges ]
+    branches: [ main, dev, weighted_edges]
     paths:
       - 'cognee/modules/graph/utils/get_graph_from_model.py'
       - 'cognee/infrastructure/engine/models/Edge.py'
       - 'cognee/tests/unit/interfaces/graph/test_weighted_edges.py'
-      - 'examples/python/weighted_edges_example.py'
+      - 'examples/demos/dynamic_multiple_weighted_edges_example.py'
       - '.github/workflows/weighted_edges_tests.yml'
   pull_request:
     branches: [ main, dev ]
@@ -15,7 +15,7 @@ on:
       - 'cognee/modules/graph/utils/get_graph_from_model.py'
       - 'cognee/infrastructure/engine/models/Edge.py'
       - 'cognee/tests/unit/interfaces/graph/test_weighted_edges.py'
-      - 'examples/python/weighted_edges_example.py'
+      - 'examples/demos/dynamic_multiple_weighted_edges_example.py'
       - '.github/workflows/weighted_edges_tests.yml'
 
 env:
@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -77,7 +77,7 @@ jobs:
       EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -120,7 +120,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -131,13 +131,13 @@ jobs:
 
       - name: Test Weighted Edges Example
         run: |
-          uv run python examples/python/weighted_edges_example.py
+          uv run python examples/demos/dynamic_multiple_weighted_edges_example.py
 
       - name: Verify Visualization File Created
         run: |
-          if [ -f "examples/python/weighted_graph_visualization.html" ]; then
+          if [ -f "examples/demos/dunder_mifflin_company_graph.html" ]; then
             echo "✅ Visualization file created successfully"
-            ls -la examples/python/weighted_graph_visualization.html
+            ls -la examples/demos/dunder_mifflin_company_graph.html
           else
             echo "❌ Visualization file not found"
             exit 1
@@ -150,7 +150,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -162,9 +162,9 @@ jobs:
       - name: Run Linting on Weighted Edges Files
         uses: astral-sh/ruff-action@v3
         with:
-          args: "check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py examples/python/weighted_edges_example.py"
+          args: "check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py examples/demos/dynamic_multiple_weighted_edges_example.py"
 
       - name: Run Formatting Check on Weighted Edges Files
         uses: astral-sh/ruff-action@v3
         with:
-          args: "format --check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py examples/python/weighted_edges_example.py"
+          args: "format --check cognee/modules/graph/utils/get_graph_from_model.py cognee/tests/unit/interfaces/graph/test_weighted_edges.py examples/demos/dynamic_multiple_weighted_edges_example.py"

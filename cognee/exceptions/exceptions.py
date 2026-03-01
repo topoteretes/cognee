@@ -56,7 +56,7 @@ class CogneeValidationError(CogneeApiError):
         self,
         message: str = "A validation error occurred.",
         name: str = "CogneeValidationError",
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         log=True,
         log_level="ERROR",
     ):

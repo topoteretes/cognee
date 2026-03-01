@@ -1,3 +1,4 @@
+import uuid
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 
@@ -44,7 +45,6 @@ class CacheDBInterface(ABC):
         finally:
             self.release()
 
-    @abstractmethod
     async def add_qa(
         self,
         user_id: str,
@@ -52,25 +52,105 @@ class CacheDBInterface(ABC):
         question: str,
         context: str,
         answer: str,
-        ttl: int | None = 86400,
+    ):
+        """Backward-compatibility: delegates to create_qa_entry with generated qa_id. :TODO: delete when retrievers are updated"""
+        return await self.create_qa_entry(
+            user_id,
+            session_id,
+            question,
+            context,
+            answer,
+            qa_id=str(uuid.uuid4()),
+        )
+
+    @abstractmethod
+    async def create_qa_entry(
+        self,
+        user_id: str,
+        session_id: str,
+        question: str,
+        context: str,
+        answer: str,
+        qa_id: str,
+        feedback_text: str | None = None,
+        feedback_score: int | None = None,
     ):
         """
         Add a Q/A/context triplet to a cache session.
+        Uses the same QA fields as update_qa_entry for consistent structure.
         """
-
         pass
 
-    @abstractmethod
     async def get_latest_qa(self, user_id: str, session_id: str, last_n: int = 5):
+        """Backward-compat: delegates to get_latest_qa_entries. :TODO: delete when retrievers are updated"""
+        return await self.get_latest_qa_entries(user_id, session_id, last_n)
+
+    @abstractmethod
+    async def get_latest_qa_entries(self, user_id: str, session_id: str, last_n: int = 5):
         """
         Retrieve the most recent Q/A/context triplets for a session.
         """
         pass
 
-    @abstractmethod
     async def get_all_qas(self, user_id: str, session_id: str):
+        """Backward-compat: delegates to get_all_qa_entries. :TODO: delete when retrievers are updated"""
+        return await self.get_all_qa_entries(user_id, session_id)
+
+    @abstractmethod
+    async def get_all_qa_entries(self, user_id: str, session_id: str):
         """
         Retrieve all Q/A/context triplets for the given session.
+        """
+        pass
+
+    @abstractmethod
+    async def update_qa_entry(
+        self,
+        user_id: str,
+        session_id: str,
+        qa_id: str,
+        question: str | None = None,
+        context: str | None = None,
+        answer: str | None = None,
+        feedback_text: str | None = None,
+        feedback_score: int | None = None,
+    ) -> bool:
+        """
+        Update a QA entry by qa_id. Same QA fields as create_qa_entry.
+        Only passed fields are updated; None/default preserves existing values.
+        Returns True if updated, False if qa_id not found.
+        """
+        pass
+
+    @abstractmethod
+    async def delete_feedback(self, user_id: str, session_id: str, qa_id: str) -> bool:
+        """
+        Set feedback_text and feedback_score to None for a QA entry (clears feedback).
+        Returns True if updated, False if qa_id not found.
+        """
+        pass
+
+    @abstractmethod
+    async def delete_qa_entry(self, user_id: str, session_id: str, qa_id: str) -> bool:
+        """
+        Delete a single QA entry by qa_id.
+        Returns True if deleted, False if qa_id not found.
+        """
+        pass
+
+    @abstractmethod
+    async def delete_session(self, user_id: str, session_id: str) -> bool:
+        """
+        Delete the entire session and all its QA entries.
+        Returns True if deleted, False if session did not exist.
+        """
+        pass
+
+    @abstractmethod
+    async def prune(self) -> None:
+        """
+        Delete the entire cache (flush Redis db or delete FS cache directory).
+        In Cognee, prune means wiping the whole cache storage.
         """
         pass
 

@@ -12,6 +12,10 @@ on:
         type: string
         default: "local"
         description: "Pypi-compatible version of cognee to use. For example, 0.5.2.dev0. `local` (default) - Installing Cognee from local source"
+      ci-image:
+        required: false
+        type: string
+        default: ''
     secrets:
       LLM_PROVIDER:
         required: true
@@ -43,6 +47,7 @@ jobs:
     name: CLI Unit Tests
     if: ${{ inputs.cognee_version == 'local' }}
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     env:
       ENV: 'dev'
       LLM_PROVIDER: openai
@@ -56,7 +61,7 @@ jobs:
       EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -71,6 +76,7 @@ jobs:
   cli-integration-tests:
     name: CLI Integration Tests
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     env:
       ENV: 'dev'
       LLM_PROVIDER: openai
@@ -85,7 +91,7 @@ jobs:
       EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -106,6 +112,7 @@ jobs:
   cli-functionality-tests:
     name: CLI Functionality Tests
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     env:
       ENV: 'dev'
       LLM_PROVIDER: openai
@@ -120,7 +127,7 @@ jobs:
       EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
