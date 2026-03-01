@@ -861,6 +861,7 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           CACHING: true
+          AUTO_FEEDBACK: true
           CACHE_BACKEND: 'redis'
           CACHE_HOST: ${{ inputs.ci-image != '' && 'redis' || 'localhost' }}
           DB_PROVIDER: 'postgres'
@@ -917,6 +918,7 @@ jobs:
           EMBEDDING_API_VERSION: ${{ secrets.EMBEDDING_API_VERSION }}
           GRAPH_DATABASE_PROVIDER: 'kuzu'
           CACHING: true
+          AUTO_FEEDBACK: true
           CACHE_BACKEND: 'fs'
           DB_PROVIDER: 'postgres'
           DB_NAME: 'cognee_db'

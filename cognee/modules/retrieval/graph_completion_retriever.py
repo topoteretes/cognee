@@ -14,7 +14,7 @@ from cognee.modules.retrieval.utils.completion import (
 )
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.shared.logging_utils import get_logger
-from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.context_global_variables import session_user
 from cognee.infrastructure.databases.cache.config import CacheConfig
 
@@ -94,8 +94,8 @@ class GraphCompletionRetriever(BaseRetriever):
 
         validate_retriever_input(query, query_batch, self._use_session_cache())
 
-        graph_engine = await get_graph_engine()
-        is_empty = await graph_engine.is_empty()
+        self._unified_engine = await get_unified_engine()
+        is_empty = await self._unified_engine.graph.is_empty()
 
         if is_empty:
             logger.warning("Search attempt on an empty knowledge graph")
@@ -149,6 +149,7 @@ class GraphCompletionRetriever(BaseRetriever):
             - list: A list of found triplets that match the query.
         """
         collections = self._get_vector_index_collections()
+        unified_engine = getattr(self, "_unified_engine", None)
         return await brute_force_triplet_search(
             query,
             query_batch,
@@ -158,6 +159,7 @@ class GraphCompletionRetriever(BaseRetriever):
             node_name=self.node_name,
             wide_search_top_k=self.wide_search_top_k,
             triplet_distance_penalty=self.triplet_distance_penalty,
+            unified_engine=unified_engine,
         )
 
     async def get_triplets_batch(

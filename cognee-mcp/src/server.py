@@ -6,10 +6,8 @@ import asyncio
 import subprocess
 from pathlib import Path
 from typing import Optional
-from cognee.modules.data.methods import (
-    get_datasets_by_name,
-    get_last_added_data,
-)
+from cognee.modules.data.methods.get_datasets_by_name import get_datasets_by_name
+from cognee.modules.data.methods.get_last_added_data import get_last_added_data
 from cognee.modules.users.methods import get_default_user
 from cognee.shared.logging_utils import get_logger, setup_logging, get_log_file_location
 from cognee.shared.usage_logger import log_usage

@@ -100,7 +100,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Run Simple Examples
-        run: uv run python ./examples/python/simple_example.py
+        run: uv run python ./examples/demos/simple_cognee_example.py
 
   simple-examples-baml:
     name: Run Simple Examples BAML
@@ -140,4 +140,4 @@ jobs:
           extra-dependencies: "baml"
 
       - name: Run Simple Examples
-        run: uv run python ./examples/python/simple_example.py
+        run: uv run python ./examples/demos/simple_cognee_example.py

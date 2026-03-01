@@ -11,7 +11,7 @@ from cognee.modules.users.methods import get_default_user
 logger = get_logger()
 
 
-async def test_local_file_deletion(data_text, file_location):
+async def test_local_file_deletion(data_text, file_location, dataset_1_id, dataset_2_id):
     from sqlalchemy import select
     import hashlib
     from cognee.infrastructure.databases.relational import get_relational_engine
@@ -28,7 +28,7 @@ async def test_local_file_deletion(data_text, file_location):
             f"Data location doesn't exist: {data.raw_data_location}"
         )
         # Test deletion of data along with local files created by cognee
-        await engine.delete_data_entity(data.id)
+        await engine.delete_data_entity(data.id, dataset_id=dataset_2_id)
         assert not os.path.exists(data.raw_data_location.replace("file://", "")), (
             f"Data location still exists after deletion: {data.raw_data_location}"
         )
@@ -44,7 +44,7 @@ async def test_local_file_deletion(data_text, file_location):
             f"Data location doesn't exist: {data.original_data_location}"
         )
         # Test local files not created by cognee won't get deleted
-        await engine.delete_data_entity(data.id)
+        await engine.delete_data_entity(data.id, dataset_id=dataset_1_id)
         assert os.path.exists(data.original_data_location.replace("file://", "")), (
             f"Data location doesn't exists: {data.original_data_location}"
         )
@@ -166,7 +166,9 @@ async def main():
     explanation_file_path_nlp = os.path.join(
         pathlib.Path(__file__).parent, "test_data/Natural_language_processing.txt"
     )
-    await cognee.add([explanation_file_path_nlp], dataset_name_1, node_set=node_set_a)
+    add_1_payload = await cognee.add(
+        [explanation_file_path_nlp], dataset_name_1, node_set=node_set_a
+    )
 
     text = """A quantum computer is a computer that takes advantage of quantum mechanical phenomena.
     At small scales, physical matter exhibits properties of both particles and waves, and quantum computing leverages this behavior, specifically quantum superposition and entanglement, using specialized hardware that supports the preparation and manipulation of quantum states.
@@ -176,7 +178,7 @@ async def main():
     In principle, a non-quantum (classical) computer can solve the same computational problems as a quantum computer, given enough time. Quantum advantage comes in the form of time complexity rather than computability, and quantum complexity theory shows that some quantum algorithms for carefully selected tasks require exponentially fewer computational steps than the best known non-quantum algorithms. Such tasks can in theory be solved on a large-scale quantum computer whereas classical computers would not finish computations in any reasonable amount of time. However, quantum speedup is not universal or even typical across computational tasks, since basic tasks such as sorting are proven to not allow any asymptotic quantum speedup. Claims of quantum supremacy have drawn significant attention to the discipline, but are demonstrated on contrived tasks, while near-term practical use cases remain limited.
     """
 
-    await cognee.add([text], dataset_name_2, node_set=node_set_b)
+    add_2_payload = await cognee.add([text], dataset_name_2, node_set=node_set_b)
 
     await cognee.cognify([dataset_name_2, dataset_name_1])
 
@@ -232,7 +234,12 @@ async def main():
 
     await test_vector_nodeset_filtering_retriever_integration()
 
-    await test_local_file_deletion(text, explanation_file_path_nlp)
+    await test_local_file_deletion(
+        text,
+        explanation_file_path_nlp,
+        dataset_1_id=add_1_payload.dataset_id,
+        dataset_2_id=add_2_payload.dataset_id,
+    )
 
     await cognee.prune.prune_data()
     data_root_directory = get_storage_config()["data_root_directory"]

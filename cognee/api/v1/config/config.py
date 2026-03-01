@@ -187,6 +187,7 @@ class config:
         """
         config._update_config(get_translation_config(), config_dict)
 
+    @staticmethod
     def set(key: str, value):
         """
         Generic setter that maps configuration keys to their specific setter methods.

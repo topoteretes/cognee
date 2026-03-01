@@ -1,5 +1,6 @@
 from cognee.modules.users.models import DatasetDatabase
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 
 from cognee.modules.data.models import Dataset, DatasetData, Data
 from cognee.infrastructure.databases.utils.get_vector_dataset_database_handler import (
@@ -46,7 +47,11 @@ async def delete_dataset(dataset: Dataset):
                     del data_record.pipeline_status[pipeline_name][dataset_id_str]
                     updated = True
             if updated:
-                await session.merge(data_record)
+                # MutableDict only tracks top-level dict changes. Nested dict
+                # modifications (del status[pipeline][dataset_id]) are invisible
+                # to SQLAlchemy's change tracking, so we must explicitly mark
+                # the column as dirty to ensure the update is persisted.
+                flag_modified(data_record, "pipeline_status")
 
         await session.commit()
 

@@ -164,6 +164,14 @@ def mock_vector_engine():
     return engine
 
 
+def _make_unified_mock(graph_engine_mock, vector_engine_mock=None):
+    """Create a unified engine mock wrapping graph and vector engine mocks."""
+    unified_mock = AsyncMock()
+    unified_mock.graph = graph_engine_mock
+    unified_mock.vector = vector_engine_mock
+    return unified_mock
+
+
 @pytest.mark.asyncio
 async def test_get_context_with_time_range(mock_graph_engine, mock_vector_engine):
     """Test get_context when time range is extracted from query."""
@@ -183,17 +191,15 @@ async def test_get_context_with_time_range(mock_graph_engine, mock_vector_engine
     mock_result2 = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.10)
     mock_vector_engine.search.return_value = [mock_result1, mock_result2]
 
+    unified_mock = _make_unified_mock(mock_graph_engine, mock_vector_engine)
+
     with (
         patch.object(
             retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
         ),
         patch(
-            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
-        patch(
-            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
-            return_value=mock_vector_engine,
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
     ):
         objects = await retriever.get_retrieved_objects("What happened in 2024?")
@@ -209,10 +215,12 @@ async def test_get_context_fallback_to_triplets_no_time(mock_graph_engine):
     """Test get_context falls back to triplets when no time is extracted."""
     retriever = TemporalRetriever()
 
+    unified_mock = _make_unified_mock(mock_graph_engine)
+
     with (
         patch(
-            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
         patch.object(
             retriever, "get_triplets", return_value=[{"s": "a", "p": "b", "o": "c"}]
@@ -242,10 +250,12 @@ async def test_get_context_no_events_found(mock_graph_engine):
 
     mock_graph_engine.collect_time_ids.return_value = []
 
+    unified_mock = _make_unified_mock(mock_graph_engine)
+
     with (
         patch(
-            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
         patch.object(
             retriever, "get_triplets", return_value=[{"s": "a", "p": "b", "o": "c"}]
@@ -285,15 +295,13 @@ async def test_get_context_time_from_only(mock_graph_engine, mock_vector_engine)
     mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
     mock_vector_engine.search.return_value = [mock_result]
 
+    unified_mock = _make_unified_mock(mock_graph_engine, mock_vector_engine)
+
     with (
         patch.object(retriever, "extract_time_from_query", return_value=("2024-01-01", None)),
         patch(
-            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
-        patch(
-            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
-            return_value=mock_vector_engine,
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
     ):
         objects = await retriever.get_retrieved_objects("What happened in 2024?")
@@ -320,15 +328,13 @@ async def test_get_context_time_to_only(mock_graph_engine, mock_vector_engine):
     mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
     mock_vector_engine.search.return_value = [mock_result]
 
+    unified_mock = _make_unified_mock(mock_graph_engine, mock_vector_engine)
+
     with (
         patch.object(retriever, "extract_time_from_query", return_value=(None, "2024-12-31")),
         patch(
-            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
-        patch(
-            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
-            return_value=mock_vector_engine,
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
     ):
         objects = await retriever.get_retrieved_objects("What happened in 2024?")
@@ -355,17 +361,15 @@ async def test_get_completion_without_context(mock_graph_engine, mock_vector_eng
     mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
     mock_vector_engine.search.return_value = [mock_result]
 
+    unified_mock = _make_unified_mock(mock_graph_engine, mock_vector_engine)
+
     with (
         patch.object(
             retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
         ),
         patch(
-            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
-        patch(
-            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
-            return_value=mock_vector_engine,
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
@@ -441,17 +445,15 @@ async def test_get_completion_with_session(mock_graph_engine, mock_vector_engine
     mock_user = MagicMock()
     mock_user.id = "test-user-id"
 
+    unified_mock = _make_unified_mock(mock_graph_engine, mock_vector_engine)
+
     with (
         patch.object(
             retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
         ),
         patch(
-            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
-        patch(
-            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
-            return_value=mock_vector_engine,
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.get_session_manager",
@@ -500,17 +502,15 @@ async def test_get_completion_with_session_no_user_id(mock_graph_engine, mock_ve
     mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
     mock_vector_engine.search.return_value = [mock_result]
 
+    unified_mock = _make_unified_mock(mock_graph_engine, mock_vector_engine)
+
     with (
         patch.object(
             retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
         ),
         patch(
-            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
-        patch(
-            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
-            return_value=mock_vector_engine,
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
@@ -561,17 +561,15 @@ async def test_get_completion_with_response_model(mock_graph_engine, mock_vector
     mock_result = SimpleNamespace(id="e1", payload={"id": "e1"}, score=0.05)
     mock_vector_engine.search.return_value = [mock_result]
 
+    unified_mock = _make_unified_mock(mock_graph_engine, mock_vector_engine)
+
     with (
         patch.object(
             retriever, "extract_time_from_query", return_value=("2024-01-01", "2024-12-31")
         ),
         patch(
-            "cognee.modules.retrieval.temporal_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ),
-        patch(
-            "cognee.modules.retrieval.temporal_retriever.get_vector_engine",
-            return_value=mock_vector_engine,
+            "cognee.modules.retrieval.temporal_retriever.get_unified_engine",
+            return_value=unified_mock,
         ),
         patch(
             "cognee.modules.retrieval.graph_completion_retriever.generate_completion",
