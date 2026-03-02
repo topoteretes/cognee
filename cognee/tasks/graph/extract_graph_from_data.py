@@ -125,23 +125,11 @@ async def integrate_chunk_graphs(
                 _stamp_provenance_deep(node, pipeline_name, task_name)
 
         await add_data_points(
-            data_points=graph_nodes, custom_edges=context, embed_triplets=embed_triplets
+            data_points=graph_nodes,
+            context=context,
+            custom_edges=graph_edges,
+            embed_triplets=embed_triplets,
         )
-
-    if len(graph_edges) > 0:
-        await graph_engine.add_edges(graph_edges)
-        await index_graph_edges(graph_edges)
-
-        user = context["user"] if "user" in context else None
-
-        if user:
-            await upsert_edges(
-                graph_edges,
-                tenant_id=user.tenant_id,
-                user_id=user.id,
-                dataset_id=context["dataset"].id,
-                data_id=context["data"].id,
-            )
 
     return data_chunks
 

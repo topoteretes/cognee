@@ -119,6 +119,16 @@ async def add_data_points(
         custom_edges = ensure_edge_object_ids(custom_edges)
         await graph_engine.add_edges(custom_edges)
         await index_graph_edges(custom_edges, vector_engine=vector_engine)
+
+        if user and dataset and data:
+            await upsert_edges(
+                custom_edges,
+                tenant_id=user.tenant_id,
+                user_id=user.id,
+                dataset_id=dataset.id,
+                data_id=data.id,
+            )
+
         edges.extend(custom_edges)
 
     if embed_triplets:
