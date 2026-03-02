@@ -74,10 +74,12 @@ class CacheDBInterface(ABC):
         qa_id: str,
         feedback_text: str | None = None,
         feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
     ):
         """
         Add a Q/A/context triplet to a cache session.
         Uses the same QA fields as update_qa_entry for consistent structure.
+        used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
         """
         pass
 
@@ -114,6 +116,7 @@ class CacheDBInterface(ABC):
         answer: str | None = None,
         feedback_text: str | None = None,
         feedback_score: int | None = None,
+        used_graph_element_ids: dict | None = None,
     ) -> bool:
         """
         Update a QA entry by qa_id. Same QA fields as create_qa_entry.
