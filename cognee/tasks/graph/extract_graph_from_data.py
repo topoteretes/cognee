@@ -1,8 +1,13 @@
 import asyncio
-from typing import Dict, Type, List, Optional
+import numpy as np
+from typing import Dict, Type, List, Optional, Any
 from pydantic import BaseModel
 
+import pandas as pd
+from pandas import DataFrame
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.methods import upsert_edges
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.tasks.storage import index_graph_edges
@@ -56,12 +61,83 @@ def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
             _stamp_provenance_deep(item, pipeline_name, task_name, visited)
 
 
+_df_lock = asyncio.Lock()
+_reused_items_lock = asyncio.Lock()
+
+
+def get_closest_match(df: DataFrame, query_vector) -> List[Any]:
+    """
+    Returns top-k (name, cosine_similarity) pairs where each column of df is a vector.
+    Assumes df columns are named by vector key and each column is a 1D vector.
+    """
+    if df is None or df.empty:
+        return []
+
+    # columns are vectors; shape: (dim, n)
+    M = df.to_numpy(dtype=float)  # shape (dim, n_cols)
+    q = np.asarray(query_vector, dtype=float)  # shape (dim,)
+
+    q_norm = np.linalg.norm(q)
+    if q_norm == 0 or M.size == 0:
+        return []
+
+    # cosine similarity for all columns at once
+    denom = np.linalg.norm(M, axis=0) * q_norm
+    # avoid divide-by-zero
+    denom = np.where(denom == 0, np.inf, denom)
+    sims = (M.T @ q) / denom  # shape (n_cols,)
+
+    closest_idx = int(np.argmax(sims))
+    similarity_val = float(sims[closest_idx])
+
+    names = df.columns.to_numpy()
+    return [names[closest_idx], similarity_val]
+
+
+async def cache_and_replace_nodes(df, nodes, similarity_threshold, stats):
+    if df is None or stats is None:
+        return
+    vector_engine = get_vector_engine()
+    df_new = pd.DataFrame()
+    for chunk in nodes:
+        for _, node in chunk.contains:
+            if node and (isinstance(node, Entity) or isinstance(node, EntityType)):
+                vector = await vector_engine.embed_data(node.name)
+                closest_match = get_closest_match(df, vector[0])
+                if len(closest_match) > 0:
+                    print(f"node={node.name}, closest_match={closest_match}")
+                    if closest_match[1] > similarity_threshold:
+                        node.name = closest_match[0]
+                        async with _reused_items_lock:
+                            if isinstance(stats, dict):
+                                stats["reused_entities"] = (stats.get("reused_entities") or 0) + 1
+                if node.name in df_new.columns:
+                    continue
+                # Store as numeric column (not list-in-cell) for fast vectorized ops.
+                df_new[node.name] = pd.Series(vector[0], dtype=float)
+
+    async with _df_lock:
+        if not df_new.empty:
+            # Drop only overlapping columns in one shot to avoid in-place mutation
+            # during iteration and to tolerate any concurrent column changes.
+            overlap = df_new.columns.intersection(df.columns)
+            if len(overlap) > 0:
+                df_new.drop(columns=overlap, inplace=True, errors="ignore")
+        # avoid fragmentation, improve speed, keep the same df
+        combined = pd.concat([df, df_new], axis=1)
+        df._mgr = combined._mgr
+        df._item_cache.clear()
+
+
 async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
     graph_model: Type[BaseModel],
     ontology_resolver: BaseOntologyResolver,
     context: Dict,
+    df: DataFrame,
+    stats: Dict = None,
+    similarity_threshold: float = 1.0,
     pipeline_name: str = None,
     task_name: str = None,
 ) -> List[DocumentChunk]:
@@ -119,6 +195,8 @@ async def integrate_chunk_graphs(
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
 
+    await cache_and_replace_nodes(df, graph_nodes, similarity_threshold, stats)
+
     if len(graph_nodes) > 0:
         if pipeline_name or task_name:
             for node in graph_nodes:
@@ -157,6 +235,10 @@ async def extract_graph_from_data(
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
+    df = kwargs.get("df", None)
+    similarity_threshold = kwargs.get("similarity_threshold", 1.0)
+    stats = kwargs.get("stats", None)
+    # use_poc = kwargs.get("use_poc") or False
 
     if not isinstance(data_chunks, list) or not data_chunks:
         raise InvalidDataChunksError("must be a non-empty list of DocumentChunk.")
@@ -165,9 +247,19 @@ async def extract_graph_from_data(
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
 
+    llm_kwargs = dict(kwargs)
+    # df is used for local vector caching; it must not be passed to the LLM client.
+    llm_kwargs.pop("df", None)
+    # use_poc is an internal flag and not part of LLM call parameters.
+    llm_kwargs.pop("use_poc", None)
+    llm_kwargs.pop("similarity_threshold", None)
+    llm_kwargs.pop("stats", None)
+
     chunk_graphs = await asyncio.gather(
         *[
-            extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs)
+            extract_content_graph(
+                chunk.text, graph_model, custom_prompt=custom_prompt, **llm_kwargs
+            )
             for chunk in data_chunks
         ]
     )
@@ -211,6 +303,9 @@ async def extract_graph_from_data(
         graph_model,
         ontology_resolver,
         context,
+        df,
+        stats,
+        similarity_threshold,
         pipeline_name=pipeline_name,
         task_name=task_name,
     )
