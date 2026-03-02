@@ -46,9 +46,7 @@ class SessionQAEntry(BaseModel):
             raise ValueError("used_graph_element_ids must be a dict or None")
         allowed = {"node_ids", "edge_ids"}
         if set(v.keys()) - allowed:
-            raise ValueError(
-                "used_graph_element_ids may only have keys 'node_ids' and 'edge_ids'"
-            )
+            raise ValueError("used_graph_element_ids may only have keys 'node_ids' and 'edge_ids'")
         out: Dict[str, List[str]] = {}
         if "node_ids" in v:
             out["node_ids"] = _validate_list_of_str(v["node_ids"], "node_ids")
