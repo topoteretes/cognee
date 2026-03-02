@@ -1,17 +1,17 @@
 import pytest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock, PropertyMock
 
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 
 
-def _make_unified_mock(vector_engine):
-    """Create a mock UnifiedStoreEngine wrapping the given vector engine."""
+def _make_unified_mock(vector_engine, graph_engine=None):
+    """Create a mock UnifiedStoreEngine wrapping the given vector and graph engines."""
     unified = AsyncMock()
     unified.vector = vector_engine
-    unified.graph = AsyncMock()
+    unified.graph = graph_engine if graph_engine is not None else AsyncMock()
     return unified
 
 
@@ -198,19 +198,17 @@ async def test_enrichment_successful_batched_query(mock_vector_engine, mock_grap
 
     retriever = ChunksRetriever(top_k=5)
 
+    unified_mock = _make_unified_mock(mock_vector_engine, mock_graph_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
+            new_callable=AsyncMock,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
-                new_callable=AsyncMock,
-            ):
-                chunks = await retriever.get_retrieved_objects("test query")
+            chunks = await retriever.get_retrieved_objects("test query")
 
     assert len(chunks) == 2
     assert "parent_document" in chunks[0].payload
@@ -241,19 +239,17 @@ async def test_enrichment_batched_query_fails_falls_back_to_individual(
 
     retriever = ChunksRetriever(top_k=5)
 
+    unified_mock = _make_unified_mock(mock_vector_engine, mock_graph_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
+            new_callable=AsyncMock,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
-                new_callable=AsyncMock,
-            ):
-                chunks = await retriever.get_retrieved_objects("test query")
+            chunks = await retriever.get_retrieved_objects("test query")
 
     assert "parent_document" in chunks[0].payload
     assert chunks[0].payload["parent_document"]["id"] == "doc-789"
@@ -272,19 +268,18 @@ async def test_enrichment_graph_engine_unavailable_graceful_degradation(mock_vec
 
     retriever = ChunksRetriever(top_k=5, strict_enrichment=False)
 
+    unified_mock = _make_unified_mock(mock_vector_engine)
+    type(unified_mock).graph = PropertyMock(side_effect=Exception("Graph DB unavailable"))
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            side_effect=Exception("Graph DB unavailable"),
+            "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
+            new_callable=AsyncMock,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
-                new_callable=AsyncMock,
-            ):
-                chunks = await retriever.get_retrieved_objects("test query")
+            chunks = await retriever.get_retrieved_objects("test query")
 
     assert len(chunks) == 1
     assert "parent_document" not in chunks[0].payload
@@ -301,20 +296,19 @@ async def test_enrichment_strict_mode_raises_on_graph_unavailable(mock_vector_en
 
     retriever = ChunksRetriever(top_k=5, strict_enrichment=True)
 
+    unified_mock = _make_unified_mock(mock_vector_engine)
+    type(unified_mock).graph = PropertyMock(side_effect=Exception("Graph DB unavailable"))
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            side_effect=Exception("Graph DB unavailable"),
+            "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
+            new_callable=AsyncMock,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
-                new_callable=AsyncMock,
-            ):
-                with pytest.raises(NoDataError, match="Graph engine unavailable"):
-                    await retriever.get_retrieved_objects("test query")
+            with pytest.raises(NoDataError, match="Graph engine unavailable"):
+                await retriever.get_retrieved_objects("test query")
 
 
 @pytest.mark.asyncio
@@ -330,19 +324,17 @@ async def test_enrichment_no_parent_found_graceful(mock_vector_engine, mock_grap
 
     retriever = ChunksRetriever(top_k=5, strict_enrichment=False)
 
+    unified_mock = _make_unified_mock(mock_vector_engine, mock_graph_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
+            new_callable=AsyncMock,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
-                new_callable=AsyncMock,
-            ):
-                chunks = await retriever.get_retrieved_objects("test query")
+            chunks = await retriever.get_retrieved_objects("test query")
 
     assert len(chunks) == 1
     assert "parent_document" not in chunks[0].payload
@@ -360,20 +352,18 @@ async def test_enrichment_strict_mode_raises_on_no_parent(mock_vector_engine, mo
 
     retriever = ChunksRetriever(top_k=5, strict_enrichment=True)
 
+    unified_mock = _make_unified_mock(mock_vector_engine, mock_graph_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
+            new_callable=AsyncMock,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
-                new_callable=AsyncMock,
-            ):
-                with pytest.raises(NoDataError, match="No parent found for chunk"):
-                    await retriever.get_retrieved_objects("test query")
+            with pytest.raises(NoDataError, match="No parent found for chunk"):
+                await retriever.get_retrieved_objects("test query")
 
 
 @pytest.mark.asyncio
@@ -395,19 +385,17 @@ async def test_enrichment_partial_success(mock_vector_engine, mock_graph_engine)
 
     retriever = ChunksRetriever(top_k=5, strict_enrichment=False)
 
+    unified_mock = _make_unified_mock(mock_vector_engine, mock_graph_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
+            new_callable=AsyncMock,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
-                new_callable=AsyncMock,
-            ):
-                chunks = await retriever.get_retrieved_objects("test query")
+            chunks = await retriever.get_retrieved_objects("test query")
 
     assert "parent_document" in chunks[0].payload
     assert "parent_document" not in chunks[1].payload
@@ -420,15 +408,13 @@ async def test_enrichment_empty_chunks_list(mock_vector_engine, mock_graph_engin
 
     retriever = ChunksRetriever(top_k=5)
 
+    unified_mock = _make_unified_mock(mock_vector_engine, mock_graph_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
-        with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
-        ):
-            chunks = await retriever.get_retrieved_objects("test query")
+        chunks = await retriever.get_retrieved_objects("test query")
 
     assert chunks == []
     mock_graph_engine.query.assert_not_awaited()
@@ -445,19 +431,17 @@ async def test_enrichment_chunk_without_id(mock_vector_engine, mock_graph_engine
 
     retriever = ChunksRetriever(top_k=5, strict_enrichment=False)
 
+    unified_mock = _make_unified_mock(mock_vector_engine, mock_graph_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
+            new_callable=AsyncMock,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
-                new_callable=AsyncMock,
-            ):
-                chunks = await retriever.get_retrieved_objects("test query")
+            chunks = await retriever.get_retrieved_objects("test query")
 
     assert len(chunks) == 1
 
@@ -496,20 +480,18 @@ async def test_enrichment_low_success_rate_warning(mock_vector_engine, mock_grap
 
     retriever = ChunksRetriever(top_k=10, strict_enrichment=False)
 
+    unified_mock = _make_unified_mock(mock_vector_engine, mock_graph_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
+            new_callable=AsyncMock,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
-                new_callable=AsyncMock,
-            ):
-                with patch("cognee.modules.retrieval.chunks_retriever.logger") as mock_logger:
-                    result = await retriever.get_retrieved_objects("test query")
+            with patch("cognee.modules.retrieval.chunks_retriever.logger") as mock_logger:
+                result = await retriever.get_retrieved_objects("test query")
 
     assert len(result) == 10
     assert sum(1 for c in result if "parent_document" in c.payload) == 2
@@ -536,19 +518,17 @@ async def test_enrichment_timestamp_update_failure_non_strict(
 
     mock_update = AsyncMock(side_effect=Exception("Timestamp update failed"))
 
+    unified_mock = _make_unified_mock(mock_vector_engine, mock_graph_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
+            mock_update,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
-                mock_update,
-            ):
-                chunks = await retriever.get_retrieved_objects("test query")
+            chunks = await retriever.get_retrieved_objects("test query")
 
     assert len(chunks) == 1
     assert "parent_document" in chunks[0].payload
@@ -567,9 +547,11 @@ async def test_enrichment_timestamp_update_failure_strict(mock_vector_engine):
 
     mock_update = AsyncMock(side_effect=Exception("Timestamp update failed"))
 
+    unified_mock = _make_unified_mock(mock_vector_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
             "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps", mock_update
@@ -622,21 +604,18 @@ async def test_enrichment_chunk_missing_id_strict_mode(mock_vector_engine, mock_
 
     retriever = ChunksRetriever(top_k=5, strict_enrichment=True)
 
+    unified_mock = _make_unified_mock(mock_vector_engine, mock_graph_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
             "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
             new_callable=AsyncMock,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-                new_callable=AsyncMock,
-                return_value=mock_graph_engine,
-            ):
-                with pytest.raises(NoDataError, match="Failed to extract chunk ID"):
-                    await retriever.get_retrieved_objects("test query")
+            with pytest.raises(NoDataError, match="Failed to extract chunk ID"):
+                await retriever.get_retrieved_objects("test query")
 
 
 @pytest.mark.asyncio
@@ -661,19 +640,17 @@ async def test_enrichment_batched_row_parse_error(mock_vector_engine, mock_graph
 
     retriever = ChunksRetriever(top_k=5, strict_enrichment=False)
 
+    unified_mock = _make_unified_mock(mock_vector_engine, mock_graph_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
+            new_callable=AsyncMock,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
-                new_callable=AsyncMock,
-            ):
-                chunks = await retriever.get_retrieved_objects("test query")
+            chunks = await retriever.get_retrieved_objects("test query")
 
     assert "parent_document" in chunks[0].payload
     assert "parent_document" not in chunks[1].payload
@@ -695,20 +672,18 @@ async def test_enrichment_individual_query_fails_strict_mode(mock_vector_engine,
 
     retriever = ChunksRetriever(top_k=5, strict_enrichment=True)
 
+    unified_mock = _make_unified_mock(mock_vector_engine, mock_graph_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
+            new_callable=AsyncMock,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
-                new_callable=AsyncMock,
-            ):
-                with pytest.raises(NoDataError, match="Failed to fetch parent for chunk-123"):
-                    await retriever.get_retrieved_objects("test query")
+            with pytest.raises(NoDataError, match="Failed to fetch parent for chunk-123"):
+                await retriever.get_retrieved_objects("test query")
 
 
 @pytest.mark.asyncio
@@ -725,19 +700,17 @@ async def test_enrichment_handles_dict_chunks(mock_vector_engine, mock_graph_eng
 
     retriever = ChunksRetriever(top_k=5)
 
+    unified_mock = _make_unified_mock(mock_vector_engine, mock_graph_engine)
+
     with patch(
-        "cognee.modules.retrieval.chunks_retriever.get_vector_engine",
-        return_value=mock_vector_engine,
+        "cognee.modules.retrieval.chunks_retriever.get_unified_engine",
+        return_value=unified_mock,
     ):
         with patch(
-            "cognee.modules.retrieval.chunks_retriever.get_graph_engine",
-            return_value=mock_graph_engine,
+            "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
+            new_callable=AsyncMock,
         ):
-            with patch(
-                "cognee.modules.retrieval.chunks_retriever.update_node_access_timestamps",
-                new_callable=AsyncMock,
-            ):
-                chunks = await retriever.get_retrieved_objects("test query")
+            chunks = await retriever.get_retrieved_objects("test query")
 
     assert len(chunks) == 1
     assert "parent_document" in chunks[0].payload
