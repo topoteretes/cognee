@@ -94,7 +94,6 @@ async def add_data_points(
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
-    # Step 1: Ensure main edges have edge_object_id before storage and indexing
     edges = ensure_edge_object_ids(edges)
 
     unified = await get_unified_engine()
@@ -115,7 +114,6 @@ async def add_data_points(
     await graph_engine.add_edges(edges)
     await index_graph_edges(edges, vector_engine=vector_engine)
 
-    # Step 2: Ensure custom_edges have edge_object_id before storage and indexing
     if isinstance(custom_edges, list) and custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
         custom_edges = ensure_edge_object_ids(custom_edges)
