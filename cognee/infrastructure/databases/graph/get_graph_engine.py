@@ -74,7 +74,7 @@ def _create_graph_engine(
     Parameters:
     -----------
 
-        - graph_database_provider: The type of graph database provider to use (e.g., neo4j, falkor, kuzu).
+        - graph_database_provider: The type of graph database provider to use (e.g., neo4j, falkor, ladybug).
         - graph_database_url: The URL for the graph database instance. Required for neo4j and falkordb providers.
         - graph_database_username: The username for authentication with the graph database.
           Required for neo4j provider.
@@ -82,7 +82,7 @@ def _create_graph_engine(
           Required for neo4j provider.
         - graph_database_port: The port number for the graph database connection. Required
           for the falkordb provider
-        - graph_file_path: The filesystem path to the graph file. Required for the kuzu
+        - graph_file_path: The filesystem path to the graph file. Required for the ladybug
           provider.
 
     Returns:
@@ -184,5 +184,5 @@ def _create_graph_engine(
 
     raise EnvironmentError(
         f"Unsupported graph database provider: {graph_database_provider}. "
-        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'kuzu', 'kuzu-remote', 'ladybug', 'neptune', 'neptune_analytics'])}"
+        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'ladybug', 'ladybug-remote', 'neptune', 'neptune_analytics'])}"
     )
