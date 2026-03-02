@@ -1,6 +1,6 @@
 import os
 import asyncio
-from typing import Any, Optional, List, Type
+from typing import Any, Dict, List, Optional, Type
 from datetime import datetime
 
 from operator import itemgetter
@@ -8,6 +8,7 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.infrastructure.llm.prompts import render_prompt
 from cognee.infrastructure.llm import LLMGateway
 from cognee.modules.retrieval.graph_completion_retriever import GraphCompletionRetriever
+from cognee.modules.retrieval.utils.used_graph_elements import extract_from_temporal_dict
 from cognee.shared.logging_utils import get_logger
 
 from cognee.tasks.temporal_graph.models import QueryInterval
@@ -61,6 +62,12 @@ class TemporalRetriever(GraphCompletionRetriever):
         self.top_k = top_k if top_k is not None else 5
         self.node_type = node_type
         self.node_name = node_name
+
+    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+        """Extract node_ids/edge_ids from temporal dict (triplets or relevant_events)."""
+        if isinstance(retrieved_objects, dict):
+            return extract_from_temporal_dict(retrieved_objects)
+        return None
 
     def descriptions_to_string(self, results):
         descs = []
