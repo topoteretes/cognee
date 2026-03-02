@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, field_validator
 
 
@@ -14,6 +14,8 @@ class SessionQAEntry(BaseModel):
         answer: Generated answer.
         feedback_text: Optional user feedback text.
         feedback_score: Optional feedback score 1-5.
+        used_graph_element_ids: Optional dict of node and edge IDs used to produce the answer.
+            Keys: "node_ids", "edge_ids" (lists of str). When present, stored; otherwise None.
     """
 
     time: str
@@ -23,6 +25,7 @@ class SessionQAEntry(BaseModel):
     qa_id: Optional[str] = None
     feedback_text: Optional[str] = None
     feedback_score: Optional[int] = None
+    used_graph_element_ids: Optional[Dict[str, List[str]]] = None
 
     @field_validator("feedback_score")
     @classmethod
