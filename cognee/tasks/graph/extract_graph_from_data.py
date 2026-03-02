@@ -62,6 +62,10 @@ def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
             _stamp_provenance_deep(item, pipeline_name, task_name, visited)
 
 
+_df_lock = asyncio.Lock()
+_reused_items_lock = asyncio.Lock()
+
+
 async def cache_nodes(df, nodes):
     if df is None:
         return
@@ -71,12 +75,22 @@ async def cache_nodes(df, nodes):
         for _, node in chunk.contains:
             if node and (isinstance(node, Entity) or isinstance(node, EntityType)):
                 vector = await vector_engine.embed_data(node.name)
+                if node.name in df_new.columns:
+                    continue
                 # Store as numeric column (not list-in-cell) for fast vectorized ops.
                 df_new[node.name] = pd.Series(vector[0], dtype=float)
-    # avoid fragmentation, improve speed, keep the same df
-    combined = pd.concat([df, df_new], axis=1)
-    df._mgr = combined._mgr
-    df._item_cache.clear()
+
+    async with _df_lock:
+        if not df_new.empty:
+            # Drop only overlapping columns in one shot to avoid in-place mutation
+            # during iteration and to tolerate any concurrent column changes.
+            overlap = df_new.columns.intersection(df.columns)
+            if len(overlap) > 0:
+                df_new.drop(columns=overlap, inplace=True, errors="ignore")
+        # avoid fragmentation, improve speed, keep the same df
+        combined = pd.concat([df, df_new], axis=1)
+        df._mgr = combined._mgr
+        df._item_cache.clear()
 
 
 async def integrate_chunk_graphs(
@@ -172,6 +186,27 @@ async def integrate_chunk_graphs(
     return data_chunks
 
 
+def _count_reused_items_in_prompt_tail(prompt: Optional[str], graph, vector_search_limit) -> int:
+    if not prompt or not getattr(graph, "nodes", None):
+        return 0
+    lines = [line.strip() for line in prompt.splitlines() if line.strip()]
+    if not lines:
+        return 0
+
+    # Consider the last vector_search_limit lines (or fewer if prompt is shorter).
+    tail_lines = lines[-vector_search_limit:]
+    tail_blob = "\n".join(tail_lines).casefold()
+
+    count = 0
+    for node in graph.nodes:
+        name = getattr(node, "name", None)
+        if not name:
+            continue
+        if name.casefold() in tail_blob:
+            count += 1
+    return count
+
+
 def top_k_by_cosine(df: DataFrame, query_vector, k: int = 5) -> List[str]:
     """
     Returns top-k (name, cosine_similarity) pairs where each column of df is a vector.
@@ -255,6 +290,18 @@ async def extract_graph_from_data(
                 for chunk in data_chunks
             ]
         )
+
+    if use_poc:
+        reused_total = sum(
+            _count_reused_items_in_prompt_tail(prompt, graph, vector_search_limit)
+            for prompt, graph in zip(chunk_prompts, chunk_graphs)
+        )
+        if reused_total:
+            # "Atomic" update for shared kwargs dict across async tasks.
+            async with _reused_items_lock:
+                stats = kwargs.get("stats")
+                if isinstance(stats, dict):
+                    stats["reused_entities"] = (stats.get("reused_entities") or 0) + reused_total
 
     # Note: Filter edges with missing source or target nodes
     if graph_model == KnowledgeGraph:

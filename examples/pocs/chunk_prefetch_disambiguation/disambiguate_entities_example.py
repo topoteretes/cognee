@@ -30,12 +30,16 @@ async def main(
     if use_poc:
         kwargs["use_poc"] = use_poc
         kwargs["df"] = df
+        kwargs["stats"] = {"reused_entities": 0}
+
     for part in sorted(parts_dir.glob("part_*.txt")):
         print(part)
         text = part.read_text(encoding="utf-8")
         await cognee.add(text)
         await cognee.cognify(chunk_size=1024, custom_prompt=custom_prompt, **kwargs)
 
+    if use_poc:
+        print(f"Reused instances: {kwargs.get('stats').get('reused_entities')}")
     await visualize_graph(graph_visualization_path)
 
 
@@ -43,13 +47,13 @@ async def _run():
     with open("prompts/prompt1.txt", "r") as f:
         custom_prompt_text = f.read()
 
-    for i in range(2, 5):
+    for i in range(1, 2):
         example_id = str(i)
         df = pd.DataFrame()
         await main(
             example="example" + example_id,
             use_poc=True,
-            vector_search_limit=5,
+            vector_search_limit=20,
             custom_prompt=custom_prompt_text,
             df=df,
         )
