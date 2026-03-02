@@ -518,7 +518,9 @@ async def search(search_query: str, search_type: str, top_k: int = 10) -> list:
 
 @mcp.tool()
 @log_usage(function_name="MCP get_document", log_type="mcp_tool")
-async def get_document(document_id: str, include_metadata: bool = True) -> list:
+async def get_document(
+    document_id: str, include_metadata: bool = True, max_chunks: int = 0
+) -> list:
     """
     Retrieve a complete document by its ID with all chunks and metadata.
 
@@ -536,6 +538,13 @@ async def get_document(document_id: str, include_metadata: bool = True) -> list:
         Whether to include document metadata (default: True).
         Set to False for faster retrieval when metadata is not needed.
 
+    max_chunks : int, optional
+        Maximum number of chunks to return (default: 0, meaning all chunks).
+        Use this to cap response size for large documents. When truncated,
+        the response includes total_chunks and is_truncated fields so you
+        can continue fetching via get_chunk_neighbors with direction="forward"
+        from the last returned chunk.
+
     Returns
     -------
     list
@@ -547,6 +556,8 @@ async def get_document(document_id: str, include_metadata: bool = True) -> list:
             "name": str,
             "type": str,
             "chunk_count": int,
+            "total_chunks": int,
+            "is_truncated": bool,
             "chunks": [{"chunk_id": str, "chunk_index": int, "text": str, "word_count": int}],
             "metadata": dict  (if include_metadata=True)
         }
@@ -559,9 +570,11 @@ async def get_document(document_id: str, include_metadata: bool = True) -> list:
     - Requires graph database to be accessible with Document nodes
     - Chunks are returned sorted by chunk_index in reading order
     - Document must have been processed via cognify to exist in graph
+    - When is_truncated is true, use get_chunk_neighbors with the last chunk's ID
+      and direction="forward" to continue reading
     """
 
-    async def get_document_task(document_id: str, include_metadata: bool) -> str:
+    async def get_document_task(document_id: str, include_metadata: bool, max_chunks: int) -> str:
         """
         Internal task to retrieve document from graph database.
 
@@ -571,6 +584,8 @@ async def get_document(document_id: str, include_metadata: bool = True) -> list:
             Document identifier to retrieve
         include_metadata : bool
             Whether to include metadata in response
+        max_chunks : int
+            Maximum chunks to return (0 = all)
 
         Returns
         -------
@@ -616,10 +631,10 @@ async def get_document(document_id: str, include_metadata: bool = True) -> list:
                 doc = result[0]["doc"]
 
                 # Assemble chunks from flat rows
-                chunks = []
+                all_chunks = []
                 for row in result:
                     if row.get("chunk_id") is not None:
-                        chunks.append(
+                        all_chunks.append(
                             {
                                 "id": row["chunk_id"],
                                 "chunk_index": row.get("chunk_index", 0),
@@ -628,12 +643,18 @@ async def get_document(document_id: str, include_metadata: bool = True) -> list:
                             }
                         )
 
+                total_chunks = len(all_chunks)
+                is_truncated = max_chunks > 0 and total_chunks > max_chunks
+                chunks = all_chunks[:max_chunks] if max_chunks > 0 else all_chunks
+
                 # Build response
                 response = {
                     "document_id": str(doc.id) if hasattr(doc, "id") else str(doc.get("id", "")),
                     "name": doc.name if hasattr(doc, "name") else doc.get("name", "Unknown"),
                     "type": doc.type if hasattr(doc, "type") else doc.get("type", "unknown"),
                     "chunk_count": len(chunks),
+                    "total_chunks": total_chunks,
+                    "is_truncated": is_truncated,
                     "chunks": chunks,
                 }
 
@@ -656,7 +677,7 @@ async def get_document(document_id: str, include_metadata: bool = True) -> list:
                     cls=JSONEncoder,
                 )
 
-    result = await get_document_task(document_id, include_metadata)
+    result = await get_document_task(document_id, include_metadata, max_chunks)
     return [types.TextContent(type="text", text=result)]
 
 
