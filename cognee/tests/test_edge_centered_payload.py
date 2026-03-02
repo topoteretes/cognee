@@ -146,8 +146,8 @@ async def main():
         assert len(triplets_phase2) > 0, (
             "Expected triplet embeddings to be created, but found none."
         )
-        assert len(triplets_phase2) <= len(edges_phase2), (
-            f"Triplet count ({len(triplets_phase2)}) should not exceed edge count ({len(edges_phase2)})."
+        assert len(triplets_phase2) == len(edges_phase2), (
+            f"Triplet count ({len(triplets_phase2)}) should be equal to edge count: ({len(edges_phase2)})."
         )
         logger.info(f"Created {len(triplets_phase2)} triplets from {len(edges_phase2)} edges")
 
