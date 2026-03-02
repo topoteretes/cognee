@@ -85,8 +85,6 @@ async def main():
     chunks = await search(query_text="Python", query_type=SearchType.CHUNKS)
     for chunk in chunks:
         print(chunk)
-    graph_visualization_path = os.path.join(os.path.dirname(__file__), "custom_Graph_model.html")
-    await visualize_graph(graph_visualization_path)
 
 
 if __name__ == "__main__":
