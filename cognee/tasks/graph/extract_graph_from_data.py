@@ -62,6 +62,7 @@ def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
 
 
 _df_lock = asyncio.Lock()
+_reused_items_lock = asyncio.Lock()
 
 
 def get_closest_match(df: DataFrame, query_vector) -> List[Any]:
@@ -86,17 +87,15 @@ def get_closest_match(df: DataFrame, query_vector) -> List[Any]:
     denom = np.where(denom == 0, np.inf, denom)
     sims = (M.T @ q) / denom  # shape (n_cols,)
 
-    # top index
-    k = 1
-    idx = np.argpartition(-sims, k - 1)[:k]
-    idx = idx[np.argsort(-sims[idx])]
+    closest_idx = int(np.argmax(sims))
+    similarity_val = float(sims[closest_idx])
 
     names = df.columns.to_numpy()
-    return [names[idx], sims[idx]]
+    return [names[closest_idx], similarity_val]
 
 
-async def cache_nodes(df, nodes):
-    if df is None:
+async def cache_and_replace_nodes(df, nodes, similarity_threshold, stats):
+    if df is None or stats is None:
         return
     vector_engine = get_vector_engine()
     df_new = pd.DataFrame()
@@ -107,6 +106,11 @@ async def cache_nodes(df, nodes):
                 closest_match = get_closest_match(df, vector[0])
                 if len(closest_match) > 0:
                     print(f"node={node.name}, closest_match={closest_match}")
+                    if closest_match[1] > similarity_threshold:
+                        node.name = closest_match[0]
+                        async with _reused_items_lock:
+                            if isinstance(stats, dict):
+                                stats["reused_entities"] = (stats.get("reused_entities") or 0) + 1
                 if node.name in df_new.columns:
                     continue
                 # Store as numeric column (not list-in-cell) for fast vectorized ops.
@@ -132,6 +136,8 @@ async def integrate_chunk_graphs(
     ontology_resolver: BaseOntologyResolver,
     context: Dict,
     df: DataFrame,
+    stats: Dict = None,
+    similarity_threshold: float = 1.0,
     pipeline_name: str = None,
     task_name: str = None,
 ) -> List[DocumentChunk]:
@@ -189,7 +195,7 @@ async def integrate_chunk_graphs(
     cognify_config = get_cognify_config()
     embed_triplets = cognify_config.triplet_embedding
 
-    await cache_nodes(df, graph_nodes)
+    await cache_and_replace_nodes(df, graph_nodes, similarity_threshold, stats)
 
     if len(graph_nodes) > 0:
         if pipeline_name or task_name:
@@ -230,6 +236,8 @@ async def extract_graph_from_data(
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
     df = kwargs.get("df", None)
+    similarity_threshold = kwargs.get("similarity_threshold", 1.0)
+    stats = kwargs.get("stats", None)
     # use_poc = kwargs.get("use_poc") or False
 
     if not isinstance(data_chunks, list) or not data_chunks:
@@ -244,6 +252,8 @@ async def extract_graph_from_data(
     llm_kwargs.pop("df", None)
     # use_poc is an internal flag and not part of LLM call parameters.
     llm_kwargs.pop("use_poc", None)
+    llm_kwargs.pop("similarity_threshold", None)
+    llm_kwargs.pop("stats", None)
 
     chunk_graphs = await asyncio.gather(
         *[
@@ -294,6 +304,8 @@ async def extract_graph_from_data(
         ontology_resolver,
         context,
         df,
+        stats,
+        similarity_threshold,
         pipeline_name=pipeline_name,
         task_name=task_name,
     )

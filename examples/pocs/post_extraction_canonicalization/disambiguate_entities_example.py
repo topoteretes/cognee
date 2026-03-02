@@ -16,10 +16,8 @@ from utils import _normalize_nodes, _normalize_edges, _compare
 async def main(
     example,
     use_poc,
-    vector_search_limit: Optional[int] = None,
     custom_prompt: Optional[str] = None,
     df: Optional[DataFrame] = None,
-    stats: Optional[dict] = None,
 ):
     await cognee.prune.prune_data()
     await cognee.prune.prune_system(metadata=True)
@@ -33,26 +31,28 @@ async def main(
     if use_poc:
         kwargs["use_poc"] = use_poc
         kwargs["df"] = df
-        # kwargs["stats"] = {"reused_entities": 0}
+        kwargs["similarity_threshold"] = 0.7
+        kwargs["stats"] = {"reused_entities": 0}
 
     text = Path("data/example1/part_1.txt").read_text(encoding="utf-8")
     await cognee.add(text)
-    await cognee.cognify(chunk_size=1024, custom_prompt=custom_prompt, **kwargs)
+    await cognee.cognify(custom_prompt=custom_prompt, **kwargs)
 
     text = Path("data/example1/part_2.txt").read_text(encoding="utf-8")
 
     await cognee.add(text)
-    await cognee.cognify(chunk_size=1024, custom_prompt=custom_prompt, **kwargs)
+    await cognee.cognify(custom_prompt=custom_prompt, **kwargs)
     text = Path("data/example1/part_3.txt").read_text(encoding="utf-8")
 
     await cognee.add(text)
-    await cognee.cognify(chunk_size=1024, custom_prompt=custom_prompt, **kwargs)
+    await cognee.cognify(custom_prompt=custom_prompt, **kwargs)
     text = Path("data/example1/part_4.txt").read_text(encoding="utf-8")
 
     await cognee.add(text)
-    await cognee.cognify(chunk_size=1024, custom_prompt=custom_prompt, **kwargs)
+    await cognee.cognify(custom_prompt=custom_prompt, **kwargs)
 
-    # print(kwargs.get("stats").get("reused_entities"))
+    if use_poc:
+        print(f"Reused instances: {kwargs.get('stats').get('reused_entities')}")
     await visualize_graph(graph_visualization_path)
 
     graph_engine = await get_graph_engine()
@@ -68,27 +68,16 @@ async def _run():
     for i in range(1, 2):
         example_id = str(i)
         df = pd.DataFrame()
-        stats = {"reused_entities": 0}
-        nodes, edges = await main(
-            example="example" + example_id,
-            use_poc=True,
-            vector_search_limit=5,
-            custom_prompt=custom_prompt_text,
-            df=df,
-            stats=stats,
-        )
         poc_nodes, poc_edges = await main(
             example="example" + example_id,
             use_poc=True,
-            vector_search_limit=10,
             custom_prompt=custom_prompt_text,
             df=df,
-            stats=stats,
         )
-        # nodes, edges = await main(
-        #     example="example" + example_id,
-        #     use_poc=False,
-        # )
+        nodes, edges = await main(
+            example="example" + example_id,
+            use_poc=False,
+        )
         poc_nodes = _normalize_nodes(poc_nodes)
         poc_edges = _normalize_edges(poc_edges)
         nodes = _normalize_nodes(nodes)
