@@ -189,6 +189,15 @@ class VectorDBInterface(Protocol):
         """
         return None
 
+    async def get_collection_names(self) -> List[str]:
+        """
+        Return the names of all collections (tables/indexes) in the vector database.
+
+        Returns:
+            List of collection name strings.
+        """
+        return []
+
     async def create_vector_index(self, index_name: str, index_property_name: str):
         """
         Create a vector index for improved search performance.

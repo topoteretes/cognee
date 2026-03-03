@@ -138,6 +138,10 @@ class LanceDBAdapter(VectorDBInterface):
                         exist_ok=True,
                     )
 
+    async def get_collection_names(self) -> list[str]:
+        connection = await self.get_connection()
+        return await connection.table_names()
+
     async def get_collection(self, collection_name: str):
         if not await self.has_collection(collection_name):
             raise CollectionNotFoundError(f"Collection '{collection_name}' not found!")

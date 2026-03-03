@@ -204,3 +204,6 @@ SWE-bench_testsample/
 .chromadb_data/
 
 deployment/helm/values-local.yml
+
+*bincognee-integration-langgraph/
+cognee-integration-langgraph/

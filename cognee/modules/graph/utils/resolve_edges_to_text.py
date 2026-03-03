@@ -54,8 +54,17 @@ def _extract_nodes_from_edges(retrieved_edges: List[Edge]) -> dict:
                     "Node text missing, using fallback attributes",
                     extra={"node_id": str(node.id)},
                 )
-                name = node.attributes.get("name", "Unnamed Node")
-                content = node.attributes.get("description", name)
+                name = node.attributes.get("name") or node.attributes.get("type", "Unnamed Node")
+                desc = node.attributes.get("description")
+                if desc:
+                    content = desc
+                else:
+                    props = {
+                        k: v
+                        for k, v in node.attributes.items()
+                        if v is not None and k not in ("id", "type", "version", "topological_rank")
+                    }
+                    content = "; ".join(f"{k}: {v}" for k, v in props.items()) if props else name
 
             nodes[node.id] = {"node": node, "name": name, "content": content}
 

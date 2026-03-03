@@ -1262,6 +1262,18 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to get graph data: {e}")
             raise
 
+    async def get_neighbor_ids(self, node_ids: List[str]) -> List[str]:
+        """Return IDs of all 1-hop neighbors of the given node IDs."""
+        if not node_ids:
+            return []
+        query = """
+            MATCH (n:Node)-[:EDGE]-(nbr:Node)
+            WHERE n.id IN $ids
+            RETURN DISTINCT nbr.id
+        """
+        rows = await self.query(query, {"ids": node_ids})
+        return [str(row[0]) for row in rows if row[0]]
+
     async def get_nodeset_subgraph(
         self, node_type: Type[Any], node_name: List[str]
     ) -> Tuple[List[Tuple[str, dict]], List[Tuple[str, str, str, dict]]]:

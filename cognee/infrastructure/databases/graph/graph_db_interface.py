@@ -177,6 +177,14 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError
 
+    async def get_neighbor_ids(self, node_ids: List[str]) -> List[str]:
+        """Return IDs of all 1-hop neighbors of the given node IDs.
+
+        Default implementation returns an empty list (no expansion).
+        Adapters that support efficient neighbor lookups should override this.
+        """
+        return []
+
     @abstractmethod
     async def get_graph_data(self) -> Tuple[List[Node], List[EdgeData]]:
         """

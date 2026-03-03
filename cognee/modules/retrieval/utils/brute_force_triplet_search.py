@@ -4,6 +4,7 @@ from cognee.modules.retrieval.utils.validate_queries import validate_queries
 from cognee.shared.logging_utils import get_logger, ERROR
 from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
@@ -40,8 +41,6 @@ async def get_memory_fragment(
     triplet_distance_penalty: Optional[float] = 3.5,
 ) -> CogneeGraph:
     """Creates and initializes a CogneeGraph memory fragment with optional property projections."""
-    if properties_to_project is None:
-        properties_to_project = ["id", "description", "name", "type", "text"]
 
     memory_fragment = CogneeGraph()
 
@@ -90,6 +89,12 @@ async def _get_top_triplet_importances(
             relevant_node_ids = None
         else:
             relevant_node_ids = vector_search.extract_relevant_node_ids()
+
+            if relevant_node_ids:
+                graph_engine = await get_graph_engine()
+                neighbor_ids = await graph_engine.get_neighbor_ids(relevant_node_ids)
+                if neighbor_ids:
+                    relevant_node_ids = list(set(relevant_node_ids) | set(neighbor_ids))
 
         memory_fragment = await get_memory_fragment(
             properties_to_project=properties_to_project,
@@ -160,12 +165,18 @@ async def brute_force_triplet_search(
     )
 
     if collections is None:
-        collections = [
-            "Entity_name",
-            "TextSummary_text",
-            "EntityType_name",
-            "DocumentChunk_text",
-        ]
+        vector_engine = get_vector_engine()
+        all_names = await vector_engine.get_collection_names()
+        if all_names:
+            collections = list(all_names)
+        else:
+            collections = [
+                "Entity_name",
+                "TextSummary_text",
+                "EntityType_name",
+                "DocumentChunk_text",
+                "EdgeType_relationship_name",
+            ]
 
     if "EdgeType_relationship_name" not in collections:
         collections.append("EdgeType_relationship_name")

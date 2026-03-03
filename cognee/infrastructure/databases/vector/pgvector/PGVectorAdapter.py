@@ -115,6 +115,12 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
             else:
                 return False
 
+    async def get_collection_names(self) -> list[str]:
+        async with self.engine.begin() as connection:
+            metadata = MetaData()
+            await connection.run_sync(metadata.reflect)
+            return list(metadata.tables.keys())
+
     @retry(
         retry=retry_if_exception_type(
             (DuplicateTableError, UniqueViolationError, ProgrammingError)

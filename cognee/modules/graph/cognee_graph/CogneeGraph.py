@@ -193,7 +193,12 @@ class CogneeGraph(CogneeAbstractGraph):
             start_time = time.time()
             # Process nodes
             for node_id, properties in nodes_data:
-                node_attributes = {key: properties.get(key) for key in node_properties_to_project}
+                if node_properties_to_project is not None:
+                    node_attributes = {
+                        key: properties.get(key) for key in node_properties_to_project
+                    }
+                else:
+                    node_attributes = dict(properties)
                 self.add_node(
                     Node(
                         str(node_id),
