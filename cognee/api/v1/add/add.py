@@ -37,9 +37,7 @@ async def add(
     preferred_loaders: Optional[List[Union[str, dict[str, dict[str, Any]]]]] = None,
     incremental_loading: bool = True,
     data_per_batch: Optional[int] = 20,
-    primary_key: Optional[str] = None,
-    query: Optional[str] = None,
-    write_disposition: str = "merge",
+    **kwargs,
 ):
     """
     Add data to Cognee for knowledge graph processing.
@@ -211,9 +209,7 @@ async def add(
         data,
         dataset_name=dataset_name,
         user=user,
-        primary_key=primary_key,
-        write_disposition=write_disposition,
-        query=query,
+        **kwargs,
     )
 
     await reset_dataset_pipeline_run_status(

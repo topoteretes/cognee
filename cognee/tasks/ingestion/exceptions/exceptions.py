@@ -12,11 +12,11 @@ class S3FileSystemNotFoundError(CogneeSystemError):
         super().__init__(message, name, status_code)
 
 
-class InvalidWriteDispositionError(CogneeValidationError):
+class InvalidDLTArgumentError(CogneeValidationError):
     def __init__(
         self,
-        name: str = "InvalidWriteDispositionError",
-        message: str = "Invalid write disposition for dlt ingestion.",
+        name: str = "InvalidDLTArgumentError",
+        message: str = "Invalid argument for dlt ingestion.",
         status_code: int = status.HTTP_422_UNPROCESSABLE_CONTENT,
     ):
         super().__init__(message, name, status_code)

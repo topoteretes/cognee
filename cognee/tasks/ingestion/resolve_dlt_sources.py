@@ -29,9 +29,7 @@ async def resolve_dlt_sources(
     data: Any,
     dataset_name: str,
     user: User,
-    primary_key: Optional[str] = None,
-    write_disposition: str = "merge",
-    query: Optional[str] = None,
+    **kwargs,
 ) -> Any:
     """Expand DLT resources (and auto-detected structured data) into DataItems.
 
@@ -48,6 +46,10 @@ async def resolve_dlt_sources(
     except ImportError:
         # dlt not installed — nothing to resolve
         return data
+
+    primary_key = kwargs["primary_key"] if "primary_key" in kwargs else None
+    write_disposition = kwargs["write_disposition"] if "write_disposition" in kwargs else None
+    query = kwargs["query"] if "query" in kwargs else None
 
     # --- Auto-detect structured data (CSV paths / connection strings) ------
     if isinstance(data, str):

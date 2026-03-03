@@ -11,10 +11,9 @@ from cognee.modules.data.models import Data
 from cognee.infrastructure.databases.relational.config import get_relational_config
 from cognee.tasks.ingestion.dlt_row_data import DltRowData
 from cognee.tasks.ingestion.exceptions.exceptions import (
-    InvalidWriteDispositionError,
     UnsupportedDBProviderError,
-    DLTExecutionError,
     DLTIngestionError,
+    InvalidDLTArgumentError,
 )
 from cognee.tasks.ingestion.get_dlt_destination import get_dlt_destination
 from cognee.shared.logging_utils import get_logger
@@ -52,7 +51,7 @@ async def ingest_dlt_source(
 
     valid_dispositions = ("merge", "append", "replace")
     if write_disposition not in valid_dispositions:
-        raise InvalidWriteDispositionError(
+        raise InvalidDLTArgumentError(
             message=f"Invalid write_disposition '{write_disposition}'. Must be one of: {valid_dispositions}"
         )
 
