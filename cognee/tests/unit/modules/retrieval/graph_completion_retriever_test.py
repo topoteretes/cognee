@@ -327,6 +327,65 @@ async def test_get_completion_with_session(mock_edge):
 
 
 @pytest.mark.asyncio
+async def test_get_completion_with_session_passes_used_graph_element_ids(mock_edge):
+    """When session enabled, get_completion_from_context passes extracted used_graph_element_ids."""
+    mock_node1 = MagicMock()
+    mock_node1.id = "node-1"
+    mock_node2 = MagicMock()
+    mock_node2.id = "node-2"
+    mock_edge.node1 = mock_node1
+    mock_edge.node2 = mock_node2
+    mock_edge.attributes = {"edge_object_id": "edge-1"}
+
+    mock_graph_engine = AsyncMock()
+    mock_graph_engine.is_empty = AsyncMock(return_value=False)
+
+    retriever = GraphCompletionRetriever(session_id="test_session")
+    mock_user = MagicMock()
+    mock_user.id = "test-user-id"
+
+    with (
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.get_unified_engine",
+            new_callable=AsyncMock,
+        ) as mock_get_unified,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.get_session_manager",
+        ) as mock_get_sm,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.CacheConfig"
+        ) as mock_cache_config,
+        patch(
+            "cognee.modules.retrieval.graph_completion_retriever.session_user"
+        ) as mock_session_user,
+    ):
+        mock_get_unified.return_value = _make_unified_mock(mock_graph_engine)
+        mock_config = MagicMock()
+        mock_config.caching = True
+        mock_cache_config.return_value = mock_config
+        mock_session_user.get.return_value = mock_user
+        mock_sm = MagicMock()
+        mock_sm.generate_completion_with_session = AsyncMock(return_value="Generated answer")
+        mock_get_sm.return_value = mock_sm
+
+        await retriever.get_completion_from_context(
+            query="test query",
+            retrieved_objects=[mock_edge],
+            context="Resolved context",
+        )
+
+    mock_sm.generate_completion_with_session.assert_awaited_once()
+    call_kw = mock_sm.generate_completion_with_session.call_args.kwargs
+    assert "used_graph_element_ids" in call_kw
+    ids = call_kw["used_graph_element_ids"]
+    assert ids is not None
+    assert set(ids.keys()) <= {"node_ids", "edge_ids"}
+    assert "node-1" in ids.get("node_ids", [])
+    assert "node-2" in ids.get("node_ids", [])
+    assert "edge-1" in ids.get("edge_ids", [])
+
+
+@pytest.mark.asyncio
 async def test_get_completion_with_response_model(mock_edge):
     """Test get_completion with custom response model."""
     from pydantic import BaseModel
