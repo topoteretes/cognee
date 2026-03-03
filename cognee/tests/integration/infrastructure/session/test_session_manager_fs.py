@@ -45,6 +45,24 @@ async def test_add_qa_and_get_session(session_manager):
 
 
 @pytest.mark.asyncio
+async def test_add_qa_with_used_graph_element_ids_round_trip(session_manager):
+    """add_qa with used_graph_element_ids stores and returns it via get_session."""
+    used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
+    qa_id = await session_manager.add_qa(
+        user_id="u1",
+        question="Q?",
+        context="C",
+        answer="A",
+        session_id="s1",
+        used_graph_element_ids=used_ids,
+    )
+    assert qa_id is not None
+    entries = await session_manager.get_session(user_id="u1", session_id="s1")
+    assert len(entries) == 1
+    assert entries[0]["used_graph_element_ids"] == used_ids
+
+
+@pytest.mark.asyncio
 async def test_get_session_formatted(session_manager):
     """get_session with formatted=True returns prompt string."""
     await session_manager.add_qa(
@@ -154,12 +172,14 @@ async def test_generate_completion_with_session_saves_qa(session_manager):
         mock_config.caching = True
         mock_config_cls.return_value = mock_config
 
+        used_ids = {"node_ids": ["n1"]}
         result = await session_manager.generate_completion_with_session(
             session_id="s1",
             query="What is X?",
             context="Context about X.",
             user_prompt_path="user.txt",
             system_prompt_path="sys.txt",
+            used_graph_element_ids=used_ids,
         )
 
     assert result == "Integration test answer"
@@ -167,6 +187,7 @@ async def test_generate_completion_with_session_saves_qa(session_manager):
     assert len(entries) == 1
     assert entries[0]["question"] == "What is X?"
     assert entries[0]["answer"] == "Integration test answer"
+    assert entries[0]["used_graph_element_ids"] == used_ids
 
 
 @pytest.mark.asyncio
