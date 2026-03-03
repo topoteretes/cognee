@@ -9,6 +9,8 @@ except ImportError:
 
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.modules.visualization.cognee_network_visualization import cognee_network_visualization
+from cognee.modules.ontology.ontology_config import Config
+from cognee.modules.ontology.rdf_xml.RDFLibOntologyResolver import RDFLibOntologyResolver
 
 
 async def main():
@@ -147,8 +149,51 @@ async def main():
     )
     await cognee.cognify()
 
+    # ── Mode 5: Adding some unstructured text about users and pets along with the dlt resource ──
+
     result = await cognee.search("What products are in inventory?")
     print("Mode 4 results:", result)
+
+    text = """Alice has two pets: a cat named Fluffy and a dog named Spot.
+    She often says Fluffy is calm in the mornings, while Spot gets excited whenever someone mentions a walk.
+    Bob has a dog named Fido, who is friendly with both Fluffy and Spot. Charlie owns a kangaroo named Klokan, which makes Charlie’s household the most unusual in the neighborhood.
+    Recently, a new user named Diana joined their pet group with her cat, Luna.
+    Diana says Luna is playful and curious, and Luna quickly became friends with Fluffy during their first meetup."""
+
+    await cognee.add(
+        [text, users_and_pets],
+        dataset_name="users_and_pets_with_text",
+        primary_key="id",
+        incremental_loading=False,
+    )
+
+    await cognee.cognify()
+
+    result = await cognee.search("Who is Diana?")
+    print("Mode 5 results:", result)
+
+    # ── Mode 6: Adding a csv along with an ontology ──
+
+    await cognee.add(
+        csv_path,
+        dataset_name="employees",
+        primary_key="id",
+        incremental_loading=False,
+    )
+
+    ontology_path = os.path.join(os.path.dirname(__file__), "test_data", "employees_ontology.owl")
+
+    # Create full config structure manually
+    config: Config = {
+        "ontology_config": {
+            "ontology_resolver": RDFLibOntologyResolver(ontology_file=ontology_path)
+        }
+    }
+
+    await cognee.cognify(config=config)
+
+    result = await cognee.search("Who works in Engineering and is female?")
+    print("Mode 6 results:", result)
 
     # ── Visualize the final graph ──
 
