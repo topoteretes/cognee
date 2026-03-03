@@ -55,6 +55,9 @@ async def ingest_dlt_source(
             message=f"Invalid write_disposition '{write_disposition}'. Must be one of: {valid_dispositions}"
         )
 
+    original_dataset_name = dataset_name
+    dataset_name = _to_safe_ident(dataset_name)
+
     relational_config = get_relational_config()
     dlt_db_name = f"dlt_database_{dataset_name}"
 
@@ -89,7 +92,7 @@ async def ingest_dlt_source(
         load_info = pipeline.run(dlt_source, **run_kwargs)
     except Exception as e:
         raise DLTIngestionError(
-            message=f"DLT pipeline execution failed for dataset '{dataset_name}': {e}"
+            message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
         ) from e
 
     # Validate load_info for failed jobs
@@ -103,7 +106,7 @@ async def ingest_dlt_source(
                 ]
                 raise DLTIngestionError(
                     message=f"DLT load had {len(failed_jobs)} failed job(s) for dataset "
-                    f"'{dataset_name}':\n" + "\n".join(failure_messages)
+                    f"'{original_dataset_name}':\n" + "\n".join(failure_messages)
                 )
 
     # Extract schema from the dlt database
@@ -382,6 +385,17 @@ async def _create_pg_database(db_name):
         await connection.close()
     finally:
         await maintenance_engine.dispose()
+
+
+def _to_safe_ident(s: str) -> str:
+    import re
+
+    s = re.sub(r"[^A-Za-z0-9_]+", "_", s).strip("_").lower()
+    if not s:
+        raise InvalidDLTArgumentError(message="Invalid dataset name given for dlt ingestion.")
+    if s[0].isdigit():
+        s = f"d_{s}"
+    return s[:63]
 
 
 async def migrate_dlt_database(data: List[Data]):
