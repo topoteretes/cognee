@@ -144,7 +144,7 @@ class TemporalRetriever(GraphCompletionRetriever):
         query_vector = (await vector_engine.embedding_engine.embed_text([query]))[0]
 
         vector_search_results = await vector_engine.search(
-            collection_name="Event_name", query_vector=query_vector, limit=None
+            collection_name="Event_name", query_vector=query_vector, limit=self.top_k
         )
 
         return {"relevant_events": relevant_events, "vector_search_results": vector_search_results}
