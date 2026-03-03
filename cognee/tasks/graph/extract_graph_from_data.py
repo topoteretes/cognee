@@ -246,7 +246,7 @@ def top_k_by_cosine(df: DataFrame, query_vector, k: int = 5) -> List[str]:
 async def build_prompt(chunk, df, vector_search_limit, custom_prompt) -> Optional[str]:
     vector_engine = get_vector_engine()
     query_vector = (await vector_engine.embedding_engine.embed_text([chunk.text]))[0]
-    closest_matches = top_k_by_cosine(df, query_vector)
+    closest_matches = top_k_by_cosine(df, query_vector, vector_search_limit)
 
     prompt = custom_prompt
     for match in closest_matches:
@@ -268,6 +268,11 @@ async def extract_graph_from_data(
     vector_search_limit = kwargs.get("vector_search_limit") or 5
     df = kwargs.get("df", None)
     use_poc = kwargs.get("use_poc") or False
+    llm_kwargs = {
+        key: value
+        for key, value in kwargs.items()
+        if key not in {"vector_search_limit", "df", "use_poc", "stats"}
+    }
 
     if not isinstance(data_chunks, list) or not data_chunks:
         raise InvalidDataChunksError("must be a non-empty list of DocumentChunk.")
@@ -282,7 +287,7 @@ async def extract_graph_from_data(
         )
         chunk_graphs = await asyncio.gather(
             *[
-                extract_content_graph(chunk.text, graph_model, custom_prompt=prompt)
+                extract_content_graph(chunk.text, graph_model, custom_prompt=prompt, **llm_kwargs)
                 for chunk, prompt in zip(data_chunks, chunk_prompts)
             ]
         )
