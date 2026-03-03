@@ -84,7 +84,7 @@ class datasets:
         # even if some fail.
         if dataset_data:
             results = await asyncio.gather(
-                *[delete_data(data) for data in dataset_data],
+                *[delete_data(data, dataset_id) for data in dataset_data],
                 return_exceptions=True,
             )
             deletion_errors = [r for r in results if isinstance(r, Exception)]
@@ -145,7 +145,7 @@ class datasets:
         else:
             await delete_data_nodes_and_edges(dataset_id, data_id, user.id)
 
-        await delete_data(data)
+        await delete_data(data, dataset_id)
 
         dataset_data = await get_dataset_data(dataset.id)
         if not dataset_data and delete_dataset_if_empty:

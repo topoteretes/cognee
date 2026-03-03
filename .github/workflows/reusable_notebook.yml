@@ -7,6 +7,10 @@ on:
         description: "Location of Jupyter notebook to run"
         required: true
         type: string
+      ci-image:
+        required: false
+        type: string
+        default: ''
     secrets:
       #LLM_MODEL:
       #  required: true
@@ -35,6 +39,7 @@ jobs:
   run_notebook_test:
     name: test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     defaults:
       run:
         shell: bash

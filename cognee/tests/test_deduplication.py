@@ -113,7 +113,7 @@ async def test_deduplication_postgres():
     cognee.config.set_relational_db_config(
         {
             "db_name": "cognee_db",
-            "db_host": "127.0.0.1",
+            "db_host": os.environ.get("DB_HOST", "127.0.0.1"),
             "db_port": "5432",
             "db_username": "cognee",
             "db_password": "cognee",

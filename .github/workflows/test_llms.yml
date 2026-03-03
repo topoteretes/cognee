@@ -2,9 +2,15 @@ name: LLM Test Suites
 
 permissions:
   contents: read
+  packages: read
 
 on:
   workflow_call:
+    inputs:
+      ci-image:
+        required: false
+        type: string
+        default: ''
 
 env:
   RUNTIME__LOG_LEVEL: ERROR
@@ -14,6 +20,7 @@ jobs:
   test-gemini:
     name: Run Gemini Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -33,11 +40,12 @@ jobs:
           EMBEDDING_MODEL: "gemini/gemini-embedding-001"
           EMBEDDING_DIMENSIONS: "768"
           EMBEDDING_MAX_TOKENS: "8076"
-        run: uv run python ./examples/python/simple_example.py
+        run: uv run python ./examples/demos/simple_cognee_example.py
 
   test-fastembed:
     name: Run Fastembed Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -58,11 +66,12 @@ jobs:
           EMBEDDING_MODEL: "sentence-transformers/all-MiniLM-L6-v2"
           EMBEDDING_DIMENSIONS: "384"
           EMBEDDING_MAX_TOKENS: "256"
-        run: uv run python ./examples/python/simple_example.py
+        run: uv run python ./examples/demos/simple_cognee_example.py
 
   test-openrouter:
     name: Run OpenRouter Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -83,11 +92,12 @@ jobs:
           EMBEDDING_MODEL: "openai/text-embedding-3-large"
           EMBEDDING_DIMENSIONS: "3072"
           EMBEDDING_MAX_TOKENS: "8191"
-        run: uv run python ./examples/python/simple_example.py
+        run: uv run python ./examples/demos/simple_cognee_example.py
 
   test-bedrock-api-key:
     name: Run Bedrock API Key Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -110,11 +120,12 @@ jobs:
           EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
           EMBEDDING_DIMENSIONS: "1024"
           EMBEDDING_MAX_TOKENS: "8191"
-        run: uv run python ./examples/python/simple_example.py
+        run: uv run python ./examples/demos/simple_cognee_example.py
 
   test-bedrock-aws-credentials:
     name: Run Bedrock AWS Credentials Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -138,11 +149,12 @@ jobs:
           EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
           EMBEDDING_DIMENSIONS: "1024"
           EMBEDDING_MAX_TOKENS: "8191"
-        run: uv run python ./examples/python/simple_example.py
+        run: uv run python ./examples/demos/simple_cognee_example.py
 
   test-bedrock-aws-profile:
     name: Run Bedrock AWS Profile Test
     runs-on: ubuntu-22.04
+    container: ${{ inputs.ci-image != '' && fromJSON(format('{{"image":"{0}","credentials":{{"username":"{1}","password":"{2}"}}}}', inputs.ci-image, github.actor, github.token)) || null }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -173,4 +185,4 @@ jobs:
           EMBEDDING_MODEL: "amazon.titan-embed-text-v2:0"
           EMBEDDING_DIMENSIONS: "1024"
           EMBEDDING_MAX_TOKENS: "8191"
-        run: uv run python ./examples/python/simple_example.py
+        run: uv run python ./examples/demos/simple_cognee_example.py

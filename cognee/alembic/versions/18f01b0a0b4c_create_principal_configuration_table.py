@@ -27,11 +27,11 @@ def upgrade() -> None:
     if table_name not in inspector.get_table_names():
         op.create_table(
             table_name,
+            sa.Column("id", sa.UUID(), primary_key=True, index=True),
             sa.Column(
                 "owner_id",
                 sa.UUID(),
                 sa.ForeignKey("principals.id", ondelete="CASCADE"),
-                primary_key=True,
                 index=True,
             ),
             sa.Column("name", sa.String(), unique=False, nullable=False),

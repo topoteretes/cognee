@@ -41,6 +41,8 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         node_info = node_info.copy()
         node_info["id"] = str(node_id)
         node_info["color"] = color_map.get(node_info.get("type", "default"), "#DBD8D8")
+        if node_info.get("ontology_valid") is True:
+            node_info["color"] = "#D8D8D8"
         node_info["name"] = node_info.get("name", str(node_id))
         node_info.pop("updated_at", None)
         node_info.pop("created_at", None)
@@ -80,7 +82,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
 
     task_color_map = _generate_provenance_colors([n.get("source_task") for n in nodes_list])
     pipeline_color_map = _generate_provenance_colors([n.get("source_pipeline") for n in nodes_list])
-    note_set_color_map = _generate_provenance_colors([n.get("source_note_set") for n in nodes_list])
+    node_set_color_map = _generate_provenance_colors([n.get("source_node_set") for n in nodes_list])
     user_color_map = _generate_provenance_colors([n.get("source_user") for n in nodes_list])
 
     html_content = _build_html(
@@ -88,7 +90,7 @@ async def cognee_network_visualization(graph_data, destination_file_path: str = 
         links_list,
         task_color_map,
         pipeline_color_map,
-        note_set_color_map,
+        node_set_color_map,
         user_color_map,
     )
 
@@ -156,7 +158,7 @@ def _build_html(
     links_list,
     task_color_map=None,
     pipeline_color_map=None,
-    note_set_color_map=None,
+    node_set_color_map=None,
     user_color_map=None,
 ):
     def _safe_json_embed(obj):
@@ -170,7 +172,7 @@ def _build_html(
         "__PIPELINE_COLORS__", _safe_json_embed(pipeline_color_map or {})
     )
     html_content = html_content.replace(
-        "__NOTESET_COLORS__", _safe_json_embed(note_set_color_map or {})
+        "__NODESET_COLORS__", _safe_json_embed(node_set_color_map or {})
     )
     html_content = html_content.replace("__USER_COLORS__", _safe_json_embed(user_color_map or {}))
     return html_content
@@ -324,7 +326,7 @@ canvas:active{cursor:grabbing}
   <button class="ctrl-btn active" data-colorby="type">Type</button>
   <button class="ctrl-btn" data-colorby="task">Task</button>
   <button class="ctrl-btn" data-colorby="pipeline">Pipeline</button>
-  <button class="ctrl-btn" data-colorby="noteset">Note Set</button>
+  <button class="ctrl-btn" data-colorby="nodeset">Node Set</button>
   <button class="ctrl-btn" data-colorby="user">User</button>
   <div class="ctrl-sep"></div>
   <button class="ctrl-btn" id="btn-zoom-out" title="Zoom out (-)">&#x2212;</button>
@@ -354,7 +356,7 @@ var nodes = __NODES_DATA__;
 var links = __LINKS_DATA__;
 var taskColors = __TASK_COLORS__;
 var pipelineColors = __PIPELINE_COLORS__;
-var notesetColors = __NOTESET_COLORS__;
+var nodesetColors = __NODESET_COLORS__;
 var userColors = __USER_COLORS__;
 
 if (!nodes || nodes.length === 0) {
@@ -444,6 +446,10 @@ nodes.forEach(function(n){
     }
   }
   n._rgb=typeRgbCache[n.type];
+  if(n.ontology_valid===true){
+    n.color="#D8D8D8";
+    n._rgb=[216,216,216];
+  }
 });
 
 // ── Color-by mode ──
@@ -457,17 +463,22 @@ function recolorNodes(){
       n.color=taskColors[n.source_task||"Unknown"]||"#DBD8D8";
     }else if(colorByMode==="pipeline"){
       n.color=pipelineColors[n.source_pipeline||"Unknown"]||"#DBD8D8";
-    }else if(colorByMode==="noteset"){
-      n.color=notesetColors[n.source_note_set||"Unknown"]||"#DBD8D8";
+    }else if(colorByMode==="nodeset"){
+      n.color=nodesetColors[n.source_node_set||"Unknown"]||"#DBD8D8";
     }else if(colorByMode==="user"){
       n.color=userColors[n.source_user||"Unknown"]||"#DBD8D8";
     }
-    // Recache RGB
-    if(n.color.indexOf("hsl")===0){
-      var m=n.color.match(/[\d.]+/g);
-      n._rgb=hslToRgb(+m[0],+m[1],+m[2]);
+    if(colorByMode==="type"&&n.ontology_valid===true){
+      n.color="#D8D8D8";
+      n._rgb=[216,216,216];
     }else{
-      n._rgb=hexToRgb(n.color);
+      // Recache RGB
+      if(n.color.indexOf("hsl")===0){
+        var m=n.color.match(/[\d.]+/g);
+        n._rgb=hslToRgb(+m[0],+m[1],+m[2]);
+      }else{
+        n._rgb=hexToRgb(n.color);
+      }
     }
   });
 }
@@ -490,13 +501,13 @@ var taskCounts={};
 nodes.forEach(function(n){var t=n.source_task||"Unknown";taskCounts[t]=(taskCounts[t]||0)+1});
 var pipeCounts={};
 nodes.forEach(function(n){var p=n.source_pipeline||"Unknown";pipeCounts[p]=(pipeCounts[p]||0)+1});
-var notesetCounts={};
-nodes.forEach(function(n){var s=n.source_note_set||"Unknown";notesetCounts[s]=(notesetCounts[s]||0)+1});
+var nodesetCounts={};
+nodes.forEach(function(n){var s=n.source_node_set||"Unknown";nodesetCounts[s]=(nodesetCounts[s]||0)+1});
 var userCounts={};
 nodes.forEach(function(n){var u=n.source_user||"Unknown";userCounts[u]=(userCounts[u]||0)+1});
 var uniqueTasks=Object.keys(taskCounts).length;
 var uniquePipelines=Object.keys(pipeCounts).length;
-var uniqueNotesets=Object.keys(notesetCounts).length;
+var uniqueNodesets=Object.keys(nodesetCounts).length;
 var uniqueUsers=Object.keys(userCounts).length;
 var statsEl=document.getElementById("stats");
 var perfTier=N>10000?"large":N>2000?"medium":"small";
@@ -505,7 +516,7 @@ statsEl.innerHTML='<span><span class="dot" style="background:#6510F4"></span>'+N
   '<span>'+Object.keys(typeCounts).length+" types</span>"+
   '<span>'+uniqueTasks+" tasks</span>"+
   '<span>'+uniquePipelines+" pipelines</span>"+
-  '<span>'+uniqueNotesets+" note sets</span>"+
+  '<span>'+uniqueNodesets+" node sets</span>"+
   '<span>'+uniqueUsers+" users</span>"+
   '<span style="opacity:0.5">['+perfTier+']</span>';
 
@@ -526,10 +537,10 @@ function updateLegend(){
     counts=pipeCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
     colorSource=function(t){return pipelineColors[t]||"#DBD8D8"};
-  }else if(colorByMode==="noteset"){
-    counts=notesetCounts;
+  }else if(colorByMode==="nodeset"){
+    counts=nodesetCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
-    colorSource=function(t){return notesetColors[t]||"#DBD8D8"};
+    colorSource=function(t){return nodesetColors[t]||"#DBD8D8"};
   }else{
     counts=userCounts;
     entries=Object.keys(counts).sort(function(a,b){return counts[b]-counts[a]});
@@ -796,8 +807,9 @@ function showNodeInfo(n){
   html+='<div class="panel-row"><span class="k">Connections</span><span class="v">'+n._degree+"</span></div>";
   if(n.source_task)html+='<div class="panel-row"><span class="k">Source Task</span><span class="v">'+esc(n.source_task)+"</span></div>";
   if(n.source_pipeline)html+='<div class="panel-row"><span class="k">Source Pipeline</span><span class="v">'+esc(n.source_pipeline)+"</span></div>";
-  if(n.source_note_set)html+='<div class="panel-row"><span class="k">Source Note Set</span><span class="v">'+esc(n.source_note_set)+"</span></div>";
+  if(n.source_node_set)html+='<div class="panel-row"><span class="k">Source Node Set</span><span class="v">'+esc(n.source_node_set)+"</span></div>";
   if(n.source_user)html+='<div class="panel-row"><span class="k">Source User</span><span class="v">'+esc(n.source_user)+"</span></div>";
+  if(n.ontology_valid!==undefined&&n.ontology_valid!==null){var ovStyle=n.ontology_valid===true?'color:#D8D8D8;font-weight:600':'color:var(--text2)';html+='<div class="panel-row"><span class="k">Ontology Valid</span><span class="v" style="'+ovStyle+'">'+esc(String(n.ontology_valid))+"</span></div>";}
 
   if(n.properties){
     Object.keys(n.properties).slice(0,10).forEach(function(key){

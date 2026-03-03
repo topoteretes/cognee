@@ -41,4 +41,4 @@ jobs:
           EMBEDDING_MAX_TOKENS: "8191"
           STRUCTURED_OUTPUT_FRAMEWORK: "instructor"
           LLM_INSTRUCTOR_MODE: ""
-        run: uv run python ./examples/python/simple_example.py
+        run: uv run python ./examples/demos/simple_cognee_example.py
