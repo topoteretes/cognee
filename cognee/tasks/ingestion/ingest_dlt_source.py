@@ -17,7 +17,11 @@ from cognee.tasks.ingestion.exceptions.exceptions import (
 )
 from cognee.tasks.ingestion.get_dlt_destination import get_dlt_destination
 from cognee.shared.logging_utils import get_logger
-import dlt
+
+try:
+    import dlt
+except ImportError:
+    dlt = None
 
 logger = get_logger("ingest_dlt_source")
 

@@ -1,7 +1,11 @@
 import asyncio
 import os
 import cognee
-import dlt
+
+try:
+    import dlt
+except ImportError:
+    dlt = None
 
 from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 from cognee.modules.visualization.cognee_network_visualization import cognee_network_visualization
