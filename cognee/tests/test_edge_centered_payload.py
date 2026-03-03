@@ -140,9 +140,6 @@ async def main():
             query_text="technology", limit=None, collection_name="Triplet_text"
         )
 
-        # Note: Not all edges can be converted to triplets. Triplets require valid source/target nodes
-        # and relationship information. Some edges may be skipped during triplet creation if they lack
-        # necessary data (e.g., missing nodes, empty relationship names).
         assert len(triplets_phase2) > 0, (
             "Expected triplet embeddings to be created, but found none."
         )
