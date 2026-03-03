@@ -1,9 +1,11 @@
+from uuid import UUID
+
 from cognee.modules.data.exceptions.exceptions import InvalidTableAttributeError
 from cognee.modules.data.models import Data
 from cognee.infrastructure.databases.relational import get_relational_engine
 
 
-async def delete_data(data: Data):
+async def delete_data(data: Data, dataset_id: UUID):
     """Delete a data record from the database.
 
     Args:
@@ -17,4 +19,4 @@ async def delete_data(data: Data):
 
     db_engine = get_relational_engine()
 
-    return await db_engine.delete_data_entity(data.id)
+    return await db_engine.delete_data_entity(data.id, dataset_id)

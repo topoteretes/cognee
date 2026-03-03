@@ -60,7 +60,7 @@ class TestConfigSetMethod:
         """Test setting multiple different keys."""
         test_cases = [
             ("llm_provider", "openai"),
-            ("llm_model", "gpt-3.5-turbo"),
+            ("llm_model", "gpt-5-mini"),
             ("vector_db_provider", "lancedb"),
             ("chunk_size", 1500),
             ("chunk_overlap", 100),
