@@ -10,6 +10,12 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from cognee.modules.data.models import Data
 from cognee.infrastructure.databases.relational.config import get_relational_config
 from cognee.tasks.ingestion.dlt_row_data import DltRowData
+from cognee.tasks.ingestion.exceptions.exceptions import (
+    InvalidWriteDispositionError,
+    UnsupportedDBProviderError,
+    DLTExecutionError,
+    DLTIngestionError,
+)
 from cognee.tasks.ingestion.get_dlt_destination import get_dlt_destination
 from cognee.shared.logging_utils import get_logger
 import dlt
@@ -46,8 +52,8 @@ async def ingest_dlt_source(
 
     valid_dispositions = ("merge", "append", "replace")
     if write_disposition not in valid_dispositions:
-        raise ValueError(
-            f"Invalid write_disposition '{write_disposition}'. Must be one of: {valid_dispositions}"
+        raise InvalidWriteDispositionError(
+            message=f"Invalid write_disposition '{write_disposition}'. Must be one of: {valid_dispositions}"
         )
 
     relational_config = get_relational_config()
@@ -58,8 +64,8 @@ async def ingest_dlt_source(
 
     destination = get_dlt_destination()
     if destination is None:
-        raise RuntimeError(
-            f"Unsupported db_provider for DLT ingestion: {relational_config.db_provider}. "
+        raise UnsupportedDBProviderError(
+            message=f"Unsupported db_provider for DLT ingestion: {relational_config.db_provider}. "
             "Only 'sqlite' and 'postgres' are supported."
         )
 
@@ -83,8 +89,8 @@ async def ingest_dlt_source(
     try:
         load_info = pipeline.run(dlt_source, **run_kwargs)
     except Exception as e:
-        raise RuntimeError(
-            f"DLT pipeline execution failed for dataset '{dataset_name}': {e}"
+        raise DLTIngestionError(
+            message=f"DLT pipeline execution failed for dataset '{dataset_name}': {e}"
         ) from e
 
     # Validate load_info for failed jobs
@@ -96,8 +102,8 @@ async def ingest_dlt_source(
                     f"Table '{job.job_file_info.table_name}': {job.failed_message}"
                     for job in failed_jobs
                 ]
-                raise RuntimeError(
-                    f"DLT load had {len(failed_jobs)} failed job(s) for dataset "
+                raise DLTIngestionError(
+                    message=f"DLT load had {len(failed_jobs)} failed job(s) for dataset "
                     f"'{dataset_name}':\n" + "\n".join(failure_messages)
                 )
 
@@ -105,8 +111,8 @@ async def ingest_dlt_source(
     try:
         _, filtered_schema = await _extract_dlt_schema(relational_config, dlt_db_name, dataset_name)
     except Exception as e:
-        raise RuntimeError(
-            f"Failed to extract schema from DLT database '{dlt_db_name}': {e}"
+        raise DLTIngestionError(
+            message=f"Failed to extract schema from DLT database '{dlt_db_name}': {e}"
         ) from e
 
     # Read rows from each table and produce DltRowData objects
@@ -119,7 +125,9 @@ async def ingest_dlt_source(
             relational_config=relational_config,
         )
     except Exception as e:
-        raise RuntimeError(f"Failed to read rows from DLT database '{dlt_db_name}': {e}") from e
+        raise DLTIngestionError(
+            message=f"Failed to read rows from DLT database '{dlt_db_name}': {e}"
+        ) from e
 
     return row_data_list
 

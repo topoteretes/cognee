@@ -65,9 +65,7 @@ async def extract_dlt_fk_edges(data_points: List[DataPoint]) -> List[DataPoint]:
         schema_info = table_meta["schema_info"]
 
         # Build column description
-        if isinstance(schema_info, list):
-            columns_str = json.dumps(schema_info, default=str)
-        elif isinstance(schema_info, dict):
+        if isinstance(schema_info, (list, dict)):
             columns_str = json.dumps(schema_info, default=str)
         else:
             columns_str = "[]"
