@@ -66,13 +66,17 @@ _df_lock = asyncio.Lock()
 _reused_items_lock = asyncio.Lock()
 
 
-async def cache_nodes(df, nodes):
+async def cache_nodes(df, nodes) -> None:
     if df is None:
         return
     vector_engine = get_vector_engine()
     df_new = pd.DataFrame()
     for chunk in nodes:
-        for _, node in chunk.contains:
+        for contained in getattr(chunk, "contains", None) or []:
+            if isinstance(contained, tuple) and len(contained) == 2:
+                _, node = contained
+            else:
+                node = contained
             if node and (isinstance(node, Entity) or isinstance(node, EntityType)):
                 vector = await vector_engine.embed_data(node.name)
                 if node.name in df_new.columns:
@@ -88,9 +92,7 @@ async def cache_nodes(df, nodes):
             if len(overlap) > 0:
                 df_new.drop(columns=overlap, inplace=True, errors="ignore")
         # avoid fragmentation, improve speed, keep the same df
-        combined = pd.concat([df, df_new], axis=1)
-        df._mgr = combined._mgr
-        df._item_cache.clear()
+        df[df_new.columns] = df_new
 
 
 async def integrate_chunk_graphs(
@@ -218,6 +220,9 @@ def top_k_by_cosine(df: DataFrame, query_vector, k: int = 5) -> List[str]:
     # columns are vectors; shape: (dim, n)
     M = df.to_numpy(dtype=float)  # shape (dim, n_cols)
     q = np.asarray(query_vector, dtype=float)  # shape (dim,)
+
+    if M.shape[0] != q.shape[0]:
+        raise ValueError(f"Embedding dimension mismatch: stored={M.shape[0]} query={q.shape[0]}")
 
     q_norm = np.linalg.norm(q)
     if q_norm == 0 or M.size == 0:

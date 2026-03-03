@@ -44,7 +44,8 @@ async def main(
 
 
 async def _run():
-    with open("prompts/prompt1.txt", "r") as f:
+    prompt_path = os.path.join(Path(__file__).resolve().parent, "prompts", "prompt1.txt")
+    with open(prompt_path, "r", encoding="utf-8") as f:
         custom_prompt_text = f.read()
 
     for i in range(1, 2):
