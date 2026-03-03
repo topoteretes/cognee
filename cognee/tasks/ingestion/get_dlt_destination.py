@@ -1,7 +1,10 @@
 import os
 from functools import lru_cache
 
-import dlt
+try:
+    import dlt
+except ImportError:
+    dlt = None
 from typing import Union
 
 from cognee.infrastructure.databases.relational import get_relational_config
