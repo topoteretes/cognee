@@ -5,13 +5,13 @@ try:
     import dlt
 except ImportError:
     dlt = None
-from typing import Union
+from typing import Optional, Any
 
 from cognee.infrastructure.databases.relational import get_relational_config
 
 
 @lru_cache
-def get_dlt_destination() -> Union[type[dlt.destinations.sqlalchemy], None]:
+def get_dlt_destination() -> Optional[Any]:
     """
     Handle the propagation of the cognee database configuration to the dlt library.
 
