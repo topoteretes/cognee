@@ -9,6 +9,11 @@ from pathlib import Path
 import os
 import pandas as pd
 
+from examples.pocs.post_extraction_canonicalization.post_extraction_canonicalization import (
+    cache_and_replace_nodes,
+    calculate_chunk_graphs_post_extraction_canonicalization,
+)
+
 
 async def main(
     example,
@@ -26,11 +31,10 @@ async def main(
     )
 
     parts_dir = Path(__file__).resolve().parent / "data" / example
-    kwargs = {"vector_search_limit": vector_search_limit}
+    kwargs = {}
     if use_post_extraction_canonicalization_disambiguation:
-        kwargs["use_post_extraction_canonicalization_disambiguation"] = (
-            use_post_extraction_canonicalization_disambiguation
-        )
+        kwargs["calculate_chunk_graphs"] = calculate_chunk_graphs_post_extraction_canonicalization
+        kwargs["cache_entity_embeddings"] = cache_and_replace_nodes
         kwargs["df"] = df
         kwargs["similarity_threshold"] = 0.7
         kwargs["stats"] = {"reused_entities": 0}

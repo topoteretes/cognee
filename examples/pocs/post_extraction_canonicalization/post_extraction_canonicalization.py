@@ -1,8 +1,13 @@
+import asyncio
 import numpy as np
 from typing import Dict, Type, List, Optional, Any
 import pandas as pd
 from pandas import DataFrame
+from pydantic import BaseModel
+
 from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.infrastructure.llm.extraction import extract_content_graph
+from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models import Entity, EntityType
 
 
@@ -64,3 +69,32 @@ async def cache_and_replace_nodes(nodes, **kwargs):
             df_new.drop(columns=overlap, inplace=True, errors="ignore")
     # avoid fragmentation, improve speed, keep the same df
     df[df_new.columns] = df_new
+
+
+async def calculate_chunk_graphs_post_extraction_canonicalization(
+    data_chunks: List[DocumentChunk],
+    graph_model: Type[BaseModel],
+    custom_prompt: Optional[str] = None,
+    **kwargs,
+):
+    extractor_kwargs = {
+        key: value
+        for key, value in kwargs.items()
+        if key
+        not in {
+            "calculate_chunk_graphs",
+            "cache_entity_embeddings",
+            "df",
+            "similarity_threshold",
+            "stats",
+        }
+    }
+
+    return await asyncio.gather(
+        *[
+            extract_content_graph(
+                chunk.text, graph_model, custom_prompt=custom_prompt, **extractor_kwargs
+            )
+            for chunk in data_chunks
+        ]
+    )
