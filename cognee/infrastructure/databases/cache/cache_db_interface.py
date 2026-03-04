@@ -75,19 +75,13 @@ class CacheDBInterface(ABC):
         feedback_text: str | None = None,
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
-<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
         memify_metadata: dict | None = None,
-=======
->>>>>>> dev
     ):
         """
         Add a Q/A/context triplet to a cache session.
         Uses the same QA fields as update_qa_entry for consistent structure.
         used_graph_element_ids: Optional dict with keys "node_ids" and "edge_ids" (lists of str).
-<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
         memify_metadata: Optional dict with pipeline name as key (e.g. "apply_feedback_weights") and bool value.
-=======
->>>>>>> dev
         """
         pass
 
@@ -125,10 +119,7 @@ class CacheDBInterface(ABC):
         feedback_text: str | None = None,
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
-<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
         memify_metadata: dict | None = None,
-=======
->>>>>>> dev
     ) -> bool:
         """
         Update a QA entry by qa_id. Same QA fields as create_qa_entry.
