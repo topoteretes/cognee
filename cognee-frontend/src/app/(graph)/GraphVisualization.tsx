@@ -240,7 +240,8 @@ export default function GraphVisualization({ ref, data, graphControls, className
   return (
     <div ref={containerRef} className={classNames("w-full h-full", className)} id="graph-container">
       <ForceGraph
-        ref={graphRef as RefObject<ForceGraphMethods>}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ref={graphRef as any}
         width={dimensions.width}
         height={dimensions.height}
         dagMode={graphShape as unknown as undefined}
