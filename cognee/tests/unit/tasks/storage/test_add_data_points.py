@@ -4,7 +4,11 @@ import sys
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.models import Triplet
+<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
 from cognee.modules.graph.utils import ensure_default_edge_properties
+=======
+from cognee.modules.graph.utils import ensure_edge_object_ids
+>>>>>>> dev
 from cognee.tasks.storage.add_data_points import (
     add_data_points,
     InvalidDataPointsInAddDataPointsError,
@@ -63,8 +67,13 @@ async def test_add_data_points_indexes_nodes_and_edges(
     graph_engine.add_nodes.assert_awaited_once()
     mock_index_nodes.assert_awaited_once()
     assert graph_engine.add_edges.await_count == 2
+<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
     expected_main_edges = ensure_default_edge_properties([edge1])
     expected_custom_edges = ensure_default_edge_properties(custom_edges)
+=======
+    expected_main_edges = ensure_edge_object_ids([edge1])
+    expected_custom_edges = ensure_edge_object_ids(custom_edges)
+>>>>>>> dev
     first_call_edges = graph_engine.add_edges.await_args_list[0].args[0]
     assert expected_main_edges[0] in first_call_edges
     assert expected_custom_edges[0] in first_call_edges

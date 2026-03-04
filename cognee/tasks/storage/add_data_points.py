@@ -5,7 +5,11 @@ from cognee.infrastructure.databases.unified import get_unified_engine
 from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 from cognee.modules.graph.utils import (
     deduplicate_nodes_and_edges,
+<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
     ensure_default_edge_properties,
+=======
+    ensure_edge_object_ids,
+>>>>>>> dev
     get_graph_from_model,
 )
 from cognee.modules.users.models import User
@@ -94,7 +98,11 @@ async def add_data_points(
 
     nodes, edges = deduplicate_nodes_and_edges(nodes, edges)
 
+<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
     edges = ensure_default_edge_properties(edges)
+=======
+    edges = ensure_edge_object_ids(edges)
+>>>>>>> dev
 
     unified = await get_unified_engine()
     graph_engine = unified.graph
@@ -116,7 +124,11 @@ async def add_data_points(
 
     if isinstance(custom_edges, list) and custom_edges:
         # This must be handled separately from datapoint edges, created a task in linear to dig deeper but (COG-3488)
+<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
         custom_edges = ensure_default_edge_properties(custom_edges)
+=======
+        custom_edges = ensure_edge_object_ids(custom_edges)
+>>>>>>> dev
         await graph_engine.add_edges(custom_edges)
         await index_graph_edges(custom_edges, vector_engine=vector_engine)
 
