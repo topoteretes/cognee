@@ -12,7 +12,7 @@ import pandas as pd
 
 async def main(
     example,
-    use_poc,
+    use_chunk_prefetch_disambiguation: Optional[bool] = False,
     vector_search_limit: Optional[int] = None,
     custom_prompt: Optional[str] = None,
     df: Optional[DataFrame] = None,
@@ -22,13 +22,13 @@ async def main(
 
     graph_visualization_path = os.path.join(
         os.path.dirname(__file__),
-        f"results/{'poc_' if use_poc else ''}cognify_disambiguate_{example}_result.html",
+        f"results/{'poc_' if use_chunk_prefetch_disambiguation else ''}cognify_disambiguate_{example}_result.html",
     )
 
     parts_dir = Path(__file__).resolve().parent / "data" / example
     kwargs = {"vector_search_limit": vector_search_limit}
-    if use_poc:
-        kwargs["use_chunk_prefetch_disambiguation"] = use_poc
+    if use_chunk_prefetch_disambiguation:
+        kwargs["use_chunk_prefetch_disambiguation"] = use_chunk_prefetch_disambiguation
         kwargs["df"] = df
         kwargs["stats"] = {"reused_entities": 0}
 
@@ -38,7 +38,7 @@ async def main(
         await cognee.add(text)
         await cognee.cognify(chunk_size=1024, custom_prompt=custom_prompt, **kwargs)
 
-    if use_poc:
+    if use_chunk_prefetch_disambiguation:
         print(f"Reused instances: {kwargs.get('stats').get('reused_entities')}")
     await visualize_graph(graph_visualization_path)
 
@@ -53,14 +53,13 @@ async def _run():
         df = pd.DataFrame()
         await main(
             example="example" + example_id,
-            use_poc=True,
+            use_chunk_prefetch_disambiguation=True,
             vector_search_limit=20,
             custom_prompt=custom_prompt_text,
             df=df,
         )
         await main(
             example="example" + example_id,
-            use_poc=False,
         )
 
 
