@@ -33,6 +33,9 @@ from examples.pocs.chunk_prefetch_disambiguation.chunk_prefetch_disambiguation i
     cache_entity_embeddings,
     calculate_chunk_graphs_chunk_prefetch_disambiguation,
 )
+from examples.pocs.post_extraction_canonicalization.post_extraction_canonicalization import (
+    cache_and_replace_nodes,
+)
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -132,6 +135,8 @@ async def integrate_chunk_graphs(
 
         if kwargs.get("use_chunk_prefetch_disambiguation"):
             await cache_entity_embeddings(graph_nodes, **kwargs)
+        elif kwargs.get("use_post_extraction_canonicalization_disambiguation"):
+            await cache_and_replace_nodes(graph_nodes, **kwargs)
 
         await add_data_points(
             data_points=graph_nodes, custom_edges=context, embed_triplets=embed_triplets
@@ -177,6 +182,27 @@ async def extract_graph_from_data(
     if kwargs.get("use_chunk_prefetch_disambiguation"):
         chunk_graphs = await calculate_chunk_graphs_chunk_prefetch_disambiguation(
             data_chunks, graph_model, custom_prompt, **kwargs
+        )
+    elif kwargs.get("use_post_extraction_canonicalization_disambiguation"):
+        llm_kwargs = {
+            key: value
+            for key, value in kwargs.items()
+            if key
+            not in {
+                "vector_search_limit",
+                "df",
+                "use_post_extraction_canonicalization_disambiguation",
+                "stats",
+                "similarity_threshold",
+            }
+        }
+        chunk_graphs = await asyncio.gather(
+            *[
+                extract_content_graph(
+                    chunk.text, graph_model, custom_prompt=custom_prompt, **llm_kwargs
+                )
+                for chunk in data_chunks
+            ]
         )
     else:
         chunk_graphs = await asyncio.gather(
