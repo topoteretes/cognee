@@ -34,3 +34,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# override root .gitignore Python lib/ rule for frontend source
+!src/lib/
