@@ -102,7 +102,15 @@ async def _build_chunk_graphs_and_prompts(
     llm_kwargs = {
         key: value
         for key, value in kwargs.items()
-        if key not in {"vector_search_limit", "df", "use_chunk_prefetch_disambiguation", "stats"}
+        if key
+        not in {
+            "vector_search_limit",
+            "df",
+            "use_chunk_prefetch_disambiguation",
+            "stats",
+            "calculate_chunk_graphs",
+            "cache_entity_embeddings",
+        }
     }
 
     chunk_prompts = await asyncio.gather(

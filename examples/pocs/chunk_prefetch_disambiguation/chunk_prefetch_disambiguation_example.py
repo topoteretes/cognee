@@ -9,6 +9,11 @@ from pathlib import Path
 import os
 import pandas as pd
 
+from examples.pocs.chunk_prefetch_disambiguation.chunk_prefetch_disambiguation import (
+    cache_entity_embeddings,
+    calculate_chunk_graphs_chunk_prefetch_disambiguation,
+)
+
 
 async def main(
     example,
@@ -26,9 +31,11 @@ async def main(
     )
 
     parts_dir = Path(__file__).resolve().parent / "data" / example
-    kwargs = {"vector_search_limit": vector_search_limit}
+    kwargs = {}
     if use_chunk_prefetch_disambiguation:
-        kwargs["use_chunk_prefetch_disambiguation"] = use_chunk_prefetch_disambiguation
+        kwargs = {"vector_search_limit": vector_search_limit}
+        kwargs["calculate_chunk_graphs"] = calculate_chunk_graphs_chunk_prefetch_disambiguation
+        kwargs["cache_entity_embeddings"] = cache_entity_embeddings
         kwargs["df"] = df
         kwargs["stats"] = {"reused_entities": 0}
 
@@ -48,19 +55,17 @@ async def _run():
     with open(prompt_path, "r", encoding="utf-8") as f:
         custom_prompt_text = f.read()
 
-    for i in range(1, 2):
-        example_id = str(i)
-        df = pd.DataFrame()
-        await main(
-            example="example" + example_id,
-            use_chunk_prefetch_disambiguation=True,
-            vector_search_limit=20,
-            custom_prompt=custom_prompt_text,
-            df=df,
-        )
-        await main(
-            example="example" + example_id,
-        )
+    df = pd.DataFrame()
+    await main(
+        example="example1",
+        use_chunk_prefetch_disambiguation=True,
+        vector_search_limit=20,
+        custom_prompt=custom_prompt_text,
+        df=df,
+    )
+    await main(
+        example="example1",
+    )
 
 
 if __name__ == "__main__":
