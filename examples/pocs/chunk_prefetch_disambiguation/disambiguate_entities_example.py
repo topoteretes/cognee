@@ -28,7 +28,7 @@ async def main(
     parts_dir = Path(__file__).resolve().parent / "data" / example
     kwargs = {"vector_search_limit": vector_search_limit}
     if use_poc:
-        kwargs["use_poc"] = use_poc
+        kwargs["use_chunk_prefetch_disambiguation"] = use_poc
         kwargs["df"] = df
         kwargs["stats"] = {"reused_entities": 0}
 

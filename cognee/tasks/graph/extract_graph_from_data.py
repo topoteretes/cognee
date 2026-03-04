@@ -1,14 +1,10 @@
 import asyncio
 from typing import Dict, Type, List, Optional
-import numpy as np
 
-import pandas as pd
 from pandas import DataFrame
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine
-from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.engine.models import Entity, EntityType
 from cognee.modules.graph.methods import upsert_edges
 from cognee.modules.ontology.ontology_env_config import get_ontology_env_config
 from cognee.tasks.storage import index_graph_edges
@@ -34,6 +30,11 @@ from cognee.tasks.graph.exceptions import (
     InvalidOntologyAdapterError,
 )
 from cognee.modules.cognify.config import get_cognify_config
+
+from examples.pocs.chunk_prefetch_disambiguation.chunk_prefetch_disambiguation import (
+    cache_entity_embeddings,
+    calculate_chunk_graphs_chunk_prefetch_disambiguation,
+)
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -62,48 +63,15 @@ def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
             _stamp_provenance_deep(item, pipeline_name, task_name, visited)
 
 
-_df_lock = asyncio.Lock()
-_reused_items_lock = asyncio.Lock()
-
-
-async def cache_nodes(df, nodes) -> None:
-    if df is None:
-        return
-    vector_engine = get_vector_engine()
-    df_new = pd.DataFrame()
-    for chunk in nodes:
-        for contained in getattr(chunk, "contains", None) or []:
-            if isinstance(contained, tuple) and len(contained) == 2:
-                _, node = contained
-            else:
-                node = contained
-            if node and (isinstance(node, Entity) or isinstance(node, EntityType)):
-                vector = await vector_engine.embed_data(node.name)
-                if node.name in df_new.columns:
-                    continue
-                # Store as numeric column (not list-in-cell) for fast vectorized ops.
-                df_new[node.name] = pd.Series(vector[0], dtype=float)
-
-    async with _df_lock:
-        if not df_new.empty:
-            # Drop only overlapping columns in one shot to avoid in-place mutation
-            # during iteration and to tolerate any concurrent column changes.
-            overlap = df_new.columns.intersection(df.columns)
-            if len(overlap) > 0:
-                df_new.drop(columns=overlap, inplace=True, errors="ignore")
-        # avoid fragmentation, improve speed, keep the same df
-        df[df_new.columns] = df_new
-
-
 async def integrate_chunk_graphs(
     data_chunks: list[DocumentChunk],
     chunk_graphs: list,
     graph_model: Type[BaseModel],
     ontology_resolver: BaseOntologyResolver,
     context: Dict,
-    df: DataFrame = None,
     pipeline_name: str = None,
     task_name: str = None,
+    **kwargs,
 ) -> List[DocumentChunk]:
     """Integrate chunk graphs with ontology validation and store in databases.
 
@@ -164,11 +132,12 @@ async def integrate_chunk_graphs(
             for node in graph_nodes:
                 _stamp_provenance_deep(node, pipeline_name, task_name)
 
+        if kwargs.get("use_chunk_prefetch_disambiguation"):
+            await cache_entity_embeddings(graph_nodes, **kwargs)
+
         await add_data_points(
             data_points=graph_nodes, custom_edges=context, embed_triplets=embed_triplets
         )
-
-        await cache_nodes(df, graph_nodes)
 
     if len(graph_edges) > 0:
         await graph_engine.add_edges(graph_edges)
@@ -188,72 +157,6 @@ async def integrate_chunk_graphs(
     return data_chunks
 
 
-def _count_reused_items_in_prompt_tail(prompt: Optional[str], graph, vector_search_limit) -> int:
-    if not prompt or not getattr(graph, "nodes", None):
-        return 0
-    lines = [line.strip() for line in prompt.splitlines() if line.strip()]
-    if not lines:
-        return 0
-
-    # Consider the last vector_search_limit lines (or fewer if prompt is shorter).
-    tail_lines = lines[-vector_search_limit:]
-    tail_blob = "\n".join(tail_lines).casefold()
-
-    count = 0
-    for node in graph.nodes:
-        name = getattr(node, "name", None)
-        if not name:
-            continue
-        if name.casefold() in tail_blob:
-            count += 1
-    return count
-
-
-def top_k_by_cosine(df: DataFrame, query_vector, k: int = 5) -> List[str]:
-    """
-    Returns top-k (name, cosine_similarity) pairs where each column of df is a vector.
-    Assumes df columns are named by vector key and each column is a 1D vector.
-    """
-    if df is None or df.empty:
-        return []
-
-    # columns are vectors; shape: (dim, n)
-    M = df.to_numpy(dtype=float)  # shape (dim, n_cols)
-    q = np.asarray(query_vector, dtype=float)  # shape (dim,)
-
-    if M.shape[0] != q.shape[0]:
-        raise ValueError(f"Embedding dimension mismatch: stored={M.shape[0]} query={q.shape[0]}")
-
-    q_norm = np.linalg.norm(q)
-    if q_norm == 0 or M.size == 0:
-        return []
-
-    # cosine similarity for all columns at once
-    denom = np.linalg.norm(M, axis=0) * q_norm
-    # avoid divide-by-zero
-    denom = np.where(denom == 0, np.inf, denom)
-    sims = (M.T @ q) / denom  # shape (n_cols,)
-
-    # top-k indices
-    k = min(k, sims.shape[0])
-    idx = np.argpartition(-sims, k - 1)[:k]
-    idx = idx[np.argsort(-sims[idx])]
-
-    names = df.columns.to_numpy()
-    return [names[i] for i in idx]
-
-
-async def build_prompt(chunk, df, vector_search_limit, custom_prompt) -> Optional[str]:
-    vector_engine = get_vector_engine()
-    query_vector = (await vector_engine.embedding_engine.embed_text([chunk.text]))[0]
-    closest_matches = top_k_by_cosine(df, query_vector, vector_search_limit)
-
-    prompt = custom_prompt
-    for match in closest_matches:
-        prompt = prompt + "\n  -" + match
-    return prompt
-
-
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     context: Dict,
@@ -265,14 +168,6 @@ async def extract_graph_from_data(
     """
     Extracts and integrates a knowledge graph from the text content of document chunks using a specified graph model.
     """
-    vector_search_limit = kwargs.get("vector_search_limit") or 5
-    df = kwargs.get("df", None)
-    use_poc = kwargs.get("use_poc") or False
-    llm_kwargs = {
-        key: value
-        for key, value in kwargs.items()
-        if key not in {"vector_search_limit", "df", "use_poc", "stats"}
-    }
 
     if not isinstance(data_chunks, list) or not data_chunks:
         raise InvalidDataChunksError("must be a non-empty list of DocumentChunk.")
@@ -281,15 +176,9 @@ async def extract_graph_from_data(
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
 
-    if use_poc:
-        chunk_prompts = await asyncio.gather(
-            *[build_prompt(chunk, df, vector_search_limit, custom_prompt) for chunk in data_chunks]
-        )
-        chunk_graphs = await asyncio.gather(
-            *[
-                extract_content_graph(chunk.text, graph_model, custom_prompt=prompt, **llm_kwargs)
-                for chunk, prompt in zip(data_chunks, chunk_prompts)
-            ]
+    if kwargs.get("use_chunk_prefetch_disambiguation"):
+        chunk_graphs = await calculate_chunk_graphs_chunk_prefetch_disambiguation(
+            data_chunks, graph_model, custom_prompt, **kwargs
         )
     else:
         chunk_graphs = await asyncio.gather(
@@ -300,18 +189,6 @@ async def extract_graph_from_data(
                 for chunk in data_chunks
             ]
         )
-
-    if use_poc:
-        reused_total = sum(
-            _count_reused_items_in_prompt_tail(prompt, graph, vector_search_limit)
-            for prompt, graph in zip(chunk_prompts, chunk_graphs)
-        )
-        if reused_total:
-            # "Atomic" update for shared kwargs dict across async tasks.
-            async with _reused_items_lock:
-                stats = kwargs.get("stats")
-                if isinstance(stats, dict):
-                    stats["reused_entities"] = (stats.get("reused_entities") or 0) + reused_total
 
     # Note: Filter edges with missing source or target nodes
     if graph_model == KnowledgeGraph:
@@ -352,7 +229,7 @@ async def extract_graph_from_data(
         graph_model,
         ontology_resolver,
         context,
-        df,
         pipeline_name=pipeline_name,
         task_name=task_name,
+        **kwargs,
     )
