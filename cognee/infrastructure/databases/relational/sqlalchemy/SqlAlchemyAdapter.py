@@ -78,8 +78,9 @@ class SQLAlchemyAdapter:
                 connect_args={**{"timeout": 30}, **final_connect_args},
             )
         else:
-            if pool_args is None:
-                pool_args = {}
+            # Transform pool_args from tuple into dict if provided
+            # Note: For caching purposes, pool_args is stored as a sorted tuple of key-value pairs in the config
+            pool_args = pool_args or {}
 
             if pool_args.get("pool_size") is None:
                 pool_args["pool_size"] = 20
