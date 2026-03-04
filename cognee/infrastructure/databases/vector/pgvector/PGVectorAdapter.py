@@ -310,6 +310,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         with_vector: bool = False,
         include_payload: bool = False,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ) -> List[ScoredResult]:
         if query_text is None and query_vector is None:
             raise MissingQueryParameterError()
@@ -342,6 +343,11 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
         # Use async session to connect to the database
         async with self.get_async_session() as session:
             if node_name:
+                if node_name_filter_operator == "AND":
+                    filter_operator = "?&"
+                else:
+                    filter_operator = "?|"
+
                 from sqlalchemy import cast, bindparam
                 from sqlalchemy.dialects.postgresql import JSONB, ARRAY, TEXT
 
@@ -356,7 +362,7 @@ class PGVectorAdapter(SQLAlchemyAdapter, VectorDBInterface):
                     .where(
                         cast(PGVectorDataPoint.c.payload, JSONB)
                         .op("->")("belongs_to_set")
-                        .op("?|")(target)
+                        .op(filter_operator)(target)
                     )
                     .order_by("similarity")
                 )

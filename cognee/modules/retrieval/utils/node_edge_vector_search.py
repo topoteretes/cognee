@@ -34,6 +34,7 @@ class NodeEdgeVectorSearch:
         collections: List[str] = None,
         wide_search_limit: Optional[int] = None,
         node_name: Optional[List[str]] = None,
+        node_name_filter_operator: str = "OR",
     ):
         """Embeds query/queries and retrieves vector distances from all collections."""
         if query is not None and query_batch is not None:
@@ -51,7 +52,7 @@ class NodeEdgeVectorSearch:
         else:
             self.query_list_length = None
             search_results = await self._run_single_search(
-                collections, query, wide_search_limit, node_name
+                collections, query, wide_search_limit, node_name, node_name_filter_operator
             )
 
         elapsed_time = time.time() - start_time
@@ -148,6 +149,7 @@ class NodeEdgeVectorSearch:
         query: str,
         wide_search_limit: Optional[int],
         node_name: Optional[List[str]],
+        node_name_filter_operator: str,
     ) -> List[List[Any]]:
         """Runs single query search and returns flat lists per collection.
 
@@ -157,7 +159,11 @@ class NodeEdgeVectorSearch:
         await self._embed_query(query)
         search_tasks = [
             self._search_single_collection(
-                self.vector_engine, wide_search_limit, collection, node_name
+                self.vector_engine,
+                wide_search_limit,
+                collection,
+                node_name,
+                node_name_filter_operator,
             )
             for collection in collections
         ]
@@ -175,6 +181,7 @@ class NodeEdgeVectorSearch:
         wide_search_limit: Optional[int],
         collection_name: str,
         node_name: Optional[List[str]],
+        node_name_filter_operator: str,
     ):
         """Searches one collection and returns results or empty list if not found."""
         try:
@@ -183,6 +190,7 @@ class NodeEdgeVectorSearch:
                 query_vector=self.query_vector,
                 limit=wide_search_limit,
                 node_name=node_name,
+                node_name_filter_operator=node_name_filter_operator,
             )
         except CollectionNotFoundError:
             return []

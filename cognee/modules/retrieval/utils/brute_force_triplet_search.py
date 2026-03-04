@@ -131,6 +131,7 @@ async def brute_force_triplet_search(
     memory_fragment: Optional[CogneeGraph] = None,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
     unified_engine: Optional[UnifiedStoreEngine] = None,
@@ -194,6 +195,7 @@ async def brute_force_triplet_search(
             collections=collections,
             wide_search_limit=wide_search_limit,
             node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
         )
 
         if not vector_search.has_results():
