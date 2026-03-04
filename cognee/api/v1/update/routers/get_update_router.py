@@ -74,7 +74,7 @@ def get_update_router() -> APIRouter:
         try:
             update_run = await cognee_update(
                 data_id=data_id,
-                data=data,
+                data=data or [],
                 dataset_id=dataset_id,
                 user=user,
                 node_set=node_set if node_set else None,

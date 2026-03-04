@@ -80,7 +80,7 @@ def get_add_router() -> APIRouter:
 
         try:
             add_run = await cognee_add(
-                data,
+                data or [],
                 datasetName,
                 user=user,
                 dataset_id=datasetId,
