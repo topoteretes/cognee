@@ -1,4 +1,4 @@
-from typing import Any, Optional, Type, List, Union
+from typing import Any, Dict, List, Optional, Type, Union
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
@@ -78,6 +78,10 @@ class TripletRetriever(BaseRetriever):
             logger.error("Triplet_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
 
+    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+        """Triplets are non-elementary graph objects; do not report IDs for session QA - object ids cannot be resolved"""
+        return None
+
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
         if retrieved_objects:
             triplets_payload = [
@@ -134,6 +138,7 @@ class TripletRetriever(BaseRetriever):
 
         if use_session:
             sm = get_session_manager()
+            used_graph_element_ids = self._extract_context_object_ids(retrieved_objects)
             completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
                 query=query,
@@ -143,6 +148,7 @@ class TripletRetriever(BaseRetriever):
                 system_prompt=self.system_prompt,
                 response_model=self.response_model,
                 summarize_context=False,
+                used_graph_element_ids=used_graph_element_ids,
             )
             return [completion]
         return await self._generate_completion_without_session(query, context)
