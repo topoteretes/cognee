@@ -126,20 +126,9 @@ async def integrate_chunk_graphs(
             for node in graph_nodes:
                 _stamp_provenance_deep(node, pipeline_name, task_name)
 
-        on_nodes_ready = kwargs.get("on_nodes_ready") or kwargs.get("cache_entity_embeddings")
-        if callable(on_nodes_ready):
-            callback_kwargs = {
-                key: value
-                for key, value in kwargs.items()
-                if key
-                not in {
-                    "on_nodes_ready",
-                    "cache_entity_embeddings",
-                    "extract_graphs_fn",
-                    "calculate_chunk_graphs",
-                }
-            }
-            callback_result = on_nodes_ready(graph_nodes, **callback_kwargs)
+        cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
+        if callable(cache_entity_embeddings):
+            callback_result = cache_entity_embeddings(graph_nodes, **kwargs)
             if inspect.isawaitable(callback_result):
                 await callback_result
 
@@ -186,18 +175,7 @@ async def extract_graph_from_data(
 
     calculate_chunk_graphs = kwargs.get("calculate_chunk_graphs")
     if callable(calculate_chunk_graphs):
-        extractor_kwargs = {
-            key: value
-            for key, value in kwargs.items()
-            if key
-            not in {
-                "calculate_chunk_graphs",
-                "cache_entity_embeddings",
-            }
-        }
-        extracted = calculate_chunk_graphs(
-            data_chunks, graph_model, custom_prompt, **extractor_kwargs
-        )
+        extracted = calculate_chunk_graphs(data_chunks, graph_model, custom_prompt, **kwargs)
         chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
         chunk_graphs = await asyncio.gather(
