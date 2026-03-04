@@ -14,7 +14,7 @@ def _is_eligible(entry: Dict[str, Any]) -> bool:
     if not isinstance(feedback_score, int) or feedback_score < 1 or feedback_score > 5:
         return False
 
-    memify_metadata = entry.get("memify_metadata")
+    memify_metadata = entry.get("memify_metadata") #:TODO: For myself, check correct key tomorrow
     if isinstance(memify_metadata, dict) and memify_metadata.get("memify_graph_weights") is True:
         return False
 
