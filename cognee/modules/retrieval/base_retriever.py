@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Type, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 
 class BaseRetriever(ABC):
@@ -70,6 +70,14 @@ class BaseRetriever(ABC):
             List[Any]: A list containing the generated completions or response objects.
         """
         pass
+
+    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+        """
+        Extract node_ids and edge_ids from retrieved_objects for session QA.
+        Override in retrievers that use session and have graph elements to store.
+        Only called when session is enabled.
+        """
+        return None
 
     async def get_completion(self, query: str) -> Union[List[str], List[dict]]:
         """
