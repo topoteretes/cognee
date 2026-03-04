@@ -12,16 +12,16 @@ export function validateCogneeGraphResponse(data: unknown): data is CogneeGraphR
     return false;
   }
 
-  if (obj.nodes.length > 0) {
-    const first = obj.nodes[0] as Record<string, unknown>;
-    if (typeof first.id !== "string" || typeof first.label !== "string" || typeof first.type !== "string") {
+  for (const raw of obj.nodes) {
+    const node = raw as Record<string, unknown>;
+    if (typeof node.id !== "string" || typeof node.label !== "string" || typeof node.type !== "string") {
       return false;
     }
   }
 
-  if (obj.edges.length > 0) {
-    const first = obj.edges[0] as Record<string, unknown>;
-    if (typeof first.source !== "string" || typeof first.target !== "string" || typeof first.label !== "string") {
+  for (const raw of obj.edges) {
+    const edge = raw as Record<string, unknown>;
+    if (typeof edge.source !== "string" || typeof edge.target !== "string" || typeof edge.label !== "string") {
       return false;
     }
   }

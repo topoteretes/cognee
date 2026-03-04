@@ -16,8 +16,8 @@ export function inferNodeSets(
   edges: Edge[],
   options: InferNodeSetsOptions = {}
 ): InferNodeSetsResult {
-  const minSetSize = options.minSetSize ?? 5;
-  const maxSets = options.maxSets ?? 15;
+  const minSetSize = Math.max(1, options.minSetSize ?? 5);
+  const maxSets = Math.max(1, options.maxSets ?? 15);
 
   // Group nodes by type
   const typeGroups = new Map<string, string[]>();

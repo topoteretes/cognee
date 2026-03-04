@@ -5,8 +5,8 @@ function createRng(seed: number) {
   let state = seed;
   return {
     next(): number {
-      state = (state * 1664525 + 1013904223) & 0xffffffff;
-      return (state >>> 0) / 0xffffffff;
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 0x100000000;
     },
     nextInt(max: number): number {
       return Math.floor(this.next() * max);
