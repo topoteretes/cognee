@@ -8,7 +8,7 @@ from neo4j import AsyncSession
 from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
 from contextlib import asynccontextmanager
-from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine
+from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine, Set
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
@@ -746,10 +746,63 @@ class Neo4jAdapter(GraphDBInterface):
         results = await self.query(query, {"node_ids": node_ids})
         return [result["node"] for result in results]
 
+    def _build_node_feedback_items(
+        self, node_feedback_weights: Dict[str, float]
+    ) -> List[Dict[str, Any]]:
+        """Build UNWIND items for node feedback weight updates."""
+        return [
+            {"node_id": node_id, "feedback_weight": float(weight)}
+            for node_id, weight in node_feedback_weights.items()
+            if isinstance(node_id, str) and node_id
+        ]
+
+    async def _execute_node_feedback_updates(
+        self, items: List[Dict[str, Any]]
+    ) -> Set[str]:
+        """Run node feedback weight UNWIND/SET; return set of updated node_ids."""
+        if not items:
+            return set()
+        query = """
+        UNWIND $items AS item
+        MATCH (n:`__Node__` {id: item.node_id})
+        SET n.feedback_weight = item.feedback_weight, n.updated_at = timestamp()
+        RETURN n.id AS node_id
+        """
+        results = await self.query(query, {"items": items})
+        return {str(r["node_id"]) for r in results if r.get("node_id") is not None}
+
+    def _build_edge_feedback_items(
+        self, edge_feedback_weights: Dict[str, float]
+    ) -> List[Dict[str, Any]]:
+        """Build UNWIND items for edge feedback weight updates."""
+        return [
+            {"edge_object_id": edge_object_id, "feedback_weight": float(weight)}
+            for edge_object_id, weight in edge_feedback_weights.items()
+            if isinstance(edge_object_id, str) and edge_object_id
+        ]
+
+    async def _execute_edge_feedback_updates(
+        self, items: List[Dict[str, Any]]
+    ) -> Set[str]:
+        """Run edge feedback weight UNWIND/SET; return set of updated edge_object_ids."""
+        if not items:
+            return set()
+        query = """
+        UNWIND $items AS item
+        MATCH ()-[r]->()
+        WHERE r.edge_object_id = item.edge_object_id
+        SET r.feedback_weight = item.feedback_weight, r.updated_at = timestamp()
+        RETURN r.edge_object_id AS edge_object_id
+        """
+        results = await self.query(query, {"items": items})
+        return {
+            str(r["edge_object_id"]) for r in results if r.get("edge_object_id") is not None
+        }
+
     async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
         if not node_ids:
             return {}
-        valid_node_ids = [node_id for node_id in node_ids if isinstance(node_id, str) and node_id]
+        valid_node_ids = [nid for nid in node_ids if isinstance(nid, str) and nid]
         if not valid_node_ids:
             return {}
         query = """
@@ -767,33 +820,18 @@ class Neo4jAdapter(GraphDBInterface):
     async def set_node_feedback_weights(self, node_feedback_weights: Dict[str, float]) -> Dict[str, bool]:
         if not node_feedback_weights:
             return {}
-
         node_ids = list(node_feedback_weights.keys())
-        valid_items = [
-            {"node_id": node_id, "feedback_weight": float(weight)}
-            for node_id, weight in node_feedback_weights.items()
-            if isinstance(node_id, str) and node_id
-        ]
-        if not valid_items:
-            return {node_id: False for node_id in node_ids}
-
-        query = """
-        UNWIND $items AS item
-        MATCH (n:`__Node__` {id: item.node_id})
-        SET n.feedback_weight = item.feedback_weight, n.updated_at = timestamp()
-        RETURN n.id AS node_id
-        """
-        results = await self.query(query, {"items": valid_items})
-        updated_ids = {str(row["node_id"]) for row in results if row.get("node_id") is not None}
-        return {node_id: (node_id in updated_ids) for node_id in node_ids}
+        items = self._build_node_feedback_items(node_feedback_weights)
+        if not items:
+            return {nid: False for nid in node_ids}
+        updated_ids = await self._execute_node_feedback_updates(items)
+        return {nid: (nid in updated_ids) for nid in node_ids}
 
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
         if not edge_object_ids:
             return {}
         valid_edge_ids = [
-            edge_object_id
-            for edge_object_id in edge_object_ids
-            if isinstance(edge_object_id, str) and edge_object_id
+            eid for eid in edge_object_ids if isinstance(eid, str) and eid
         ]
         if not valid_edge_ids:
             return {}
@@ -816,28 +854,12 @@ class Neo4jAdapter(GraphDBInterface):
     async def set_edge_feedback_weights(self, edge_feedback_weights: Dict[str, float]) -> Dict[str, bool]:
         if not edge_feedback_weights:
             return {}
-
         edge_ids = list(edge_feedback_weights.keys())
-        valid_items = [
-            {"edge_object_id": edge_object_id, "feedback_weight": float(weight)}
-            for edge_object_id, weight in edge_feedback_weights.items()
-            if isinstance(edge_object_id, str) and edge_object_id
-        ]
-        if not valid_items:
-            return {edge_object_id: False for edge_object_id in edge_ids}
-
-        query = """
-        UNWIND $items AS item
-        MATCH ()-[r]->()
-        WHERE r.edge_object_id = item.edge_object_id
-        SET r.feedback_weight = item.feedback_weight, r.updated_at = timestamp()
-        RETURN r.edge_object_id AS edge_object_id
-        """
-        results = await self.query(query, {"items": valid_items})
-        updated_ids = {
-            str(row["edge_object_id"]) for row in results if row.get("edge_object_id") is not None
-        }
-        return {edge_object_id: (edge_object_id in updated_ids) for edge_object_id in edge_ids}
+        items = self._build_edge_feedback_items(edge_feedback_weights)
+        if not items:
+            return {eid: False for eid in edge_ids}
+        updated_ids = await self._execute_edge_feedback_updates(items)
+        return {eid: (eid in updated_ids) for eid in edge_ids}
 
     async def get_connections(self, node_id: UUID) -> list:
         """
