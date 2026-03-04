@@ -45,10 +45,7 @@ class FSCacheAdapter(CacheDBInterface):
         feedback_text: str | None = None,
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
-<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
         memify_metadata: dict | None = None,
-=======
->>>>>>> dev
     ) -> dict:
         entry = SessionQAEntry(
             time=datetime.utcnow().isoformat(),
@@ -59,10 +56,7 @@ class FSCacheAdapter(CacheDBInterface):
             feedback_text=feedback_text,
             feedback_score=feedback_score,
             used_graph_element_ids=used_graph_element_ids,
-<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
             memify_metadata=memify_metadata,
-=======
->>>>>>> dev
         )
         return entry.model_dump()
 
@@ -87,10 +81,7 @@ class FSCacheAdapter(CacheDBInterface):
         feedback_text: str | None = None,
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
-<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
         memify_metadata: dict | None = None,
-=======
->>>>>>> dev
     ) -> dict:
         merged = {**entry}
         if question is not None:
@@ -105,11 +96,9 @@ class FSCacheAdapter(CacheDBInterface):
             merged["feedback_score"] = feedback_score
         if used_graph_element_ids is not None:
             merged["used_graph_element_ids"] = used_graph_element_ids
-<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
         if memify_metadata is not None:
             merged["memify_metadata"] = memify_metadata
-=======
->>>>>>> dev
+
         return merged
 
     @staticmethod
@@ -155,10 +144,7 @@ class FSCacheAdapter(CacheDBInterface):
         feedback_text: str | None = None,
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
-<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
         memify_metadata: dict | None = None,
-=======
->>>>>>> dev
     ):
         try:
             session_key = self._session_key(user_id, session_id)
@@ -170,10 +156,7 @@ class FSCacheAdapter(CacheDBInterface):
                 feedback_text,
                 feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
-<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
                 memify_metadata=memify_metadata,
-=======
->>>>>>> dev
             )
             entries = self._load_entries(session_key)
             entries.append(qa_entry)
@@ -205,10 +188,7 @@ class FSCacheAdapter(CacheDBInterface):
         feedback_text: str | None = None,
         feedback_score: int | None = None,
         used_graph_element_ids: dict | None = None,
-<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
         memify_metadata: dict | None = None,
-=======
->>>>>>> dev
     ) -> bool:
         """
         Update a QA entry by qa_id. Same QA fields as create_qa_entry.
@@ -229,10 +209,7 @@ class FSCacheAdapter(CacheDBInterface):
                 feedback_text,
                 feedback_score,
                 used_graph_element_ids=used_graph_element_ids,
-<<<<<<< feature/cog-4069-memify-pipeline-apply-feedback-weights-to-graph-elements
                 memify_metadata=memify_metadata,
-=======
->>>>>>> dev
             )
             entries[idx] = self._validate_entry_dict(merged)
             self._save_entries(session_key, entries)
