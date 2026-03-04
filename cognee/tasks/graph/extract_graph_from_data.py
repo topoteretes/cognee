@@ -1,7 +1,5 @@
 import asyncio
 from typing import Dict, Type, List, Optional
-
-from pandas import DataFrame
 from pydantic import BaseModel
 
 from cognee.infrastructure.databases.graph import get_graph_engine

@@ -153,7 +153,7 @@ async def cache_entity_embeddings(nodes, **kwargs) -> None:
 async def calculate_chunk_graphs_chunk_prefetch_disambiguation(
     data_chunks: List[DocumentChunk],
     graph_model: Type[BaseModel],
-    custom_prompt: Optional[str] = None,
+    custom_prompt: str,
     **kwargs,
 ):
     chunk_graphs, chunk_prompts = await _build_chunk_graphs_and_prompts(
