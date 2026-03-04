@@ -24,6 +24,7 @@ class SessionQAEntry(BaseModel):
         feedback_text: Optional user feedback text.
         feedback_score: Optional feedback score 1-5.
         used_graph_element_ids: Optional dict with only "node_ids" and "edge_ids" (lists of str).
+        memify_metadata: Optional dict with memify pipeline name as key (e.g. "apply_feedback_weights") and bool value.
     """
 
     time: str
@@ -34,6 +35,7 @@ class SessionQAEntry(BaseModel):
     feedback_text: Optional[str] = None
     feedback_score: Optional[int] = None
     used_graph_element_ids: Optional[Dict[str, List[str]]] = None
+    memify_metadata: Optional[Dict[str, bool]] = None
 
     @field_validator("used_graph_element_ids")
     @classmethod
@@ -60,3 +62,17 @@ class SessionQAEntry(BaseModel):
         if v is not None and (v < 1 or v > 5):
             raise ValueError("feedback_score must be between 1 and 5")
         return v
+
+    @field_validator("memify_metadata")
+    @classmethod
+    def memify_metadata_only_pipeline_keys(cls, v: Optional[Dict[str, bool]]) -> Optional[Dict[str, bool]]:
+        if v is None:
+            return None
+        if not isinstance(v, dict):
+            raise ValueError("memify_metadata must be a dict or None")
+        out: Dict[str, bool] = {}
+        for key, val in v.items():
+            if not isinstance(key, str) or not isinstance(val, bool):
+                raise ValueError("memify_metadata may only have string keys and bool values")
+            out[key] = val
+        return out if out else None
