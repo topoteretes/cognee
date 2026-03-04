@@ -746,6 +746,99 @@ class Neo4jAdapter(GraphDBInterface):
         results = await self.query(query, {"node_ids": node_ids})
         return [result["node"] for result in results]
 
+    async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
+        if not node_ids:
+            return {}
+        valid_node_ids = [node_id for node_id in node_ids if isinstance(node_id, str) and node_id]
+        if not valid_node_ids:
+            return {}
+        query = """
+        UNWIND $node_ids AS node_id
+        MATCH (n:`__Node__` {id: node_id})
+        RETURN n.id AS node_id, coalesce(n.feedback_weight, $default_weight) AS feedback_weight
+        """
+        results = await self.query(query, {"node_ids": valid_node_ids, "default_weight": 0.5})
+        return {
+            str(row["node_id"]): float(row["feedback_weight"])
+            for row in results
+            if row.get("node_id") is not None
+        }
+
+    async def set_node_feedback_weights(self, node_feedback_weights: Dict[str, float]) -> Dict[str, bool]:
+        if not node_feedback_weights:
+            return {}
+
+        node_ids = list(node_feedback_weights.keys())
+        valid_items = [
+            {"node_id": node_id, "feedback_weight": float(weight)}
+            for node_id, weight in node_feedback_weights.items()
+            if isinstance(node_id, str) and node_id
+        ]
+        if not valid_items:
+            return {node_id: False for node_id in node_ids}
+
+        query = """
+        UNWIND $items AS item
+        MATCH (n:`__Node__` {id: item.node_id})
+        SET n.feedback_weight = item.feedback_weight, n.updated_at = timestamp()
+        RETURN n.id AS node_id
+        """
+        results = await self.query(query, {"items": valid_items})
+        updated_ids = {str(row["node_id"]) for row in results if row.get("node_id") is not None}
+        return {node_id: (node_id in updated_ids) for node_id in node_ids}
+
+    async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
+        if not edge_object_ids:
+            return {}
+        valid_edge_ids = [
+            edge_object_id
+            for edge_object_id in edge_object_ids
+            if isinstance(edge_object_id, str) and edge_object_id
+        ]
+        if not valid_edge_ids:
+            return {}
+        query = """
+        UNWIND $edge_object_ids AS edge_object_id
+        MATCH ()-[r]->()
+        WHERE r.edge_object_id = edge_object_id
+        RETURN r.edge_object_id AS edge_object_id, coalesce(r.feedback_weight, $default_weight) AS feedback_weight
+        """
+        results = await self.query(
+            query,
+            {"edge_object_ids": valid_edge_ids, "default_weight": 0.5},
+        )
+        return {
+            str(row["edge_object_id"]): float(row["feedback_weight"])
+            for row in results
+            if row.get("edge_object_id") is not None
+        }
+
+    async def set_edge_feedback_weights(self, edge_feedback_weights: Dict[str, float]) -> Dict[str, bool]:
+        if not edge_feedback_weights:
+            return {}
+
+        edge_ids = list(edge_feedback_weights.keys())
+        valid_items = [
+            {"edge_object_id": edge_object_id, "feedback_weight": float(weight)}
+            for edge_object_id, weight in edge_feedback_weights.items()
+            if isinstance(edge_object_id, str) and edge_object_id
+        ]
+        if not valid_items:
+            return {edge_object_id: False for edge_object_id in edge_ids}
+
+        query = """
+        UNWIND $items AS item
+        MATCH ()-[r]->()
+        WHERE r.edge_object_id = item.edge_object_id
+        SET r.feedback_weight = item.feedback_weight, r.updated_at = timestamp()
+        RETURN r.edge_object_id AS edge_object_id
+        """
+        results = await self.query(query, {"items": valid_items})
+        updated_ids = {
+            str(row["edge_object_id"]) for row in results if row.get("edge_object_id") is not None
+        }
+        return {edge_object_id: (edge_object_id in updated_ids) for edge_object_id in edge_ids}
+
     async def get_connections(self, node_id: UUID) -> list:
         """
         Retrieve all connections (predecessors and successors) for a specified node.
