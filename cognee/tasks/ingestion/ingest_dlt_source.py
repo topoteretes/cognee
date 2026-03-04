@@ -68,7 +68,7 @@ async def ingest_dlt_source(
     if relational_config.db_provider == "postgres":
         await _create_pg_database(dlt_db_name)
 
-    destination = get_dlt_destination()
+    destination = get_dlt_destination(dlt_db_name=dlt_db_name)
     if destination is None:
         raise UnsupportedDBProviderError(
             message=f"Unsupported db_provider for DLT ingestion: {relational_config.db_provider}. "
@@ -153,7 +153,7 @@ async def _extract_dlt_schema(relational_config, dlt_db_name: str, dataset_name:
     migration_config.migration_db_password = relational_config.db_password
 
     if relational_config.db_provider == "sqlite":
-        dlt_sqlite_db_name = f"{relational_config.db_name}__{dataset_name}"
+        dlt_sqlite_db_name = f"{dlt_db_name}__{dataset_name}"
         migration_config.migration_db_path = relational_config.db_path
         migration_config.migration_db_name = dlt_sqlite_db_name
     else:
@@ -163,9 +163,7 @@ async def _extract_dlt_schema(relational_config, dlt_db_name: str, dataset_name:
     schema = await engine.extract_schema()
 
     # Filter out dlt internal tables (those starting with _dlt_ or containing staging)
-    filtered_schema = {
-        k: v for k, v in schema.items() if not k.startswith("_dlt_") and "staging" not in k
-    }
+    filtered_schema = {k: v for k, v in schema.items() if "_dlt_" not in k and "staging" not in k}
 
     return schema, filtered_schema
 
@@ -193,7 +191,7 @@ async def _read_rows_from_tables(
     """Read all rows from the dlt database tables and return DltRowData objects."""
     if relational_config.db_provider == "sqlite":
         # DLT creates a separate SQLite file: {db_name}__{dataset_name}
-        dlt_sqlite_db_name = f"{relational_config.db_name}__{dataset_name}"
+        dlt_sqlite_db_name = f"{dlt_db_name}__{dataset_name}"
         db_path = os.path.join(relational_config.db_path, dlt_sqlite_db_name)
         async_url = f"sqlite+aiosqlite:///{db_path}"
     else:
@@ -268,8 +266,8 @@ async def _read_single_table(
     if relational_config.db_provider == "sqlite":
         query = f'SELECT * FROM "{table_name}"'
     else:
-        qualified_table = f"{dataset_name}.{table_name}"
-        query = f'SELECT * FROM "{qualified_table}"'
+        schema_name, table_name_only = table_name.split(".", 1)
+        query = f'SELECT * FROM "{schema_name}"."{table_name_only}"'
 
     result = await conn.execute(text(query))
     rows = result.mappings().all()
@@ -295,6 +293,11 @@ async def _read_single_table(
     for row in rows:
         row_dict = {k: v for k, v in row.items()}
         pk_value = str(row_dict.get(pk_col, ""))
+
+        row_keys = list(row_dict.keys())
+        for k in row_keys:
+            if "_dlt_" in k:
+                row_dict.pop(k)
 
         content_hash = hashlib.md5(
             json.dumps(row_dict, sort_keys=True, default=str).encode()
