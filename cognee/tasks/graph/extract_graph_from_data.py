@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from typing import Dict, Type, List, Optional
 from pydantic import BaseModel
 
@@ -28,14 +29,6 @@ from cognee.tasks.graph.exceptions import (
     InvalidOntologyAdapterError,
 )
 from cognee.modules.cognify.config import get_cognify_config
-
-from examples.pocs.chunk_prefetch_disambiguation.chunk_prefetch_disambiguation import (
-    cache_entity_embeddings,
-    calculate_chunk_graphs_chunk_prefetch_disambiguation,
-)
-from examples.pocs.post_extraction_canonicalization.post_extraction_canonicalization import (
-    cache_and_replace_nodes,
-)
 
 
 def _stamp_provenance_deep(data, pipeline_name, task_name, visited=None):
@@ -133,10 +126,11 @@ async def integrate_chunk_graphs(
             for node in graph_nodes:
                 _stamp_provenance_deep(node, pipeline_name, task_name)
 
-        if kwargs.get("use_chunk_prefetch_disambiguation"):
-            await cache_entity_embeddings(graph_nodes, **kwargs)
-        elif kwargs.get("use_post_extraction_canonicalization_disambiguation"):
-            await cache_and_replace_nodes(graph_nodes, **kwargs)
+        cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
+        if callable(cache_entity_embeddings):
+            callback_result = cache_entity_embeddings(graph_nodes, **kwargs)
+            if inspect.isawaitable(callback_result):
+                await callback_result
 
         await add_data_points(
             data_points=graph_nodes, custom_edges=context, embed_triplets=embed_triplets
@@ -179,31 +173,10 @@ async def extract_graph_from_data(
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
 
-    if kwargs.get("use_chunk_prefetch_disambiguation"):
-        chunk_graphs = await calculate_chunk_graphs_chunk_prefetch_disambiguation(
-            data_chunks, graph_model, custom_prompt, **kwargs
-        )
-    elif kwargs.get("use_post_extraction_canonicalization_disambiguation"):
-        llm_kwargs = {
-            key: value
-            for key, value in kwargs.items()
-            if key
-            not in {
-                "vector_search_limit",
-                "df",
-                "use_post_extraction_canonicalization_disambiguation",
-                "stats",
-                "similarity_threshold",
-            }
-        }
-        chunk_graphs = await asyncio.gather(
-            *[
-                extract_content_graph(
-                    chunk.text, graph_model, custom_prompt=custom_prompt, **llm_kwargs
-                )
-                for chunk in data_chunks
-            ]
-        )
+    calculate_chunk_graphs = kwargs.get("calculate_chunk_graphs")
+    if callable(calculate_chunk_graphs):
+        extracted = calculate_chunk_graphs(data_chunks, graph_model, custom_prompt, **kwargs)
+        chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
     else:
         chunk_graphs = await asyncio.gather(
             *[

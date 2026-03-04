@@ -102,7 +102,15 @@ async def _build_chunk_graphs_and_prompts(
     llm_kwargs = {
         key: value
         for key, value in kwargs.items()
-        if key not in {"vector_search_limit", "df", "use_chunk_prefetch_disambiguation", "stats"}
+        if key
+        not in {
+            "vector_search_limit",
+            "df",
+            "use_chunk_prefetch_disambiguation",
+            "stats",
+            "calculate_chunk_graphs",
+            "cache_entity_embeddings",
+        }
     }
 
     chunk_prompts = await asyncio.gather(
@@ -156,10 +164,19 @@ async def calculate_chunk_graphs_chunk_prefetch_disambiguation(
     custom_prompt: str,
     **kwargs,
 ):
+    extractor_kwargs = {
+        key: value
+        for key, value in kwargs.items()
+        if key
+        not in {
+            "calculate_chunk_graphs",
+            "cache_entity_embeddings",
+        }
+    }
     chunk_graphs, chunk_prompts = await _build_chunk_graphs_and_prompts(
-        data_chunks, graph_model, custom_prompt, **kwargs
+        data_chunks, graph_model, custom_prompt, **extractor_kwargs
     )
 
-    _update_reused_node_name_stats(chunk_graphs, chunk_prompts, **kwargs)
+    _update_reused_node_name_stats(chunk_graphs, chunk_prompts, **extractor_kwargs)
 
     return chunk_graphs
