@@ -2,14 +2,13 @@
 
 import { v4 as uuid4 } from "uuid";
 import classNames from "classnames";
-import { Fragment, MouseEvent, MutableRefObject, useCallback, useEffect, useRef, useState, memo } from "react";
+import { Fragment, MouseEvent, useCallback, useEffect, useState, memo } from "react";
 
 import { useModal } from "@/ui/elements/Modal";
 import { CaretIcon, CloseIcon, PlusIcon } from "@/ui/Icons";
 import PopupMenu from "@/ui/elements/PopupMenu";
 import { IconButton, TextArea, Modal, GhostButton, CTAButton } from "@/ui/elements";
-import { GraphControlsAPI } from "@/app/(graph)/GraphControls";
-import GraphVisualization, { GraphVisualizationAPI } from "@/app/(graph)/GraphVisualization";
+import GraphVisualization from "@/ui/elements/GraphVisualization";
 
 import NotebookCellHeader from "./NotebookCellHeader";
 import MarkdownPreview from "./MarkdownPreview";
@@ -356,12 +355,6 @@ export default function Notebook({ notebook, updateNotebook, runCell }: Notebook
 function CellResult({ content }: { content: [] }) {
   const parsedContent = [];
 
-  const graphRef = useRef<GraphVisualizationAPI>(null);
-  const graphControls = useRef<GraphControlsAPI>({
-    setSelectedNode: () => {},
-    getSelectedNode: () => null,
-  });
-
   if (content.length === 0) {
     return <span>OK</span>;
   }
@@ -459,10 +452,10 @@ function CellResult({ content }: { content: [] }) {
               <div key={datasetName} className="w-full h-full bg-white">
                 <span className="text-sm pl-2 mb-4">reasoning graph (datasets: {datasetName})</span>
                 <GraphVisualization
-                  data={transformToVisualizationData(graph)}
-                  ref={graphRef as MutableRefObject<GraphVisualizationAPI>}
-                  graphControls={graphControls}
+                  nodes={graph.nodes}
+                  edges={graph.edges}
                   className="min-h-80"
+                  config={{ fontSize: 24 }}
                 />
               </div>
             );
