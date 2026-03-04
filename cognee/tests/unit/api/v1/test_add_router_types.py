@@ -14,7 +14,7 @@ def test_add_router_data_is_optional() -> None:
     from cognee.api.v1.add.routers.get_add_router import get_add_router
 
     router = get_add_router()
-    route = next(r for r in router.routes if r.path == "")
+    route = next(r for r in router.routes if r.path == "" and "POST" in r.methods)
     endpoint = route.endpoint
     sig = inspect.signature(endpoint)
     data_param = sig.parameters["data"]
@@ -35,7 +35,7 @@ def test_update_router_data_is_optional() -> None:
     from cognee.api.v1.update.routers.get_update_router import get_update_router
 
     router = get_update_router()
-    route = next(r for r in router.routes if r.path == "")
+    route = next(r for r in router.routes if r.path == "" and "PATCH" in r.methods)
     endpoint = route.endpoint
     sig = inspect.signature(endpoint)
     data_param = sig.parameters["data"]
