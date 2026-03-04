@@ -65,7 +65,9 @@ class SessionQAEntry(BaseModel):
 
     @field_validator("memify_metadata")
     @classmethod
-    def memify_metadata_only_pipeline_keys(cls, v: Optional[Dict[str, bool]]) -> Optional[Dict[str, bool]]:
+    def memify_metadata_only_pipeline_keys(
+        cls, v: Optional[Dict[str, bool]]
+    ) -> Optional[Dict[str, bool]]:
         if v is None:
             return None
         if not isinstance(v, dict):
