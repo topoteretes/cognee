@@ -79,7 +79,7 @@ async def _build_disambiguation_prompt(
     return prompt
 
 
-async def _update_reused_node_name_stats(chunk_graphs, chunk_prompts, **kwargs):
+def _update_reused_node_name_stats(chunk_graphs, chunk_prompts, **kwargs):
     vector_search_limit = kwargs.get("vector_search_limit") or 5
     reused_total = sum(
         _count_reused_node_names_in_prompt_tail(prompt, graph, vector_search_limit)
@@ -160,6 +160,6 @@ async def calculate_chunk_graphs_chunk_prefetch_disambiguation(
         data_chunks, graph_model, custom_prompt, **kwargs
     )
 
-    await _update_reused_node_name_stats(chunk_graphs, chunk_prompts, **kwargs)
+    _update_reused_node_name_stats(chunk_graphs, chunk_prompts, **kwargs)
 
     return chunk_graphs
