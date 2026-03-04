@@ -299,7 +299,9 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError("get_node_feedback_weights is not implemented for this adapter")
 
-    async def set_node_feedback_weights(self, node_feedback_weights: Dict[str, float]) -> Dict[str, bool]:
+    async def set_node_feedback_weights(
+        self, node_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
         """
         Persist node feedback weights for multiple node ids.
         Returns per-id update success.
@@ -313,7 +315,9 @@ class GraphDBInterface(ABC):
         """
         raise NotImplementedError("get_edge_feedback_weights is not implemented for this adapter")
 
-    async def set_edge_feedback_weights(self, edge_feedback_weights: Dict[str, float]) -> Dict[str, bool]:
+    async def set_edge_feedback_weights(
+        self, edge_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
         """
         Persist edge feedback weights for multiple edge_object_ids.
         Returns per-id update success.

@@ -756,9 +756,7 @@ class Neo4jAdapter(GraphDBInterface):
             if isinstance(node_id, str) and node_id
         ]
 
-    async def _execute_node_feedback_updates(
-        self, items: List[Dict[str, Any]]
-    ) -> Set[str]:
+    async def _execute_node_feedback_updates(self, items: List[Dict[str, Any]]) -> Set[str]:
         """Run node feedback weight UNWIND/SET; return set of updated node_ids."""
         if not items:
             return set()
@@ -781,9 +779,7 @@ class Neo4jAdapter(GraphDBInterface):
             if isinstance(edge_object_id, str) and edge_object_id
         ]
 
-    async def _execute_edge_feedback_updates(
-        self, items: List[Dict[str, Any]]
-    ) -> Set[str]:
+    async def _execute_edge_feedback_updates(self, items: List[Dict[str, Any]]) -> Set[str]:
         """Run edge feedback weight UNWIND/SET; return set of updated edge_object_ids."""
         if not items:
             return set()
@@ -795,9 +791,7 @@ class Neo4jAdapter(GraphDBInterface):
         RETURN r.edge_object_id AS edge_object_id
         """
         results = await self.query(query, {"items": items})
-        return {
-            str(r["edge_object_id"]) for r in results if r.get("edge_object_id") is not None
-        }
+        return {str(r["edge_object_id"]) for r in results if r.get("edge_object_id") is not None}
 
     async def get_node_feedback_weights(self, node_ids: List[str]) -> Dict[str, float]:
         if not node_ids:
@@ -817,7 +811,9 @@ class Neo4jAdapter(GraphDBInterface):
             if row.get("node_id") is not None
         }
 
-    async def set_node_feedback_weights(self, node_feedback_weights: Dict[str, float]) -> Dict[str, bool]:
+    async def set_node_feedback_weights(
+        self, node_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
         if not node_feedback_weights:
             return {}
         node_ids = list(node_feedback_weights.keys())
@@ -830,9 +826,7 @@ class Neo4jAdapter(GraphDBInterface):
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
         if not edge_object_ids:
             return {}
-        valid_edge_ids = [
-            eid for eid in edge_object_ids if isinstance(eid, str) and eid
-        ]
+        valid_edge_ids = [eid for eid in edge_object_ids if isinstance(eid, str) and eid]
         if not valid_edge_ids:
             return {}
         query = """
@@ -851,7 +845,9 @@ class Neo4jAdapter(GraphDBInterface):
             if row.get("edge_object_id") is not None
         }
 
-    async def set_edge_feedback_weights(self, edge_feedback_weights: Dict[str, float]) -> Dict[str, bool]:
+    async def set_edge_feedback_weights(
+        self, edge_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
         if not edge_feedback_weights:
             return {}
         edge_ids = list(edge_feedback_weights.keys())

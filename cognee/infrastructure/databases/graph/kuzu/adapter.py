@@ -949,9 +949,7 @@ class KuzuAdapter(GraphDBInterface):
             logger.error(f"Failed to get nodes: {e}")
             return []
 
-    def _rows_to_dicts(
-        self, rows: List, column_names: List[str]
-    ) -> List[Dict[str, Any]]:
+    def _rows_to_dicts(self, rows: List, column_names: List[str]) -> List[Dict[str, Any]]:
         """Convert query result rows to a list of dicts keyed by column names."""
         result = []
         for row in rows:
@@ -1018,12 +1016,12 @@ class KuzuAdapter(GraphDBInterface):
                 if k not in {"id", "name", "type", "created_at", "updated_at"}
             }
             properties["feedback_weight"] = float(node_feedback_weights[node_id])
-            updates.append({"node_id": node_id, "properties": json.dumps(properties, cls=JSONEncoder)})
+            updates.append(
+                {"node_id": node_id, "properties": json.dumps(properties, cls=JSONEncoder)}
+            )
         return updates
 
-    async def _execute_node_feedback_updates(
-        self, updates: List[Dict[str, Any]]
-    ) -> Set[str]:
+    async def _execute_node_feedback_updates(self, updates: List[Dict[str, Any]]) -> Set[str]:
         """Run node feedback weight UNWIND/SET; return set of updated node_ids."""
         if not updates:
             return set()
@@ -1072,9 +1070,7 @@ class KuzuAdapter(GraphDBInterface):
             )
         return edge_updates
 
-    async def _execute_edge_feedback_updates(
-        self, edge_updates: List[Dict[str, Any]]
-    ) -> Set[str]:
+    async def _execute_edge_feedback_updates(self, edge_updates: List[Dict[str, Any]]) -> Set[str]:
         """Run edge feedback weight UNWIND/SET; return set of updated edge_object_ids."""
         if not edge_updates:
             return set()
@@ -1112,7 +1108,9 @@ class KuzuAdapter(GraphDBInterface):
                 result[node_id] = 0.5
         return result
 
-    async def set_node_feedback_weights(self, node_feedback_weights: Dict[str, float]) -> Dict[str, bool]:
+    async def set_node_feedback_weights(
+        self, node_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
         if not node_feedback_weights:
             return {}
         node_ids = list(node_feedback_weights.keys())
@@ -1129,9 +1127,7 @@ class KuzuAdapter(GraphDBInterface):
     async def get_edge_feedback_weights(self, edge_object_ids: List[str]) -> Dict[str, float]:
         if not edge_object_ids:
             return {}
-        requested_ids = {
-            eid for eid in edge_object_ids if isinstance(eid, str) and eid
-        }
+        requested_ids = {eid for eid in edge_object_ids if isinstance(eid, str) and eid}
         if not requested_ids:
             return {}
         edge_rows = await self._fetch_edge_rows_by_object_ids(requested_ids)
@@ -1156,12 +1152,12 @@ class KuzuAdapter(GraphDBInterface):
                 result[edge_object_id] = 0.5
         return result
 
-    async def set_edge_feedback_weights(self, edge_feedback_weights: Dict[str, float]) -> Dict[str, bool]:
+    async def set_edge_feedback_weights(
+        self, edge_feedback_weights: Dict[str, float]
+    ) -> Dict[str, bool]:
         if not edge_feedback_weights:
             return {}
-        requested_ids = {
-            eid for eid in edge_feedback_weights if isinstance(eid, str) and eid
-        }
+        requested_ids = {eid for eid in edge_feedback_weights if isinstance(eid, str) and eid}
         if not requested_ids:
             return {eid: False for eid in edge_feedback_weights}
         edge_rows = await self._fetch_edge_rows_by_object_ids(requested_ids)
