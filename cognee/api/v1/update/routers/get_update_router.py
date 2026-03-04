@@ -24,7 +24,7 @@ def get_update_router() -> APIRouter:
     async def update(
         data_id: UUID,
         dataset_id: UUID,
-        data: List[UploadFile] = File(default=None),
+        data: Optional[List[UploadFile]] = File(default=None),
         node_set: Optional[List[str]] = Form(default=[""], example=[""]),
         user: User = Depends(get_authenticated_user),
     ):

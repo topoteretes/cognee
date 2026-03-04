@@ -2,7 +2,7 @@ import os
 import asyncio
 from uuid import UUID
 from pydantic import Field
-from typing import List, Optional
+from typing import List, Optional, Union
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi import APIRouter, WebSocket, Depends, WebSocketDisconnect
@@ -38,8 +38,8 @@ logger = get_logger("api.cognify")
 
 
 class CognifyPayloadDTO(InDTO):
-    datasets: Optional[List[str]] = Field(default=None)
-    dataset_ids: Optional[List[UUID]] = Field(default=None, examples=[[]])
+    datasets: Optional[Union[str, List[str]]] = Field(default=None)
+    dataset_ids: Optional[Union[UUID, List[UUID]]] = Field(default=None, examples=[[]])
     run_in_background: Optional[bool] = Field(default=False)
     graph_model: Optional[dict] = Field(default=None, examples=[{}])
     custom_prompt: Optional[str] = Field(
