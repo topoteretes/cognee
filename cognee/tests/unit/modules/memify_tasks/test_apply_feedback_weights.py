@@ -12,7 +12,7 @@ from cognee.tasks.memify.apply_feedback_weights import (
 apply_feedback_weights_module = sys.modules["cognee.tasks.memify.apply_feedback_weights"]
 
 
-class FakeNeo4jGraph:
+class InMemoryGraphWithWeights:
     def __init__(self, missing_edge: bool = False):
         self.node_weights = {"n1": 0.5}
         self.edge_weights = {"e1": 0.5}
@@ -55,7 +55,7 @@ class FakeNeo4jGraph:
         return result
 
 
-class FakeKuzuGraph:
+class InMemoryGraphWithNestedEdgeProperties:
     def __init__(self):
         self.nodes = {"n1": {"id": "n1", "feedback_weight": 0.5}}
         self.edges = {
@@ -139,7 +139,7 @@ def test_streaming_update_formula_and_bounds():
 
 @pytest.mark.asyncio
 async def test_apply_feedback_weights_neo4j_success_marks_applied_true():
-    graph = FakeNeo4jGraph()
+    graph = InMemoryGraphWithWeights()
     session_manager = MagicMock()
     session_manager.is_available = True
     session_manager.update_qa = AsyncMock(return_value=True)
@@ -167,7 +167,7 @@ async def test_apply_feedback_weights_neo4j_success_marks_applied_true():
 
 @pytest.mark.asyncio
 async def test_apply_feedback_weights_kuzu_success_marks_applied_true():
-    graph = FakeKuzuGraph()
+    graph = InMemoryGraphWithNestedEdgeProperties()
     session_manager = MagicMock()
     session_manager.is_available = True
     session_manager.update_qa = AsyncMock(return_value=True)
@@ -192,7 +192,7 @@ async def test_apply_feedback_weights_kuzu_success_marks_applied_true():
 
 @pytest.mark.asyncio
 async def test_apply_feedback_weights_skips_already_applied():
-    graph = FakeNeo4jGraph()
+    graph = InMemoryGraphWithWeights()
     session_manager = MagicMock()
     session_manager.is_available = True
     session_manager.update_qa = AsyncMock(return_value=True)
@@ -218,7 +218,7 @@ async def test_apply_feedback_weights_skips_already_applied():
 
 @pytest.mark.asyncio
 async def test_apply_feedback_weights_missing_mapping_sets_false():
-    graph = FakeNeo4jGraph()
+    graph = InMemoryGraphWithWeights()
     session_manager = MagicMock()
     session_manager.is_available = True
     session_manager.update_qa = AsyncMock(return_value=True)
@@ -244,7 +244,7 @@ async def test_apply_feedback_weights_missing_mapping_sets_false():
 
 @pytest.mark.asyncio
 async def test_apply_feedback_weights_partial_failure_keeps_false():
-    graph = FakeNeo4jGraph(missing_edge=True)
+    graph = InMemoryGraphWithWeights(missing_edge=True)
     session_manager = MagicMock()
     session_manager.is_available = True
     session_manager.update_qa = AsyncMock(return_value=True)
