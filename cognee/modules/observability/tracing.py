@@ -225,10 +225,66 @@ _tracer: Optional["trace.Tracer"] = None
 _provider: Optional["TracerProvider"] = None
 
 
-def setup_tracing(console_output: bool = False) -> "trace.Tracer":
-    """Create an OTEL TracerProvider with CogneeSpanExporter.
+def _is_auto_instrumented() -> bool:
+    """Return True if an external tool (e.g. opentelemetry-instrument) already
+    configured a real TracerProvider."""
+    if not _OTEL_AVAILABLE:
+        return False
+    current = trace.get_tracer_provider()
+    # The default ProxyTracerProvider is set before any real provider is configured.
+    # If the current provider is something else, auto-instrumentation is active.
+    return current is not None and type(current).__name__ != "ProxyTracerProvider"
 
-    Optionally adds a ConsoleSpanExporter for debugging.
+
+def _try_add_otlp_exporter(provider: "TracerProvider") -> None:
+    """If an OTLP endpoint is configured, add an OTLP span exporter.
+
+    Reads the endpoint from ``BaseConfig.otel_exporter_otlp_endpoint``.
+    The OTLP exporters also honour the standard ``OTEL_EXPORTER_OTLP_*``
+    env vars for headers, compression, etc.
+    """
+    from cognee.base_config import get_base_config
+
+    config = get_base_config()
+    if not config.otel_exporter_otlp_endpoint:
+        return
+
+    try:
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+            OTLPSpanExporter,
+        )
+
+        otlp_exporter = OTLPSpanExporter(endpoint=config.otel_exporter_otlp_endpoint)
+        provider.add_span_processor(SimpleSpanProcessor(otlp_exporter))
+    except ImportError:
+        try:
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                OTLPSpanExporter as OTLPHttpSpanExporter,
+            )
+
+            otlp_exporter = OTLPHttpSpanExporter(endpoint=config.otel_exporter_otlp_endpoint)
+            provider.add_span_processor(SimpleSpanProcessor(otlp_exporter))
+        except ImportError:
+            import warnings
+
+            warnings.warn(
+                "otel_exporter_otlp_endpoint is set but no OTLP exporter is installed. "
+                "Install with: pip install cognee[tracing]",
+                stacklevel=2,
+            )
+
+
+def setup_tracing(console_output: bool = False) -> "trace.Tracer":
+    """Set up OTEL tracing for Cognee.
+
+    If an external auto-instrumentation tool (e.g. ``opentelemetry-instrument``,
+    Dash0, Datadog) has already configured a TracerProvider, this function
+    attaches Cognee's in-memory exporter to it instead of replacing it.
+
+    When no external provider exists, creates a new TracerProvider and
+    optionally adds an OTLP exporter (if ``OTEL_EXPORTER_OTLP_ENDPOINT`` is
+    set) and a ConsoleSpanExporter for debugging.
+
     Returns the cognee tracer.
     """
     _check_otel_available()
@@ -238,22 +294,40 @@ def setup_tracing(console_output: bool = False) -> "trace.Tracer":
     global _exporter, _tracer, _provider
 
     version = get_cognee_version()
-    resource = Resource.create(
-        {
-            "service.name": "cognee",
-            "service.version": version,
-            "deployment.environment": os.getenv("ENV", "development"),
-        }
-    )
-
     _exporter = CogneeSpanExporter()
-    _provider = TracerProvider(resource=resource)
-    _provider.add_span_processor(SimpleSpanProcessor(_exporter))
 
-    if console_output:
-        _provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+    if _is_auto_instrumented():
+        # An external tool already set up a provider — reuse it.
+        _provider = trace.get_tracer_provider()
+        # Attach our in-memory exporter so CogneeTrace still works.
+        # The underlying provider must support add_span_processor;
+        # the auto-instrumented TracerProvider (from opentelemetry-sdk) does.
+        if hasattr(_provider, "add_span_processor"):
+            _provider.add_span_processor(SimpleSpanProcessor(_exporter))
+    else:
+        # No external provider — create our own.
+        from cognee.base_config import get_base_config
 
-    trace.set_tracer_provider(_provider)
+        config = get_base_config()
+        resource = Resource.create(
+            {
+                "service.name": config.otel_service_name,
+                "service.version": version,
+                "deployment.environment": os.getenv("ENV", "development"),
+            }
+        )
+
+        _provider = TracerProvider(resource=resource)
+        _provider.add_span_processor(SimpleSpanProcessor(_exporter))
+
+        # Add OTLP exporter when endpoint is configured (e.g. Dash0, Grafana, etc.)
+        _try_add_otlp_exporter(_provider)
+
+        if console_output:
+            _provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+
+        trace.set_tracer_provider(_provider)
+
     _tracer = _provider.get_tracer("cognee", version)
     return _tracer
 

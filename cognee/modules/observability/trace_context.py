@@ -1,6 +1,5 @@
 """Public tracing API: enable/disable tracing and retrieve traces."""
 
-import os
 from typing import Optional
 
 from cognee.modules.observability.tracing import (
@@ -34,12 +33,21 @@ def disable_tracing() -> None:
 def is_tracing_enabled() -> bool:
     """Return True when tracing is active.
 
-    Checks both the module-level flag and the ``COGNEE_TRACING_ENABLED``
-    environment variable.
+    Checks both the module-level flag and the ``cognee_tracing_enabled``
+    config field.  When the config enables tracing but it has not been
+    initialized yet, lazily calls ``enable_tracing()`` so that the
+    TracerProvider and exporters are set up.
     """
+    global _tracing_enabled
     if _tracing_enabled:
         return True
-    return os.environ.get("COGNEE_TRACING_ENABLED", "").lower() in ("true", "1", "yes")
+
+    from cognee.base_config import get_base_config
+
+    if get_base_config().cognee_tracing_enabled:
+        enable_tracing()
+        return True
+    return False
 
 
 def get_last_trace() -> Optional[CogneeTrace]:
