@@ -379,8 +379,10 @@ async def test_enrichment_partial_success(mock_vector_engine, mock_graph_engine)
 
     mock_vector_engine.search.return_value = [mock_chunk1, mock_chunk2]
 
-    mock_graph_engine.query.return_value = [
-        {"chunk_id": "chunk-123", "doc_id": "doc-789", "doc_name": "python_tutorial.pdf"},
+    # Batch returns only chunk-123; individual retry for chunk-456 returns empty
+    mock_graph_engine.query.side_effect = [
+        [{"chunk_id": "chunk-123", "doc_id": "doc-789", "doc_name": "python_tutorial.pdf"}],
+        [],
     ]
 
     retriever = ChunksRetriever(top_k=5, strict_enrichment=False)
@@ -473,9 +475,13 @@ async def test_enrichment_low_success_rate_warning(mock_vector_engine, mock_grap
         chunks.append(chunk)
 
     mock_vector_engine.search.return_value = chunks
-    mock_graph_engine.query.return_value = [
-        {"chunk_id": "chunk-0", "doc_id": "doc-1", "doc_name": "doc1.pdf"},
-        {"chunk_id": "chunk-1", "doc_id": "doc-1", "doc_name": "doc1.pdf"},
+    # Batch returns 2 parents; individual retries for remaining 8 return empty
+    mock_graph_engine.query.side_effect = [
+        [
+            {"chunk_id": "chunk-0", "doc_id": "doc-1", "doc_name": "doc1.pdf"},
+            {"chunk_id": "chunk-1", "doc_id": "doc-1", "doc_name": "doc1.pdf"},
+        ],
+        *[[] for _ in range(8)],
     ]
 
     retriever = ChunksRetriever(top_k=10, strict_enrichment=False)
@@ -636,7 +642,11 @@ async def test_enrichment_batched_row_parse_error(mock_vector_engine, mock_graph
     bad_row.__getitem__ = MagicMock(side_effect=KeyError("chunk_id"))
     bad_row.__contains__ = MagicMock(return_value=False)
 
-    mock_graph_engine.query.return_value = [good_row, bad_row]
+    # Batch returns good_row + bad_row; individual retry for chunk-456 returns empty
+    mock_graph_engine.query.side_effect = [
+        [good_row, bad_row],
+        [],
+    ]
 
     retriever = ChunksRetriever(top_k=5, strict_enrichment=False)
 

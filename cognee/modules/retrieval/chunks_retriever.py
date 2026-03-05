@@ -198,26 +198,28 @@ class ChunksRetriever(BaseRetriever):
         except Exception as error:
             logger.warning(f"Batched lookup failed, falling back to individual queries: {error}")
 
-            for chunk_id in chunk_ids:
-                try:
-                    cypher_query = """
-                    MATCH (chunk:DocumentChunk {id: $chunk_id})-[:is_part_of]->(doc:Document)
-                    RETURN doc.id as doc_id, doc.name as doc_name, doc.type as doc_type
-                    LIMIT 1
-                    """
+        # Retry missing chunk IDs individually (handles both batch failure and partial results)
+        missing_chunk_ids = [cid for cid in chunk_ids if cid not in parent_map]
+        for chunk_id in missing_chunk_ids:
+            try:
+                cypher_query = """
+                MATCH (chunk:DocumentChunk {id: $chunk_id})-[:is_part_of]->(doc:Document)
+                RETURN doc.id as doc_id, doc.name as doc_name, doc.type as doc_type
+                LIMIT 1
+                """
 
-                    result = await graph_engine.query(cypher_query, params={"chunk_id": chunk_id})
-                    result = normalize_graph_result(result, ["doc_id", "doc_name", "doc_type"])
+                result = await graph_engine.query(cypher_query, params={"chunk_id": chunk_id})
+                result = normalize_graph_result(result, ["doc_id", "doc_name", "doc_type"])
 
-                    if result and len(result) > 0:
-                        parent_map[chunk_id] = self._build_parent_info(result[0])
+                if result and len(result) > 0:
+                    parent_map[chunk_id] = self._build_parent_info(result[0])
 
-                except Exception as individual_error:
-                    if self.strict_enrichment:
-                        raise NoDataError(
-                            f"Failed to fetch parent for {chunk_id}: {individual_error}"
-                        ) from individual_error
-                    logger.debug(f"Individual query failed for {chunk_id}: {individual_error}")
+            except Exception as individual_error:
+                if self.strict_enrichment:
+                    raise NoDataError(
+                        f"Failed to fetch parent for {chunk_id}: {individual_error}"
+                    ) from individual_error
+                logger.debug(f"Individual query failed for {chunk_id}: {individual_error}")
 
         return parent_map
 
