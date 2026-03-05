@@ -151,7 +151,7 @@ class KuzuAdapter(GraphDBInterface):
             except Exception as e:
                 logger.info(f"JSON extension already loaded or unavailable: {e}")
 
-            # Create node table with essential fields and timestamp
+            # Create node table with essential fields, timestamp, and frequency tracking
             self.connection.execute("""
                 CREATE NODE TABLE IF NOT EXISTS Node(
                     id STRING PRIMARY KEY,
@@ -159,7 +159,9 @@ class KuzuAdapter(GraphDBInterface):
                     type STRING,
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP,
-                    properties STRING
+                    properties STRING,
+                    frequency_weight DOUBLE DEFAULT 0.0,
+                    frequency_updated_at TIMESTAMP
                 )
             """)
             # Create relationship table with timestamp
@@ -563,7 +565,9 @@ class KuzuAdapter(GraphDBInterface):
             id: n.id,
             name: n.name,
             type: n.type,
-            properties: n.properties
+            properties: n.properties,
+            frequency_weight: n.frequency_weight,
+            frequency_updated_at: n.frequency_updated_at
         }
         """
         try:
@@ -602,7 +606,9 @@ class KuzuAdapter(GraphDBInterface):
             id: n.id,
             name: n.name,
             type: n.type,
-            properties: n.properties
+            properties: n.properties,
+            frequency_weight: n.frequency_weight,
+            frequency_updated_at: n.frequency_updated_at
         }
         """
         try:
@@ -886,7 +892,9 @@ class KuzuAdapter(GraphDBInterface):
             id: n.id,
             name: n.name,
             type: n.type,
-            properties: n.properties
+            properties: n.properties,
+            frequency_weight: n.frequency_weight,
+            frequency_updated_at: n.frequency_updated_at
         }
         """
         try:
@@ -924,7 +932,9 @@ class KuzuAdapter(GraphDBInterface):
             id: n.id,
             name: n.name,
             type: n.type,
-            properties: n.properties
+            properties: n.properties,
+            frequency_weight: n.frequency_weight,
+            frequency_updated_at: n.frequency_updated_at
         }
         """
         try:
@@ -1195,7 +1205,9 @@ class KuzuAdapter(GraphDBInterface):
             RETURN n.id, {
                 name: n.name,
                 type: n.type,
-                properties: n.properties
+                properties: n.properties,
+                frequency_weight: n.frequency_weight,
+                frequency_updated_at: n.frequency_updated_at
             }
             """
             nodes = await self.query(nodes_query)
@@ -1380,7 +1392,9 @@ class KuzuAdapter(GraphDBInterface):
         RETURN n.id, {{
             name: n.name,
             type: n.type,
-            properties: n.properties
+            properties: n.properties,
+            frequency_weight: n.frequency_weight,
+            frequency_updated_at: n.frequency_updated_at
         }}
         """
         edges_query = f"""
@@ -1452,11 +1466,15 @@ class KuzuAdapter(GraphDBInterface):
             RETURN n.id, {
                 name: n.name,
                 type: n.type,
-                properties: n.properties
+                properties: n.properties,
+                frequency_weight: n.frequency_weight,
+                frequency_updated_at: n.frequency_updated_at
             }, m.id, {
                 name: m.name,
                 type: m.type,
-                properties: m.properties
+                properties: m.properties,
+                frequency_weight: m.frequency_weight,
+                frequency_updated_at: m.frequency_updated_at
             }, r.relationship_name, r.properties
             """
 
@@ -2072,3 +2090,96 @@ class KuzuAdapter(GraphDBInterface):
                 continue
 
         return triplets
+
+    async def update_node_frequencies(self, node_frequencies: Dict[str, float]) -> None:
+        """
+        Update frequency weights for multiple nodes in batch.
+
+        This method updates the frequency_weight and frequency_updated_at fields
+        for nodes in the Kuzu database. These fields must be defined in the schema
+        at table creation time since Kuzu uses a strict schema-based model.
+
+        Parameters:
+        -----------
+            - node_frequencies (Dict[str, float]): A dictionary mapping node IDs to
+              their frequency weights.
+
+        Raises:
+        -------
+            - Exception: Re-raises any exceptions from query execution.
+        """
+        if not node_frequencies:
+            logger.debug("No frequency weights to update")
+            return
+
+        try:
+            # Get current timestamp
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f")
+
+            # Prepare batch update parameters
+            updates = [
+                {"id": node_id, "frequency_weight": float(weight), "updated_at": now}
+                for node_id, weight in node_frequencies.items()
+            ]
+
+            # Batch update query
+            update_query = """
+            UNWIND $updates AS update
+            MATCH (n:Node {id: update.id})
+            SET n.frequency_weight = update.frequency_weight,
+                n.frequency_updated_at = timestamp(update.updated_at)
+            """
+
+            await self.query(update_query, {"updates": updates})
+
+            logger.info(f"Updated frequency weights for {len(node_frequencies)} nodes")
+
+        except Exception as e:
+            logger.error(f"Failed to update node frequencies: {e}")
+            raise
+
+    async def get_node_frequencies(self, node_ids: Optional[List[str]] = None) -> Dict[str, float]:
+        """
+        Get frequency weights for specified nodes or all nodes.
+
+        Parameters:
+        -----------
+            - node_ids (Optional[List[str]]): List of node IDs to get frequencies for.
+              If None, returns frequencies for all nodes.
+
+        Returns:
+        --------
+            - Dict[str, float]: A dictionary mapping node IDs to their frequency weights.
+        """
+        try:
+            if node_ids:
+                query = """
+                MATCH (n:Node)
+                WHERE n.id IN $node_ids
+                RETURN n.id, n.frequency_weight
+                """
+                params = {"node_ids": node_ids}
+            else:
+                query = """
+                MATCH (n:Node)
+                WHERE n.frequency_weight IS NOT NULL AND n.frequency_weight > 0
+                RETURN n.id, n.frequency_weight
+                """
+                params = {}
+
+            results = await self.query(query, params)
+
+            # Convert results to dictionary
+            frequencies = {}
+            for row in results:
+                if row and len(row) >= 2:
+                    node_id = str(row[0])
+                    # Handle None or missing frequency_weight
+                    frequency = float(row[1]) if row[1] is not None else 0.0
+                    frequencies[node_id] = frequency
+
+            return frequencies
+
+        except Exception as e:
+            logger.error(f"Failed to get node frequencies: {e}")
+            return {}
