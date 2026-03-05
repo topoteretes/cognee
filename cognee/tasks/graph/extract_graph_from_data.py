@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from typing import Dict, Type, List, Optional
 from pydantic import BaseModel
 
@@ -61,6 +62,7 @@ async def integrate_chunk_graphs(
     context: Dict,
     pipeline_name: str = None,
     task_name: str = None,
+    **kwargs,
 ) -> List[DocumentChunk]:
     """Integrate chunk graphs with ontology validation and store in databases.
 
@@ -119,6 +121,12 @@ async def integrate_chunk_graphs(
             for node in graph_nodes:
                 _stamp_provenance_deep(node, pipeline_name, task_name)
 
+        cache_entity_embeddings = kwargs.get("cache_entity_embeddings")
+        if callable(cache_entity_embeddings):
+            callback_result = cache_entity_embeddings(graph_nodes, **kwargs)
+            if inspect.isawaitable(callback_result):
+                await callback_result
+
         await add_data_points(
             data_points=graph_nodes,
             context=context,
@@ -148,12 +156,19 @@ async def extract_graph_from_data(
     if not isinstance(graph_model, type) or not issubclass(graph_model, BaseModel):
         raise InvalidGraphModelError(graph_model)
 
-    chunk_graphs = await asyncio.gather(
-        *[
-            extract_content_graph(chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs)
-            for chunk in data_chunks
-        ]
-    )
+    calculate_chunk_graphs = kwargs.get("calculate_chunk_graphs")
+    if callable(calculate_chunk_graphs):
+        extracted = calculate_chunk_graphs(data_chunks, graph_model, custom_prompt, **kwargs)
+        chunk_graphs = await extracted if inspect.isawaitable(extracted) else extracted
+    else:
+        chunk_graphs = await asyncio.gather(
+            *[
+                extract_content_graph(
+                    chunk.text, graph_model, custom_prompt=custom_prompt, **kwargs
+                )
+                for chunk in data_chunks
+            ]
+        )
 
     # Note: Filter edges with missing source or target nodes
     if graph_model == KnowledgeGraph:
@@ -196,4 +211,5 @@ async def extract_graph_from_data(
         context,
         pipeline_name=pipeline_name,
         task_name=task_name,
+        **kwargs,
     )
