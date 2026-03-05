@@ -483,6 +483,8 @@ async def test_get_completion_with_session(mock_graph_engine, mock_vector_engine
     assert len(completion) == 1
     assert completion[0] == "Generated answer"
     mock_sm.generate_completion_with_session.assert_awaited_once()
+    call_kw = mock_sm.generate_completion_with_session.call_args.kwargs
+    assert call_kw.get("used_graph_element_ids") == {"node_ids": ["e1"]}
 
 
 @pytest.mark.asyncio
