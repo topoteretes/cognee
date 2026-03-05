@@ -2,7 +2,7 @@ from typing import Optional, List
 
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError
-from cognee.infrastructure.databases.cache.get_cache_engine import get_cache_engine
+from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 
@@ -14,10 +14,12 @@ async def extract_user_sessions(
     session_ids: Optional[List[str]] = None,
 ):
     """
-    Extract Q&A sessions for the current user from cache.
+    Extract Q&A sessions for the current user via SessionManager.
 
     Retrieves all Q&A triplets from specified session IDs and yields them
-    as formatted strings combining question, context, and answer.
+    as formatted strings combining question, context, and answer. Session
+    persistence relies on SessionManager; caching must be enabled for
+    sessions to be available.
 
     Args:
         data: Data passed from memify. If empty dict ({}), no external data is provided.
@@ -27,7 +29,7 @@ async def extract_user_sessions(
         String containing session ID and all Q&A pairs formatted.
 
     Raises:
-        CogneeSystemError: If cache engine is unavailable or extraction fails.
+        CogneeSystemError: If SessionManager is unavailable or extraction fails.
     """
     try:
         if not data or data == [{}]:
@@ -39,19 +41,25 @@ async def extract_user_sessions(
 
         user_id = str(user.id)
 
-        cache_engine = get_cache_engine()
-        if cache_engine is None:
+        session_manager = get_session_manager()
+        if not session_manager.is_available:
             raise CogneeSystemError(
-                message="Cache engine not available for session extraction, please enable caching in order to have sessions to save",
+                message="SessionManager not available for session extraction, please enable caching in order to have sessions to save",
                 log=False,
             )
 
         if session_ids:
             for session_id in session_ids:
                 try:
-                    qa_data = await cache_engine.get_all_qas(user_id, session_id)
+                    qa_data = await session_manager.get_session(
+                        user_id=user_id,
+                        session_id=session_id,
+                        formatted=False,
+                    )
                     if qa_data:
-                        logger.info(f"Extracted session {session_id} with {len(qa_data)} Q&A pairs")
+                        logger.info(
+                            f"Extracted session {session_id} via SessionManager with {len(qa_data)} Q&A pairs"
+                        )
                         session_string = f"Session ID: {session_id}\n\n"
                         for qa_pair in qa_data:
                             question = qa_pair.get("question", "")

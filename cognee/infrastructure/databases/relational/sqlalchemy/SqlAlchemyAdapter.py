@@ -8,10 +8,11 @@ from typing import AsyncGenerator, List
 from contextlib import asynccontextmanager
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import NoResultFound
-from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect, URL
+from sqlalchemy import NullPool, text, select, MetaData, Table, delete, inspect, func
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 
 from cognee.modules.data.models.Data import Data
+from cognee.modules.data.models.DatasetData import DatasetData
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
 from cognee.infrastructure.databases.exceptions import EntityNotFoundError
@@ -29,7 +30,7 @@ class SQLAlchemyAdapter:
     functions.
     """
 
-    def __init__(self, connection_string: str, connect_args: dict = None):
+    def __init__(self, connection_string: str, connect_args: dict = None, pool_args: dict = None):
         """
         Initialize the SQLAlchemy adapter with connection settings.
 
@@ -77,13 +78,27 @@ class SQLAlchemyAdapter:
                 connect_args={**{"timeout": 30}, **final_connect_args},
             )
         else:
+            if pool_args is None:
+                pool_args = {}
+
+            if pool_args.get("pool_size") is None:
+                pool_args["pool_size"] = 20
+
+            if pool_args.get("max_overflow") is None:
+                pool_args["max_overflow"] = 20
+
+            if pool_args.get("pool_pre_ping") is None:
+                pool_args["pool_pre_ping"] = True
+
+            if pool_args.get("pool_recycle") is None:
+                pool_args["pool_recycle"] = 280
+
+            if pool_args.get("pool_timeout") is None:
+                pool_args["pool_timeout"] = 280
+
             self.engine = create_async_engine(
                 connection_string,
-                pool_size=20,
-                max_overflow=20,
-                pool_recycle=280,
-                pool_pre_ping=True,
-                pool_timeout=280,
+                **pool_args,
                 connect_args=final_connect_args,
             )
 
@@ -287,7 +302,7 @@ class SQLAlchemyAdapter:
                 await session.execute(TableModel.delete().where(TableModel.c.id == data_id))
                 await session.commit()
 
-    async def delete_data_entity(self, data_id: UUID):
+    async def delete_data_entity(self, data_id: UUID, dataset_id: UUID):
         """
         Delete a data entity along with its local files if no references remain in the database.
 
@@ -301,6 +316,30 @@ class SQLAlchemyAdapter:
                 # Foreign key constraints are disabled by default in SQLite (for backwards compatibility),
                 # so must be enabled for each database connection/session separately.
                 await session.execute(text("PRAGMA foreign_keys = ON;"))
+
+            # Delete DatasetData instances referencing this data_id first to maintain referential integrity.
+            await session.execute(
+                delete(DatasetData).where(
+                    DatasetData.data_id == data_id,
+                    DatasetData.dataset_id == dataset_id,
+                )
+            )
+            # Flush to ensure the count in the next step is accurate within the transaction
+            await session.flush()
+
+            # Check if any references to this data_id still exist in the DatasetData table
+            remaining_refs = (
+                await session.execute(
+                    select(func.count())
+                    .select_from(DatasetData)
+                    .where(DatasetData.data_id == data_id)
+                )
+            ).scalar()
+
+            # If there are still datasets using this data, we stop here.
+            if remaining_refs > 0:
+                await session.commit()
+                return
 
             try:
                 data_entity = (await session.scalars(select(Data).where(Data.id == data_id))).one()

@@ -39,9 +39,6 @@ async def setup_test_db():
     await create_relational_db_and_tables()
     await create_pgvector_db_and_tables()
 
-    user = await get_default_user()
-    await create_authorized_dataset(TEST_DATASET_NAME, user)
-
     migration_engine = get_migration_relational_engine()
     return migration_engine
 
@@ -224,7 +221,6 @@ async def test_schema_only_migration():
         query_text="How many tables are there in this database",
         query_type=cognee.SearchType.GRAPH_COMPLETION,
         top_k=30,
-        datasets=[TEST_DATASET_NAME],
     )
     assert any("11" in r for r in search_results), (
         "Number of tables in the database reported in search_results is either None or not equal to 11"
@@ -357,7 +353,7 @@ async def test_migration_postgres():
     cognee.config.set_migration_db_config(
         {
             "migration_db_name": "test_migration_db",
-            "migration_db_host": "127.0.0.1",
+            "migration_db_host": os.environ.get("DB_HOST", "127.0.0.1"),
             "migration_db_port": "5432",
             "migration_db_username": "cognee",
             "migration_db_password": "cognee",

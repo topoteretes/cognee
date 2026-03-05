@@ -1,3 +1,4 @@
+from typing import Optional
 from uuid import UUID
 from cognee.cli.exceptions import CliCommandException
 from cognee.infrastructure.databases.exceptions.exceptions import EntityNotFoundError
@@ -18,7 +19,7 @@ class DeletionCountsPreview:
 
 
 async def get_deletion_counts(
-    dataset_name: str = None, user_id: str = None, all_data: bool = False
+    dataset_name: Optional[str] = None, user_id: Optional[UUID] = None, all_data: bool = False
 ) -> DeletionCountsPreview:
     """
     Calculates the number of items that will be deleted based on the provided arguments.
@@ -47,7 +48,7 @@ async def get_deletion_counts(
             data_entry_count = (await session.execute(count_query)).scalar_one()
             counts.users = 1
             counts.datasets = 1
-            counts.entries = data_entry_count
+            counts.data_entries = data_entry_count
             return counts
 
         elif all_data:
@@ -55,7 +56,7 @@ async def get_deletion_counts(
             counts.datasets = (
                 await session.execute(select(func.count()).select_from(Dataset))
             ).scalar_one()
-            counts.entries = (
+            counts.data_entries = (
                 await session.execute(select(func.count()).select_from(Data))
             ).scalar_one()
             counts.users = (
@@ -67,8 +68,7 @@ async def get_deletion_counts(
         elif user_id:
             user = None
             try:
-                user_uuid = UUID(user_id)
-                user = await get_user(user_uuid)
+                user = await get_user(user_id)
             except (ValueError, EntityNotFoundError):
                 raise CliCommandException(f"No User exists with ID {user_id}", error_code=1)
             counts.users = 1
@@ -79,14 +79,16 @@ async def get_deletion_counts(
             counts.datasets = dataset_count
             if dataset_count > 0:
                 dataset_ids = [d.id for d in user_datasets]
-                # Count all data entries across all of the user's datasets
+                # Count all data data_entries across all of the user's datasets
                 data_count_query = (
                     select(func.count())
                     .select_from(DatasetData)
                     .where(DatasetData.dataset_id.in_(dataset_ids))
                 )
                 data_entry_count = (await session.execute(data_count_query)).scalar_one()
-                counts.entries = data_entry_count
+                counts.data_entries = data_entry_count
             else:
-                counts.entries = 0
+                counts.data_entries = 0
             return counts
+
+    return counts

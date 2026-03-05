@@ -9,6 +9,7 @@ from .get_dataset_data import get_dataset_data
 from .get_authorized_dataset import get_authorized_dataset
 from .get_authorized_dataset_by_name import get_authorized_dataset_by_name
 from .get_data import get_data
+from .get_last_added_data import get_last_added_data
 from .get_unique_dataset_id import get_unique_dataset_id
 from .get_unique_data_id import get_unique_data_id
 from .get_authorized_existing_datasets import get_authorized_existing_datasets

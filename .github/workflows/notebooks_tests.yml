@@ -2,6 +2,11 @@ name: Reusable Notebook Tests
 
 on:
   workflow_call:
+    inputs:
+      ci-image:
+        required: false
+        type: string
+        default: ''
 
 jobs:
 #  run-main-notebook:
@@ -16,4 +21,5 @@ jobs:
     uses: ./.github/workflows/reusable_notebook.yml
     with:
       notebook-location: notebooks/cognee_multimedia_demo.ipynb
+      ci-image: ${{ inputs.ci-image }}
     secrets: inherit

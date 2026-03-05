@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.ref_name }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
       - name: Install uv
@@ -55,7 +55,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.ref_name }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
 
@@ -85,7 +85,7 @@ jobs:
 
     steps:
       - name: Check out ${{ github.ref_name }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
 

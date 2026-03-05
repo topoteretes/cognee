@@ -1,4 +1,4 @@
-from typing import List, Protocol, Optional, Union, Any
+from typing import List, Protocol, Optional, Any
 from abc import abstractmethod
 from cognee.infrastructure.engine import DataPoint
 from .models.PayloadSchema import PayloadSchema
@@ -88,6 +88,7 @@ class VectorDBInterface(Protocol):
         limit: Optional[int],
         with_vector: bool = False,
         include_payload: bool = False,
+        node_name: Optional[List[str]] = None,
     ):
         """
         Perform a search in the specified collection using either a text query or a vector
@@ -107,6 +108,8 @@ class VectorDBInterface(Protocol):
             - include_payload (bool): Whether to include the payload data with search. Search is faster when set to False.
               Payload contains metadata about the data point, useful for searches that are only based on embedding distances
               like the RAG_COMPLETION search type, but not needed when search also contains graph data.
+            - node_name (Optional[List[str]]): An optional list of names of nodes. Search results are filtered
+              based on these, and only data which has at least one of the names in its "belongs_to_set" field is returned.
         """
         raise NotImplementedError
 
@@ -118,6 +121,7 @@ class VectorDBInterface(Protocol):
         limit: Optional[int],
         with_vectors: bool = False,
         include_payload: bool = False,
+        node_name: Optional[List[str]] = None,
     ):
         """
         Perform a batch search using multiple text queries against a collection.
@@ -137,9 +141,7 @@ class VectorDBInterface(Protocol):
         raise NotImplementedError
 
     @abstractmethod
-    async def delete_data_points(
-        self, collection_name: str, data_point_ids: Union[List[str], list[str]]
-    ):
+    async def delete_data_points(self, collection_name: str, data_point_ids: List[UUID]):
         """
         Delete specified data points from a collection.
 

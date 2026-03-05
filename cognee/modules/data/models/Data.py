@@ -42,7 +42,7 @@ class Data(Base):
         "Dataset",
         secondary=DatasetData.__tablename__,
         back_populates="data",
-        lazy="noload",
+        lazy="selectin",
         cascade="all, delete",
     )
 

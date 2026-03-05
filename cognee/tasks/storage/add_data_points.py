@@ -1,8 +1,10 @@
 import asyncio
-from typing import List, Dict, Optional
+from typing import Any, Dict, List, Optional
 from cognee.infrastructure.engine import DataPoint
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.graph.methods import upsert_edges, upsert_nodes
 from cognee.modules.graph.utils import deduplicate_nodes_and_edges, get_graph_from_model
+from cognee.modules.users.models import User
 from .index_data_points import index_data_points
 from .index_graph_edges import index_graph_edges
 from cognee.modules.engine.models import Triplet
@@ -16,7 +18,10 @@ logger = get_logger("add_data_points")
 
 
 async def add_data_points(
-    data_points: List[DataPoint], custom_edges: Optional[List] = None, embed_triplets: bool = False
+    data_points: List[DataPoint],
+    context: Optional[Dict[str, Any]] = None,
+    custom_edges: Optional[List] = None,
+    embed_triplets: bool = False,
 ) -> List[DataPoint]:
     """
     Add a batch of data points to the graph database by extracting nodes and edges,
@@ -45,8 +50,15 @@ async def add_data_points(
         - Updates the node index via `index_data_points`.
         - Inserts nodes and edges into the graph engine.
         - Optionally updates the edge index via `index_graph_edges`.
-        - Optionally creates and indexes triplet embeddings if embed_triplets is True.
     """
+    user: Optional[User] = None
+    data = None
+    dataset = None
+
+    if context:
+        data = context["data"]
+        dataset = context["dataset"]
+        user = context["user"]
 
     if not isinstance(data_points, list):
         raise InvalidDataPointsInAddDataPointsError("data_points must be a list.")
@@ -82,6 +94,14 @@ async def add_data_points(
 
     await graph_engine.add_nodes(nodes)
     await index_data_points(nodes)
+
+    if user and dataset and data:
+        await upsert_nodes(
+            nodes, tenant_id=user.tenant_id, user_id=user.id, dataset_id=dataset.id, data_id=data.id
+        )
+        await upsert_edges(
+            edges, tenant_id=user.tenant_id, user_id=user.id, dataset_id=dataset.id, data_id=data.id
+        )
 
     await graph_engine.add_edges(edges)
     await index_graph_edges(edges)

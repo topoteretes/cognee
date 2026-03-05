@@ -10,7 +10,6 @@ from cognee.modules.search.operations import select_search_type
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
 
 # Retrievers
-from cognee.modules.retrieval.user_qa_feedback import UserQAFeedback
 from cognee.modules.retrieval.chunks_retriever import ChunksRetriever
 from cognee.modules.retrieval.summaries_retriever import SummariesRetriever
 from cognee.modules.retrieval.completion_retriever import CompletionRetriever
@@ -57,7 +56,6 @@ async def get_search_type_retriever_instance(
     system_prompt = kwargs.get("system_prompt")
     node_type = kwargs.get("node_type", NodeSet)
     node_name = kwargs.get("node_name")
-    save_interaction = kwargs.get("save_interaction", False)
     wide_search_top_k = kwargs.get("wide_search_top_k", 100)
     triplet_distance_penalty = kwargs.get("triplet_distance_penalty", 3.5)
     session_id = kwargs.get("session_id")
@@ -96,7 +94,6 @@ async def get_search_type_retriever_instance(
                 "top_k": top_k,
                 "node_type": node_type,
                 "node_name": node_name,
-                "save_interaction": save_interaction,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
@@ -111,7 +108,6 @@ async def get_search_type_retriever_instance(
                 "top_k": top_k,
                 "node_type": node_type,
                 "node_name": node_name,
-                "save_interaction": save_interaction,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
@@ -139,7 +135,6 @@ async def get_search_type_retriever_instance(
                 "top_k": top_k,
                 "node_type": node_type,
                 "node_name": node_name,
-                "save_interaction": save_interaction,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,
@@ -157,7 +152,6 @@ async def get_search_type_retriever_instance(
                 "top_k": top_k,
                 "node_type": node_type,
                 "node_name": node_name,
-                "save_interaction": save_interaction,
                 "system_prompt": system_prompt,
                 "wide_search_top_k": wide_search_top_k,
                 "triplet_distance_penalty": triplet_distance_penalty,

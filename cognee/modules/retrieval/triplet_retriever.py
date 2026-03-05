@@ -1,13 +1,9 @@
-import asyncio
 from typing import Any, Optional, Type, List, Union
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee.modules.retrieval.utils.completion import generate_completion, summarize_text
-from cognee.modules.retrieval.utils.session_cache import (
-    save_conversation_history,
-    get_conversation_history,
-)
+from cognee.modules.retrieval.utils.completion import generate_completion
+from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
@@ -91,6 +87,22 @@ class TripletRetriever(BaseRetriever):
             return combined_context
         return ""
 
+    def _completion_kwargs(self, context: str) -> dict:
+        """Common kwargs for completion calls (no session)."""
+        return {
+            "context": context,
+            "user_prompt_path": self.user_prompt_path,
+            "system_prompt_path": self.system_prompt_path,
+            "system_prompt": self.system_prompt,
+            "response_model": self.response_model,
+        }
+
+    async def _generate_completion_without_session(self, query: str, context: str) -> List[Any]:
+        """Generate completion without session; returns list of one completion."""
+        kwargs = self._completion_kwargs(context)
+        completion = await generate_completion(query=query, **kwargs)
+        return [completion]
+
     async def get_completion_from_context(
         self, query: str, retrieved_objects: Any, context: Any
     ) -> Union[List[str], List[dict]]:
@@ -118,64 +130,19 @@ class TripletRetriever(BaseRetriever):
         cache_config = CacheConfig()
         user = session_user.get()
         user_id = getattr(user, "id", None)
-        session_save = user_id and cache_config.caching
+        use_session = user_id and cache_config.caching
 
-        if session_save:
-            completion = await self._get_completion_with_session(
-                query=query,
-                context=context,
-            )
-        else:
-            completion = await self._get_completion_without_session(
-                query=query,
-                context=context,
-            )
-
-        return [completion]
-
-    async def _get_completion_with_session(
-        self,
-        query: str,
-        context: str,
-    ) -> Any:
-        """Generate completion with session history and caching."""
-        conversation_history = await get_conversation_history(session_id=self.session_id)
-
-        context_summary, completion = await asyncio.gather(
-            summarize_text(context),
-            generate_completion(
+        if use_session:
+            sm = get_session_manager()
+            completion = await sm.generate_completion_with_session(
+                session_id=self.session_id,
                 query=query,
                 context=context,
                 user_prompt_path=self.user_prompt_path,
                 system_prompt_path=self.system_prompt_path,
                 system_prompt=self.system_prompt,
-                conversation_history=conversation_history,
                 response_model=self.response_model,
-            ),
-        )
-
-        await save_conversation_history(
-            query=query,
-            context_summary=context_summary,
-            answer=completion,
-            session_id=self.session_id,
-        )
-
-        return completion
-
-    async def _get_completion_without_session(
-        self,
-        query: str,
-        context: str,
-    ) -> Any:
-        """Generate completion without session history."""
-        completion = await generate_completion(
-            query=query,
-            context=context,
-            user_prompt_path=self.user_prompt_path,
-            system_prompt_path=self.system_prompt_path,
-            system_prompt=self.system_prompt,
-            response_model=self.response_model,
-        )
-
-        return completion
+                summarize_context=False,
+            )
+            return [completion]
+        return await self._generate_completion_without_session(query, context)

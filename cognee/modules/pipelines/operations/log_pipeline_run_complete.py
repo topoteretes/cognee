@@ -6,7 +6,7 @@ from typing import Any
 
 
 async def log_pipeline_run_complete(
-    pipeline_run_id: UUID, pipeline_id: str, pipeline_name: str, dataset_id: UUID, data: Any
+    pipeline_run_id: UUID, pipeline_id: UUID, pipeline_name: str, dataset_id: UUID, data: Any
 ):
     if not data:
         data_info = "None"
