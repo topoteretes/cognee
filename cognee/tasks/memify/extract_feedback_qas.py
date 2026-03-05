@@ -53,11 +53,6 @@ async def extract_feedback_qas(data, session_ids: Optional[List[str]] = None):
         raise CogneeSystemError(message="No authenticated user found in context", log=False)
 
     session_manager = get_session_manager()
-    if not session_manager.is_available:
-        raise CogneeSystemError(
-            message="SessionManager not available for feedback extraction",
-            log=False,
-        )
 
     user_id = str(user.id)
 
