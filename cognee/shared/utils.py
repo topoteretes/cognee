@@ -1,24 +1,61 @@
 """This module contains utility functions for the cognee."""
 
-import os
-import ssl
-import requests
-from datetime import datetime, timezone
+import atexit
 import http.server
-import socketserver
-from threading import Thread
+import os
 import pathlib
-from typing import Union, Any, Dict, List
-from uuid import uuid4, uuid5, NAMESPACE_OID, UUID
+import queue
+import socketserver
+import ssl
+from datetime import datetime, timezone
+from threading import Thread
+from typing import Any, Dict, List, Union
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
+
+import requests
 
 from cognee.base_config import get_base_config
-from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.shared.logging_utils import get_logger
 
 logger = get_logger()
 
 # Analytics Proxy Url, currently hosted by Vercel
 proxy_url = "https://test.prometh.ai"
+
+# Timeout for telemetry HTTP request; short to avoid blocking if proxy is unreachable
+TELEMETRY_REQUEST_TIMEOUT: int = int(os.getenv("TELEMETRY_REQUEST_TIMEOUT", "5"))
+
+# ---------------------------------------------------------------------------
+# Single background worker thread for fire-and-forget telemetry requests.
+# Using a queue avoids spawning a new thread for every send_telemetry() call.
+# ---------------------------------------------------------------------------
+_telemetry_queue: queue.Queue = queue.Queue()
+_SENTINEL = object()  # poison pill to shut down the worker
+
+
+def _telemetry_worker() -> None:
+    """Drain the telemetry queue and send each payload. Runs in a single daemon thread."""
+    while True:
+        payload = _telemetry_queue.get()
+        if payload is _SENTINEL:
+            _telemetry_queue.task_done()
+            break
+        try:
+            _send_telemetry_request(payload)
+        finally:
+            _telemetry_queue.task_done()
+
+
+_telemetry_thread = Thread(target=_telemetry_worker, daemon=True)
+_telemetry_thread.start()
+
+
+def _shutdown_telemetry_worker() -> None:
+    _telemetry_queue.put(_SENTINEL)
+
+
+atexit.register(_shutdown_telemetry_worker)
 
 
 def create_secure_ssl_context() -> ssl.SSLContext:
@@ -79,6 +116,16 @@ def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
         return obj
 
 
+def _send_telemetry_request(payload: dict) -> None:
+    """Send telemetry payload via HTTP. Runs in a background thread; never blocks."""
+    try:
+        response = requests.post(proxy_url, json=payload, timeout=TELEMETRY_REQUEST_TIMEOUT)
+        if response.status_code != 200:
+            logger.debug("Telemetry proxy returned status %s", response.status_code)
+    except requests.RequestException as e:
+        logger.debug("Telemetry request failed: %s", e)
+
+
 def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_properties: dict = {}):
     if additional_properties is None:
         additional_properties = {}
@@ -105,10 +152,8 @@ def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_proper
         },
     }
 
-    response = requests.post(proxy_url, json=payload)
-
-    if response.status_code != 200:
-        print(f"Error sending telemetry through proxy: {response.status_code}")
+    # Fire-and-forget via the single background worker thread
+    _telemetry_queue.put(payload)
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):
