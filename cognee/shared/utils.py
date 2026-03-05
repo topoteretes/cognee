@@ -1,10 +1,9 @@
 """This module contains utility functions for the cognee."""
 
-import atexit
+import asyncio
 import http.server
 import os
 import pathlib
-import queue
 import socketserver
 import ssl
 from datetime import datetime, timezone
@@ -12,7 +11,7 @@ from threading import Thread
 from typing import Any, Dict, List, Union
 from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
-import requests
+import aiohttp
 
 from cognee.base_config import get_base_config
 from cognee.infrastructure.databases.graph import get_graph_engine
@@ -25,37 +24,6 @@ proxy_url = "https://test.prometh.ai"
 
 # Timeout for telemetry HTTP request; short to avoid blocking if proxy is unreachable
 TELEMETRY_REQUEST_TIMEOUT: int = int(os.getenv("TELEMETRY_REQUEST_TIMEOUT", "5"))
-
-# ---------------------------------------------------------------------------
-# Single background worker thread for fire-and-forget telemetry requests.
-# Using a queue avoids spawning a new thread for every send_telemetry() call.
-# ---------------------------------------------------------------------------
-_telemetry_queue: queue.Queue = queue.Queue()
-_SENTINEL = object()  # poison pill to shut down the worker
-
-
-def _telemetry_worker() -> None:
-    """Drain the telemetry queue and send each payload. Runs in a single daemon thread."""
-    while True:
-        payload = _telemetry_queue.get()
-        if payload is _SENTINEL:
-            _telemetry_queue.task_done()
-            break
-        try:
-            _send_telemetry_request(payload)
-        finally:
-            _telemetry_queue.task_done()
-
-
-_telemetry_thread = Thread(target=_telemetry_worker, daemon=True)
-_telemetry_thread.start()
-
-
-def _shutdown_telemetry_worker() -> None:
-    _telemetry_queue.put(_SENTINEL)
-
-
-atexit.register(_shutdown_telemetry_worker)
 
 
 def create_secure_ssl_context() -> ssl.SSLContext:
@@ -116,13 +84,15 @@ def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
         return obj
 
 
-def _send_telemetry_request(payload: dict) -> None:
-    """Send telemetry payload via HTTP. Runs in a background thread; never blocks."""
+async def _send_telemetry_request(payload: dict) -> None:
+    """Send telemetry payload via async HTTP. Non-blocking, no threads."""
+    timeout = aiohttp.ClientTimeout(total=TELEMETRY_REQUEST_TIMEOUT)
     try:
-        response = requests.post(proxy_url, json=payload, timeout=TELEMETRY_REQUEST_TIMEOUT)
-        if response.status_code != 200:
-            logger.debug("Telemetry proxy returned status %s", response.status_code)
-    except requests.RequestException as e:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(proxy_url, json=payload) as response:
+                if response.status != 200:
+                    logger.debug("Telemetry proxy returned status %s", response.status)
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         logger.debug("Telemetry request failed: %s", e)
 
 
@@ -152,8 +122,13 @@ def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_proper
         },
     }
 
-    # Fire-and-forget via the single background worker thread
-    _telemetry_queue.put(payload)
+    # Fire-and-forget async task — no threads, no blocking
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_send_telemetry_request(payload))
+    except RuntimeError:
+        # No running event loop (e.g. called from sync context) — skip silently
+        logger.debug("No running event loop for telemetry, skipping")
 
 
 def embed_logo(p: Any, layout_scale: float, logo_alpha: float, position: str):
