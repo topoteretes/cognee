@@ -1,5 +1,5 @@
 import inspect
-from opentelemetry.trace import StatusCode
+from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.shared.logging_utils import get_logger
 from cognee.modules.users.models import User
 from cognee.shared.utils import send_telemetry

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, List, Optional, Type, Union
 
-from opentelemetry.trace import StatusCode
+from cognee.modules.observability import OtelStatusCode as StatusCode
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError

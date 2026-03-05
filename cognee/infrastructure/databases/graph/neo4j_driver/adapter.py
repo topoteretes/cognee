@@ -9,7 +9,7 @@ from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
 from contextlib import asynccontextmanager
 from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine
-from opentelemetry.trace import StatusCode
+from cognee.modules.observability import OtelStatusCode as StatusCode
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int

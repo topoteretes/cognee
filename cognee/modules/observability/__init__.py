@@ -30,6 +30,18 @@ from .tracing import (
 )
 
 
+try:
+    from opentelemetry.trace import StatusCode as OtelStatusCode
+except ImportError:
+
+    class _StatusCodeFallback:
+        ERROR = "ERROR"
+        OK = "OK"
+        UNSET = "UNSET"
+
+    OtelStatusCode = _StatusCodeFallback  # type: ignore[misc, assignment]
+
+
 class _NullSpan:
     """No-op span used when tracing is disabled."""
 

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, Union, Optional, Tuple, Type
-from opentelemetry.trace import StatusCode
+from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.exceptions import CogneeValidationError
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
