@@ -56,7 +56,7 @@ async def get_search_type_retriever_instance(
     system_prompt = kwargs.get("system_prompt")
     node_type = kwargs.get("node_type", NodeSet)
     node_name = kwargs.get("node_name")
-    node_name_filter_operator = kwargs.get("node_name_filter_operator")
+    node_name_filter_operator = kwargs.get("node_name_filter_operator", "OR")
     wide_search_top_k = kwargs.get("wide_search_top_k", 100)
     triplet_distance_penalty = kwargs.get("triplet_distance_penalty", 3.5)
     session_id = kwargs.get("session_id")

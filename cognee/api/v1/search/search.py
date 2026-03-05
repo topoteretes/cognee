@@ -195,9 +195,9 @@ async def search(
             datasets = [datasets]
 
         allowed_node_name_operators = {"AND", "OR"}
-        operator = (node_name_filter_operator or "").strip().upper()
+        normalized_node_name_filter_operator = (node_name_filter_operator or "").strip().upper()
 
-        if operator not in allowed_node_name_operators:
+        if normalized_node_name_filter_operator not in allowed_node_name_operators:
             raise CogneeValidationError(
                 f"Invalid node_name_filter_operator: {node_name_filter_operator!r}. Must be one of {sorted(allowed_node_name_operators)}."
             )
@@ -235,7 +235,7 @@ async def search(
             top_k=top_k,
             node_type=node_type,
             node_name=node_name,
-            node_name_filter_operator=node_name_filter_operator,
+            node_name_filter_operator=normalized_node_name_filter_operator,
             only_context=only_context,
             session_id=session_id,
             wide_search_top_k=wide_search_top_k,
