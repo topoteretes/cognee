@@ -37,7 +37,8 @@ def is_tracing_enabled() -> bool:
     Checks the module-level flag, then the ``cognee_tracing_enabled`` config
     field, then falls back to the ``COGNEE_TRACING_ENABLED`` env var directly
     (to support runtime changes, e.g. in tests).  When enabled but not yet
-    initialized, lazily calls ``enable_tracing()``.
+    initialized, lazily calls ``enable_tracing()`` if OpenTelemetry is
+    available.
     """
     global _tracing_enabled
     if _tracing_enabled:
@@ -51,7 +52,12 @@ def is_tracing_enabled() -> bool:
     ).lower() in ("true", "1", "yes")
 
     if enabled:
-        enable_tracing()
+        try:
+            enable_tracing()
+        except ImportError:
+            # OpenTelemetry not installed — flag as enabled so callers know
+            # tracing is desired, but spans will be no-ops via _NullSpan.
+            _tracing_enabled = True
         return True
     return False
 
