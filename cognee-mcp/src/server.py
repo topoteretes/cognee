@@ -636,7 +636,7 @@ async def get_document(
                     if row.get("chunk_id") is not None:
                         all_chunks.append(
                             {
-                                "id": row["chunk_id"],
+                                "chunk_id": row["chunk_id"],
                                 "chunk_index": row.get("chunk_index", 0),
                                 "text": row.get("chunk_text", ""),
                                 "word_count": row.get("chunk_word_count", 0),

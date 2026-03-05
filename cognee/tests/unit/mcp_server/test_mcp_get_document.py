@@ -237,7 +237,7 @@ async def test_get_document_max_chunks_1(mock_graph_engine, mock_cognee_client):
     assert data["chunk_count"] == 1
     assert data["total_chunks"] == 5
     assert data["is_truncated"] is True
-    assert data["chunks"][0]["id"] == "chunk-0"
+    assert data["chunks"][0]["chunk_id"] == "chunk-0"
 
 
 @pytest.mark.asyncio
