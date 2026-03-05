@@ -992,6 +992,7 @@ jobs:
           CACHING: true
           AUTO_FEEDBACK: false
           CACHE_BACKEND: 'fs'
+          ENABLE_BACKEND_ACCESS_CONTROL: false
         run: uv run python ./cognee/tests/test_feedback_weights_memify_pipeline.py
 
   run-pipeline-cache-test:
