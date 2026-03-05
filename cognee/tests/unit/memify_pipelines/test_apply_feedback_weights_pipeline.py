@@ -15,6 +15,9 @@ async def test_apply_feedback_weights_pipeline_validates_session_ids():
     with pytest.raises(CogneeValidationError, match="session_ids must be a non-empty list"):
         await apply_feedback_weights_pipeline(user=user, session_ids=[])
 
+    with pytest.raises(CogneeValidationError, match="session_ids must be a non-empty list"):
+        await apply_feedback_weights_pipeline(user=user, session_ids="session_1")
+
 
 @pytest.mark.asyncio
 async def test_apply_feedback_weights_pipeline_wires_memify_tasks():

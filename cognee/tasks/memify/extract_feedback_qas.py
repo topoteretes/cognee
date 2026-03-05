@@ -39,7 +39,11 @@ async def extract_feedback_qas(data, session_ids: Optional[List[str]] = None):
     """
     Read provided sessions and yield feedback QAs eligible for graph weight updates.
     """
-    if not session_ids:
+    if (
+        not isinstance(session_ids, list)
+        or not session_ids
+        or any(not isinstance(session_id, str) or not session_id for session_id in session_ids)
+    ):
         raise CogneeValidationError(
             message="session_ids must be provided for extract_feedback_qas",
             log=False,

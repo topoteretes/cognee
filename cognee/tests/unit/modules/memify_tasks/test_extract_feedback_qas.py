@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from cognee.exceptions import CogneeValidationError
 from cognee.infrastructure.session.session_manager import SessionManager
 from cognee.tasks.memify.extract_feedback_qas import extract_feedback_qas
 
@@ -170,3 +171,23 @@ async def test_extract_feedback_qas_unavailable_session_manager_yields_nothing(m
             extracted.append(item)
 
     assert extracted == []
+
+
+@pytest.mark.asyncio
+async def test_extract_feedback_qas_rejects_non_list_session_ids(mock_user):
+    mock_session_manager = MagicMock()
+    mock_session_manager.get_session = AsyncMock(return_value=[])
+
+    with (
+        patch.object(extract_feedback_qas_module, "session_user") as mock_session_user,
+        patch.object(
+            extract_feedback_qas_module,
+            "get_session_manager",
+            return_value=mock_session_manager,
+        ),
+    ):
+        mock_session_user.get.return_value = mock_user
+
+        with pytest.raises(CogneeValidationError, match="session_ids must be provided"):
+            async for _ in extract_feedback_qas([{}], session_ids="session_1"):
+                pass

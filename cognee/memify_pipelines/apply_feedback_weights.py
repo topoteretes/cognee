@@ -31,7 +31,11 @@ async def apply_feedback_weights_pipeline(
     updates mapped graph nodes/edges with streaming feedback weights, and marks each QA
     as applied in memify metadata only on full success.
     """
-    if not session_ids:
+    if (
+        not isinstance(session_ids, list)
+        or not session_ids
+        or any(not isinstance(session_id, str) or not session_id for session_id in session_ids)
+    ):
         raise CogneeValidationError(message="session_ids must be a non-empty list", log=False)
 
     if alpha <= 0 or alpha > 1:
