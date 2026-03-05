@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, Union, Optional, Tuple, Type, Set
-
+from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.exceptions import CogneeValidationError
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.utils.run_sync import run_sync
@@ -24,8 +24,16 @@ from cognee.modules.storage.utils import JSONEncoder
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.tasks.temporal_graph.models import Timestamp
 from cognee.infrastructure.databases.cache.config import get_cache_config
+from cognee.modules.observability import new_span
+from cognee.modules.observability.tracing import (
+    COGNEE_DB_SYSTEM,
+    COGNEE_DB_QUERY,
+    COGNEE_DB_ROW_COUNT,
+    redact_secrets,
+)
 
 logger = get_logger()
+
 
 cache_config = get_cache_config()
 if cache_config.shared_kuzu_lock:
@@ -227,55 +235,64 @@ class KuzuAdapter(GraphDBInterface):
 
             - List[Tuple]: A list of tuples representing the query results.
         """
-        loop = asyncio.get_running_loop()
-        params = params or {}
+        with new_span("cognee.db.graph.query") as otel_span:
+            otel_span.set_attribute(COGNEE_DB_SYSTEM, "kuzu")
+            otel_span.set_attribute(COGNEE_DB_QUERY, redact_secrets(query[:500]))
 
-        def blocking_query():
-            lock_acquired = False
+            loop = asyncio.get_running_loop()
+            params = params or {}
+
+            def blocking_query():
+                lock_acquired = False
+                try:
+                    if cache_config.shared_kuzu_lock:
+                        self.redis_lock.acquire_lock()
+                        lock_acquired = True
+                    if not self.connection:
+                        logger.info("Reconnecting to Kuzu database...")
+                        self._initialize_connection()
+
+                    result = self.connection.execute(query, params)
+                    rows = []
+
+                    while result.has_next():
+                        row = result.get_next()
+                        processed_rows = []
+                        for val in row:
+                            if hasattr(val, "as_py"):
+                                val = val.as_py()
+                            processed_rows.append(val)
+                        rows.append(tuple(processed_rows))
+
+                    return rows
+                except Exception as e:
+                    logger.error(f"Query execution failed: {str(e)}")
+                    raise
+                finally:
+                    if cache_config.shared_kuzu_lock and lock_acquired:
+                        try:
+                            self.close()
+                        finally:
+                            self.redis_lock.release_lock()
+
             try:
                 if cache_config.shared_kuzu_lock:
-                    self.redis_lock.acquire_lock()
-                    lock_acquired = True
-                if not self.connection:
-                    logger.info("Reconnecting to Kuzu database...")
-                    self._initialize_connection()
+                    async with self._connection_change_lock:
+                        self.open_connections += 1
+                        logger.info(f"Open connections after open: {self.open_connections}")
+                        try:
+                            result = blocking_query()
+                        finally:
+                            self.open_connections -= 1
+                            logger.info(f"Open connections after close: {self.open_connections}")
+                else:
+                    result = await loop.run_in_executor(self.executor, blocking_query)
 
-                result = self.connection.execute(query, params)
-                rows = []
-
-                while result.has_next():
-                    row = result.get_next()
-                    processed_rows = []
-                    for val in row:
-                        if hasattr(val, "as_py"):
-                            val = val.as_py()
-                        processed_rows.append(val)
-                    rows.append(tuple(processed_rows))
-
-                return rows
-            except Exception as e:
-                logger.error(f"Query execution failed: {str(e)}")
-                raise
-            finally:
-                if cache_config.shared_kuzu_lock and lock_acquired:
-                    try:
-                        self.close()
-                    finally:
-                        self.redis_lock.release_lock()
-
-        if cache_config.shared_kuzu_lock:
-            async with self._connection_change_lock:
-                self.open_connections += 1
-                logger.info(f"Open connections after open: {self.open_connections}")
-                try:
-                    result = blocking_query()
-                finally:
-                    self.open_connections -= 1
-                    logger.info(f"Open connections after close: {self.open_connections}")
+                otel_span.set_attribute(COGNEE_DB_ROW_COUNT, len(result))
                 return result
-        else:
-            result = await loop.run_in_executor(self.executor, blocking_query)
-            return result
+            except Exception as e:
+                otel_span.set_status(StatusCode.ERROR, str(e))
+                otel_span.record_exception(e)
 
     def close(self):
         if self.connection:

@@ -14,6 +14,10 @@ from cognee.tasks.graph.cascade_extract.utils.extract_edge_triplets import (
 from cognee.tasks.graph.extract_graph_from_data import integrate_chunk_graphs
 
 
+from cognee.modules.pipelines.tasks.task import task_summary
+
+
+@task_summary("Extracted graph from {n} chunk(s)")
 async def extract_graph_from_data(
     data_chunks: List[DocumentChunk],
     n_rounds: int = 2,

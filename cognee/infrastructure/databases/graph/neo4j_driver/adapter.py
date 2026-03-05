@@ -9,7 +9,7 @@ from neo4j import AsyncGraphDatabase
 from neo4j.exceptions import Neo4jError
 from contextlib import asynccontextmanager
 from typing import Optional, Any, List, Dict, Type, Tuple, Coroutine, Set
-
+from cognee.modules.observability import OtelStatusCode as StatusCode
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.engine.utils.generate_timestamp_datapoint import date_to_int
 from cognee.tasks.temporal_graph.models import Timestamp
@@ -33,8 +33,17 @@ from .neo4j_metrics_utils import (
 )
 from .deadlock_retry import deadlock_retry
 
+from cognee.modules.observability import new_span
+from cognee.modules.observability.tracing import (
+    COGNEE_DB_SYSTEM,
+    COGNEE_DB_QUERY,
+    COGNEE_DB_ROW_COUNT,
+    redact_secrets,
+)
+
 
 logger = get_logger("Neo4jAdapter")
+
 
 BASE_LABEL = "__Node__"
 
@@ -117,14 +126,21 @@ class Neo4jAdapter(GraphDBInterface):
             - List[Dict[str, Any]]: A list of dictionaries representing the result of the query
               execution.
         """
-        try:
-            async with self.get_session() as session:
-                result = await session.run(query, parameters=params)
-                data = await result.data()
-                return data
-        except Neo4jError as error:
-            logger.error("Neo4j query error: %s", error, exc_info=True)
-            raise error
+        with new_span("cognee.db.graph.query") as otel_span:
+            otel_span.set_attribute(COGNEE_DB_SYSTEM, "neo4j")
+            otel_span.set_attribute(COGNEE_DB_QUERY, redact_secrets(query[:500]))
+
+            try:
+                async with self.get_session() as session:
+                    result = await session.run(query, parameters=params)
+                    data = await result.data()
+                    otel_span.set_attribute(COGNEE_DB_ROW_COUNT, len(data))
+                    return data
+            except Neo4jError as error:
+                otel_span.set_status(StatusCode.ERROR, str(error))
+                otel_span.record_exception(error)
+                logger.error("Neo4j query error: %s", error, exc_info=True)
+                raise error
 
     async def has_node(self, node_id: str) -> bool:
         """

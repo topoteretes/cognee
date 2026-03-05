@@ -5,6 +5,10 @@ from cognee.tasks.temporal_graph.enrich_events import enrich_events
 from cognee.tasks.temporal_graph.add_entities_to_event import add_entities_to_event
 
 
+from cognee.modules.pipelines.tasks.task import task_summary
+
+
+@task_summary("Built graph from {n} event(s)")
 async def extract_knowledge_graph_from_events(
     data_chunks: List[DocumentChunk],
 ) -> List[DocumentChunk]:
