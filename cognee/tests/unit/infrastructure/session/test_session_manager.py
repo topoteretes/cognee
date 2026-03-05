@@ -106,8 +106,14 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_add_qa_returns_qa_id(self, sm, mock_cache):
         """add_qa returns generated qa_id and calls cache."""
+        used_ids = {"node_ids": ["n1"], "edge_ids": ["e1"]}
         qa_id = await sm.add_qa(
-            user_id="u1", question="Q", context="C", answer="A", session_id="s1"
+            user_id="u1",
+            question="Q",
+            context="C",
+            answer="A",
+            session_id="s1",
+            used_graph_element_ids=used_ids,
         )
         assert qa_id is not None
         mock_cache.create_qa_entry.assert_called_once()
@@ -117,6 +123,7 @@ class TestSessionManager:
         assert call_kw["question"] == "Q"
         assert call_kw["answer"] == "A"
         assert call_kw["qa_id"] == qa_id
+        assert call_kw["used_graph_element_ids"] == used_ids
 
     @pytest.mark.asyncio
     async def test_add_qa_unavailable_returns_none(self, sm_unavailable):
@@ -308,12 +315,14 @@ class TestSessionManager:
             mock_config.caching = True
             mock_config_cls.return_value = mock_config
 
+            used_ids = {"node_ids": ["n1"]}
             result = await sm.generate_completion_with_session(
                 session_id="s1",
                 query="Q?",
                 context="ctx",
                 user_prompt_path="user.txt",
                 system_prompt_path="sys.txt",
+                used_graph_element_ids=used_ids,
             )
 
         assert result == "Generated answer"
@@ -325,6 +334,7 @@ class TestSessionManager:
         assert call_kw["question"] == "Q?"
         assert call_kw["answer"] == "Generated answer"
         assert call_kw["context"] == ""
+        assert call_kw["used_graph_element_ids"] == used_ids
 
     @pytest.mark.asyncio
     async def test_generate_completion_with_session_unavailable_returns_completion_only(

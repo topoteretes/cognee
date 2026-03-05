@@ -1,10 +1,11 @@
-from typing import Any, Optional, Type, List
+from typing import Any, Dict, List, Optional, Type
 
 from cognee.shared.logging_utils import get_logger
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.retrieval.utils.completion import generate_completion
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.modules.retrieval.base_retriever import BaseRetriever
+from cognee.modules.retrieval.utils.used_graph_elements import extract_from_scored_results
 from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.context_global_variables import session_user
@@ -47,6 +48,12 @@ class CompletionRetriever(BaseRetriever):
         except CollectionNotFoundError as error:
             logger.error("DocumentChunk_text collection not found")
             raise NoDataError("No data found in the system, please add data first.") from error
+
+    def _extract_context_object_ids(self, retrieved_objects: Any) -> Optional[Dict[str, List[str]]]:
+        """Extract node_ids from ScoredResult-like list for session QA."""
+        if isinstance(retrieved_objects, list) and retrieved_objects:
+            return extract_from_scored_results(retrieved_objects)
+        return None
 
     async def get_context_from_objects(self, query: str, retrieved_objects: Any) -> str:
         """
@@ -124,6 +131,7 @@ class CompletionRetriever(BaseRetriever):
 
         if use_session:
             sm = get_session_manager()
+            used_graph_element_ids = self._extract_context_object_ids(retrieved_objects)
             completion = await sm.generate_completion_with_session(
                 session_id=self.session_id,
                 query=query,
@@ -133,6 +141,7 @@ class CompletionRetriever(BaseRetriever):
                 system_prompt=self.system_prompt,
                 response_model=self.response_model,
                 summarize_context=False,
+                used_graph_element_ids=used_graph_element_ids,
             )
             return [completion]
         return await self._generate_completion_without_session(query, context)

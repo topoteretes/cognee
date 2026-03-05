@@ -12,8 +12,8 @@ def create_relational_engine(
     db_username: str,
     db_password: str,
     db_provider: str,
-    database_connect_args: dict = None,
-    pool_args: dict = None,
+    database_connect_args: tuple = None,
+    pool_args: tuple = None,
 ):
     """
     Create a relational database engine based on the specified parameters.
@@ -39,6 +39,10 @@ def create_relational_engine(
 
         Returns a SQLAlchemyAdapter instance for the specified database connection.
     """
+    # Transform pool_args and database_connect_args from tuple of key-value pairs back to dictionary format if they are provided
+    database_connect_args = dict(database_connect_args) if database_connect_args else {}
+    pool_args = dict(pool_args) if pool_args else {}
+
     if db_provider == "sqlite":
         connection_string = f"sqlite+aiosqlite:///{db_path}/{db_name}"
 
