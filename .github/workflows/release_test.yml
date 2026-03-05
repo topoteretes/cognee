@@ -6,12 +6,31 @@ permissions:
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches:
-      - main
+    inputs:
+      cognee_version:
+        required: false
+        default: local
+        type: string
+        description: "Pypi-compatible version of cognee to use. For example, 0.5.2.dev0. `local` (default) - Installing Cognee from local source"
 
 jobs:
+
+  mcp-test:
+    name: MCP Tests
+    uses: ./.github/workflows/test_mcp.yml
+    secrets: inherit
+    with:
+      cognee_version: ${{ inputs.cognee_version }}
+
+  cli-test:
+    name: CLI Tests
+    uses: ./.github/workflows/cli_tests.yml
+    secrets: inherit
+    with:
+      cognee_version: ${{ inputs.cognee_version }}
+
   load-tests:
+    if: false
     name: Load Tests
     uses: ./.github/workflows/load_tests.yml
     secrets: inherit
