@@ -18,7 +18,6 @@ from examples.pocs.post_extraction_canonicalization.post_extraction_canonicaliza
 async def main(
     example,
     use_post_extraction_canonicalization_disambiguation: Optional[bool] = False,
-    vector_search_limit: Optional[int] = None,
     custom_prompt: Optional[str] = None,
     df: Optional[DataFrame] = None,
 ):
@@ -61,7 +60,6 @@ async def _run():
         await main(
             example="example" + example_id,
             use_post_extraction_canonicalization_disambiguation=True,
-            vector_search_limit=20,
             custom_prompt=custom_prompt_text,
             df=df,
         )

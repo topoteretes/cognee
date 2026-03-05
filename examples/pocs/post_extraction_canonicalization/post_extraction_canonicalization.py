@@ -48,7 +48,7 @@ async def cache_and_replace_nodes(nodes, **kwargs):
     for chunk in nodes:
         for _, node in chunk.contains:
             if node and (isinstance(node, Entity) or isinstance(node, EntityType)):
-                vector = await vector_engine.embed_data(node.name)
+                vector = await vector_engine.embed_data([node.name])
                 closest_match = _get_closest_match(df, vector[0])
                 if len(closest_match) > 0:
                     print(f"node={node.name}, closest_match={closest_match}")
