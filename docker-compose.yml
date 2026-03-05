@@ -10,6 +10,8 @@ services:
     volumes:
       - ./cognee:/app/cognee
       - .env:/app/.env
+      # Uncomment to allow ingestion of local files from host:
+      # - /path/to/your/data:/data
     environment:
       - DEBUG=false # Change to true if debugging
       - HOST=0.0.0.0
@@ -43,6 +45,8 @@ services:
     volumes:
       - .env:/app/.env
       - ./cognee:/app/cognee
+      # Uncomment to allow ingestion of local files from host:
+      # - /path/to/your/data:/data
     environment:
       - DEBUG=false # Change to true if debugging
       - ENVIRONMENT=local
