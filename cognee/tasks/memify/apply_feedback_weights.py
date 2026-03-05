@@ -1,4 +1,5 @@
-from typing import Any, Dict, Iterable, List
+from collections.abc import Awaitable, Callable, Iterable
+from typing import Any, TypedDict
 
 from cognee.context_global_variables import session_user
 from cognee.exceptions import CogneeSystemError, CogneeValidationError
@@ -9,6 +10,25 @@ from cognee.shared.logging_utils import get_logger
 logger = get_logger("apply_feedback_weights")
 
 MEMIFY_METADATA_KEY = "apply_feedback_weights"
+FEEDBACK_WEIGHT_DECIMALS = 4
+
+
+class FeedbackItem(TypedDict, total=False):
+    session_id: str
+    qa_id: str
+    feedback_score: int
+    used_graph_element_ids: dict[str, Any]
+    memify_metadata: dict[str, Any]
+
+
+class ApplyFeedbackWeightsResult(TypedDict):
+    processed: int
+    applied: int
+    skipped: int
+
+
+WeightGetter = Callable[[list[str]], Awaitable[dict[str, float]]]
+WeightSetter = Callable[[dict[str, float]], Awaitable[dict[str, bool]]]
 
 
 def normalize_feedback_score(feedback_score: int) -> float:
@@ -26,10 +46,11 @@ def stream_update_weight(previous_weight: float, normalized_rating: float, alpha
     if alpha <= 0 or alpha > 1:
         raise CogneeValidationError(message="alpha must be in range (0, 1]", log=False)
     updated = float(previous_weight) + alpha * (normalized_rating - float(previous_weight))
-    return max(0.0, min(1.0, float(updated)))
+    final_score = max(0.0, min(1.0, float(updated)))
+    return round(final_score, FEEDBACK_WEIGHT_DECIMALS)
 
 
-def _extract_ids(used_graph_element_ids: Any, key: str) -> List[str]:
+def _extract_ids(used_graph_element_ids: Any, key: str) -> list[str]:
     if not isinstance(used_graph_element_ids, dict):
         return []
     values = used_graph_element_ids.get(key)
@@ -38,7 +59,7 @@ def _extract_ids(used_graph_element_ids: Any, key: str) -> List[str]:
     return sorted({value for value in values if isinstance(value, str) and value})
 
 
-def _iter_feedback_items(data: Any) -> Iterable[Dict[str, Any]]:
+def _iter_feedback_items(data: Any) -> Iterable[FeedbackItem]:
     if isinstance(data, dict):
         yield data
     elif isinstance(data, list):
@@ -49,11 +70,11 @@ def _iter_feedback_items(data: Any) -> Iterable[Dict[str, Any]]:
 
 async def _update_element_weights(
     *,
-    ids: List[str],
+    ids: list[str],
     normalized_rating: float,
     alpha: float,
-    get_weights,
-    set_weights,
+    get_weights: WeightGetter,
+    set_weights: WeightSetter,
 ) -> bool:
     """
     Update weights for one element type (nodes or edges).
@@ -65,7 +86,7 @@ async def _update_element_weights(
 
     existing_weights = await get_weights(ids)
 
-    updates: Dict[str, float] = {}
+    updates: dict[str, float] = {}
     all_found = True
     for element_id in ids:
         previous_weight = existing_weights.get(element_id)
@@ -88,7 +109,7 @@ async def _mark_feedback_processed(
     user_id: str,
     session_id: str,
     qa_id: str,
-    current_metadata: Dict[str, Any],
+    current_metadata: dict[str, Any],
     success: bool,
 ) -> None:
     metadata = {**current_metadata, MEMIFY_METADATA_KEY: success}
@@ -105,7 +126,7 @@ async def _mark_feedback_processed(
         )
 
 
-async def apply_feedback_weights(data, alpha: float = 0.1):
+async def apply_feedback_weights(data: Any, alpha: float = 0.1) -> ApplyFeedbackWeightsResult:
     """Apply feedback-based weight updates for graph nodes and edges."""
     if alpha <= 0 or alpha > 1:
         raise CogneeValidationError(message="alpha must be in range (0, 1]", log=False)
@@ -128,7 +149,7 @@ async def apply_feedback_weights(data, alpha: float = 0.1):
         memify_metadata = memify_metadata if isinstance(memify_metadata, dict) else {}
 
         if memify_metadata.get(MEMIFY_METADATA_KEY) is True:
-            logger.info(f"Session QA Entry witd id: {qa_id} is already processed and applied on the graph.")
+            logger.info(f"Session QA entry with id: {qa_id} is already processed and applied on the graph.")
             skipped += 1
             continue
 
