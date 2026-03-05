@@ -97,7 +97,11 @@ class FSCacheAdapter(CacheDBInterface):
         if used_graph_element_ids is not None:
             merged["used_graph_element_ids"] = used_graph_element_ids
         if memify_metadata is not None:
-            merged["memify_metadata"] = memify_metadata
+            existing_metadata = merged.get("memify_metadata")
+            if isinstance(existing_metadata, dict):
+                merged["memify_metadata"] = {**existing_metadata, **memify_metadata}
+            else:
+                merged["memify_metadata"] = memify_metadata
 
         return merged
 
