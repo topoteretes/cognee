@@ -79,74 +79,78 @@ def _check_otel_available() -> None:
 _MAX_TRACES = 50
 
 if _OTEL_AVAILABLE:
+    _ExporterBase = SpanExporter
+else:
+    _ExporterBase = object
 
-    class CogneeSpanExporter(SpanExporter):
-        """Custom SpanExporter that buffers completed spans in-memory.
 
-        Spans are grouped by trace_id. The buffer is bounded to the last
-        ``_MAX_TRACES`` distinct traces.
-        """
+class CogneeSpanExporter(_ExporterBase):
+    """Custom SpanExporter that buffers completed spans in-memory.
 
-        def __init__(self) -> None:
-            self._lock = threading.Lock()
-            self._traces: dict[str, list[dict]] = defaultdict(list)
-            self._trace_order: list[str] = []
+    Spans are grouped by trace_id. The buffer is bounded to the last
+    ``_MAX_TRACES`` distinct traces.
+    """
 
-        def export(self, spans: Sequence["ReadableSpan"]) -> "SpanExportResult":
-            with self._lock:
-                for span in spans:
-                    trace_id = format(span.context.trace_id, "032x")
-                    span_dict = {
-                        "name": span.name,
-                        "trace_id": trace_id,
-                        "span_id": format(span.context.span_id, "016x"),
-                        "parent_span_id": (
-                            format(span.parent.span_id, "016x") if span.parent else None
-                        ),
-                        "start_time_ns": span.start_time,
-                        "end_time_ns": span.end_time,
-                        "duration_ms": (
-                            (span.end_time - span.start_time) / 1_000_000
-                            if span.end_time and span.start_time
-                            else 0.0
-                        ),
-                        "status": span.status.status_code.name if span.status else "UNSET",
-                        "attributes": dict(span.attributes) if span.attributes else {},
-                    }
-                    self._traces[trace_id].append(span_dict)
-                    if trace_id not in self._trace_order:
-                        self._trace_order.append(trace_id)
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._traces: dict[str, list[dict]] = defaultdict(list)
+        self._trace_order: list[str] = []
 
-                # Evict oldest traces if over limit
-                while len(self._trace_order) > _MAX_TRACES:
-                    oldest = self._trace_order.pop(0)
-                    self._traces.pop(oldest, None)
+    def export(self, spans: Sequence) -> "SpanExportResult":
+        with self._lock:
+            for span in spans:
+                trace_id = format(span.context.trace_id, "032x")
+                span_dict = {
+                    "name": span.name,
+                    "trace_id": trace_id,
+                    "span_id": format(span.context.span_id, "016x"),
+                    "parent_span_id": (
+                        format(span.parent.span_id, "016x") if span.parent else None
+                    ),
+                    "start_time_ns": span.start_time,
+                    "end_time_ns": span.end_time,
+                    "duration_ms": (
+                        (span.end_time - span.start_time) / 1_000_000
+                        if span.end_time and span.start_time
+                        else 0.0
+                    ),
+                    "status": span.status.status_code.name if span.status else "UNSET",
+                    "attributes": dict(span.attributes) if span.attributes else {},
+                }
+                self._traces[trace_id].append(span_dict)
+                if trace_id not in self._trace_order:
+                    self._trace_order.append(trace_id)
 
-            return SpanExportResult.SUCCESS
+            # Evict oldest traces if over limit
+            while len(self._trace_order) > _MAX_TRACES:
+                oldest = self._trace_order.pop(0)
+                self._traces.pop(oldest, None)
 
-        def shutdown(self) -> None:
-            pass
+        return SpanExportResult.SUCCESS if _OTEL_AVAILABLE else None
 
-        def force_flush(self, timeout_millis: int = 30000) -> bool:
-            return True
+    def shutdown(self) -> None:
+        pass
 
-        # -- Public helpers for reading collected traces --
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return True
 
-        def get_last_trace_spans(self) -> Optional[list[dict]]:
-            with self._lock:
-                if not self._trace_order:
-                    return None
-                last_id = self._trace_order[-1]
-                return list(self._traces[last_id])
+    # -- Public helpers for reading collected traces --
 
-        def get_all_traces(self) -> dict[str, list[dict]]:
-            with self._lock:
-                return {tid: list(spans) for tid, spans in self._traces.items()}
+    def get_last_trace_spans(self) -> Optional[list[dict]]:
+        with self._lock:
+            if not self._trace_order:
+                return None
+            last_id = self._trace_order[-1]
+            return list(self._traces[last_id])
 
-        def clear(self) -> None:
-            with self._lock:
-                self._traces.clear()
-                self._trace_order.clear()
+    def get_all_traces(self) -> dict[str, list[dict]]:
+        with self._lock:
+            return {tid: list(spans) for tid, spans in self._traces.items()}
+
+    def clear(self) -> None:
+        with self._lock:
+            self._traces.clear()
+            self._trace_order.clear()
 
 
 # ---------------------------------------------------------------------------
