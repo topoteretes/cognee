@@ -1,22 +1,23 @@
-
-from typing import List, Optional, Type, Union
-from opentelemetry.trace import StatusCode
 from __future__ import annotations
+
 from typing import TYPE_CHECKING, List, Optional, Type, Union
-from cognee.modules.retrieval.utils.validate_queries import validate_queries
-from cognee.shared.logging_utils import get_logger, ERROR
-from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
+
+from opentelemetry.trace import StatusCode
+
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector.exceptions import CollectionNotFoundError
 from cognee.modules.graph.cognee_graph.CogneeGraph import CogneeGraph
 from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
-from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
+from cognee.modules.graph.exceptions.exceptions import EntityNotFoundError
 from cognee.modules.observability import (
-    new_span,
+    COGNEE_RESULT_SUMMARY,
     COGNEE_VECTOR_COLLECTION,
     COGNEE_VECTOR_RESULT_COUNT,
-    COGNEE_RESULT_SUMMARY,
+    new_span,
 )
+from cognee.modules.retrieval.utils.node_edge_vector_search import NodeEdgeVectorSearch
+from cognee.modules.retrieval.utils.validate_queries import validate_queries
+from cognee.shared.logging_utils import ERROR, get_logger
 
 if TYPE_CHECKING:
     from cognee.infrastructure.databases.unified import UnifiedStoreEngine
@@ -177,57 +178,11 @@ async def brute_force_triplet_search(
         otel_span.set_attribute("cognee.retrieval.top_k", top_k)
         otel_span.set_attribute(
             "cognee.retrieval.mode", "batch" if query_batch is not None else "single"
-
-    query_list_length = len(query_batch) if query_batch is not None else None
-    wide_search_limit = (
-        None if query_list_length else (wide_search_top_k if node_name is None else None)
-    )
-
-    if collections is None:
-        collections = [
-            "Entity_name",
-            "TextSummary_text",
-            "EntityType_name",
-            "DocumentChunk_text",
-        ]
-
-    if "EdgeType_relationship_name" not in collections:
-        collections.append("EdgeType_relationship_name")
-
-    try:
-        vector_engine = unified_engine.vector if unified_engine else None
-        graph_engine = unified_engine.graph if unified_engine else None
-
-        vector_search = NodeEdgeVectorSearch(vector_engine=vector_engine)
-
-        await vector_search.embed_and_retrieve_distances(
-            query=None if query_list_length else query,
-            query_batch=query_batch if query_list_length else None,
-            collections=collections,
-            wide_search_limit=wide_search_limit,
-            node_name=node_name,
         )
-        if query_batch is not None:
-            otel_span.set_attribute("cognee.retrieval.batch_size", len(query_batch))
 
         query_list_length = len(query_batch) if query_batch is not None else None
         wide_search_limit = (
             None if query_list_length else (wide_search_top_k if node_name is None else None)
-
-        if not vector_search.has_results():
-            return [[] for _ in range(query_list_length)] if query_list_length else []
-
-        results = await _get_top_triplet_importances(
-            memory_fragment,
-            vector_search,
-            properties_to_project,
-            node_type,
-            node_name,
-            triplet_distance_penalty,
-            wide_search_limit,
-            top_k,
-            query_list_length=query_list_length,
-            graph_engine=graph_engine,
         )
 
         if collections is None:
@@ -245,7 +200,10 @@ async def brute_force_triplet_search(
         otel_span.set_attribute(COGNEE_VECTOR_COLLECTION, ", ".join(collections))
 
         try:
-            vector_search = NodeEdgeVectorSearch()
+            vector_engine = unified_engine.vector if unified_engine else None
+            graph_engine = unified_engine.graph if unified_engine else None
+
+            vector_search = NodeEdgeVectorSearch(vector_engine=vector_engine)
 
             await vector_search.embed_and_retrieve_distances(
                 query=None if query_list_length else query,
@@ -254,6 +212,9 @@ async def brute_force_triplet_search(
                 wide_search_limit=wide_search_limit,
                 node_name=node_name,
             )
+
+            if query_batch is not None:
+                otel_span.set_attribute("cognee.retrieval.batch_size", len(query_batch))
 
             if not vector_search.has_results():
                 otel_span.set_attribute(COGNEE_VECTOR_RESULT_COUNT, 0)
@@ -270,6 +231,7 @@ async def brute_force_triplet_search(
                 wide_search_limit,
                 top_k,
                 query_list_length=query_list_length,
+                graph_engine=graph_engine,
             )
 
             result_count = sum(len(r) for r in results) if query_list_length else len(results)
