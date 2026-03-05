@@ -5,6 +5,7 @@ Mocks the MCP SDK so server.py can be imported without that package installed.
 
 import sys
 import types as builtin_types
+from pathlib import Path
 
 
 def _install_mock_modules():
@@ -49,4 +50,5 @@ def _install_mock_modules():
 _install_mock_modules()
 
 # Now add the MCP src to path so "import server" works
-sys.path.insert(0, "cognee-mcp/src")
+repo_root = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(repo_root / "cognee-mcp" / "src"))
