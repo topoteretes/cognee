@@ -804,6 +804,7 @@ async def get_chunk_neighbors(
 
                 # validate direction
                 valid_directions = ("both", "forward", "backward")
+                direction = str(direction).lower()
                 if direction not in valid_directions:
                     direction = "both"
 
