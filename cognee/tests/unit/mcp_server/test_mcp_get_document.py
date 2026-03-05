@@ -58,7 +58,7 @@ def _patches(mock_graph_engine, mock_cognee_client):
                 return_value=mock_graph_engine,
             ),
             patch(
-                "cognee.infrastructure.databases.graph.utils.normalize_graph_result",
+                "server.normalize_graph_result",
                 side_effect=lambda r, c: r,
             ),
             patch("server.cognee_client", mock_cognee_client),
