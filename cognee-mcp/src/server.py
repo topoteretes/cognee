@@ -595,6 +595,12 @@ async def get_document(
         # NOTE: MCP uses stdout to communicate, we must redirect all output
         #       going to stdout ( like the print function ) to stderr.
         with redirect_stdout(sys.stderr):
+            if max_chunks < 0:
+                return json.dumps(
+                    {"error": "max_chunks must be >= 0", "document_id": document_id},
+                    cls=JSONEncoder,
+                )
+
             if cognee_client.use_api:
                 return json.dumps(
                     {
