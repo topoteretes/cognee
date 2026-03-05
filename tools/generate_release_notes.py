@@ -141,9 +141,7 @@ async def generate_release_notes_with_llm(
             description="Enhancements and improvements to existing functionality"
         )
         bug_fixes: list[str] = Field(description="Bug fixes and issue resolutions")
-        breaking_changes: list[str] = Field(
-            description="Breaking changes that require user action"
-        )
+        breaking_changes: list[str] = Field(description="Breaking changes that require user action")
         technical_changes: list[str] = Field(
             description="Technical changes, refactoring, and internal improvements"
         )
