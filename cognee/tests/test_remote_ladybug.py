@@ -15,27 +15,27 @@ async def main():
     # Clean up test directories before starting
     data_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_remote_kuzu")
+            os.path.join(pathlib.Path(__file__).parent, ".data_storage/test_remote_ladybug")
         ).resolve()
     )
     cognee_directory_path = str(
         pathlib.Path(
-            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_remote_kuzu")
+            os.path.join(pathlib.Path(__file__).parent, ".cognee_system/test_remote_ladybug")
         ).resolve()
     )
 
     try:
-        # Set Kuzu as the graph database provider
-        cognee.config.set_graph_database_provider("kuzu")
+        # Set Ladybug as the graph database provider
+        cognee.config.set_graph_database_provider("ladybug")
         cognee.config.data_root_directory(data_directory_path)
         cognee.config.system_root_directory(cognee_directory_path)
 
-        # Configure remote Kuzu database using environment variables
-        os.environ["KUZU_HOST"] = os.getenv("KUZU_HOST", "localhost")
-        os.environ["KUZU_PORT"] = os.getenv("KUZU_PORT", "8000")
-        os.environ["KUZU_USERNAME"] = os.getenv("KUZU_USERNAME", "kuzu")
-        os.environ["KUZU_PASSWORD"] = os.getenv("KUZU_PASSWORD", "kuzu")
-        os.environ["KUZU_DATABASE"] = os.getenv("KUZU_DATABASE", "cognee_test")
+        # Configure remote Ladybug database using environment variables
+        os.environ["LADYBUG_HOST"] = os.getenv("LADYBUG_HOST", "localhost")
+        os.environ["LADYBUG_PORT"] = os.getenv("LADYBUG_PORT", "8000")
+        os.environ["LADYBUG_USERNAME"] = os.getenv("LADYBUG_USERNAME", "ladybug")
+        os.environ["LADYBUG_PASSWORD"] = os.getenv("LADYBUG_PASSWORD", "ladybug")
+        os.environ["LADYBUG_DATABASE"] = os.getenv("LADYBUG_DATABASE", "cognee_test")
 
         await cognee.prune.prune_data()
         await cognee.prune.prune_system(metadata=True)
@@ -100,7 +100,7 @@ async def main():
 
         graph_engine = await get_graph_engine()
         nodes, edges = await graph_engine.get_graph_data()
-        assert len(nodes) == 0 and len(edges) == 0, "Remote Kuzu graph database is not empty"
+        assert len(nodes) == 0 and len(edges) == 0, "Remote Ladybug graph database is not empty"
 
     finally:
         # Ensure cleanup even if tests fail

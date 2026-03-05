@@ -1,4 +1,4 @@
-"""Adapter for remote Kuzu graph database via REST API."""
+"""Adapter for remote Ladybug graph database via REST API."""
 
 from cognee.shared.logging_utils import get_logger
 import json
@@ -6,7 +6,7 @@ from typing import Dict, Any, List, Optional, Tuple
 import aiohttp
 from uuid import UUID
 
-from cognee.infrastructure.databases.graph.kuzu.adapter import KuzuAdapter
+from cognee.infrastructure.databases.graph.ladybug.adapter import LadybugAdapter
 from cognee.shared.utils import create_secure_ssl_context
 
 logger = get_logger()
@@ -21,19 +21,19 @@ class UUIDEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-class RemoteKuzuAdapter(KuzuAdapter):
-    """Adapter for remote Kuzu graph database operations via REST API."""
+class RemoteLadybugAdapter(LadybugAdapter):
+    """Adapter for remote Ladybug graph database operations via REST API."""
 
     def __init__(self, api_url: str, username: str, password: str):
-        """Initialize remote Kuzu database connection.
+        """Initialize remote Ladybug database connection.
 
         Args:
-            api_url: URL of the Kuzu REST API
+            api_url: URL of the Ladybug REST API
             username: Optional username for API authentication
             password: Optional password for API authentication
         """
         # Initialize parent with a dummy path since we're using REST API
-        super().__init__("/tmp/kuzu_remote")
+        super().__init__("/tmp/ladybug_remote")
         self.api_url = api_url
         self.username = username
         self.password = password
@@ -55,7 +55,7 @@ class RemoteKuzuAdapter(KuzuAdapter):
             self._session = None
 
     async def _make_request(self, endpoint: str, data: dict) -> dict:
-        """Make a request to the Kuzu API."""
+        """Make a request to the Ladybug API."""
         url = f"{self.api_url}{endpoint}"
         session = await self._get_session()
         try:
@@ -83,7 +83,7 @@ class RemoteKuzuAdapter(KuzuAdapter):
             raise
 
     async def query(self, query: str, params: Optional[dict] = None) -> List[Tuple]:
-        """Execute a Kuzu query via the REST API."""
+        """Execute a Ladybug query via the REST API."""
         try:
             # Initialize schema if needed
             if not self._schema_initialized:

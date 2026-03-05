@@ -3,7 +3,7 @@ import os
 
 # Set custom dataset database handler environment variable
 os.environ["VECTOR_DATASET_DATABASE_HANDLER"] = "custom_lancedb_handler"
-os.environ["GRAPH_DATASET_DATABASE_HANDLER"] = "custom_kuzu_handler"
+os.environ["GRAPH_DATASET_DATABASE_HANDLER"] = "custom_ladybug_handler"
 
 import cognee
 from cognee.modules.users.methods import get_default_user
@@ -37,18 +37,18 @@ class LanceDBTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
         }
 
 
-class KuzuTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
+class LadybugTestDatasetDatabaseHandler(DatasetDatabaseHandlerInterface):
     @classmethod
     async def create_dataset(cls, dataset_id, user):
         databases_directory_path = os.path.join("databases", str(user.id))
         os.makedirs(databases_directory_path, exist_ok=True)
 
-        graph_db_name = "test.kuzu"
+        graph_db_name = "test.ladybug"
         return {
-            "graph_dataset_database_handler": "custom_kuzu_handler",
+            "graph_dataset_database_handler": "custom_ladybug_handler",
             "graph_database_name": graph_db_name,
             "graph_database_url": os.path.join(databases_directory_path, graph_db_name),
-            "graph_database_provider": "kuzu",
+            "graph_database_provider": "ladybug",
         }
 
 
@@ -80,7 +80,9 @@ async def main():
     use_dataset_database_handler(
         "custom_lancedb_handler", LanceDBTestDatasetDatabaseHandler, "lancedb"
     )
-    use_dataset_database_handler("custom_kuzu_handler", KuzuTestDatasetDatabaseHandler, "kuzu")
+    use_dataset_database_handler(
+        "custom_ladybug_handler", LadybugTestDatasetDatabaseHandler, "ladybug"
+    )
 
     # Create a clean slate for cognee -- reset data and system state
     print("Resetting cognee data...")
@@ -120,7 +122,7 @@ async def main():
     default_user = await get_default_user()
     # Assert that the custom database files were created based on the custom dataset database handlers
     assert os.path.exists(
-        os.path.join(cognee_directory_path, "databases", str(default_user.id), "test.kuzu")
+        os.path.join(cognee_directory_path, "databases", str(default_user.id), "test.ladybug")
     ), "Graph database file not found."
     assert os.path.exists(
         os.path.join(cognee_directory_path, "databases", str(default_user.id), "test.lance.db")
