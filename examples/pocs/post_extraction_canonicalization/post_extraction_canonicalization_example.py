@@ -54,18 +54,16 @@ async def _run():
     with open(prompt_path, "r", encoding="utf-8") as f:
         custom_prompt_text = f.read()
 
-    for i in range(1, 2):
-        example_id = str(i)
-        df = pd.DataFrame()
-        await main(
-            example="example" + example_id,
-            use_post_extraction_canonicalization_disambiguation=True,
-            custom_prompt=custom_prompt_text,
-            df=df,
-        )
-        await main(
-            example="example" + example_id,
-        )
+    df = pd.DataFrame()
+    await main(
+        example="example1",
+        use_post_extraction_canonicalization_disambiguation=True,
+        custom_prompt=custom_prompt_text,
+        df=df,
+    )
+    await main(
+        example="example1",
+    )
 
 
 if __name__ == "__main__":
