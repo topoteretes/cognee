@@ -558,6 +558,12 @@ class SQLAlchemyAdapter:
                 await file_storage.ensure_directory_exists()
 
         async with self.engine.begin() as connection:
+            # Import here to avoid circular imports
+            from cognee.infrastructure.databases.vector.config import get_vectordb_config
+
+            vector_config = get_vectordb_config()
+            if vector_config.vector_db_provider == "pgvector":
+                await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
             if len(Base.metadata.tables.keys()) > 0:
                 await connection.run_sync(Base.metadata.create_all)
 
