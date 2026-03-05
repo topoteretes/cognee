@@ -149,7 +149,9 @@ async def apply_feedback_weights(data: Any, alpha: float = 0.1) -> ApplyFeedback
         memify_metadata = memify_metadata if isinstance(memify_metadata, dict) else {}
 
         if memify_metadata.get(MEMIFY_METADATA_KEY) is True:
-            logger.info(f"Session QA entry with id: {qa_id} is already processed and applied on the graph.")
+            logger.info(
+                f"Session QA entry with id: {qa_id} is already processed and applied on the graph."
+            )
             skipped += 1
             continue
 
