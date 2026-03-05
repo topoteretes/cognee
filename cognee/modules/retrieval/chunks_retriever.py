@@ -151,6 +151,11 @@ class ChunksRetriever(BaseRetriever):
                     chunk_id = str(chunk.id)
                 elif hasattr(chunk, "payload") and "id" in chunk.payload:
                     chunk_id = str(chunk.payload["id"])
+                elif isinstance(chunk, dict):
+                    if "id" in chunk:
+                        chunk_id = str(chunk["id"])
+                    elif isinstance(chunk.get("payload"), dict) and "id" in chunk["payload"]:
+                        chunk_id = str(chunk["payload"]["id"])
 
                 if chunk_id:
                     chunk_ids.append(chunk_id)
