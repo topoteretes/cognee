@@ -331,6 +331,7 @@ class SessionManager:
         answer: Optional[str] = None,
         feedback_text: Optional[str] = None,
         feedback_score: Optional[int] = None,
+        memify_metadata: Optional[dict] = None,
         session_id: Optional[str] = None,
     ) -> bool:
         """
@@ -338,6 +339,7 @@ class SessionManager:
 
         Only passed fields are updated; None preserves existing values.
         Returns True if updated, False if not found or cache unavailable.
+        memify_metadata: Optional dict with pipeline name as key (e.g. "apply_feedback_weights") and bool value.
         """
         session_id = self._resolve_session_id(session_id)
         _validate_session_params(user_id=user_id, session_id=session_id, qa_id=qa_id)
@@ -354,6 +356,7 @@ class SessionManager:
             answer=answer,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
+            memify_metadata=memify_metadata,
         )
 
     async def add_feedback(

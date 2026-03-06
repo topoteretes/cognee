@@ -94,6 +94,32 @@ async def test_delete_feedback(adapter):
 
 
 @pytest.mark.asyncio
+async def test_update_memify_metadata_merges_existing_keys(adapter):
+    """update_qa_entry merges memify_metadata keys instead of replacing the map."""
+    await adapter.create_qa_entry(
+        "u1",
+        "s1",
+        "Q",
+        "C",
+        "A",
+        qa_id="id1",
+        memify_metadata={"persist_sessions_in_knowledge_graph": True},
+    )
+    ok = await adapter.update_qa_entry(
+        "u1",
+        "s1",
+        "id1",
+        memify_metadata={"apply_feedback_weights": False},
+    )
+    assert ok
+    entries = await adapter.get_all_qa_entries("u1", "s1")
+    assert entries[0]["memify_metadata"] == {
+        "persist_sessions_in_knowledge_graph": True,
+        "apply_feedback_weights": False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_delete_entry(adapter):
     """Delete a single QA entry by qa_id."""
     await adapter.create_qa_entry("u1", "s1", "Q1", "C1", "A1", qa_id="id1")
