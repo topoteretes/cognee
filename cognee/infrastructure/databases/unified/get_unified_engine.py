@@ -6,7 +6,7 @@ from cognee.infrastructure.databases.vector import get_vector_engine
 from .capabilities import EngineCapability
 from .unified_store_engine import UnifiedStoreEngine
 
-HYBRID_PROVIDERS = {"neptune_analytics"}
+HYBRID_PROVIDERS = {"neptune_analytics", "helixdb"}
 
 
 def _is_hybrid_provider(graph_config: dict, vector_config: dict) -> bool:
@@ -42,6 +42,27 @@ def _create_hybrid_adapter(graph_config: dict, vector_config: dict):
         return NeptuneAnalyticsAdapter(
             graph_id=graph_identifier,
             embedding_engine=embedding_engine,
+        )
+
+    elif provider == "helixdb":
+        from cognee.infrastructure.databases.graph.get_graph_engine import (
+            supported_databases as graph_dbs,
+        )
+        from cognee.infrastructure.databases.vector.embeddings import get_embedding_engine
+
+        adapter_cls = graph_dbs.get("helixdb")
+        if adapter_cls is None:
+            raise EnvironmentError(
+                "HelixDB adapter not registered. "
+                "Install cognee-community-hybrid-adapter-helixdb"
+            )
+
+        embedding_engine = get_embedding_engine()
+        return adapter_cls(
+            graph_database_url=graph_config.get("graph_database_url", ""),
+            graph_database_port=graph_config.get("graph_database_port", 6969),
+            embedding_engine=embedding_engine,
+            database_name=graph_config.get("graph_database_name", "cognee_graph"),
         )
 
     raise EnvironmentError(f"Unsupported hybrid provider: {provider}")
