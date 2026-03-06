@@ -1049,7 +1049,7 @@ class Neo4jAdapter(GraphDBInterface):
             raise
 
     async def get_nodeset_subgraph(
-        self, node_type: Type[Any], node_name: List[str]
+        self, node_type: Type[Any], node_name: List[str], node_name_filter_operator: str
     ) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
         """
         Retrieve a subgraph based on specified node names and type, including their
@@ -1074,28 +1074,50 @@ class Neo4jAdapter(GraphDBInterface):
         try:
             label = node_type.__name__
 
-            query = f"""
-            UNWIND $names AS wantedName
-            MATCH (n:`{label}`)
-            WHERE n.name = wantedName
-            WITH collect(DISTINCT n) AS primary
-            UNWIND primary AS p
-            OPTIONAL MATCH (p)--(nbr)
-            WITH primary, collect(DISTINCT nbr) AS nbrs
-            WITH primary + nbrs AS nodelist
-            UNWIND nodelist AS node
-            WITH collect(DISTINCT node) AS nodes
-            MATCH (a)-[r]-(b)
-            WHERE a IN nodes AND b IN nodes
-            WITH nodes, collect(DISTINCT r) AS rels
-            RETURN
-              [n IN nodes |
-                 {{ id: n.id,
-                    properties: properties(n) }}] AS rawNodes,
-              [r IN rels  |
-                 {{ type: type(r),
-                    properties: properties(r) }}] AS rawRels
-            """
+            if node_name_filter_operator == "OR":
+                query = f"""
+                UNWIND $names AS wantedName
+                MATCH (n:`{label}`)
+                WHERE n.name = wantedName
+                WITH collect(DISTINCT n) AS primary
+                UNWIND primary AS p
+                OPTIONAL MATCH (p)--(nbr)
+                WITH primary, collect(DISTINCT nbr) AS nbrs
+                WITH primary + nbrs AS nodelist
+                UNWIND nodelist AS node
+                WITH collect(DISTINCT node) AS nodes
+                MATCH (a)-[r]-(b)
+                WHERE a IN nodes AND b IN nodes
+                WITH nodes, collect(DISTINCT r) AS rels
+                RETURN
+                  [n IN nodes |
+                     {{ id: n.id,
+                        properties: properties(n) }}] AS rawNodes,
+                  [r IN rels  |
+                     {{ type: type(r),
+                        properties: properties(r) }}] AS rawRels
+                """
+            else:
+                query = f"""
+                UNWIND $names AS wantedName
+                MATCH (n:`{label}`)
+                WHERE n.name = wantedName
+                WITH collect(DISTINCT n) AS primary
+                UNWIND primary AS p
+                MATCH (p)--(nbr)
+                WITH primary, nbr, COUNT(DISTINCT p) AS matched_count
+                WHERE matched_count = size(primary)
+                WITH primary, collect(DISTINCT nbr) AS nbrs
+                WITH primary + nbrs AS nodelist
+                UNWIND nodelist AS node
+                WITH collect(DISTINCT node) AS nodes
+                MATCH (a)-[r]-(b)
+                WHERE a IN nodes AND b IN nodes
+                WITH nodes, collect(DISTINCT r) AS rels
+                RETURN
+                  [n IN nodes | {{ id: n.id, properties: properties(n) }}] AS rawNodes,
+                  [r IN rels  | {{ type: type(r), properties: properties(r) }}] AS rawRels
+                """
 
             result = await self.query(query, {"names": node_name})
 

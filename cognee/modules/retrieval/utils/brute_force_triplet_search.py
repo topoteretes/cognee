@@ -49,6 +49,7 @@ async def get_memory_fragment(
     properties_to_project: Optional[List[str]] = None,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
     relevant_ids_to_filter: Optional[List[str]] = None,
     triplet_distance_penalty: Optional[float] = 3.5,
     graph_engine=None,
@@ -68,6 +69,7 @@ async def get_memory_fragment(
             edge_properties_to_project=["relationship_name", "edge_text", "edge_object_id"],
             node_type=node_type,
             node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
             relevant_ids_to_filter=relevant_ids_to_filter,
             triplet_distance_penalty=triplet_distance_penalty,
         )
@@ -85,6 +87,7 @@ async def _get_top_triplet_importances(
     properties_to_project: Optional[List[str]],
     node_type: Optional[Type],
     node_name: Optional[List[str]],
+    node_name_filter_operator: str,
     triplet_distance_penalty: float,
     wide_search_limit: Optional[int],
     top_k: int,
@@ -113,6 +116,7 @@ async def _get_top_triplet_importances(
             properties_to_project=properties_to_project,
             node_type=node_type,
             node_name=node_name,
+            node_name_filter_operator=node_name_filter_operator,
             relevant_ids_to_filter=relevant_node_ids,
             triplet_distance_penalty=triplet_distance_penalty,
             graph_engine=graph_engine,
@@ -139,6 +143,7 @@ async def brute_force_triplet_search(
     memory_fragment: Optional[CogneeGraph] = None,
     node_type: Optional[Type] = None,
     node_name: Optional[List[str]] = None,
+    node_name_filter_operator: str = "OR",
     wide_search_top_k: Optional[int] = 100,
     triplet_distance_penalty: Optional[float] = 3.5,
     unified_engine: Optional[UnifiedStoreEngine] = None,
@@ -211,6 +216,7 @@ async def brute_force_triplet_search(
                 collections=collections,
                 wide_search_limit=wide_search_limit,
                 node_name=node_name,
+                node_name_filter_operator=node_name_filter_operator,
             )
 
             if query_batch is not None:
@@ -227,6 +233,7 @@ async def brute_force_triplet_search(
                 properties_to_project,
                 node_type,
                 node_name,
+                node_name_filter_operator,
                 triplet_distance_penalty,
                 wide_search_limit,
                 top_k,
