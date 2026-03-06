@@ -22,7 +22,7 @@ def get_add_router() -> APIRouter:
     @router.post("", response_model=dict)
     @log_usage(function_name="POST /v1/add", log_type="api_endpoint")
     async def add(
-        data: List[UploadFile] = File(default=None),
+        data: Optional[List[UploadFile]] = File(default=None),
         datasetName: Optional[str] = Form(default=None),
         # Note: Literal is needed for Swagger use
         datasetId: Union[UUID, Literal[""], None] = Form(default=None, examples=[""]),
@@ -80,7 +80,7 @@ def get_add_router() -> APIRouter:
 
         try:
             add_run = await cognee_add(
-                data,
+                data or [],
                 datasetName,
                 user=user,
                 dataset_id=datasetId,
