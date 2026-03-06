@@ -144,11 +144,17 @@ def update_changelog_if_needed(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Sync release docs artifacts into cognee-docs repo")
-    parser.add_argument("--docs-repo", required=True, type=Path, help="Path to checked-out docs repo")
+    parser = argparse.ArgumentParser(
+        description="Sync release docs artifacts into cognee-docs repo"
+    )
+    parser.add_argument(
+        "--docs-repo", required=True, type=Path, help="Path to checked-out docs repo"
+    )
     parser.add_argument("--tag", required=True, help="Release tag, e.g. v0.5.4")
     parser.add_argument("--release-url", required=True, help="GitHub release URL")
-    parser.add_argument("--published-at", required=True, help="Release publish timestamp (ISO 8601)")
+    parser.add_argument(
+        "--published-at", required=True, help="Release publish timestamp (ISO 8601)"
+    )
     parser.add_argument(
         "--release-body-file",
         required=True,
@@ -215,4 +221,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
