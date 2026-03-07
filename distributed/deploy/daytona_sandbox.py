@@ -9,6 +9,7 @@ Prerequisites:
 
     Set environment variables:
         DAYTONA_API_KEY  — your Daytona API key (from https://app.daytona.io)
+        DAYTONA_API_URL  — Daytona API URL (default: https://app.daytona.io/api)
         LLM_API_KEY      — your LLM provider API key
 
 Usage:
@@ -25,10 +26,13 @@ from daytona import (
     Resources,
 )
 
+DAYTONA_API_URL = "https://app.daytona.io/api"
+
 
 def deploy_cognee():
     """Create a Daytona sandbox and start the Cognee API server."""
     api_key = os.environ.get("DAYTONA_API_KEY")
+    api_url = os.environ.get("DAYTONA_API_URL", DAYTONA_API_URL)
     llm_api_key = os.environ.get("LLM_API_KEY")
 
     if not api_key:
@@ -36,7 +40,7 @@ def deploy_cognee():
     if not llm_api_key:
         raise ValueError("LLM_API_KEY environment variable is required")
 
-    daytona = Daytona(DaytonaConfig(api_key=api_key))
+    daytona = Daytona(DaytonaConfig(api_key=api_key, api_url=api_url))
 
     print("Creating Daytona sandbox for Cognee...")
     sandbox = daytona.create(
@@ -52,24 +56,31 @@ def deploy_cognee():
             labels={"app": "cognee", "service": "api"},
         ),
     )
-
     print(f"Sandbox created: {sandbox.id}")
 
-    # Install Cognee
-    print("Installing Cognee...")
-    sandbox.process.exec("pip install 'cognee[api]'")
-
-    # Start the API server
-    print("Starting Cognee API server...")
-    response = sandbox.process.exec(
+    # Install Cognee and start server in one command to avoid timeout
+    # on long pip install. The server starts after install completes.
+    print("Installing Cognee and starting API server (this may take a few minutes)...")
+    setup_script = (
+        "pip install 'cognee[api]' > /tmp/cognee-install.log 2>&1 && "
         "nohup python -m uvicorn cognee.api.client:app "
-        "--host 0.0.0.0 --port 8000 &"
+        "--host 0.0.0.0 --port 8000 > /tmp/cognee-server.log 2>&1 &"
     )
-    print(response.result)
+    sandbox.process.exec(f"bash -c \"{setup_script}\"", timeout=600)
+
+    # Generate a signed preview URL (no auth headers needed)
+    signed_url = sandbox.create_signed_preview_url(8000, expires_in_seconds=86400)
 
     print(f"\nCognee sandbox is running!")
-    print(f"Sandbox ID: {sandbox.id}")
-    print("Use 'daytona preview <sandbox-id> 8000' to access the API")
+    print(f"  Sandbox ID: {sandbox.id}")
+    print(f"\n  API URL: {signed_url.url}")
+    print(f"  Health:  {signed_url.url}/health")
+    print(f"  Docs:    {signed_url.url}/docs")
+    print(f"  (URL expires in 24 hours)")
+    print(f"\nTo check server logs:")
+    print(f"  daytona exec {sandbox.id} -- cat /tmp/cognee-server.log")
+    print(f"\nTo stop:")
+    print(f"  daytona sandbox stop {sandbox.id}")
 
     return sandbox
 
