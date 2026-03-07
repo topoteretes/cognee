@@ -273,7 +273,7 @@ class SQLAlchemyAdapter:
         return []
 
     async def delete_entity_by_id(
-        self, table_name: str, data_id: UUID, schema_name: Optional[str] = "public"
+        self, table_name: str, data_id: UUID, schema_name: Optional[str] = None
     ):
         """
         Delete an entity from the specified table based on its unique ID.
@@ -283,8 +283,8 @@ class SQLAlchemyAdapter:
 
             - table_name (str): The name of the table from which to delete the entity.
             - data_id (UUID): The unique identifier of the entity to be deleted.
-            - schema_name (Optional[str]): The name of the schema where the table resides,
-              defaults to 'public'. (default 'public')
+            - schema_name (Optional[str]): The name of the schema where the table resides.
+              If None, uses the database search_path (recommended for multi-schema setups).
         """
         if self.engine.dialect.name == "sqlite":
             async with self.get_async_session() as session:

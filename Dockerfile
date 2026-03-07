@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy pyproject.toml and lockfile first for better caching
-COPY README.md pyproject.toml uv.lock entrypoint.sh ./
+COPY README.md pyproject.toml uv.lock entrypoint.sh entrypoint.py ./
 
 # Install the project's dependencies using the lockfile and settings
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -53,7 +53,7 @@ COPY --from=uv /app /app
 # COPY --from=uv /app/.venv /app/.venv
 # COPY --from=uv /root/.local /root/.local
 
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh /app/entrypoint.py
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"
@@ -62,4 +62,5 @@ ENV PYTHONPATH=/app
 # ENV LOG_LEVEL=ERROR
 ENV PYTHONUNBUFFERED=1
 
-ENTRYPOINT ["/app/entrypoint.sh"]
+# Use Python entrypoint for better Windows/Docker compatibility
+ENTRYPOINT ["python", "/app/entrypoint.py"]
