@@ -431,6 +431,42 @@ class TestParallel:
         result = asyncio.run(pipeline.execute(input=[10, 20, 30], parallel=True))
         assert sorted(result) == [11, 21, 31]
 
+    def test_parallel_max_concurrency(self):
+        """Verify max_parallel limits concurrent items."""
+        peak = {"current": 0, "max": 0}
+
+        async def track_concurrency(x):
+            peak["current"] += 1
+            if peak["current"] > peak["max"]:
+                peak["max"] = peak["current"]
+            await asyncio.sleep(0.05)
+            peak["current"] -= 1
+            return x
+
+        items = list(range(10))
+        result = asyncio.run(
+            run_steps(track_concurrency, input=items, parallel=True, max_parallel=3)
+        )
+        assert sorted(result) == items
+        assert peak["max"] <= 3
+
+    def test_parallel_default_max_parallel(self):
+        """Default max_parallel=20 allows up to 20 concurrent items."""
+        peak = {"current": 0, "max": 0}
+
+        async def track(x):
+            peak["current"] += 1
+            if peak["current"] > peak["max"]:
+                peak["max"] = peak["current"]
+            await asyncio.sleep(0.01)
+            peak["current"] -= 1
+            return x
+
+        items = list(range(30))
+        result = asyncio.run(run_steps(track, input=items, parallel=True))
+        assert sorted(result) == items
+        assert peak["max"] <= 20
+
 
 # -- Drop sentinel tests --
 
