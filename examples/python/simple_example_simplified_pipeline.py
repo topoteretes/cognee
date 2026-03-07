@@ -50,24 +50,32 @@ async def main():
     # cognee_pipeline() sets up DB isolation, permissions, ContextVars
     print("Running cognify with simplified pipeline...\n")
 
+    # Define the cognify steps once, reuse per data item
+    cognify_steps = [
+        classify_documents,
+        step(extract_chunks_from_documents,
+             max_chunk_size=get_max_chunk_tokens(), chunker=TextChunker),
+        step(extract_graph_from_data,
+             graph_model=KnowledgeGraph, batch_size=100),
+        step(summarize_text, batch_size=100),
+        step(add_data_points, batch_size=100),
+    ]
+
     async with cognee_pipeline(dataset="main_dataset") as dataset:
         # Fetch dataset data explicitly
         data = await get_dataset_data(dataset_id=dataset.id)
 
-        # Run the cognify steps with parallel=True for per-item concurrency.
-        # Each data item flows through the full chain independently,
-        # with its own context["data"] — matching original run_tasks behavior.
-        await run_steps(
-            classify_documents,
-            step(extract_chunks_from_documents,
-                 max_chunk_size=get_max_chunk_tokens(), chunker=TextChunker),
-            step(extract_graph_from_data,
-                 graph_model=KnowledgeGraph, batch_size=100),
-            step(summarize_text, batch_size=100),
-            step(add_data_points, batch_size=100),
-            input=data,
-            parallel=True,
-        )
+        # Process each data item through the full chain.
+        # skip_processed=True enables incremental loading — if you run
+        # this pipeline again, already-processed items will be skipped.
+        for data_item in data:
+            await run_steps(
+                *cognify_steps,
+                input=[data_item],
+                context={"dataset": dataset, "data": data_item},
+                pipeline_name="cognify",
+                skip_processed=True,
+            )
 
     print("Cognify process complete.\n")
 
