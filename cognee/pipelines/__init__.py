@@ -4,7 +4,7 @@ Simplified pipeline API for Cognee.
 Three tiers of abstraction:
 
 Tier 1 - Smart Functions (zero config):
-    results = await flow(extract, transform, load, input=data)
+    results = await run_steps(extract, transform, load, input=data)
 
 Tier 2 - Decorators (add config when needed):
     @step(batch_size=10)
@@ -17,22 +17,16 @@ Tier 3 - Pipeline Objects (full control):
 Legacy imports (from cognee.pipelines import Task, run_tasks, etc.) also work.
 """
 
-# New simplified API (no circular dependency risk)
-from cognee.pipelines.flow import flow
+from cognee.pipelines.flow import run_steps
 from cognee.pipelines.step import step
 from cognee.pipelines.builder import Pipeline
 from cognee.pipelines.context import dataset, get_current_dataset
 from cognee.pipelines.types import (
     Pipe,
     Ctx,
-    Cfg,
     Drop,
-    Batch,
-    Stream,
-    inject,
     get_pipe_param_name,
     get_ctx_param_name,
-    get_cfg_param_name,
 )
 
 # Legacy re-exports are lazy to avoid circular imports with cognee.modules.pipelines
@@ -60,7 +54,7 @@ __all__ = [
     "run_tasks_parallel",
     "run_pipeline",
     # Tier 1: Simple execution
-    "flow",
+    "run_steps",
     # Tier 2: Decorators
     "step",
     # Tier 3: Builder
@@ -71,13 +65,8 @@ __all__ = [
     # Type annotations
     "Pipe",
     "Ctx",
-    "Cfg",
     "Drop",
-    "Batch",
-    "Stream",
-    "inject",
     # Introspection helpers
     "get_pipe_param_name",
     "get_ctx_param_name",
-    "get_cfg_param_name",
 ]

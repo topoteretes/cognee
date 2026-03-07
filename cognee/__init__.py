@@ -36,7 +36,7 @@ from .api.v1.session import session
 from .modules import pipelines
 
 # Simplified pipeline API
-from .pipelines import flow, step, Pipeline, dataset, Pipe, Ctx, Drop
+from .pipelines import run_steps, step, Pipeline, dataset, Pipe, Ctx, Drop
 
 from cognee.run_migrations import run_migrations
 

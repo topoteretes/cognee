@@ -1,34 +1,30 @@
 """
-Simple pipeline execution via flow().
+Pipeline execution via run_steps().
 
-flow() is the primary entry point for the simplified pipeline API.
+run_steps() is the primary entry point for the simplified pipeline API.
 It accepts plain functions, @step-decorated functions, or Task objects,
 auto-wraps them as needed, and returns results directly.
 
+Supports two execution modes:
+- Sequential (default): data flows step-by-step, breadth-first.
+- Parallel (parallel=True): each input item flows through the full
+  chain independently, concurrently — like the original run_tasks engine.
+
 Example:
-    async def extract_names(text: str) -> list[str]:
-        return ["Alice", "Bob"]
+    results = await run_steps(extract, transform, load, input="text")
 
-    async def greet(names: list[str]) -> list[str]:
-        return [f"Hello {name}!" for name in names]
-
-    results = await flow(extract_names, greet, input="Alice and Bob")
-    # results = ["Hello Alice!", "Hello Bob!"]
+    # Per-item parallelism (each doc processed through full chain concurrently):
+    results = await run_steps(chunk, extract, store, input=docs, parallel=True)
 """
 
+import asyncio
 import inspect
 from functools import wraps
-from typing import Any, Optional
 
 from cognee.pipelines.types import (
-    Drop,
     _Drop,
-    _CtxMarker,
-    _PipeMarker,
     get_ctx_param_name,
-    get_pipe_param_name,
 )
-from cognee.pipelines.step import StepConfig
 
 
 def _get_original(fn):
@@ -36,161 +32,276 @@ def _get_original(fn):
     return getattr(fn, "_original_fn", fn)
 
 
-def _get_step_config(fn) -> Optional[StepConfig]:
+def _get_step_config(fn):
     """Get StepConfig from a @step-decorated function, if present."""
     return getattr(fn, "_cognee_step_config", None)
 
 
-def _to_task(fn, step_config: Optional[StepConfig] = None):
-    """Convert a function (plain or @step-decorated) to a Task object."""
-    from cognee.modules.pipelines.tasks.task import Task
+def _get_default_params(fn) -> dict:
+    """Get default params from a @step-decorated function."""
+    config = _get_step_config(fn)
+    return config.params if config else {}
 
-    original = _get_original(fn)
 
-    task_config = None
-    if step_config and step_config.batch_size > 1:
-        task_config = {"batch_size": step_config.batch_size}
+def _wrap_with_default_params(fn, default_params: dict):
+    """Wrap a function to inject default params from @step(..., key=value).
 
-    return Task(original, task_config=task_config)
+    Only injects params that the function actually accepts and that
+    weren't already provided by the caller.
+    """
+    if not default_params:
+        return fn
+
+    sig = inspect.signature(fn)
+    accepted = set(sig.parameters.keys())
+    applicable = {k: v for k, v in default_params.items() if k in accepted}
+
+    if not applicable:
+        return fn
+
+    if inspect.isasyncgenfunction(fn):
+
+        @wraps(fn)
+        async def wrapper(*args, **kwargs):
+            merged = {**applicable, **kwargs}
+            async for item in fn(*args, **merged):
+                yield item
+
+        return wrapper
+
+    if inspect.iscoroutinefunction(fn):
+
+        @wraps(fn)
+        async def wrapper(*args, **kwargs):
+            merged = {**applicable, **kwargs}
+            return await fn(*args, **merged)
+
+        return wrapper
+
+    if inspect.isgeneratorfunction(fn):
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            merged = {**applicable, **kwargs}
+            yield from fn(*args, **merged)
+
+        return wrapper
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        merged = {**applicable, **kwargs}
+        return fn(*args, **merged)
+
+    return wrapper
 
 
 def _wrap_with_ctx_injection(fn, context: dict):
-    """Wrap a function to inject context into Ctx-annotated parameters.
-
-    If the function has a parameter annotated with Ctx[T], the pipeline
-    context dict is automatically injected as that parameter's value.
-    """
+    """Wrap a function to inject context into Ctx-annotated parameters."""
     sig = inspect.signature(fn)
     ctx_param = get_ctx_param_name(sig)
 
     if ctx_param is None:
         return fn
 
-    if inspect.iscoroutinefunction(fn) or inspect.isasyncgenfunction(fn):
+    if inspect.isasyncgenfunction(fn):
 
         @wraps(fn)
-        async def wrapper(*args, **kwargs):
+        async def async_gen_wrapper(*args, **kwargs):
             kwargs[ctx_param] = context
-            return await fn(*args, **kwargs)
+            async for item in fn(*args, **kwargs):
+                yield item
 
-    else:
+        return async_gen_wrapper
 
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            kwargs[ctx_param] = context
-            return fn(*args, **kwargs)
-
-    return wrapper
-
-
-def _wrap_with_drop_filter(fn):
-    """Wrap a function to filter out Drop sentinel values from results.
-
-    If a step returns Drop, the item is removed from the pipeline.
-    If a step returns a list containing Drop values, those items are filtered out.
-    """
     if inspect.iscoroutinefunction(fn):
 
         @wraps(fn)
-        async def wrapper(*args, **kwargs):
-            result = await fn(*args, **kwargs)
-            return _filter_drops(result)
+        async def async_wrapper(*args, **kwargs):
+            kwargs[ctx_param] = context
+            return await fn(*args, **kwargs)
 
-    elif inspect.isasyncgenfunction(fn):
-        # Don't wrap generators — Drop filtering happens at the flow level
-        return fn
-    else:
+        return async_wrapper
+
+    if inspect.isgeneratorfunction(fn):
 
         @wraps(fn)
-        def wrapper(*args, **kwargs):
-            result = fn(*args, **kwargs)
-            return _filter_drops(result)
+        def gen_wrapper(*args, **kwargs):
+            kwargs[ctx_param] = context
+            yield from fn(*args, **kwargs)
+
+        return gen_wrapper
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        kwargs[ctx_param] = context
+        return fn(*args, **kwargs)
 
     return wrapper
 
 
-def _filter_drops(result):
-    """Remove Drop sentinels from a result."""
+def _split_batches(data, batch_size: int):
+    """Split list data into batches. Returns None if no splitting needed."""
+    if not isinstance(data, list) or batch_size <= 1 or len(data) <= batch_size:
+        return None
+    return [data[i : i + batch_size] for i in range(0, len(data), batch_size)]
+
+
+def _build_context(dataset, context):
+    """Build the context dict, integrating dataset() context manager if active."""
+    ctx = dict(context) if context else {}
+    if dataset:
+        ctx["dataset"] = dataset
+    elif "dataset" not in ctx:
+        from cognee.pipelines.context import get_current_dataset
+
+        current = get_current_dataset()
+        if current is not None:
+            ctx["dataset"] = current
+    return ctx
+
+
+def _prepare_step(step_fn, ctx):
+    """Prepare a step function: unwrap, inject defaults, inject context."""
+    original = _get_original(step_fn)
+    default_params = _get_default_params(step_fn)
+    wrapped = _wrap_with_default_params(original, default_params)
+    wrapped = _wrap_with_ctx_injection(wrapped, ctx)
+    return wrapped
+
+
+async def _execute_step(wrapped, data, batch_size, enriches):
+    """Execute a single step against data, handling all function types."""
+    if inspect.isasyncgenfunction(wrapped):
+        results = []
+        if isinstance(data, list):
+            for item in data:
+                async for result in wrapped(item):
+                    if not isinstance(result, _Drop):
+                        results.append(result)
+        else:
+            async for result in wrapped(data):
+                if not isinstance(result, _Drop):
+                    results.append(result)
+        return results
+
+    if inspect.iscoroutinefunction(wrapped):
+        batches = _split_batches(data, batch_size) if batch_size > 1 else None
+
+        if batches is not None:
+            results = []
+            for batch in batches:
+                result = await wrapped(batch)
+                if enriches and result is None:
+                    results.extend(batch)
+                elif isinstance(result, _Drop):
+                    continue
+                elif isinstance(result, list):
+                    results.extend(result)
+                else:
+                    results.append(result)
+            return results
+
+        result = await wrapped(data)
+        if enriches and result is None:
+            return data
+        if isinstance(result, _Drop):
+            return []
+        return result
+
+    if inspect.isgeneratorfunction(wrapped):
+        results = []
+        if isinstance(data, list):
+            for item in data:
+                for result in wrapped(item):
+                    if not isinstance(result, _Drop):
+                        results.append(result)
+        else:
+            for result in wrapped(data):
+                if not isinstance(result, _Drop):
+                    results.append(result)
+        return results
+
+    # Plain sync function
+    result = wrapped(data)
+    if enriches and result is None:
+        return data
     if isinstance(result, _Drop):
-        return Drop
-    if isinstance(result, list):
-        filtered = [item for item in result if not isinstance(item, _Drop)]
-        return filtered if filtered else Drop
+        return []
     return result
 
 
-async def flow(*steps, input=None, dataset: str = None, context: dict = None, **kwargs):
-    """Execute a pipeline of steps with a simple API.
+async def _run_chain(steps_prepared, data, configs):
+    """Run a single item through the full step chain sequentially."""
+    for i, wrapped in enumerate(steps_prepared):
+        batch_size = configs[i].batch_size if configs[i] else 1
+        enriches = configs[i].enriches if configs[i] else False
+        data = await _execute_step(wrapped, data, batch_size, enriches)
+    return data
 
-    Accepts plain async functions, @step-decorated functions, or Task objects.
-    Returns results directly — no async generator ceremony needed.
+
+async def run_steps(
+    *steps, input=None, dataset: str = None, context: dict = None, parallel: bool = False, **kwargs
+):
+    """Execute a pipeline of steps.
 
     Args:
-        *steps: Functions to execute in sequence. Output of step N becomes
-                input to step N+1.
+        *steps: Functions to execute in sequence.
         input: Initial data to feed into the first step.
         dataset: Optional dataset name for context.
         context: Optional context dict (user, dataset info, etc.).
-        **kwargs: Additional keyword arguments passed to the pipeline.
+        parallel: If True and input is a list, each item flows through
+                  the full chain independently, concurrently. This matches
+                  the original run_tasks per-data-item parallelism.
 
     Returns:
-        The output of the last step. If multiple items, returns a list.
+        The output of the last step.
 
-    Example:
-        results = await flow(step1, step2, step3, input="data")
+    Examples:
+        # Sequential (default):
+        results = await run_steps(step1, step2, input="data")
+
+        # Parallel per-item:
+        results = await run_steps(step1, step2, input=[d1, d2, d3], parallel=True)
     """
     if not steps:
         return input
 
-    # Build context
-    ctx = dict(context) if context else {}
-    if dataset:
-        ctx["dataset"] = dataset
+    ctx = _build_context(dataset, context)
 
-    # Execute steps sequentially
+    # Prepare all steps (unwrap, inject defaults + context)
+    steps_prepared = [_prepare_step(fn, ctx) for fn in steps]
+    configs = [_get_step_config(fn) for fn in steps]
+
+    # --- Parallel mode: each input item through full chain concurrently ---
+    if parallel and isinstance(input, list):
+        tasks = [asyncio.create_task(_run_chain(steps_prepared, item, configs)) for item in input]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Separate successes from errors
+        output = []
+        errors = []
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                errors.append((i, result))
+            elif isinstance(result, list):
+                output.extend(result)
+            else:
+                output.append(result)
+
+        if errors:
+            from cognee.shared.logging_utils import get_logger
+
+            logger = get_logger("run_steps")
+            for idx, err in errors:
+                logger.error(f"Item {idx} failed: {err}", exc_info=err)
+
+        return output
+
+    # --- Sequential mode: step-by-step, breadth-first ---
     data = input
-
-    for step_fn in steps:
-        original = _get_original(step_fn)
-
-        # Wrap with context injection if needed
-        wrapped = _wrap_with_ctx_injection(original, ctx)
-
-        # Execute the step
-        if inspect.isasyncgenfunction(wrapped):
-            # Async generator: collect results
-            results = []
-            if isinstance(data, list):
-                for item in data:
-                    async for result in wrapped(item):
-                        if not isinstance(result, _Drop):
-                            results.append(result)
-            else:
-                async for result in wrapped(data):
-                    if not isinstance(result, _Drop):
-                        results.append(result)
-            data = results
-        elif inspect.iscoroutinefunction(wrapped):
-            result = await wrapped(data)
-            if isinstance(result, _Drop):
-                return []
-            data = result
-        elif inspect.isgeneratorfunction(wrapped):
-            results = []
-            if isinstance(data, list):
-                for item in data:
-                    for result in wrapped(item):
-                        if not isinstance(result, _Drop):
-                            results.append(result)
-            else:
-                for result in wrapped(data):
-                    if not isinstance(result, _Drop):
-                        results.append(result)
-            data = results
-        else:
-            result = wrapped(data)
-            if isinstance(result, _Drop):
-                return []
-            data = result
+    for i, wrapped in enumerate(steps_prepared):
+        batch_size = configs[i].batch_size if configs[i] else 1
+        enriches = configs[i].enriches if configs[i] else False
+        data = await _execute_step(wrapped, data, batch_size, enriches)
 
     return data

@@ -122,7 +122,7 @@ async def handle_task(
                 f"via parameter name 'context'. Use Ctx annotation instead: "
                 f"from cognee.pipelines import Ctx; "
                 f"async def {running_task.executable.__name__}(data, ctx: Ctx[dict] = None)",
-                DeprecationWarning,
+                PendingDeprecationWarning,
                 stacklevel=2,
             )
             kwargs["context"] = context
