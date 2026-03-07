@@ -4,6 +4,9 @@ Generate human-friendly release notes by analyzing git diff with LLM.
 
 This script compares changes between two branches (typically main and dev)
 and uses an LLM to generate readable, user-focused release notes.
+
+Uses litellm + instructor directly to avoid cognee's dotenv.load_dotenv(override=True)
+which can overwrite CI environment variables with .env file placeholders.
 """
 
 import argparse
@@ -103,17 +106,30 @@ async def generate_release_notes_with_llm(
     target_ref: str,
     version: str | None = None,
 ) -> Any:
-    """Use LLM to generate human-friendly release notes."""
+    """Use LLM to generate human-friendly release notes.
+
+    Uses litellm + instructor directly instead of cognee's LLM client
+    to avoid cognee's dotenv.load_dotenv(override=True) overwriting
+    CI environment variables.
+    """
     try:
-        # Import here to avoid startup delays
-        from cognee.infrastructure.llm.structured_output_framework.litellm_instructor.llm.get_llm_client import (
-            get_llm_client,
-        )
+        import instructor
+        import litellm
         from pydantic import BaseModel, Field
     except ImportError as e:
         print(f"Error: Required dependencies not available: {e}", file=sys.stderr)
-        print("Please ensure cognee is installed with: pip install -e .", file=sys.stderr)
-        sys.exit(1)
+        print(
+            "Please ensure litellm, instructor, and pydantic are installed.",
+            file=sys.stderr,
+        )
+        return None
+
+    api_key = os.environ.get("LLM_API_KEY")
+    model = os.environ.get("LLM_MODEL", "openai/gpt-4o-mini")
+
+    if not api_key:
+        print("Warning: LLM_API_KEY not set, skipping LLM generation.", file=sys.stderr)
+        return None
 
     class ReleaseNotes(BaseModel):
         """Structured release notes."""
@@ -165,17 +181,64 @@ Create engaging release notes that help users understand what's new and improved
 """
 
     try:
-        llm_client = get_llm_client()
-        response = await llm_client.acreate_structured_output(
-            text_input=text_input,
-            system_prompt=system_prompt,
+        client = instructor.from_litellm(litellm.acompletion)
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text_input},
+            ],
             response_model=ReleaseNotes,
+            api_key=api_key,
+            max_retries=2,
         )
-
         return response
     except Exception as e:
-        print(f"Error generating release notes with LLM: {e}", file=sys.stderr)
-        sys.exit(1)
+        print(f"Warning: LLM generation failed: {e}", file=sys.stderr)
+        return None
+
+
+def generate_fallback_notes(
+    commits: str,
+    version: str,
+) -> Any:
+    """Generate basic release notes from commit messages when LLM is unavailable."""
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class FallbackNotes:
+        summary: str = ""
+        highlights: list[str] = field(default_factory=list)
+        features: list[str] = field(default_factory=list)
+        improvements: list[str] = field(default_factory=list)
+        bug_fixes: list[str] = field(default_factory=list)
+        breaking_changes: list[str] = field(default_factory=list)
+        technical_changes: list[str] = field(default_factory=list)
+
+    notes = FallbackNotes()
+
+    for line in commits.strip().split("\n"):
+        line = line.strip()
+        if not line or not line.startswith("- "):
+            continue
+        msg = line[2:]  # strip "- " prefix
+        lower = msg.lower()
+
+        if lower.startswith("feat"):
+            notes.features.append(msg)
+        elif lower.startswith("fix"):
+            notes.bug_fixes.append(msg)
+        elif lower.startswith("breaking"):
+            notes.breaking_changes.append(msg)
+        elif any(lower.startswith(p) for p in ("refactor", "chore", "ci", "build", "test")):
+            notes.technical_changes.append(msg)
+        else:
+            notes.improvements.append(msg)
+
+    notes.summary = f"Cognee v{version} includes {len(notes.features)} new features, {len(notes.bug_fixes)} bug fixes, and {len(notes.improvements)} improvements."
+    notes.highlights = (notes.features + notes.improvements)[:5]
+
+    return notes
 
 
 def format_release_notes(
@@ -194,53 +257,53 @@ def format_release_notes(
     md += "---\n\n"
 
     # Summary
-    md += f"## 🎉 Summary\n\n{notes.summary}\n\n"
+    md += f"## Summary\n\n{notes.summary}\n\n"
 
     # Highlights
     if notes.highlights:
-        md += "## ⭐ Highlights\n\n"
+        md += "## Highlights\n\n"
         for highlight in notes.highlights:
             md += f"- {highlight}\n"
         md += "\n"
 
     # Breaking Changes (if any)
     if notes.breaking_changes:
-        md += "## ⚠️ Breaking Changes\n\n"
+        md += "## Breaking Changes\n\n"
         for change in notes.breaking_changes:
             md += f"- {change}\n"
         md += "\n"
 
     # Features
     if notes.features:
-        md += "## ✨ New Features\n\n"
+        md += "## New Features\n\n"
         for feature in notes.features:
             md += f"- {feature}\n"
         md += "\n"
 
     # Improvements
     if notes.improvements:
-        md += "## 🚀 Improvements\n\n"
+        md += "## Improvements\n\n"
         for improvement in notes.improvements:
             md += f"- {improvement}\n"
         md += "\n"
 
     # Bug Fixes
     if notes.bug_fixes:
-        md += "## 🐛 Bug Fixes\n\n"
+        md += "## Bug Fixes\n\n"
         for fix in notes.bug_fixes:
             md += f"- {fix}\n"
         md += "\n"
 
     # Technical Changes
     if notes.technical_changes:
-        md += "## 🔧 Technical Changes\n\n"
+        md += "## Technical Changes\n\n"
         for change in notes.technical_changes:
             md += f"- {change}\n"
         md += "\n"
 
     # Footer
     md += "---\n\n"
-    md += f"*Generated by Cognee AI Release Notes Generator on {date_str}*\n"
+    md += f"*Generated by Cognee Release Notes Generator on {date_str}*\n"
 
     return md
 
@@ -315,8 +378,12 @@ async def main():
     commits = get_commit_history(base_ref, target_ref)
     pr_list = get_pr_list(base_ref, target_ref)
 
-    # Generate release notes with LLM
+    # Generate release notes with LLM, fall back to commit-based notes
     notes = await generate_release_notes_with_llm(diff, commits, base_ref, target_ref, version)
+
+    if notes is None:
+        print("Falling back to commit-based release notes.", file=sys.stderr)
+        notes = generate_fallback_notes(commits, version)
 
     # Format as markdown
     markdown = format_release_notes(notes, version, base_ref, target_ref, pr_list)
@@ -342,7 +409,7 @@ async def main():
     else:
         print(markdown)
 
-    print("\n✅ Release notes generated successfully!", file=sys.stderr)
+    print("\nRelease notes generated successfully!", file=sys.stderr)
 
 
 if __name__ == "__main__":
