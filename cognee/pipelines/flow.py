@@ -96,9 +96,13 @@ def _wrap_with_default_params(fn, default_params: dict):
 
 
 def _wrap_with_ctx_injection(fn, context: dict):
-    """Wrap a function to inject context into Ctx-annotated parameters."""
+    """Wrap a function to inject context into Ctx-annotated or legacy 'context' parameters."""
     sig = inspect.signature(fn)
     ctx_param = get_ctx_param_name(sig)
+
+    # Fallback: legacy tasks use a plain parameter named "context"
+    if ctx_param is None and "context" in sig.parameters:
+        ctx_param = "context"
 
     if ctx_param is None:
         return fn
@@ -147,13 +151,21 @@ def _split_batches(data, batch_size: int):
 
 
 def _build_context(dataset, context):
-    """Build the context dict, integrating dataset() context manager if active."""
+    """Build the context dict, integrating dataset() and cognee_pipeline() context."""
     ctx = dict(context) if context else {}
+
+    # Merge pipeline context (user, dataset objects) from cognee_pipeline() if active
+    from cognee.pipelines.context import get_current_dataset, get_pipeline_context
+
+    pipeline_ctx = get_pipeline_context()
+    if pipeline_ctx:
+        for key, value in pipeline_ctx.items():
+            if key not in ctx:
+                ctx[key] = value
+
     if dataset:
         ctx["dataset"] = dataset
     elif "dataset" not in ctx:
-        from cognee.pipelines.context import get_current_dataset
-
         current = get_current_dataset()
         if current is not None:
             ctx["dataset"] = current
@@ -173,15 +185,9 @@ async def _execute_step(wrapped, data, batch_size, enriches):
     """Execute a single step against data, handling all function types."""
     if inspect.isasyncgenfunction(wrapped):
         results = []
-        if isinstance(data, list):
-            for item in data:
-                async for result in wrapped(item):
-                    if not isinstance(result, _Drop):
-                        results.append(result)
-        else:
-            async for result in wrapped(data):
-                if not isinstance(result, _Drop):
-                    results.append(result)
+        async for result in wrapped(data):
+            if not isinstance(result, _Drop):
+                results.append(result)
         return results
 
     if inspect.iscoroutinefunction(wrapped):
@@ -210,15 +216,9 @@ async def _execute_step(wrapped, data, batch_size, enriches):
 
     if inspect.isgeneratorfunction(wrapped):
         results = []
-        if isinstance(data, list):
-            for item in data:
-                for result in wrapped(item):
-                    if not isinstance(result, _Drop):
-                        results.append(result)
-        else:
-            for result in wrapped(data):
-                if not isinstance(result, _Drop):
-                    results.append(result)
+        for result in wrapped(data):
+            if not isinstance(result, _Drop):
+                results.append(result)
         return results
 
     # Plain sync function

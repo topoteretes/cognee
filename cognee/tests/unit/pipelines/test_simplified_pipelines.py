@@ -146,9 +146,10 @@ class TestStepDecorator:
 
     def test_step_sync_generator(self):
         @step
-        def gen(item):
-            yield item * 2
-            yield item * 3
+        def gen(items):
+            for item in items:
+                yield item * 2
+                yield item * 3
 
         result = asyncio.run(run_steps(gen, input=[1, 2, 3]))
         assert result == [2, 3, 4, 6, 6, 9]
