@@ -1,28 +1,9 @@
-# Daytona workspace configuration for Cognee
+# Daytona is now an SDK-based cloud sandbox platform.
+# See daytona_sandbox.py for the Python integration.
 #
-# Usage:
-#   daytona create https://github.com/topoteretes/cognee
+# For devcontainer-based dev environments (Codespaces, VS Code, etc.),
+# use .devcontainer/devcontainer.json at the repo root.
 #
-# This uses the devcontainer.json spec for environment setup.
-# Daytona auto-detects .devcontainer/devcontainer.json or
-# distributed/deploy/devcontainer.json.
-
-name: cognee
-image: ghcr.io/astral-sh/uv:python3.12-bookworm
-repositories:
-  - url: https://github.com/topoteretes/cognee
-postStartCommands:
-  - uv sync
-  - cp cognee/.env.template cognee/.env
-env:
-  - name: LLM_API_KEY
-    description: "Your LLM API key (OpenAI, Anthropic, etc.)"
-  - name: LLM_MODEL
-    default: "openai/gpt-4o-mini"
-  - name: PYTHONPATH
-    default: "/workspaces/cognee"
-ports:
-  - port: 8000
-    name: "Cognee API"
-  - port: 3000
-    name: "Cognee UI"
+# CLI quick start:
+#   brew install daytonaio/cli/daytona
+#   daytona create

@@ -10,7 +10,7 @@
 | **Railway** | Simplest PaaS, native Postgres | `railway init && railway up` |
 | **Fly.io** | Edge deployment, persistent volumes | `bash distributed/deploy/fly-deploy.sh` |
 | **Render** | Simple PaaS with managed Postgres | Deploy to Render button |
-| **Daytona** | Cloud dev environments | `daytona create https://github.com/topoteretes/cognee` |
+| **Daytona** | Cloud sandboxes (SDK or CLI) | `python distributed/deploy/daytona_sandbox.py` |
 
 All platforms require setting `LLM_API_KEY` as a minimum.
 
@@ -108,28 +108,41 @@ Then connect the repo in the Render dashboard and deploy.
 
 ---
 
-## Daytona / Devcontainers
+## Daytona (Cloud Sandbox)
 
-For SDK users and contributors who want a pre-configured development environment.
+Daytona provides secure, isolated cloud sandboxes. Cognee runs inside a sandbox with persistent storage.
 
-### Daytona
+### Option A: Python SDK
 ```bash
-daytona create https://github.com/topoteretes/cognee
+pip install daytona
+
+export DAYTONA_API_KEY=your-key   # from https://app.daytona.io
+export LLM_API_KEY=sk-xxx
+python distributed/deploy/daytona_sandbox.py
 ```
 
+### Option B: CLI
+```bash
+brew install daytonaio/cli/daytona
+daytona create
+# Inside the sandbox:
+pip install 'cognee[api]'
+python -m uvicorn cognee.api.client:app --host 0.0.0.0 --port 8000
+```
+
+---
+
+## Devcontainers (Codespaces / VS Code)
+
+For contributors who want a pre-configured development environment. Uses `.devcontainer/devcontainer.json` at the repo root.
+
 ### GitHub Codespaces
-The `devcontainer.json` works with Codespaces too:
 ```bash
 gh codespace create --repo topoteretes/cognee
 ```
 
 ### VS Code Dev Containers
-Copy the devcontainer config:
-```bash
-mkdir -p .devcontainer
-cp distributed/deploy/devcontainer.json .devcontainer/devcontainer.json
-```
-Then "Reopen in Container" from VS Code.
+Open the repo in VS Code and select "Reopen in Container".
 
 ---
 
