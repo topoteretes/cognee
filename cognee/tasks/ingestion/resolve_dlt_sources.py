@@ -5,7 +5,7 @@ One-to-many expansion (one DLT source → many rows) happens here; the
 per-item pipeline model downstream stays unchanged.
 """
 
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Set
 from uuid import UUID
 
 from cognee.modules.data.methods.get_unique_data_id import get_unique_data_id
@@ -50,6 +50,7 @@ async def resolve_dlt_sources(
     primary_key = kwargs["primary_key"] if "primary_key" in kwargs else None
     write_disposition = kwargs["write_disposition"] if "write_disposition" in kwargs else "merge"
     query = kwargs["query"] if "query" in kwargs else None
+    max_rows_per_table = kwargs.get("max_rows_per_table")
 
     # --- Auto-detect structured data (CSV paths / connection strings) ------
     if isinstance(data, str):
@@ -82,6 +83,7 @@ async def resolve_dlt_sources(
             dataset_name,
             primary_key=primary_key,
             write_disposition=write_disposition,
+            max_rows_per_table=max_rows_per_table,
         )
         all_rows.extend(rows)
 
@@ -93,23 +95,38 @@ async def resolve_dlt_sources(
         row_id_lookup[(row.table_name, row.primary_key_value)] = data_id
 
     # --- Phase 2: create DataItems ------------------------------------------
+    # Build table-level metadata once per table so all rows share the same
+    # schema_info/foreign_keys references instead of duplicating per row.
+    _table_meta_cache: dict[str, dict] = {}
+
+    def _get_table_meta(row: DltRowData) -> dict:
+        if row.table_name not in _table_meta_cache:
+            _table_meta_cache[row.table_name] = {
+                "schema_info": row.schema_info,
+                "schema_hash": row.schema_hash,
+                "foreign_keys": row.foreign_keys,
+                "dlt_db_name": row.dlt_db_name,
+            }
+        return _table_meta_cache[row.table_name]
+
     expanded_items: list[DataItem] = []
     for row in all_rows:
         data_id = row_id_lookup[(row.table_name, row.primary_key_value)]
 
         enriched_text = _build_schema_context_text(row)
         fk_references = _resolve_fk_references(row, row_id_lookup)
+        table_meta = _get_table_meta(row)
 
         ext_metadata = {
             "source": "dlt",
             "table_name": row.table_name,
             "primary_key_column": row.primary_key_column,
             "primary_key_value": row.primary_key_value,
-            "schema_info": row.schema_info,
-            "schema_hash": row.schema_hash,
-            "foreign_keys": row.foreign_keys,
+            "schema_info": table_meta["schema_info"],
+            "schema_hash": table_meta["schema_hash"],
+            "foreign_keys": table_meta["foreign_keys"],
             "fk_references": fk_references,
-            "dlt_db_name": row.dlt_db_name,
+            "dlt_db_name": table_meta["dlt_db_name"],
             "content_hash": row.content_hash,
         }
 
@@ -123,6 +140,13 @@ async def resolve_dlt_sources(
 
     logger.info("Resolved %d DLT source(s) into %d DataItems.", len(dlt_items), len(expanded_items))
 
+    # --- Phase 3: delete orphaned dlt rows no longer in the source ----------
+    # Skip orphan deletion for "append" disposition — each run intentionally
+    # adds new rows, so prior batches should not be treated as orphans.
+    if write_disposition != "append":
+        fresh_data_ids: Set[UUID] = set(row_id_lookup.values())
+        await _delete_dlt_orphans(dataset_name, user, fresh_data_ids)
+
     result = non_dlt_items + expanded_items
     return result
 
@@ -133,10 +157,11 @@ async def resolve_dlt_sources(
 
 
 def _build_schema_context_text(dlt_row: DltRowData) -> str:
-    """Build a schema-enriched text representation of a DLT row.
+    """Build a human-readable, schema-enriched text representation of a DLT row.
 
-    Instead of raw JSON, this gives the LLM structural context about the table,
-    column types, and foreign key relationships so it can extract better entities.
+    This text is stored as the document content and used for vector search.
+    DLT rows bypass LLM extraction — their graph is built deterministically
+    from the relational schema by ``extract_dlt_fk_edges``.
     """
     lines = []
     lines.append(f"Table: {dlt_row.table_name}")
@@ -220,3 +245,64 @@ def _resolve_fk_references(dlt_row: DltRowData, row_id_lookup: dict) -> list:
             )
 
     return references
+
+
+async def _delete_dlt_orphans(
+    dataset_name: str,
+    user: User,
+    fresh_data_ids: Set[UUID],
+) -> None:
+    """Delete dlt-sourced Data records (and their graph/vector artifacts) that
+    are no longer present in the freshly-ingested dlt source.
+
+    This handles the case where rows are deleted from the upstream database
+    and the user re-ingests.  dlt cleans its own staging DB, but cognee's
+    relational, graph, and vector stores still hold stale data.
+    """
+    from cognee.modules.data.methods.get_dataset_data import get_dataset_data
+    from cognee.modules.data.methods import get_authorized_existing_datasets
+    from cognee.modules.data.methods.delete_data import delete_data
+    from cognee.modules.graph.methods.has_data_related_nodes import has_data_related_nodes
+    from cognee.modules.graph.methods.delete_data_nodes_and_edges import (
+        delete_data_nodes_and_edges,
+    )
+
+    # Find the dataset — if it doesn't exist yet this is a first ingestion,
+    # so there can be no orphans.
+    existing_datasets = await get_authorized_existing_datasets(
+        user=user, permission_type="write", datasets=[dataset_name]
+    )
+    if not existing_datasets:
+        return
+
+    dataset = existing_datasets[0]
+    all_data: list = await get_dataset_data(dataset.id)
+
+    orphans = []
+    for data_item in all_data:
+        ext = data_item.external_metadata
+        if not isinstance(ext, dict) or ext.get("source") != "dlt":
+            continue
+        if data_item.id not in fresh_data_ids:
+            orphans.append(data_item)
+
+    if not orphans:
+        return
+
+    logger.info(
+        "Deleting %d orphaned dlt row(s) from dataset '%s'.",
+        len(orphans),
+        dataset_name,
+    )
+
+    for orphan in orphans:
+        try:
+            if await has_data_related_nodes(dataset.id, orphan.id):
+                await delete_data_nodes_and_edges(dataset.id, orphan.id, user.id)
+            await delete_data(orphan, dataset.id)
+        except Exception:
+            logger.warning(
+                "Failed to delete orphaned dlt row data_id=%s, skipping.",
+                orphan.id,
+                exc_info=True,
+            )

@@ -1,6 +1,8 @@
+import asyncio
 import hashlib
 import json
 import os
+import re
 from collections import Counter
 from typing import List, Optional
 
@@ -25,12 +27,16 @@ except ImportError:
 
 logger = get_logger("ingest_dlt_source")
 
+# Strict identifier pattern — only allow alphanumerics, underscores, dots, and hyphens
+_SAFE_IDENT_RE = re.compile(r"^[A-Za-z0-9_.\-]+$")
+
 
 async def ingest_dlt_source(
     dlt_source,
     dataset_name: str,
     primary_key: Optional[str] = None,
     write_disposition: str = "merge",
+    max_rows_per_table: Optional[int] = None,
 ) -> List[DltRowData]:
     """
     Ingests a dlt (re)source by running the dlt pipeline on it.
@@ -93,7 +99,9 @@ async def ingest_dlt_source(
         run_kwargs["primary_key"] = effective_pk
 
     try:
-        load_info = pipeline.run(dlt_source, **run_kwargs)
+        # dlt's pipeline.run() is synchronous and potentially long-running;
+        # run it in a thread to avoid blocking the async event loop.
+        load_info = await asyncio.to_thread(pipeline.run, dlt_source, **run_kwargs)
     except Exception as e:
         raise DLTIngestionError(
             message=f"DLT pipeline execution failed for dataset '{original_dataset_name}': {e}"
@@ -122,6 +130,10 @@ async def ingest_dlt_source(
         ) from e
 
     # Read rows from each table and produce DltRowData objects
+    from cognee.tasks.ingestion.config import get_ingestion_config
+
+    default_max_rows = get_ingestion_config().dlt_max_rows_per_table
+    effective_max_rows = max_rows_per_table if max_rows_per_table is not None else default_max_rows
     try:
         row_data_list = await _read_rows_from_tables(
             dlt_db_name=dlt_db_name,
@@ -129,6 +141,7 @@ async def ingest_dlt_source(
             schema=filtered_schema,
             primary_key=primary_key,
             relational_config=relational_config,
+            max_rows_per_table=effective_max_rows,
         )
     except Exception as e:
         raise DLTIngestionError(
@@ -140,32 +153,51 @@ async def ingest_dlt_source(
 
 async def _extract_dlt_schema(relational_config, dlt_db_name: str, dataset_name: str):
     """Extract and filter schema from the dlt-populated database."""
-    from cognee.infrastructure.databases.relational.get_migration_relational_engine import (
-        get_migration_relational_engine,
+    from cognee.infrastructure.databases.relational.create_relational_engine import (
+        create_relational_engine,
     )
-    from cognee.infrastructure.databases.relational.config import get_migration_config
 
-    migration_config = get_migration_config()
-    migration_config.migration_db_provider = relational_config.db_provider
-    migration_config.migration_db_host = relational_config.db_host
-    migration_config.migration_db_port = relational_config.db_port
-    migration_config.migration_db_username = relational_config.db_username
-    migration_config.migration_db_password = relational_config.db_password
-
+    # Build engine directly instead of mutating the cached migration config
+    # singleton — concurrent calls would clobber each other's settings.
     if relational_config.db_provider == "sqlite":
         dlt_sqlite_db_name = f"{dlt_db_name}__{dataset_name}"
-        migration_config.migration_db_path = relational_config.db_path
-        migration_config.migration_db_name = dlt_sqlite_db_name
+        db_path = relational_config.db_path
+        db_name = dlt_sqlite_db_name
     else:
-        migration_config.migration_db_name = dlt_db_name
+        db_path = None
+        db_name = dlt_db_name
 
-    engine = get_migration_relational_engine()
+    engine = create_relational_engine(
+        db_path=db_path,
+        db_name=db_name,
+        db_host=relational_config.db_host,
+        db_port=relational_config.db_port,
+        db_username=relational_config.db_username,
+        db_password=relational_config.db_password,
+        db_provider=relational_config.db_provider,
+    )
     schema = await engine.extract_schema()
 
     # Filter out dlt internal tables (those starting with _dlt_ or containing staging)
     filtered_schema = {k: v for k, v in schema.items() if "_dlt_" not in k and "staging" not in k}
 
     return schema, filtered_schema
+
+
+def _quote_identifier(name: str) -> str:
+    """Safely quote a SQL identifier to prevent injection.
+
+    Validates the name against a strict pattern and double-quotes it.
+    Raises ValueError if the name contains unexpected characters.
+    """
+    if not _SAFE_IDENT_RE.match(name):
+        raise ValueError(
+            f"Unsafe SQL identifier rejected: {name!r}. "
+            "Only alphanumerics, underscores, dots, and hyphens are allowed."
+        )
+    # Escape any embedded double-quotes (defensive — regex above disallows them)
+    escaped = name.replace('"', '""')
+    return f'"{escaped}"'
 
 
 def _compute_schema_hash(schema_info) -> str:
@@ -187,8 +219,9 @@ async def _read_rows_from_tables(
     schema: dict,
     primary_key: Optional[str],
     relational_config,
+    max_rows_per_table: int = 50,
 ) -> List[DltRowData]:
-    """Read all rows from the dlt database tables and return DltRowData objects."""
+    """Read rows from the dlt database tables and return DltRowData objects."""
     if relational_config.db_provider == "sqlite":
         # DLT creates a separate SQLite file: {db_name}__{dataset_name}
         dlt_sqlite_db_name = f"{dlt_db_name}__{dataset_name}"
@@ -219,6 +252,7 @@ async def _read_rows_from_tables(
                         dataset_name=dataset_name,
                         dlt_db_name=dlt_db_name,
                         relational_config=relational_config,
+                        max_rows=max_rows_per_table,
                     )
                     row_data_list.extend(table_rows)
                 except Exception as e:
@@ -243,8 +277,13 @@ async def _read_single_table(
     dataset_name: str,
     dlt_db_name: str,
     relational_config,
+    max_rows: int = 50,
 ) -> List[DltRowData]:
-    """Read all rows from a single table and return DltRowData objects."""
+    """Read rows from a single table and return DltRowData objects.
+
+    At most ``max_rows`` rows are read.  Pass 0 or a negative value to
+    read all rows (no limit).
+    """
     raw_columns = table_info.get("columns", [])
     foreign_keys = table_info.get("foreign_keys", [])
 
@@ -264,10 +303,16 @@ async def _read_single_table(
     # For PostgreSQL, dlt uses dataset_name as schema prefix;
     # for SQLite, dlt uses a separate database file and tables have no prefix.
     if relational_config.db_provider == "sqlite":
-        query = f'SELECT * FROM "{table_name}"'
+        quoted_table = _quote_identifier(table_name)
+        query = f"SELECT * FROM {quoted_table}"
     else:
         schema_name, table_name_only = table_name.split(".", 1)
-        query = f'SELECT * FROM "{schema_name}"."{table_name_only}"'
+        quoted_schema = _quote_identifier(schema_name)
+        quoted_tbl = _quote_identifier(table_name_only)
+        query = f"SELECT * FROM {quoted_schema}.{quoted_tbl}"
+
+    if max_rows > 0:
+        query += f" LIMIT {int(max_rows)}"
 
     result = await conn.execute(text(query))
     rows = result.mappings().all()
@@ -395,8 +440,6 @@ async def _create_pg_database(db_name):
 
 
 def _to_safe_ident(s: str) -> str:
-    import re
-
     s = re.sub(r"[^A-Za-z0-9_]+", "_", s).strip("_").lower()
     if not s:
         raise InvalidDLTArgumentError(message="Invalid dataset name given for dlt ingestion.")

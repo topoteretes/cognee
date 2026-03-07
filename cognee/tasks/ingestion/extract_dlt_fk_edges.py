@@ -7,8 +7,19 @@ from cognee.infrastructure.engine.models.DataPoint import DataPoint
 from cognee.tasks.schema.models import SchemaTable, SchemaRelationship
 from cognee.tasks.storage.index_data_points import index_data_points
 from cognee.shared.logging_utils import get_logger
+from cognee.tasks.ingestion.dlt_utils import parse_external_metadata
 
 logger = get_logger("extract_dlt_fk_edges")
+
+
+def _is_dlt_data_point(data_point: DataPoint) -> bool:
+    """Fast check whether a data point originates from a DLT source."""
+    doc = getattr(data_point, "is_part_of", None)
+    if doc is None:
+        return False
+    from cognee.modules.data.processing.document_types import DltRowDocument
+
+    return isinstance(doc, DltRowDocument)
 
 
 async def extract_dlt_fk_edges(data_points: List[DataPoint]) -> List[DataPoint]:
@@ -25,6 +36,12 @@ async def extract_dlt_fk_edges(data_points: List[DataPoint]) -> List[DataPoint]:
     """
     from cognee.infrastructure.databases.graph.get_graph_engine import get_graph_engine
 
+    # Quick check: skip entirely if no data points have DLT metadata.
+    # This avoids iterating + parsing metadata for pure unstructured batches.
+    has_any_dlt = any(_is_dlt_data_point(dp) for dp in data_points)
+    if not has_any_dlt:
+        return data_points
+
     # Collect DLT metadata from all documents in this batch
     dlt_docs = {}  # doc_id -> ext_metadata
     tables_seen = {}  # table_name -> schema_info
@@ -35,7 +52,7 @@ async def extract_dlt_fk_edges(data_points: List[DataPoint]) -> List[DataPoint]:
         if doc is None:
             continue
 
-        ext_metadata = _parse_external_metadata(doc)
+        ext_metadata = parse_external_metadata(doc)
         if ext_metadata is None or ext_metadata.get("source") != "dlt":
             continue
 
@@ -223,20 +240,3 @@ async def extract_dlt_fk_edges(data_points: List[DataPoint]) -> List[DataPoint]:
         )
 
     return data_points
-
-
-def _parse_external_metadata(doc) -> dict | None:
-    """Parse external_metadata from a Document (may be JSON string or dict)."""
-    ext_metadata_raw = getattr(doc, "external_metadata", None)
-    if not ext_metadata_raw:
-        return None
-
-    if isinstance(ext_metadata_raw, str):
-        try:
-            return json.loads(ext_metadata_raw)
-        except (json.JSONDecodeError, TypeError):
-            return None
-    elif isinstance(ext_metadata_raw, dict):
-        return ext_metadata_raw
-
-    return None
