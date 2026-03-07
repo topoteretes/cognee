@@ -1,18 +1,19 @@
 """
 @step decorator for configuring pipeline steps.
 
-Provides a declarative way to add configuration to pipeline functions
-without wrapping them in Task objects.
-
 Example:
     @step(batch_size=10)
     async def process_batch(items: list) -> list:
         return [x * 2 for x in items]
 
-    # Use in flow:
-    results = await flow(process_batch, input=[1, 2, 3])
+    # Default params — injected automatically when the step is called:
+    @step(batch_size=10, graph_model=KnowledgeGraph)
+    async def extract_graph(chunks, graph_model): ...
+
+    results = await run_steps(process_batch, input=[1, 2, 3])
 """
 
+import inspect
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable
@@ -24,10 +25,11 @@ class StepConfig:
 
     batch_size: int = 1
     cache: bool = False
-    extra: dict = field(default_factory=dict)
+    enriches: bool = False
+    params: dict = field(default_factory=dict)
 
 
-def step(fn=None, *, batch_size: int = 1, cache: bool = False, **extra_config):
+def step(fn=None, *, batch_size: int = 1, cache: bool = False, enriches: bool = False, **params):
     """Decorator to configure a pipeline step.
 
     Can be used with or without arguments:
@@ -38,41 +40,50 @@ def step(fn=None, *, batch_size: int = 1, cache: bool = False, **extra_config):
         @step(batch_size=10)
         async def batched(data): ...
 
-        @step(batch_size=10, cache=True)
-        async def cached_batch(data): ...
+        @step(batch_size=10, graph_model=KnowledgeGraph)
+        async def extract(chunks, graph_model): ...
 
-    The decorated function retains its original behavior and can be called
-    directly. The configuration is stored as metadata for the pipeline runtime.
+    Extra keyword arguments beyond batch_size/cache/enriches are stored as
+    default params and auto-injected when the step is called, matching by
+    parameter name. This replaces Task(fn, **kwargs).
     """
 
     def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            return await func(*args, **kwargs)
+        if inspect.isasyncgenfunction(func):
 
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
+            @wraps(func)
+            async def wrapper(*args, **kwargs):
+                async for item in func(*args, **kwargs):
+                    yield item
 
-        import inspect
+        elif inspect.iscoroutinefunction(func):
 
-        if inspect.iscoroutinefunction(func) or inspect.isasyncgenfunction(func):
-            wrapper = async_wrapper
+            @wraps(func)
+            async def wrapper(*args, **kwargs):
+                return await func(*args, **kwargs)
+
+        elif inspect.isgeneratorfunction(func):
+
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                yield from func(*args, **kwargs)
+
         else:
-            wrapper = sync_wrapper
 
-        # Store config as metadata on the wrapper
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
         wrapper._cognee_step_config = StepConfig(
             batch_size=batch_size,
             cache=cache,
-            extra=extra_config,
+            enriches=enriches,
+            params=params,
         )
         wrapper._original_fn = func
 
         return wrapper
 
     if fn is not None:
-        # Called without arguments: @step
         return decorator(fn)
-    # Called with arguments: @step(batch_size=10)
     return decorator
