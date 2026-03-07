@@ -274,7 +274,14 @@ async def run_steps(
 
     # --- Parallel mode: each input item through full chain concurrently ---
     if parallel and isinstance(input, list):
-        tasks = [asyncio.create_task(_run_chain(steps_prepared, item, configs)) for item in input]
+
+        async def _run_item(item):
+            # Each item gets its own context with "data" set, matching original run_tasks
+            item_ctx = {**ctx, "data": item}
+            item_steps = [_prepare_step(fn, item_ctx) for fn in steps]
+            return await _run_chain(item_steps, item, configs)
+
+        tasks = [asyncio.create_task(_run_item(item)) for item in input]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Separate successes from errors
