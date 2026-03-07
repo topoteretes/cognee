@@ -20,6 +20,7 @@ from contextvars import ContextVar
 from typing import Optional
 
 _current_dataset: ContextVar[Optional[str]] = ContextVar("current_dataset", default=None)
+_pipeline_context: ContextVar[Optional[dict]] = ContextVar("pipeline_context", default=None)
 
 
 @asynccontextmanager
@@ -105,12 +106,24 @@ async def cognee_pipeline(dataset: str = None, user=None):
     if ds_name:
         _current_dataset.set(ds_name)
 
+    # Store resolved objects for run_steps context building
+    _pipeline_context.set({
+        "user": _user,
+        "dataset": active_dataset,
+    })
+
     try:
         yield active_dataset
     finally:
         _current_dataset.set(previous)
+        _pipeline_context.set(None)
 
 
 def get_current_dataset() -> Optional[str]:
     """Get the current dataset name from context, or None if not set."""
     return _current_dataset.get()
+
+
+def get_pipeline_context() -> Optional[dict]:
+    """Get the pipeline context (user, dataset objects) set by cognee_pipeline(), or None."""
+    return _pipeline_context.get()
