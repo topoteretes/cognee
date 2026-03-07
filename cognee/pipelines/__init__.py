@@ -20,7 +20,7 @@ Legacy imports (from cognee.pipelines import Task, run_tasks, etc.) also work.
 from cognee.pipelines.flow import run_steps
 from cognee.pipelines.step import step
 from cognee.pipelines.builder import Pipeline
-from cognee.pipelines.context import dataset, get_current_dataset
+from cognee.pipelines.context import dataset, cognee_pipeline, get_current_dataset
 from cognee.pipelines.types import (
     Pipe,
     Ctx,
@@ -61,6 +61,7 @@ __all__ = [
     "Pipeline",
     # Context
     "dataset",
+    "cognee_pipeline",
     "get_current_dataset",
     # Type annotations
     "Pipe",

@@ -35,6 +35,6 @@ from .api.v1.ui import start_ui
 from .modules import pipelines
 
 # Simplified pipeline API
-from .pipelines import run_steps, step, Pipeline, dataset, Pipe, Ctx, Drop
+from .pipelines import run_steps, step, Pipeline, dataset, cognee_pipeline, Pipe, Ctx, Drop
 
 from cognee.run_migrations import run_migrations
