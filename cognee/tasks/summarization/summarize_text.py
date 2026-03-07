@@ -54,8 +54,7 @@ async def summarize_text(
     from cognee.modules.data.processing.document_types import DltRowDocument
 
     non_dlt_chunks = [
-        c for c in data_chunks
-        if not isinstance(getattr(c, "is_part_of", None), DltRowDocument)
+        c for c in data_chunks if not isinstance(getattr(c, "is_part_of", None), DltRowDocument)
     ]
     dlt_chunks = [c for c in data_chunks if c not in non_dlt_chunks]
 
