@@ -1,5 +1,5 @@
 from cognee.modules.users.models import DatasetDatabase
-from sqlalchemy import select
+from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.orm.attributes import flag_modified
 
 from cognee.modules.data.models import Dataset, DatasetData, Data
@@ -55,4 +55,12 @@ async def delete_dataset(dataset: Dataset):
 
         await session.commit()
 
-    return await db_engine.delete_entity_by_id(dataset.__tablename__, dataset.id)
+    # Use ORM-based delete instead of raw table reflection with hardcoded
+    # schema.  The previous ``delete_entity_by_id`` call reflected the table
+    # using ``schema_name="public"`` by default, which fails when PostgreSQL
+    # tables live in a non-public schema (e.g. ``cognee``).  ORM queries
+    # resolve the table through SQLAlchemy's ``search_path`` / metadata, so
+    # they work regardless of the configured schema.
+    async with db_engine.get_async_session() as session:
+        await session.execute(sa_delete(Dataset).where(Dataset.id == dataset.id))
+        await session.commit()
