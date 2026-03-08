@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Type
 from uuid import uuid5
 from pydantic import BaseModel
@@ -8,6 +9,15 @@ from cognee.modules.chunking.models.DocumentChunk import DocumentChunk
 from cognee.infrastructure.llm.extraction import extract_summary
 from cognee.modules.cognify.config import get_cognify_config
 from cognee.tasks.summarization.models import TextSummary
+
+
+logger = logging.getLogger(__name__)
+
+
+class _FallbackSummary:
+    def __init__(self, summary: str = "", description: str = ""):
+        self.summary = summary
+        self.description = description
 
 
 async def summarize_text(
@@ -49,9 +59,23 @@ async def summarize_text(
         cognee_config = get_cognify_config()
         summarization_model = cognee_config.summarization_model
 
-    chunk_summaries = await asyncio.gather(
-        *[extract_summary(chunk.text, summarization_model) for chunk in data_chunks]
+    raw_chunk_summaries = await asyncio.gather(
+        *[extract_summary(chunk.text, summarization_model) for chunk in data_chunks],
+        return_exceptions=True,
     )
+
+    chunk_summaries = []
+    for chunk_index, summary_result in enumerate(raw_chunk_summaries):
+        if isinstance(summary_result, Exception):
+            logger.warning(
+                "Skipping chunk summary at index %s due to extraction error: %s",
+                chunk_index,
+                summary_result,
+            )
+            chunk_summaries.append(_FallbackSummary())
+            continue
+
+        chunk_summaries.append(summary_result)
 
     summaries = [
         TextSummary(
