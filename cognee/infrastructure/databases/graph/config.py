@@ -45,6 +45,9 @@ class GraphConfig(BaseSettings):
     graph_database_key: str = ""
     graph_file_path: str = ""
     graph_filename: str = ""
+    spanner_project_id: str = ""
+    spanner_instance_id: str = ""
+    spanner_database_id: str = ""
     graph_model: object = KnowledgeGraph
     graph_topology: object = KnowledgeGraph
     graph_dataset_database_handler: str = "kuzu"
@@ -95,6 +98,9 @@ class GraphConfig(BaseSettings):
             "graph_database_port": self.graph_database_port,
             "graph_database_key": self.graph_database_key,
             "graph_file_path": self.graph_file_path,
+            "spanner_project_id": self.spanner_project_id,
+            "spanner_instance_id": self.spanner_instance_id,
+            "spanner_database_id": self.spanner_database_id,
             "graph_model": self.graph_model,
             "graph_topology": self.graph_topology,
             "model_config": self.model_config,
@@ -123,6 +129,9 @@ class GraphConfig(BaseSettings):
             "graph_database_port": self.graph_database_port,
             "graph_database_key": self.graph_database_key,
             "graph_file_path": self.graph_file_path,
+            "spanner_project_id": self.spanner_project_id,
+            "spanner_instance_id": self.spanner_instance_id,
+            "spanner_database_id": self.spanner_database_id,
             "graph_dataset_database_handler": self.graph_dataset_database_handler,
         }
 

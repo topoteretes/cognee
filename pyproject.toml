@@ -73,6 +73,10 @@ distributed = [
     "modal>=1.0.5,<2.0.0",
 ]
 
+spanner = [
+    "google-cloud-spanner>=3.40.0,<4",
+]
+
 scraping = [
     "tavily-python>=0.7.12",
     "beautifulsoup4>=4.13.1",

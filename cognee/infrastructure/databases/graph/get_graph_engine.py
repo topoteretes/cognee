@@ -34,6 +34,9 @@ def create_graph_engine(
     graph_database_port="",
     graph_database_key="",
     graph_dataset_database_handler="",
+    spanner_project_id="",
+    spanner_instance_id="",
+    spanner_database_id="",
 ):
     """
     Wrapper function to call create graph engine with caching.
@@ -49,6 +52,9 @@ def create_graph_engine(
         graph_database_port,
         graph_database_key,
         graph_dataset_database_handler,
+        spanner_project_id,
+        spanner_instance_id,
+        spanner_database_id,
     )
 
 
@@ -63,6 +69,9 @@ def _create_graph_engine(
     graph_database_port="",
     graph_database_key="",
     graph_dataset_database_handler="",
+    spanner_project_id="",
+    spanner_instance_id="",
+    spanner_database_id="",
 ):
     """
     Create a graph engine based on the specified provider type.
@@ -193,7 +202,19 @@ def _create_graph_engine(
             graph_id=graph_identifier,
         )
 
+    elif graph_database_provider == "spanner":
+        if not spanner_project_id or not spanner_instance_id or not spanner_database_id:
+            raise EnvironmentError("Missing required Spanner credentials.")
+
+        from .spanner.adapter import SpannerAdapter
+
+        return SpannerAdapter(
+            project_id=spanner_project_id,
+            instance_id=spanner_instance_id,
+            database_id=spanner_database_id,
+        )
+
     raise EnvironmentError(
         f"Unsupported graph database provider: {graph_database_provider}. "
-        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'kuzu', 'kuzu-remote', 'neptune', 'neptune_analytics'])}"
+        f"Supported providers are: {', '.join(list(supported_databases.keys()) + ['neo4j', 'kuzu', 'kuzu-remote', 'neptune', 'neptune_analytics', 'spanner'])}"
     )
