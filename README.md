@@ -8,7 +8,7 @@
   Cognee - Build AI memory with a Knowledge Engine that learns
 
   <p align="center">
-  <a href="https://www.youtube.com/watch?v=1bezuvLwJmw&t=2s">Demo</a>
+  <a href="https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s">Demo</a>
   .
   <a href="https://docs.cognee.ai/">Docs</a>
   .
@@ -178,14 +178,6 @@ See Cognee in action:
 ### Persistent Agent Memory
 
 [Cognee Memory for LangGraph Agents](https://github.com/user-attachments/assets/e113b628-7212-4a2b-b288-0be39a93a1c3)
-
-### Simple GraphRAG
-
-[Watch Demo](https://github.com/user-attachments/assets/f2186b2e-305a-42b0-9c2d-9f4473f15df8)
-
-### Cognee with Ollama
-
-[Watch Demo](https://github.com/user-attachments/assets/39672858-f774-4136-b957-1e2de67b8981)
 
 
 ## Community & Support
