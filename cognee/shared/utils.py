@@ -79,7 +79,9 @@ def _sanitize_nested_properties(obj: Any, property_names: list[str]) -> Any:
         return obj
 
 
-def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_properties: dict = {}):
+def send_telemetry(event_name: str, user_id: Union[str, UUID], additional_properties: dict | None = None):
+    if additional_properties is None:
+        additional_properties = {}
     if additional_properties is None:
         additional_properties = {}
     if os.getenv("TELEMETRY_DISABLED"):
