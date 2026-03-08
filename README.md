@@ -177,7 +177,7 @@ See Cognee in action:
 
 ### Persistent Agent Memory
 
-[Cognee Memory for LangGraph Agents](https://github.com/user-attachments/assets/e113b628-7212-4a2b-b288-0be39a93a1c3)
+[![Watch Demo](https://img.youtube.com/vi/8hmqS2Y5RVQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=8hmqS2Y5RVQ&t=13s)
 
 
 ## Community & Support
