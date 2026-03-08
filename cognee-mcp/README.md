@@ -463,6 +463,21 @@ The MCP server exposes its functionality through tools. Call them from any MCP c
 
 - **cognify_status / codify_status**: Track pipeline progress
 
+### Skills Tools
+
+When `cognee.skills` is installed, the following additional tools are available for intelligent skill routing:
+
+- **get_skill_context**: Find the best skills for a task using semantic search and learned preferences
+- **load_skill**: Load full details for a skill by its skill_id
+- **list_skills**: List all skills currently ingested in the knowledge graph
+- **observe_skill_run**: Record a skill execution outcome (success/failure)
+- **promote_skill_runs**: Promote cached runs to the graph and update preference weights
+- **ingest_skills**: Parse SKILL.md files from a folder and store in the knowledge graph
+- **upsert_skills**: Re-ingest a folder: skip unchanged, update changed, remove deleted
+- **remove_skill**: Remove a single skill by skill_id
+
+To teach your agent when and how to use these tools, copy the contents of [`cognee/skills/agent_instructions.md`](../cognee/skills/agent_instructions.md) into your IDE's agent instructions (Cursor rules, CLAUDE.md, Cline custom instructions, etc.). See [cognee/skills/README.md](../cognee/skills/README.md) for the SKILL.md format and full setup guide.
+
 **Data Management Examples:**
 ```bash
 # List all available datasets and data items

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.modules.engine.models.node_set import NodeSet
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +62,11 @@ async def recommend_skills(
     except Exception:
         logger.debug("TaskPattern_text collection not available, skipping pattern matching")
 
-    # Load graph data
+    # Load skills subgraph (scoped to the "skills" nodeset)
     engine = await get_graph_engine()
-    raw_nodes, raw_edges = await engine.get_graph_data()
+    raw_nodes, raw_edges = await engine.get_nodeset_subgraph(
+        node_type=NodeSet, node_name=[node_set]
+    )
 
     nodes_by_id: Dict[str, Dict] = {}
     skill_nodes: Dict[str, Dict] = {}

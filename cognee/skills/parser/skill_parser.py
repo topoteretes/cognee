@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid5
 
-from cognee_skills.models.skill import Skill, SkillResource
+from cognee.skills.models.skill import Skill, SkillResource
 
 NAMESPACE = UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 

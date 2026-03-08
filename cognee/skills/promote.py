@@ -23,11 +23,12 @@ from uuid import uuid5, UUID
 from cognee.low_level import setup
 from cognee.infrastructure.session.get_session_manager import get_session_manager
 from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.tasks.storage import add_data_points
 from cognee.tasks.storage.index_graph_edges import index_graph_edges
 
-from cognee_skills.models.skill_run import SkillRun, ToolCall, CandidateSkill
-from cognee_skills.observe import CACHE_USER_ID, _session_key
+from cognee.skills.models.skill_run import SkillRun, ToolCall, CandidateSkill
+from cognee.skills.observe import CACHE_USER_ID, _session_key
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,9 @@ async def _update_prefers_weights(
         return 0
 
     engine = await get_graph_engine()
-    raw_nodes, raw_edges = await engine.get_graph_data()
+    raw_nodes, raw_edges = await engine.get_nodeset_subgraph(
+        node_type=NodeSet, node_name=["skills"]
+    )
 
     node_id_by_key: Dict[str, str] = {}
     for nid, props in raw_nodes:

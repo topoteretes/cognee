@@ -834,6 +834,151 @@ def load_class(model_file, model_name):
     return model_class
 
 
+# ---------------------------------------------------------------------------
+# Skills tools
+# ---------------------------------------------------------------------------
+
+try:
+    from cognee.skills.client import Skills
+
+    _skills_client = Skills()
+
+    @mcp.tool(
+        name="get_skill_context",
+        description="Get ranked skill recommendations for a task. Returns skills sorted by relevance with scores.",
+    )
+    async def get_skill_context(task_text: str, top_k: int = 5) -> list:
+        """Return the best-matching skills for a task description."""
+        recs = await _skills_client.get_context(task_text, top_k=top_k)
+        return [types.TextContent(type="text", text=json.dumps(recs, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="load_skill",
+        description="Load full details for a skill by its skill_id.",
+    )
+    async def load_skill(skill_id: str) -> list:
+        """Return the full skill definition including instruction summary and task patterns."""
+        result = await _skills_client.load(skill_id)
+        if result is None:
+            return [types.TextContent(type="text", text=f"Skill '{skill_id}' not found.")]
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="observe_skill_run",
+        description="Record a skill execution result. Required fields: task_text, selected_skill_id, success_score (0-1).",
+    )
+    async def observe_skill_run(run_payload: str) -> list:
+        """Record a skill run to short-term cache for later promotion."""
+        try:
+            payload = json.loads(run_payload)
+        except (json.JSONDecodeError, TypeError) as exc:
+            return [types.TextContent(type="text", text=f"Invalid JSON: {exc}")]
+
+        missing = [
+            f for f in ("task_text", "selected_skill_id", "success_score") if f not in payload
+        ]
+        if missing:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Missing required fields: {', '.join(missing)}",
+                )
+            ]
+
+        result = await _skills_client.observe(payload)
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Recorded run: skill={result.get('selected_skill_id')} score={result.get('success_score')}",
+            )
+        ]
+
+    @mcp.tool(
+        name="promote_skill_runs",
+        description="Promote cached skill runs to the knowledge graph and update preference weights.",
+    )
+    async def promote_runs(session_id: str = "") -> list:
+        """Promote runs from cache into the long-term graph."""
+        sid = session_id if session_id else None
+        result = await _skills_client.promote(session_id=sid)
+        return [
+            types.TextContent(
+                type="text",
+                text=json.dumps(result, indent=2, cls=JSONEncoder),
+            )
+        ]
+
+    @mcp.tool(
+        name="ingest_skills",
+        description="Parse SKILL.md files from a folder, enrich via LLM, and store in the knowledge graph. Use this to register new skills.",
+    )
+    async def ingest_skills_tool(
+        skills_folder: str,
+        dataset_name: str = "skills",
+        source_repo: str = "",
+        skip_enrichment: bool = False,
+        node_set: str = "skills",
+    ) -> list:
+        """Ingest all skills from a folder path."""
+        folder = Path(skills_folder).resolve()
+        if not folder.is_dir():
+            return [types.TextContent(type="text", text=f"Directory not found: {skills_folder}")]
+        await _skills_client.ingest(
+            skills_folder=str(folder),
+            dataset_name=dataset_name,
+            source_repo=source_repo,
+            skip_enrichment=skip_enrichment,
+            node_set=node_set,
+        )
+        return [types.TextContent(type="text", text=f"Ingested skills from {folder}")]
+
+    @mcp.tool(
+        name="upsert_skills",
+        description="Re-ingest skills from a folder: skip unchanged, update changed, remove deleted. Returns a summary of changes.",
+    )
+    async def upsert_skills_tool(
+        skills_folder: str,
+        dataset_name: str = "skills",
+        source_repo: str = "",
+        node_set: str = "skills",
+    ) -> list:
+        """Diff-based re-ingestion of a skills folder."""
+        folder = Path(skills_folder).resolve()
+        if not folder.is_dir():
+            return [types.TextContent(type="text", text=f"Directory not found: {skills_folder}")]
+        result = await _skills_client.upsert(
+            skills_folder=str(folder),
+            dataset_name=dataset_name,
+            source_repo=source_repo,
+            node_set=node_set,
+        )
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="remove_skill",
+        description="Remove a single skill from the knowledge graph and vector stores by its skill_id.",
+    )
+    async def remove_skill_tool(skill_id: str) -> list:
+        """Remove a skill by its skill_id."""
+        removed = await _skills_client.remove(skill_id)
+        msg = f"Skill '{skill_id}' removed." if removed else f"Skill '{skill_id}' not found."
+        return [types.TextContent(type="text", text=msg)]
+
+    @mcp.tool(
+        name="list_skills",
+        description="List all skills currently ingested in the knowledge graph.",
+    )
+    async def list_skills_tool() -> list:
+        """Return all ingested skills with their metadata."""
+        results = await _skills_client.list()
+        return [types.TextContent(type="text", text=json.dumps(results, indent=2, cls=JSONEncoder))]
+
+    logger.info("Skills tools registered")
+
+except ImportError:
+    logger.debug("cognee.skills not available, skills tools not registered")
+
+
 async def main():
     global cognee_client
 

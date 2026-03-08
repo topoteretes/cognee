@@ -16,14 +16,15 @@ from cognee.modules.users.methods import get_default_user
 from cognee.modules.data.methods import load_or_create_datasets
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
+from cognee.modules.engine.models.node_set import NodeSet
 from cognee.modules.engine.utils.generate_timestamp_datapoint import generate_timestamp_datapoint
 from cognee.modules.engine.models.Timestamp import Timestamp
 
-from cognee_skills.tasks.parse_skills import parse_skills_task
-from cognee_skills.tasks.enrich_skills import enrich_skills
-from cognee_skills.tasks.materialize_task_patterns import materialize_task_patterns
-from cognee_skills.tasks.apply_node_set import apply_node_set
-from cognee_skills.models.skill_change_event import SkillChangeEvent
+from cognee.skills.tasks.parse_skills import parse_skills_task
+from cognee.skills.tasks.enrich_skills import enrich_skills
+from cognee.skills.tasks.materialize_task_patterns import materialize_task_patterns
+from cognee.skills.tasks.apply_node_set import apply_node_set
+from cognee.skills.models.skill_change_event import SkillChangeEvent
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ async def upsert_skills(
 
     Returns a summary dict with counts.
     """
-    from cognee_skills.parser.skill_parser import parse_skills_folder
+    from cognee.skills.parser.skill_parser import parse_skills_folder
 
     skills_folder = str(Path(skills_folder).resolve())
     await setup()
@@ -140,7 +141,7 @@ async def upsert_skills(
     new_by_id = {s.skill_id: s for s in new_skills}
 
     engine = await get_graph_engine()
-    raw_nodes, _ = await engine.get_graph_data()
+    raw_nodes, _ = await engine.get_nodeset_subgraph(node_type=NodeSet, node_name=[node_set])
     existing_skills: Dict[str, tuple] = {
         props.get("skill_id"): (nid, props)
         for nid, props in raw_nodes
@@ -255,3 +256,49 @@ async def upsert_skills(
     }
     logger.info("Upsert complete: %s", summary)
     return summary
+
+
+async def remove_skill(skill_id: str) -> bool:
+    """Remove a single skill by skill_id from graph and vector stores.
+
+    Also emits a SkillChangeEvent for temporal tracking.
+
+    Returns True if the skill was found and deleted, False otherwise.
+    """
+    await setup()
+
+    engine = await get_graph_engine()
+    raw_nodes, _ = await engine.get_nodeset_subgraph(node_type=NodeSet, node_name=["skills"])
+
+    skill_nid = None
+    skill_props = None
+    for nid, props in raw_nodes:
+        if props.get("type") == "Skill" and props.get("skill_id") == skill_id:
+            skill_nid = str(nid)
+            skill_props = props
+            break
+
+    if skill_nid is None:
+        logger.info("Skill '%s' not found in graph", skill_id)
+        return False
+
+    await engine.delete_nodes([skill_nid])
+
+    vector_engine = get_vector_engine()
+    for field in ["name", "instruction_summary", "description"]:
+        collection = f"Skill_{field}"
+        try:
+            await vector_engine.delete_data_points(collection, [skill_nid])
+        except Exception:
+            pass
+
+    event = _make_change_event(
+        skill_id,
+        skill_props.get("name", skill_id),
+        "removed",
+        old_hash=skill_props.get("content_hash", ""),
+    )
+    await add_data_points([event])
+
+    logger.info("Removed skill '%s' (node %s)", skill_id, skill_nid)
+    return True

@@ -4,9 +4,9 @@ Ingest skills -> recommend -> pick top -> simulate execution -> record ->
 promote -> recommend again (prefers weights shift).
 
 Usage:
-    python cognee_skills/example.py                           # uses built-in example_skills/
-    python cognee_skills/example.py /path/to/skills           # uses external folder
-    python cognee_skills/example.py /path/to/skills my-repo   # with source_repo label
+    python -m cognee.skills.example                           # uses built-in example_skills/
+    python -m cognee.skills.example /path/to/skills           # uses external folder
+    python -m cognee.skills.example /path/to/skills my-repo   # with source_repo label
 """
 
 from __future__ import annotations
@@ -21,10 +21,11 @@ import cognee
 
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
-from cognee_skills.pipeline import ingest_skills
-from cognee_skills.observe import record_skill_run
-from cognee_skills.promote import promote_skill_runs
-from cognee_skills.retrieve import recommend_skills
+from cognee.modules.engine.models.node_set import NodeSet
+from cognee.skills.pipeline import ingest_skills
+from cognee.skills.observe import record_skill_run
+from cognee.skills.promote import promote_skill_runs
+from cognee.skills.retrieve import recommend_skills
 
 COGNEE_SYSTEM_DIR = Path(__file__).parent / ".cognee_system"
 DEFAULT_SKILLS_DIR = Path(__file__).parent / "example_skills"
@@ -66,7 +67,9 @@ async def _resolve_task_pattern(task_text: str, top_rec: Dict[str, Any]) -> str:
         if hits:
             hit_id = str(hits[0].id)
             engine = await get_graph_engine()
-            raw_nodes, _ = await engine.get_graph_data()
+            raw_nodes, _ = await engine.get_nodeset_subgraph(
+                node_type=NodeSet, node_name=["skills"]
+            )
             for nid, props in raw_nodes:
                 if str(nid) == hit_id and props.get("type") == "TaskPattern":
                     pk = props.get("pattern_key", "")
@@ -228,8 +231,15 @@ async def main() -> None:
         print(f"    prefers_score: {b['prefers_score']}  ->  {f['prefers_score']}")
         print(f"    final_score:   {b['score']}  ->  {f['score']}")
 
-    print("\nDone. To visualize the graph:")
-    print("  PYTHONPATH=. .venv/bin/python cognee_skills/inspect_graph.py")
+    # ── Step 5: Visualize the graph ──
+    print(f"\n{'=' * 60}")
+    print("STEP 5: Visualizing the skills graph")
+    print("=" * 60)
+    graph_path = COGNEE_SYSTEM_DIR.parent / "graph.html"
+    await cognee.visualize_graph(str(graph_path))
+    print(f"  Graph saved to: {graph_path}")
+    print(f"  Open in browser: file://{graph_path}")
+    print("\nDone.")
 
 
 if __name__ == "__main__":
