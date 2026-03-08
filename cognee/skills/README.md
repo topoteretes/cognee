@@ -221,6 +221,8 @@ You’ll see the **preference boost appear in the routing scores** after promoti
 
 An interactive graph visualization is also generated at the end.
 
+Bundled examples (`summarize`, `code-review`, `data-extraction`) are taken from [Agent-Skills-for-Context-Engineering](https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering/tree/main).
+
 > **Warning:** This calls `cognee.prune.prune_system()` at startup, which deletes all existing cognee data.
 
 ---
