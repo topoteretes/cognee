@@ -151,9 +151,12 @@ class Skills:
         return {
             "skill_id": skill_node.get("skill_id", ""),
             "name": skill_node.get("name", ""),
+            "instructions": skill_node.get("instructions", ""),
             "instruction_summary": skill_node.get("instruction_summary", ""),
+            "description": skill_node.get("description", ""),
             "tags": skill_node.get("tags", []),
             "complexity": skill_node.get("complexity", ""),
+            "source_path": skill_node.get("source_path", ""),
             "task_patterns": patterns,
         }
 

@@ -5,7 +5,8 @@ Primary API (via ``from cognee import skills``):
     skills.upsert()       — re-ingest, skipping unchanged, updating changed, removing deleted
     skills.remove()       — remove a single skill by id
     skills.get_context()  — ranked skill recommendations for a task
-    skills.load()         — full details for a skill by id
+    skills.load()         — full details (including full instructions) for a skill by id
+    skills.list()         — list all ingested skills with summaries
     skills.observe()      — record a skill execution to short-term cache
     skills.promote()      — promote cached runs and update prefers edges
 

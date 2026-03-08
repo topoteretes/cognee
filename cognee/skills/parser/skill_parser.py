@@ -13,12 +13,17 @@ Supports the Anthropic skills convention:
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid5
 
+import yaml
+
 from cognee.skills.models.skill import Skill, SkillResource
+
+logger = logging.getLogger(__name__)
 
 NAMESPACE = UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
@@ -60,7 +65,11 @@ def _deterministic_id(namespace_key: str) -> UUID:
 
 
 def _parse_frontmatter(text: str) -> tuple[Dict[str, Any], str]:
-    """Split YAML frontmatter and markdown body from a SKILL.md file."""
+    """Split YAML frontmatter and markdown body from a SKILL.md file.
+
+    Uses yaml.safe_load for robust parsing of lists, nested objects,
+    multi-line scalars, and special characters in values.
+    """
     match = re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)", text, re.DOTALL)
     if not match:
         return {}, text
@@ -68,35 +77,16 @@ def _parse_frontmatter(text: str) -> tuple[Dict[str, Any], str]:
     raw_yaml = match.group(1)
     body = match.group(2)
 
-    frontmatter: Dict[str, Any] = {}
-    current_key: Optional[str] = None
-    current_value_lines: list[str] = []
+    try:
+        frontmatter = yaml.safe_load(raw_yaml)
+    except yaml.YAMLError as exc:
+        logger.warning("Failed to parse YAML frontmatter: %s", exc)
+        frontmatter = {}
 
-    for line in raw_yaml.split("\n"):
-        kv_match = re.match(r"^(\w[\w-]*)\s*:\s*(.*)", line)
-        if kv_match:
-            if current_key is not None:
-                frontmatter[current_key] = _collapse_value(current_value_lines)
-            current_key = kv_match.group(1)
-            current_value_lines = [kv_match.group(2)]
-        elif current_key is not None:
-            current_value_lines.append(line)
-
-    if current_key is not None:
-        frontmatter[current_key] = _collapse_value(current_value_lines)
+    if not isinstance(frontmatter, dict):
+        frontmatter = {}
 
     return frontmatter, body.strip()
-
-
-def _collapse_value(lines: list[str]) -> str:
-    """Join multi-line YAML scalar values into a single string."""
-    joined = " ".join(line.strip() for line in lines if line.strip())
-    for quote in ('"', "'"):
-        if joined.startswith(quote) and joined.endswith(quote):
-            joined = joined[1:-1]
-    if joined.startswith(">"):
-        joined = joined[1:].strip()
-    return joined.strip()
 
 
 def _content_hash(text: str) -> str:
@@ -163,7 +153,7 @@ def _extract_tags(body: str, frontmatter: Dict[str, Any]) -> List[str]:
     if "tags" in frontmatter:
         raw = frontmatter["tags"]
         if isinstance(raw, list):
-            return raw
+            return [str(t).strip() for t in raw if t is not None]
         return [t.strip() for t in str(raw).split(",") if t.strip()]
 
     tags: List[str] = []
@@ -209,32 +199,44 @@ def _extract_triggers(description: str) -> List[str]:
     return triggers
 
 
-def parse_skill_folder(
-    skill_dir: Path,
+def parse_skill_file(
+    skill_md: Path,
     source_repo: str = "",
+    skill_key: Optional[str] = None,
 ) -> Optional[Skill]:
-    """Parse a single skill folder into a Skill DataPoint."""
-    skill_md = skill_dir / SKILL_ENTRY_FILE
+    """Parse a single SKILL.md file into a Skill DataPoint.
+
+    Args:
+        skill_md: Path to the SKILL.md file.
+        source_repo: Provenance label.
+        skill_key: Override for skill_id; defaults to parent directory name,
+                   or the file stem if the file is at the skills root.
+    """
     if not skill_md.is_file():
         return None
+
+    if skill_key is None:
+        skill_key = skill_md.parent.name
 
     raw_text = skill_md.read_text(encoding="utf-8")
     frontmatter, body = _parse_frontmatter(raw_text)
 
-    name = frontmatter.pop("name", skill_dir.name)
+    name = frontmatter.pop("name", skill_key)
     description = frontmatter.pop("description", "")
 
     triggers = _extract_triggers(description)
     tags = _extract_tags(body, frontmatter)
     complexity = _detect_complexity(body)
-    resources = _scan_resources(skill_dir)
+
+    skill_dir = skill_md.parent
+    resources = _scan_resources(skill_dir) if skill_dir != skill_md else []
 
     known_keys = {"name", "description", "tags"}
     extra = {k: v for k, v in frontmatter.items() if k not in known_keys} or None
 
     skill = Skill(
-        id=_deterministic_id(f"skill:{skill_dir.name}"),
-        skill_id=skill_dir.name,
+        id=_deterministic_id(f"skill:{skill_key}"),
+        skill_id=skill_key,
         name=name,
         description=description,
         instructions=body,
@@ -244,7 +246,7 @@ def parse_skill_folder(
         tools=[],
         triggers=triggers,
         tags=tags,
-        source_path=str(skill_dir),
+        source_path=str(skill_md.parent),
         source_repo=source_repo,
         content_hash=_content_hash(raw_text),
         complexity=complexity,
@@ -256,18 +258,34 @@ def parse_skill_folder(
     return skill
 
 
+def parse_skill_folder(
+    skill_dir: Path,
+    source_repo: str = "",
+) -> Optional[Skill]:
+    """Parse a single skill folder into a Skill DataPoint.
+
+    Looks for SKILL.md inside the given directory.
+    """
+    skill_md = skill_dir / SKILL_ENTRY_FILE
+    return parse_skill_file(skill_md, source_repo=source_repo)
+
+
 def parse_skills_folder(
     skills_root: str | Path,
     source_repo: str = "",
 ) -> List[Skill]:
-    """Parse all skill folders under a root directory.
+    """Parse all skill folders (and flat SKILL.md files) under a root directory.
+
+    Supports two layouts:
+      1. Subfolder convention: ``skills_root/my-skill/SKILL.md``
+      2. Flat files: ``skills_root/SKILL.md`` or ``skills_root/my-skill.md``
 
     Args:
         skills_root: Path to the directory containing skill subdirectories.
         source_repo: Provenance label (e.g. "anthropics/skills", "my-org/skills").
 
     Returns:
-        List of Skill DataPoints, one per valid skill folder found.
+        List of Skill DataPoints, one per valid skill folder/file found.
     """
     skills_root = Path(skills_root)
     if not skills_root.is_dir():
@@ -276,12 +294,33 @@ def parse_skills_folder(
     if not source_repo:
         source_repo = skills_root.name
 
+    seen_keys: set[str] = set()
     skills: List[Skill] = []
+
     for child in sorted(skills_root.iterdir()):
-        if not child.is_dir():
+        if child.is_dir():
+            skill = parse_skill_folder(child, source_repo=source_repo)
+            if skill is not None:
+                seen_keys.add(skill.skill_id)
+                skills.append(skill)
+
+    for child in sorted(skills_root.iterdir()):
+        if not child.is_file():
             continue
-        skill = parse_skill_folder(child, source_repo=source_repo)
+        if child.suffix.lower() != ".md":
+            continue
+
+        if child.name.upper() == SKILL_ENTRY_FILE:
+            skill_key = skills_root.name
+        else:
+            skill_key = child.stem
+
+        if skill_key in seen_keys:
+            continue
+
+        skill = parse_skill_file(child, source_repo=source_repo, skill_key=skill_key)
         if skill is not None:
+            seen_keys.add(skill_key)
             skills.append(skill)
 
     return skills

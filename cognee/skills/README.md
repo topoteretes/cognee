@@ -24,6 +24,14 @@ my_skills/
     SKILL.md
 ```
 
+Flat files are also supported -- you can place `SKILL.md` files directly in the root:
+
+```
+my_skills/
+  summarize.md
+  code-review.md
+```
+
 ### 2. Ingest and use
 
 ```python
@@ -108,7 +116,7 @@ The repo ships with four example skills in `cognee/skills/example_skills/`, the 
 | `summarize` | Summarize documents, articles, or text into concise key points |
 | `code-review` | Review code for bugs, style issues, and improvements |
 | `data-extraction` | Extract structured data from unstructured text, PDFs, or web pages |
-| `skill-routing` | Meta-skill that teaches agents to use all 7 cognee-skills MCP tools for autonomous skill discovery, routing, and learning |
+| `skill-routing` | Meta-skill that teaches agents to use all 8 cognee-skills MCP tools for autonomous skill discovery, routing, and learning |
 
 ### Try them out
 
@@ -144,7 +152,8 @@ from cognee import skills
 | `skills.upsert(skills_folder, dataset_name="skills")` | Re-ingest: skip unchanged, update changed, delete removed |
 | `skills.remove(skill_id)` | Remove a single skill from graph and vector stores |
 | `skills.get_context(task_text, top_k=5)` | Ranked skill recommendations with scores |
-| `skills.load(skill_id)` | Full skill details from the graph |
+| `skills.load(skill_id)` | Full skill details including instructions from the graph |
+| `skills.list()` | List all ingested skills with summaries |
 | `skills.observe(run_dict)` | Record a skill execution to short-term cache |
 | `skills.promote(session_id=None)` | Promote cached runs and update preference edges |
 
@@ -222,7 +231,7 @@ Or with Docker:
 docker run -e TRANSPORT_MODE=sse --env-file ./.env -p 8000:8000 --rm -it cognee/cognee-mcp:main
 ```
 
-See the [cognee-mcp README](../../cognee-mcp/README.md) for full setup options.
+See the [cognee-mcp README](https://github.com/topoteretes/cognee/tree/dev/cognee-mcp) for full setup options.
 
 ### Step 2: Connect your IDE
 
@@ -261,7 +270,7 @@ await skills.ingest("./my_skills")
 
 ### Step 4: Teach your agent about skill routing
 
-Copy the contents of [`agent_instructions.md`](agent_instructions.md) into your IDE's agent instructions. Where you paste it depends on your IDE:
+Copy the contents of [`agent_instructions.md`](https://github.com/topoteretes/cognee/blob/dev/cognee/skills/agent_instructions.md) into your IDE's agent instructions. Where you paste it depends on your IDE:
 
 | IDE | Where to paste |
 |-----|----------------|
