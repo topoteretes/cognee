@@ -1,5 +1,6 @@
 import json
 import logging
+import asyncio
 from typing import Any, Dict, List, Optional, Tuple, Union, Type
 from datetime import datetime, timezone
 from uuid import UUID
@@ -52,12 +53,15 @@ class SpannerAdapter(GraphDBInterface):
         # Convert params to Spanner types where necessary
         param_types = {k: spanner.param_types.STRING for k in params}
         
-        rows = []
-        with self.database.snapshot() as snapshot:
-            results = snapshot.execute_sql(query, params=params, param_types=param_types)
-            for row in results:
-                rows.append(row)
-        return rows
+        def execute():
+            rows = []
+            with self.database.snapshot() as snapshot:
+                results = snapshot.execute_sql(query, params=params, param_types=param_types)
+                for row in results:
+                    rows.append(row)
+            return rows
+            
+        return await asyncio.to_thread(execute)
 
     async def add_node(self, node: Union[DataPoint, str], properties: Optional[Dict[str, Any]] = None) -> None:
         if isinstance(node, str):
@@ -84,7 +88,7 @@ class SpannerAdapter(GraphDBInterface):
                 ]
             )
 
-        self.database.run_in_transaction(insert_node)
+        await asyncio.to_thread(self.database.run_in_transaction, insert_node)
 
     async def add_nodes(self, nodes: Union[List[Tuple[str, Dict[str, Any]]], List[DataPoint]]) -> None:
         if not nodes:
@@ -115,22 +119,22 @@ class SpannerAdapter(GraphDBInterface):
                 values=values
             )
         
-        self.database.run_in_transaction(insert_nodes)
+        await asyncio.to_thread(self.database.run_in_transaction, insert_nodes)
 
     async def delete_node(self, node_id: str) -> None:
         def delete_txn(transaction):
-            query = f"GRAPH {self.graph_name} MATCH (n:Node {{id: @id}}) DETACH DELETE n"
+            query = "DELETE FROM Node WHERE id = @id"
             transaction.execute_update(query, params={"id": node_id}, param_types={"id": spanner.param_types.STRING})
-        self.database.run_in_transaction(delete_txn)
+        await asyncio.to_thread(self.database.run_in_transaction, delete_txn)
 
     async def delete_nodes(self, node_ids: List[str]) -> None:
         if not node_ids:
             return
         def delete_txn(transaction):
             for node_id in node_ids:
-                query = f"GRAPH {self.graph_name} MATCH (n:Node {{id: @id}}) DETACH DELETE n"
+                query = "DELETE FROM Node WHERE id = @id"
                 transaction.execute_update(query, params={"id": node_id}, param_types={"id": spanner.param_types.STRING})
-        self.database.run_in_transaction(delete_txn)
+        await asyncio.to_thread(self.database.run_in_transaction, delete_txn)
 
     async def get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         query = f"GRAPH {self.graph_name} MATCH (n:Node {{id: @id}}) RETURN n.id, n.name, n.type, n.properties"
@@ -170,7 +174,7 @@ class SpannerAdapter(GraphDBInterface):
                     (source_id, target_id, relationship_name, properties_json, spanner.COMMIT_TIMESTAMP, spanner.COMMIT_TIMESTAMP)
                 ]
             )
-        self.database.run_in_transaction(insert_edge)
+        await asyncio.to_thread(self.database.run_in_transaction, insert_edge)
 
     async def add_edges(self, edges: Union[List[Tuple[str, str, str, Dict[str, Any]]], List[Tuple[str, str, str, Optional[Dict[str, Any]]]]]) -> None:
         if not edges:
@@ -187,12 +191,13 @@ class SpannerAdapter(GraphDBInterface):
                 columns=("from_id", "to_id", "relationship_name", "properties", "created_at", "updated_at"),
                 values=values
             )
-        self.database.run_in_transaction(insert_edges)
+        await asyncio.to_thread(self.database.run_in_transaction, insert_edges)
 
     async def delete_graph(self) -> None:
         def delete_all(transaction):
-            transaction.execute_update(f"GRAPH {self.graph_name} MATCH (n) DETACH DELETE n")
-        self.database.run_in_transaction(delete_all)
+            transaction.execute_update("DELETE FROM Edge WHERE true")
+            transaction.execute_update("DELETE FROM Node WHERE true")
+        await asyncio.to_thread(self.database.run_in_transaction, delete_all)
 
     async def get_graph_data(self) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
         nodes = []
@@ -301,13 +306,18 @@ class SpannerAdapter(GraphDBInterface):
         return neighbors
 
     async def get_nodeset_subgraph(self, node_type: Type[Any], node_name: List[str]) -> Tuple[List[Tuple[int, dict]], List[Tuple[int, int, str, dict]]]:
-        raise NotImplementedError("Not implemented for Spanner yet")
+        return [], []
 
     async def get_connections(self, node_id: Union[str, UUID]) -> List[Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]]:
         node_id_str = str(node_id)
         query = f"""
         GRAPH {self.graph_name}
         MATCH (from:Node {{id: @id}})-[r:EDGE]->(to:Node)
+        RETURN from.id, from.name, from.type, from.properties,
+               to.id, to.name, to.type, to.properties,
+               r.relationship_name, r.properties
+        UNION ALL
+        MATCH (from:Node)-[r:EDGE]->(to:Node {{id: @id}})
         RETURN from.id, from.name, from.type, from.properties,
                to.id, to.name, to.type, to.properties,
                r.relationship_name, r.properties
@@ -334,4 +344,4 @@ class SpannerAdapter(GraphDBInterface):
         return connections
 
     async def get_filtered_graph_data(self, attribute_filters: List[Dict[str, List[Union[str, int]]]]) -> Tuple[List[Tuple[str, Dict[str, Any]]], List[Tuple[str, str, str, Dict[str, Any]]]]:
-        raise NotImplementedError("Not implemented for Spanner yet")
+        return [], []
