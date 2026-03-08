@@ -77,7 +77,7 @@ Cognee is an open-source knowledge engine that lets you ingest data in any forma
 
 ### Why use Cognee:
 
-- Knowledge infrastructure — unified ingestion, graph/vector search, runs locally, ontology grounding
+- Knowledge infrastructure — unified ingestion, graph/vector search, runs locally, ontology grounding, multimodal
 - Persistent and Learning Agents - learn from feedback, context management, cross-agent knowledge sharing
 - Reliable and Trustworthy Agents - agentic user/tenant isolation, traceability, OTEL collector, audit traits
 
