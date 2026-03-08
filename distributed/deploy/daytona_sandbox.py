@@ -94,36 +94,54 @@ def deploy_cognee():
     _run_streamed(sandbox, session_id, "pip install 'cognee[api]'", label="install")
     print("\n")
 
-    # Step 2: Start the API server as a daemon process using exec (not session)
-    # Using a persistent process that survives session cleanup
+    # Step 2: Kill any existing server, then start fresh
     print("=== Starting Cognee API server ===")
+    sandbox.process.exec("pkill -f uvicorn || true", timeout=5)
+    time.sleep(1)
+
+    # Write a small health-check script to avoid shell escaping issues
     sandbox.process.exec(
-        "bash -c 'nohup python -m uvicorn cognee.api.client:app "
-        "--host 0.0.0.0 --port 8000 > /tmp/cognee-server.log 2>&1 & "
-        "echo $!'",
+        "cat > /tmp/healthcheck.py << 'PYEOF'\n"
+        "import urllib.request, sys\n"
+        "try:\n"
+        "    urllib.request.urlopen('http://localhost:8000/health', timeout=5)\n"
+        "    print('OK')\n"
+        "except Exception:\n"
+        "    print('WAITING')\n"
+        "PYEOF",
+        timeout=5,
+    )
+
+    # Start server as a background daemon
+    sandbox.process.exec(
+        "nohup python -m uvicorn cognee.api.client:app "
+        "--host 0.0.0.0 --port 8000 > /tmp/cognee-server.log 2>&1 &",
         timeout=10,
     )
 
     # Wait for server to be ready
     print("Waiting for server to start...", flush=True)
-    for i in range(20):
+    for i in range(30):
         time.sleep(3)
-        result = sandbox.process.exec(
-            "python -c \"import urllib.request; "
-            "urllib.request.urlopen('http://localhost:8000/health'); "
-            "print('OK')\" 2>/dev/null || echo 'WAITING'",
-            timeout=10,
-        )
-        status = result.result.strip()
+        try:
+            result = sandbox.process.exec("python /tmp/healthcheck.py", timeout=10)
+            status = result.result.strip()
+        except Exception:
+            status = "WAITING"
         if "OK" in status:
             print("Server is ready!")
             break
         print(f"  ({i+1}) {status}", flush=True)
     else:
         # Print server log for debugging
-        log = sandbox.process.exec("cat /tmp/cognee-server.log 2>/dev/null", timeout=5)
-        print(f"\nServer log:\n{log.result}")
-        print("WARNING: Server may not be ready yet. Check logs above.")
+        try:
+            log = sandbox.process.exec(
+                "tail -30 /tmp/cognee-server.log", timeout=5
+            )
+            print(f"\nServer log:\n{log.result}")
+        except Exception:
+            pass
+        print("WARNING: Server may not be ready yet.")
 
     # Generate a signed preview URL (no auth headers needed)
     signed_url = sandbox.create_signed_preview_url(8000, expires_in_seconds=86400)
