@@ -756,13 +756,13 @@ function renderGraph(graph, changed = { nodes: [], edges: [] }) {
         })
     )
     .force("charge", d3.forceManyBody().strength((node) => -(460 + getRadius(node) * 30)))
-    .force("collide", d3.forceCollide().radius((node) => getRadius(node) + 36).iterations(4))
+    .force("collide", d3.forceCollide().radius((node) => getRadius(node) + 34).iterations(2))
     .force("x", d3.forceX((d) => targetById.get(d.id)?.x ?? centerX).strength(0.04))
     .force("y", d3.forceY((d) => targetById.get(d.id)?.y ?? centerY).strength(0.046))
     .force("center", d3.forceCenter(centerX, centerY))
     .alpha(1.0)
-    .alphaDecay(0.016)
-    .velocityDecay(0.33);
+    .alphaDecay(0.04)
+    .velocityDecay(0.44);
 
   state.simulation = simulation;
 
@@ -851,15 +851,6 @@ function renderGraph(graph, changed = { nodes: [], edges: [] }) {
 
   nodeGroup.append("title").text((d) => `${d.display_label}\nweight=${d.feedback_weight}`);
 
-  const nodeLabelMetrics = new Map();
-  nodes.forEach((node) => {
-    const text = shortLabel(String(node.display_label || "node"), 30);
-    nodeLabelMetrics.set(node.id, {
-      w: Math.max(26, text.length * 6.1 + 8),
-      h: 13,
-    });
-  });
-
   const nodeLabel = container
     .append("g")
     .selectAll("text")
@@ -870,58 +861,19 @@ function renderGraph(graph, changed = { nodes: [], edges: [] }) {
     .attr("text-anchor", "middle")
     .attr("paint-order", "stroke")
     .attr("stroke", "rgba(8, 18, 30, 0.88)")
-    .attr("stroke-width", 3.5)
-    .attr("opacity", 0)
+    .attr("stroke-width", 2.2)
+    .attr("opacity", 0.94)
     .attr("pointer-events", "none")
     .text((d) => shortLabel(String(d.display_label || "node"), 30));
 
-  let lastLabelVisibilityAt = 0;
-  const LABEL_VISIBILITY_INTERVAL_MS = 140;
-
   const updateLabelVisibility = () => {
-    const placed = [];
-    const visibleNodeIds = new Set();
-
-    const nodeCandidates = nodes
-      .map((node) => {
-        const side = stableHash(node.id) % 2 === 0 ? 1 : -1;
-        const y = node.y + side * (nodeRadius(node.feedback_weight) + 16);
-        const m = nodeLabelMetrics.get(node.id) || { w: 30, h: 13 };
-        const priority = (activeNodeSelection === node.id ? 1000 : 0) + nodeRadius(node.feedback_weight);
-        return { id: node.id, x: node.x, y, w: m.w, h: m.h, priority };
-      })
-      .sort((a, b) => b.priority - a.priority);
-
-    nodeCandidates.forEach((candidate) => {
-      const left = candidate.x - candidate.w / 2;
-      const right = candidate.x + candidate.w / 2;
-      const top = candidate.y - candidate.h / 2;
-      const bottom = candidate.y + candidate.h / 2;
-      const inBounds = left >= 8 && right <= width - 8 && top >= 8 && bottom <= height - 8;
-
-      if (!inBounds && candidate.id !== activeNodeSelection) {
-        return;
-      }
-
-      const overlaps = placed.some((p) => {
-        const overlapX = candidate.w / 2 + p.w / 2 - Math.abs(candidate.x - p.x);
-        const overlapY = candidate.h / 2 + p.h / 2 - Math.abs(candidate.y - p.y);
-        return overlapX > 0 && overlapY > 0;
-      });
-
-      if (!overlaps || candidate.id === activeNodeSelection) {
-        visibleNodeIds.add(candidate.id);
-        placed.push(candidate);
-      }
-    });
-
     nodeLabel
       .attr("x", (d) => d.x)
       .attr("y", (d) => {
         const side = stableHash(d.id) % 2 === 0 ? 1 : -1;
         return d.y + side * (nodeRadius(d.feedback_weight) + 16);
       })
-      .attr("opacity", (d) => (visibleNodeIds.has(d.id) ? 0.96 : 0));
+      .attr("opacity", 0.94);
 
     edgeLabel
       .attr("x", (d) => {
@@ -966,12 +918,7 @@ function renderGraph(graph, changed = { nodes: [], edges: [] }) {
       .attr("y2", (d) => d.target.y);
 
     nodeGroup.attr("cx", (d) => d.x).attr("cy", (d) => d.y);
-
-    const now = performance.now();
-    if (now - lastLabelVisibilityAt >= LABEL_VISIBILITY_INTERVAL_MS) {
-      updateLabelVisibility();
-      lastLabelVisibilityAt = now;
-    }
+    updateLabelVisibility();
   });
 
   simulation.on("end", () => {
