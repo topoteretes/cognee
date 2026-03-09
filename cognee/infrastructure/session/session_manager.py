@@ -372,6 +372,7 @@ class SessionManager:
         Add or update feedback for a QA entry.
 
         Convenience method that updates only feedback fields.
+        Resets feedback-weight memify status so updated feedback can be re-applied.
         Returns True if updated, False if not found or cache unavailable.
         """
         return await self.update_qa(
@@ -379,6 +380,7 @@ class SessionManager:
             qa_id=qa_id,
             feedback_text=feedback_text,
             feedback_score=feedback_score,
+            memify_metadata={"apply_feedback_weights": False},
             session_id=session_id,
         )
 

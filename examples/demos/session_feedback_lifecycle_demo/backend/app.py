@@ -557,8 +557,6 @@ async def send_question(payload: SendPayload):
         "session_id": session_id,
         "answer": answer,
         "qa_id": qa_id,
-        "retrieval_mode": "graph_based",
-        "retrieval_label": "Graph-based retrieval",
         "auto_feedback": {
             "feedback_score": feedback_score,
             "feedback_text": feedback_text,
