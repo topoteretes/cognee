@@ -167,6 +167,63 @@ To open the local UI, run:
 cognee-cli -ui
 ```
 
+## Monitor Asynchronous Memify Runs
+
+When memify is started in background mode, Cognee returns a `pipeline_run_id` for that specific execution. That run ID is the safest polling key because a dataset can be memified multiple times over its lifetime, while dataset-based status only tells you about the latest memify run for that dataset.
+
+Start memify in background mode:
+
+```bash
+curl -X POST https://your-cognee-host.example/api/v1/memify \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "dataset_name": "research_notes",
+    "run_in_background": true
+  }'
+```
+
+Example response:
+
+```json
+{
+  "status": "PipelineRunStarted",
+  "pipeline_run_id": "8a8cc3be-c9de-4204-84de-f806686d0b4a",
+  "dataset_id": "41069bd5-7292-4b8c-8d45-8169285affff",
+  "dataset_name": "research_notes",
+  "payload": []
+}
+```
+
+Check that exact run later:
+
+```bash
+curl https://your-cognee-host.example/api/v1/memify/status/8a8cc3be-c9de-4204-84de-f806686d0b4a
+```
+
+Example response:
+
+```json
+{
+  "pipeline_run_id": "8a8cc3be-c9de-4204-84de-f806686d0b4a",
+  "dataset_id": "41069bd5-7292-4b8c-8d45-8169285affff",
+  "pipeline_name": "memify_pipeline",
+  "status": "DATASET_PROCESSING_COMPLETED",
+  "created_at": "2025-01-01T00:00:00Z",
+  "run_info": null,
+  "dataset_name": "research_notes"
+}
+```
+
+If you only know the dataset, you can fetch the most recent memify run for it:
+
+```bash
+curl 'https://your-cognee-host.example/api/v1/memify/status?dataset_name=research_notes'
+```
+
+If more than one readable dataset shares the same name, use `dataset_id` instead of `dataset_name` so the lookup stays deterministic.
+
+Use the dataset-based endpoint for dashboards and the run-id endpoint for precise client polling of a specific asynchronous request.
+
 ## Demos & Examples
 
 See Cognee in action:

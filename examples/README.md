@@ -77,6 +77,7 @@
 | `guides/custom_tasks_and_pipelines_1.py` | Custom tasks and pipelines (variant) |
 | `guides/graph_visualization.py` | Graph visualization guide |
 | `guides/low_level_llm.py` | Low-level LLM usage |
+| `guides/memify_status_api_example.py` | Poll memify status through the HTTP API |
 | `guides/memify_quickstart.py` | Memify quickstart |
 | `guides/ontology_quickstart.py` | Ontology quickstart |
 | `guides/s3_storage.py` | S3 storage |
