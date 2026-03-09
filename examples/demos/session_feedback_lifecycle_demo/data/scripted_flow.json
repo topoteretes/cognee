@@ -1,0 +1,25 @@
+{
+  "session_id": "coffee_support_demo_session",
+  "questions": [
+    {
+      "question": "Where is Blue Harbor Coffee Roasters based and how do they source beans?",
+      "feedback_score": 5,
+      "feedback_text": "Excellent summary with the right sourcing details."
+    },
+    {
+      "question": "What are the subscription tiers and what do higher tiers include?",
+      "feedback_score": 5,
+      "feedback_text": "Very helpful, this answer was specific and complete."
+    },
+    {
+      "question": "Can customers pause subscriptions every week without limits?",
+      "feedback_score": 1,
+      "feedback_text": "Incorrect. The policy allows a monthly pause, not unlimited weekly pauses."
+    },
+    {
+      "question": "Does the support team refuse replacements for damaged deliveries?",
+      "feedback_score": 1,
+      "feedback_text": "Wrong. Damaged shipments are replaced within forty-eight hours."
+    }
+  ]
+}
