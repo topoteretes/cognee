@@ -1,8 +1,29 @@
 import json
-from urllib import request
+import os
+from urllib import error, request
 
 
 BASE_URL = "https://your-cognee-host.example"
+TIMEOUT_SECONDS = 30
+AUTHORIZATION = os.getenv("COGNEE_AUTHORIZATION")
+
+
+def build_headers() -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if AUTHORIZATION:
+        headers["Authorization"] = AUTHORIZATION
+    return headers
+
+
+def read_json(req: request.Request) -> dict:
+    try:
+        with request.urlopen(req, timeout=TIMEOUT_SECONDS) as response:
+            return json.load(response)
+    except error.HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"{req.get_method()} {req.full_url} failed with {exc.code}: {details}") from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"{req.get_method()} {req.full_url} failed: {exc.reason}") from exc
 
 
 def post_json(path: str, payload: dict) -> dict:
@@ -10,17 +31,15 @@ def post_json(path: str, payload: dict) -> dict:
     req = request.Request(
         f"{BASE_URL}{path}",
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers=build_headers(),
         method="POST",
     )
-
-    with request.urlopen(req) as response:
-        return json.load(response)
+    return read_json(req)
 
 
 def get_json(path: str) -> dict:
-    with request.urlopen(f"{BASE_URL}{path}") as response:
-        return json.load(response)
+    req = request.Request(f"{BASE_URL}{path}", headers=build_headers(), method="GET")
+    return read_json(req)
 
 
 def main():
