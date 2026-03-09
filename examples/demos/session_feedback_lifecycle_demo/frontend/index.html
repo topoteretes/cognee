@@ -107,6 +107,13 @@
         </div>
         <div id="chatResizer" class="chat-resizer" title="Drag to resize chat/content"></div>
         <div id="chatBottom" class="chat-bottom">
+          <div class="topk-row">
+            <label for="topKSlider">Search depth (top_k)</label>
+            <div class="topk-control">
+              <input id="topKSlider" type="range" min="1" max="10" step="1" value="5" />
+              <span id="topKValue" class="topk-value">5</span>
+            </div>
+          </div>
           <form id="sendForm" class="send-form">
             <input id="questionInput" type="text" placeholder="Ask a question or add feedback" required />
             <button type="submit" class="btn primary">Send</button>

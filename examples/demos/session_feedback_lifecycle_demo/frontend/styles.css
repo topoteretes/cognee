@@ -478,6 +478,91 @@ body.guide-open .app-shell {
   align-items: stretch;
 }
 
+.topk-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid rgba(158, 185, 211, 0.22);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(13, 25, 39, 0.72), rgba(10, 20, 33, 0.68));
+  padding: 8px 10px;
+}
+
+.topk-row label {
+  color: #d1e3f7;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.topk-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+#topKSlider {
+  width: min(420px, 100%);
+  min-width: 220px;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(124, 183, 244, 0.9), rgba(83, 141, 217, 0.9));
+  outline: none;
+}
+
+#topKSlider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(124, 183, 244, 0.9), rgba(83, 141, 217, 0.9));
+}
+
+#topKSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px;
+  border-radius: 50%;
+  border: 2px solid rgba(219, 237, 255, 0.92);
+  background: #0f2238;
+  box-shadow: 0 0 0 3px rgba(124, 183, 244, 0.28);
+}
+
+#topKSlider::-moz-range-track {
+  height: 6px;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(124, 183, 244, 0.9), rgba(83, 141, 217, 0.9));
+}
+
+#topKSlider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(219, 237, 255, 0.92);
+  background: #0f2238;
+  box-shadow: 0 0 0 3px rgba(124, 183, 244, 0.28);
+}
+
+.topk-value {
+  width: 46px;
+  flex: 0 0 46px;
+  text-align: center;
+  color: #e7f2fd;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 0;
+  border-radius: 999px;
+  border: 1px solid rgba(166, 199, 229, 0.26);
+  background: rgba(17, 33, 51, 0.74);
+}
+
 .send-form input,
 .feedback-row input {
   flex: 1;

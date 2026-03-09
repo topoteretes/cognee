@@ -46,6 +46,8 @@ const runDemoBtn = document.getElementById("runDemoBtn");
 const runMemifyBtn = document.getElementById("runMemifyBtn");
 const sendForm = document.getElementById("sendForm");
 const questionInput = document.getElementById("questionInput");
+const topKSlider = document.getElementById("topKSlider");
+const topKValue = document.getElementById("topKValue");
 let activeNodeSelection = null;
 let activeEdgeSelection = null;
 let loadingPhaseTimer = null;
@@ -59,11 +61,17 @@ let guideBeacon = null;
 let messageQueue = Promise.resolve();
 
 function setBusy(isBusy) {
-  [runDemoBtn, runMemifyBtn, showDocsBtn, questionInput]
+  [runDemoBtn, runMemifyBtn, showDocsBtn, questionInput, topKSlider]
     .filter(Boolean)
     .forEach((el) => {
       el.disabled = isBusy;
     });
+}
+
+function getTopK() {
+  const raw = Number(topKSlider?.value ?? 5);
+  const value = Number.isFinite(raw) ? Math.round(raw) : 5;
+  return Math.max(1, Math.min(10, value));
 }
 
 function renderLoadingSteps(steps) {
@@ -1114,6 +1122,7 @@ runDemoBtn.addEventListener("click", async () => {
       const sendResult = await api("/demo/send", "POST", {
         question,
         session_id: state.sessionId,
+        top_k: getTopK(),
       });
       if (sendResult.session_id) {
         state.sessionId = sendResult.session_id;
@@ -1217,6 +1226,7 @@ sendForm.addEventListener("submit", async (event) => {
     const result = await api("/demo/send", "POST", {
       question,
       session_id: state.sessionId,
+      top_k: getTopK(),
     });
     if (result.session_id) {
       state.sessionId = result.session_id;
@@ -1313,6 +1323,13 @@ guideStepButtons.forEach((btn) => {
   });
 });
 
+topKSlider?.addEventListener("input", () => {
+  const value = getTopK();
+  if (topKValue) {
+    topKValue.textContent = String(value);
+  }
+});
+
 showDocsBtn?.addEventListener("click", async () => {
   try {
     showInlineLoading("Loading ingested docs...");
@@ -1337,6 +1354,9 @@ docsBackdrop?.addEventListener("click", closeDocsModal);
     guidePanel.hidden = true;
   }
   setGuideStep(1);
+  if (topKValue) {
+    topKValue.textContent = String(getTopK());
+  }
   setupMainResizer();
   setupGraphDetailsResizer();
   setupChatResizer();

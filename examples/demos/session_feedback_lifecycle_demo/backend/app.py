@@ -38,6 +38,7 @@ MEMIFY_ALPHA = 0.619
 class SendPayload(BaseModel):
     question: str = Field(min_length=1)
     session_id: Optional[str] = None
+    top_k: int = Field(default=5, ge=1, le=10)
 
 
 class FeedbackPayload(BaseModel):
@@ -163,7 +164,7 @@ def _collect_text_candidates(value: Any, out: list[str]) -> None:
                 out.append(extracted)
 
 
-async def _safe_search(question: str, session_id: str) -> str:
+async def _safe_search(question: str, session_id: str, top_k: int = 5) -> str:
     """
     Graph mode only: use GRAPH_COMPLETION.
     """
@@ -178,7 +179,7 @@ async def _safe_search(question: str, session_id: str) -> str:
                 query_type=search_type,
                 datasets=[DATASET_NAME],
                 session_id=session_id,
-                top_k=5,
+                top_k=max(1, min(10, int(top_k))),
             )
             if results:
                 break
@@ -510,8 +511,8 @@ async def send_question(payload: SendPayload):
     feedback_score_before = getattr(latest_before, "feedback_score", None) if latest_before else None
     feedback_text_before = getattr(latest_before, "feedback_text", None) if latest_before else None
 
-    state.log("Question", f"{payload.question} [Graph-based retrieval]")
-    answer = await _safe_search(payload.question, session_id)
+    state.log("Question", f"{payload.question} [Graph-based retrieval, top_k={payload.top_k}]")
+    answer = await _safe_search(payload.question, session_id, payload.top_k)
     latest_after = await _latest_qa_for_session(session_id)
 
     qa_id_after = getattr(latest_after, "qa_id", None) if latest_after else None
