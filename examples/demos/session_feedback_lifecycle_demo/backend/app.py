@@ -223,7 +223,9 @@ async def _snapshot_graph() -> dict[str, Any]:
     for node_id, node_info in nodes_data:
         info = dict(node_info or {})
         node_id_str = str(node_id)
-        effective_weight = clamp_weight(node_weights.get(node_id_str, info.get("feedback_weight", 0.5)))
+        effective_weight = clamp_weight(
+            node_weights.get(node_id_str, info.get("feedback_weight", 0.5))
+        )
         nodes.append(
             {
                 "id": node_id_str,
@@ -402,7 +404,9 @@ async def get_session_content(
 
     target_session_id = session_id or state.session_id or DEFAULT_SESSION_ID
     user = await get_default_user()
-    entries = await cognee.session.get_session(session_id=target_session_id, last_n=last_n, user=user)
+    entries = await cognee.session.get_session(
+        session_id=target_session_id, last_n=last_n, user=user
+    )
 
     sanitized = []
     for entry in entries:
@@ -508,7 +512,9 @@ async def send_question(payload: SendPayload):
     await _ensure_dataset_context()
     latest_before = await _latest_qa_for_session(session_id)
     qa_id_before = getattr(latest_before, "qa_id", None) if latest_before else None
-    feedback_score_before = getattr(latest_before, "feedback_score", None) if latest_before else None
+    feedback_score_before = (
+        getattr(latest_before, "feedback_score", None) if latest_before else None
+    )
     feedback_text_before = getattr(latest_before, "feedback_text", None) if latest_before else None
 
     state.log("Question", f"{payload.question} [Graph-based retrieval, top_k={payload.top_k}]")
@@ -582,7 +588,9 @@ async def add_feedback(payload: FeedbackPayload):
         user=user,
     )
     if not ok:
-        raise HTTPException(status_code=404, detail="QA entry not found or feedback could not be saved")
+        raise HTTPException(
+            status_code=404, detail="QA entry not found or feedback could not be saved"
+        )
 
     state.log(
         "Manual Feedback",
@@ -643,7 +651,9 @@ async def run_demo():
     questions = scripted_flow.get("questions") or []
 
     if not isinstance(questions, list) or len(questions) < 2:
-        raise HTTPException(status_code=500, detail="scripted_flow.json must contain at least 2 questions")
+        raise HTTPException(
+            status_code=500, detail="scripted_flow.json must contain at least 2 questions"
+        )
 
     state.session_id = session_id
     user = await get_default_user()
@@ -737,7 +747,9 @@ async def get_scripted_flow():
     session_id = str(flow.get("session_id") or DEFAULT_SESSION_ID)
     questions = flow.get("questions") or []
     if not isinstance(questions, list):
-        raise HTTPException(status_code=500, detail="Invalid scripted_flow.json: questions must be a list")
+        raise HTTPException(
+            status_code=500, detail="Invalid scripted_flow.json: questions must be a list"
+        )
 
     sanitized_questions: list[dict[str, Any]] = []
     for item in questions:
