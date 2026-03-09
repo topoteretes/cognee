@@ -425,6 +425,27 @@ async def get_session_content(
     }
 
 
+@app.get("/demo/ingested_documents")
+async def get_ingested_documents():
+    if not state.initialized:
+        raise HTTPException(status_code=409, detail="Demo not initialized. Run /demo/init first.")
+
+    documents = _get_demo_documents()
+    return {
+        "ok": True,
+        "dataset_name": state.dataset_name,
+        "count": len(documents),
+        "documents": [
+            {
+                "id": index + 1,
+                "text": doc,
+                "char_count": len(doc),
+            }
+            for index, doc in enumerate(documents)
+        ],
+    }
+
+
 @app.post("/demo/init")
 async def init_demo():
     steps: list[dict[str, Any]] = []

@@ -539,6 +539,92 @@ body.is-resizing * {
   margin-top: 4px;
 }
 
+.docs-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+}
+
+.docs-modal[hidden] {
+  display: none !important;
+}
+
+.docs-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 9, 16, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.docs-panel {
+  position: relative;
+  width: min(980px, 92vw);
+  max-height: 84vh;
+  border-radius: 14px;
+  border: 1px solid rgba(168, 186, 207, 0.28);
+  background: linear-gradient(160deg, rgba(18, 31, 48, 0.96), rgba(11, 20, 32, 0.96));
+  box-shadow: 0 30px 72px rgba(3, 7, 12, 0.66);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.docs-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.docs-header h3 {
+  margin: 0;
+}
+
+.docs-list {
+  border: 1px solid rgba(168, 186, 207, 0.24);
+  border-radius: 10px;
+  background: rgba(10, 19, 30, 0.68);
+  padding: 10px;
+  overflow: auto;
+  flex: 1;
+  min-height: 120px;
+}
+
+.docs-item {
+  border: 1px solid rgba(168, 186, 207, 0.18);
+  border-radius: 10px;
+  background: rgba(14, 27, 43, 0.68);
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.docs-item:last-child {
+  margin-bottom: 0;
+}
+
+.docs-item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #acc4dc;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.docs-item pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: #e6f0fb;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .loading-overlay {
   position: fixed;
   inset: 0;

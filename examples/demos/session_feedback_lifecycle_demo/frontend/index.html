@@ -94,6 +94,7 @@
           <div class="controls-row">
             <button id="runDemoBtn" class="btn primary">Run_demo</button>
             <button id="runMemifyBtn" class="btn secondary">Run_memify_pipeline</button>
+            <button id="showDocsBtn" class="btn secondary">View Ingested Docs</button>
           </div>
           <div id="inlineLoading" class="inline-loading" aria-live="polite"></div>
           <div class="session-box">
@@ -117,5 +118,17 @@
         </div>
       </section>
     </main>
+
+    <div id="docsModal" class="docs-modal" hidden>
+      <div id="docsBackdrop" class="docs-backdrop" onclick="document.getElementById('docsModal').hidden = true"></div>
+      <section class="docs-panel">
+        <header class="docs-header">
+          <h3>Ingested Documents</h3>
+          <button id="closeDocsBtn" class="btn secondary" onclick="document.getElementById('docsModal').hidden = true">Close</button>
+        </header>
+        <div id="docsMeta" class="meta"></div>
+        <div id="docsList" class="docs-list"></div>
+      </section>
+    </div>
   </body>
 </html>

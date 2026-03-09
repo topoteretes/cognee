@@ -29,6 +29,12 @@ const chatPanel = document.querySelector(".chat-panel");
 const chatResizer = document.getElementById("chatResizer");
 const inlineLoading = document.getElementById("inlineLoading");
 const resetLayoutBtn = document.getElementById("resetLayoutBtn");
+const showDocsBtn = document.getElementById("showDocsBtn");
+const docsModal = document.getElementById("docsModal");
+const docsBackdrop = document.getElementById("docsBackdrop");
+const closeDocsBtn = document.getElementById("closeDocsBtn");
+const docsMeta = document.getElementById("docsMeta");
+const docsList = document.getElementById("docsList");
 
 const runDemoBtn = document.getElementById("runDemoBtn");
 const runMemifyBtn = document.getElementById("runMemifyBtn");
@@ -43,7 +49,7 @@ const DEFAULT_GRAPH_ROWS = "minmax(260px, 58vh) 8px minmax(120px, 1fr)";
 const DEFAULT_CHAT_ROWS = "minmax(300px, 58vh) 8px minmax(220px, 1fr)";
 
 function setBusy(isBusy) {
-  [runDemoBtn, runMemifyBtn, questionInput]
+  [runDemoBtn, runMemifyBtn, showDocsBtn, questionInput]
     .filter(Boolean)
     .forEach((el) => {
       el.disabled = isBusy;
@@ -472,6 +478,46 @@ function hideInlineLoading() {
   if (!inlineLoading) return;
   inlineLoading.classList.remove("visible");
   inlineLoading.textContent = "";
+}
+
+function openDocsModal() {
+  if (!docsModal) return;
+  docsModal.hidden = false;
+}
+
+function closeDocsModal() {
+  if (!docsModal) return;
+  docsModal.hidden = true;
+}
+
+function renderIngestedDocs(payload) {
+  if (!docsMeta || !docsList) return;
+  const docs = payload?.documents || [];
+  docsMeta.textContent = `dataset: ${payload?.dataset_name || state.datasetName} | documents: ${docs.length}`;
+  docsList.innerHTML = "";
+  if (!docs.length) {
+    docsList.textContent = "No ingested documents available.";
+    return;
+  }
+
+  const escapeHtml = (value) =>
+    String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;");
+
+  docs.forEach((doc) => {
+    const item = document.createElement("article");
+    item.className = "docs-item";
+    item.innerHTML = `
+      <div class="docs-item-head">
+        <span>Document ${doc.id}</span>
+        <span>${doc.char_count} chars</span>
+      </div>
+      <pre>${escapeHtml(doc.text || "")}</pre>
+    `;
+    docsList.appendChild(item);
+  });
 }
 
 function startInitLoadingPhases() {
@@ -1196,7 +1242,26 @@ resetLayoutBtn?.addEventListener("click", () => {
   }
 });
 
+showDocsBtn?.addEventListener("click", async () => {
+  try {
+    showInlineLoading("Loading ingested docs...");
+    const payload = await api("/demo/ingested_documents");
+    renderIngestedDocs(payload);
+    openDocsModal();
+  } catch (error) {
+    addMessage("system", `Failed to load ingested docs: ${error.message}`);
+  } finally {
+    hideInlineLoading();
+  }
+});
+
+closeDocsBtn?.addEventListener("click", closeDocsModal);
+docsBackdrop?.addEventListener("click", closeDocsModal);
+
 (async function boot() {
+  if (docsModal) {
+    docsModal.hidden = true;
+  }
   setupMainResizer();
   setupGraphDetailsResizer();
   setupChatResizer();
