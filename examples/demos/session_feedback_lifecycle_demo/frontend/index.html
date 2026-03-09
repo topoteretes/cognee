@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Session Feedback Lifecycle Demo</title>
+    <title>Session Feedback Weights Demo</title>
     <link rel="stylesheet" href="/assets/styles.css" />
     <script src="https://d3js.org/d3.v7.min.js" defer></script>
     <script src="/assets/app.js" defer></script>
@@ -139,7 +139,7 @@
           <h3>How This Demo Works</h3>
           <button id="closeGuideBtn" class="btn secondary">Close</button>
         </header>
-        <div id="guideStepStatus" class="guide-status">Current step: 1/6</div>
+        <div id="guideStepStatus" class="guide-status">Current step: 1/7</div>
         <div class="guide-steps">
           <button class="guide-step-btn" data-step="1" data-target="showDocsBtn">
             <strong>Step 1:</strong> Inspect <code>View Ingested Docs</code> first.
@@ -151,13 +151,16 @@
             <strong>Step 3:</strong> Add positive feedback in the same input (e.g. "Correct Answer", 5/5).
           </button>
           <button class="guide-step-btn" data-step="4" data-target="questionInput">
-            <strong>Step 4:</strong> Ask a second question, then add negative feedback in the same input.
+            <strong>Step 4:</strong> Ask a second question.
           </button>
-          <button class="guide-step-btn" data-step="5" data-target="graphBody">
-            <strong>Step 5:</strong> Observe graph changes (memify runs automatically).
+          <button class="guide-step-btn" data-step="5" data-target="questionInput">
+            <strong>Step 5:</strong> Add negative feedback (e.g. "Wrong Answer", 1/5).
           </button>
           <button class="guide-step-btn" data-step="6" data-target="runDemoBtn">
             <strong>Step 6:</strong> Run <code>Run_demo</code> for scripted replay.
+          </button>
+          <button class="guide-step-btn" data-step="7" data-target="graphBody">
+            <strong>Step 7:</strong> Inspect graph changes (weights, sizes, and colors).
           </button>
         </div>
         <div id="guideHint" class="guide-hint">

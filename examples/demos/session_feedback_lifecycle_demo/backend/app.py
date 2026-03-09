@@ -30,9 +30,9 @@ DATA_DIR = BASE_DIR / "data"
 DEMO_DATA_DIR = BASE_DIR / ".data_storage"
 DEMO_SYSTEM_DIR = BASE_DIR / ".cognee_system"
 
-DATASET_NAME = "session_feedback_lifecycle_demo"
+DATASET_NAME = "session_feedback_weights_demo"
 DEFAULT_SESSION_ID = "demo_session"
-MEMIFY_ALPHA = 0.698
+MEMIFY_ALPHA = 0.619
 
 
 class SendPayload(BaseModel):
@@ -361,7 +361,7 @@ async def _ensure_dataset_context() -> None:
 
 state = DemoState()
 
-app = FastAPI(title="Session Feedback Lifecycle Demo API")
+app = FastAPI(title="Session Feedback Weights Demo API")
 app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR)), name="assets")
 
 

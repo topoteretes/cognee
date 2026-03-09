@@ -1,6 +1,6 @@
 const state = {
   sessionId: "demo_session",
-  datasetName: "session_feedback_lifecycle_demo",
+  datasetName: "session_feedback_weights_demo",
   graph: { nodes: [], edges: [] },
   graphTopologyKey: null,
   changedNodeIds: new Set(),
@@ -1183,7 +1183,7 @@ runDemoBtn.addEventListener("click", async () => {
 
 runMemifyBtn.addEventListener("click", async () => {
   try {
-    setGuideStep(5);
+    setGuideStep(7);
     setBusy(true);
     showInlineLoading("Applying memify...");
     const result = await api("/demo/run_memify_pipeline", "POST", {
@@ -1271,7 +1271,7 @@ sendForm.addEventListener("submit", async (event) => {
 });
 
 resetLayoutBtn?.addEventListener("click", () => {
-  setGuideStep(6);
+  setGuideStep(7);
   document.documentElement.style.setProperty("--left-pane-width", DEFAULT_LEFT_PANE_WIDTH);
   document.documentElement.style.setProperty("--graph-body-rows", DEFAULT_GRAPH_ROWS);
   document.documentElement.style.setProperty("--chat-rows", DEFAULT_CHAT_ROWS);
