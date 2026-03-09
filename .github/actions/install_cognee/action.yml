@@ -15,12 +15,24 @@ runs:
   using: "composite"
   steps:
 
+    - name: Detect CI container
+      id: detect-env
+      shell: bash
+      run: |
+        if [ -f "/app/.anon_id" ] && command -v uv &> /dev/null && [ -d "/app/.venv" ]; then
+          echo "in-container=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "in-container=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Set up Python
+      if: steps.detect-env.outputs.in-container != 'true'
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
 
     - name: Install uv
+      if: steps.detect-env.outputs.in-container != 'true'
       uses: astral-sh/setup-uv@v4
       with:
         enable-cache: true
@@ -28,6 +40,8 @@ runs:
     - name: (Re)Install Cognee
       shell: bash
       working-directory: cognee-mcp
+      env:
+        VIRTUAL_ENV: ${{ steps.detect-env.outputs.in-container == 'true' && '/app/.venv' || '' }}
       run: |
         uv pip uninstall cognee
         if [ "${{ inputs.cognee_version }}" = "local" ]; then
