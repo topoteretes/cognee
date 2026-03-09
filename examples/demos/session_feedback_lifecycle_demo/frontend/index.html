@@ -95,6 +95,7 @@
             <button id="runDemoBtn" class="btn primary">Run_demo</button>
             <button id="runMemifyBtn" class="btn secondary">Run_memify_pipeline</button>
             <button id="showDocsBtn" class="btn secondary">View Ingested Docs</button>
+            <button id="guideBtn" class="btn secondary">How This Demo Works</button>
           </div>
           <div id="inlineLoading" class="inline-loading" aria-live="polite"></div>
           <div class="session-box">
@@ -128,6 +129,37 @@
         </header>
         <div id="docsMeta" class="meta"></div>
         <div id="docsList" class="docs-list"></div>
+      </section>
+    </div>
+
+    <div id="guidePanel" class="guide-panel" hidden>
+      <div id="guideBackdrop" class="guide-backdrop"></div>
+      <section class="guide-card">
+        <header class="guide-header">
+          <h3>How This Demo Works</h3>
+          <button id="closeGuideBtn" class="btn secondary">Close</button>
+        </header>
+        <div id="guideStepStatus" class="guide-status">Current step: 1/5</div>
+        <div class="guide-steps">
+          <button class="guide-step-btn" data-step="1" data-target="runDemoBtn">
+            <strong>Step 1:</strong> Start with <code>Run_demo</code>.
+          </button>
+          <button class="guide-step-btn" data-step="2" data-target="messages">
+            <strong>Step 2:</strong> Watch Q/A + feedback in chat.
+          </button>
+          <button class="guide-step-btn" data-step="3" data-target="graphBody">
+            <strong>Step 3:</strong> Observe graph changes after memify.
+          </button>
+          <button class="guide-step-btn" data-step="4" data-target="questionInput">
+            <strong>Step 4:</strong> Ask your own question in the same session.
+          </button>
+          <button class="guide-step-btn" data-step="5" data-target="resetLayoutBtn">
+            <strong>Step 5:</strong> Reset view and compare state.
+          </button>
+        </div>
+        <div id="guideHint" class="guide-hint">
+          Click any step above to highlight that part of the UI.
+        </div>
       </section>
     </div>
   </body>

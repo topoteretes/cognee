@@ -30,6 +30,12 @@ const chatResizer = document.getElementById("chatResizer");
 const inlineLoading = document.getElementById("inlineLoading");
 const resetLayoutBtn = document.getElementById("resetLayoutBtn");
 const showDocsBtn = document.getElementById("showDocsBtn");
+const guideBtn = document.getElementById("guideBtn");
+const guidePanel = document.getElementById("guidePanel");
+const guideBackdrop = document.getElementById("guideBackdrop");
+const closeGuideBtn = document.getElementById("closeGuideBtn");
+const guideStepStatus = document.getElementById("guideStepStatus");
+const guideStepButtons = Array.from(document.querySelectorAll(".guide-step-btn"));
 const docsModal = document.getElementById("docsModal");
 const docsBackdrop = document.getElementById("docsBackdrop");
 const closeDocsBtn = document.getElementById("closeDocsBtn");
@@ -47,6 +53,9 @@ let loadingPhaseIndex = 0;
 const DEFAULT_LEFT_PANE_WIDTH = "62%";
 const DEFAULT_GRAPH_ROWS = "minmax(260px, 58vh) 8px minmax(120px, 1fr)";
 const DEFAULT_CHAT_ROWS = "minmax(300px, 58vh) 8px minmax(220px, 1fr)";
+let guideCurrentStep = 1;
+let guideFocusedElement = null;
+let guideBeacon = null;
 
 function setBusy(isBusy) {
   [runDemoBtn, runMemifyBtn, showDocsBtn, questionInput]
@@ -480,6 +489,75 @@ function hideInlineLoading() {
   inlineLoading.textContent = "";
 }
 
+function setGuideStep(step) {
+  guideCurrentStep = Math.max(1, Math.min(5, Number(step) || 1));
+  if (guideStepStatus) {
+    guideStepStatus.textContent = `Current step: ${guideCurrentStep}/5`;
+  }
+  guideStepButtons.forEach((btn) => {
+    const btnStep = Number(btn.dataset.step || "0");
+    btn.classList.toggle("active", btnStep === guideCurrentStep);
+  });
+}
+
+function openGuidePanel() {
+  if (!guidePanel) return;
+  guidePanel.hidden = false;
+  document.body.classList.add("guide-open");
+}
+
+function closeGuidePanel() {
+  if (!guidePanel) return;
+  guidePanel.hidden = true;
+  document.body.classList.remove("guide-open");
+  clearGuideFocus();
+}
+
+function clearGuideFocus() {
+  if (guideFocusedElement) {
+    guideFocusedElement.classList.remove("guide-focus");
+    guideFocusedElement = null;
+  }
+  if (guideBeacon) {
+    guideBeacon.style.display = "none";
+  }
+}
+
+function ensureGuideBeacon() {
+  if (guideBeacon) return guideBeacon;
+  guideBeacon = document.createElement("div");
+  guideBeacon.className = "guide-beacon";
+  guideBeacon.style.display = "none";
+  document.body.appendChild(guideBeacon);
+  return guideBeacon;
+}
+
+function positionGuideBeacon(target) {
+  const beacon = ensureGuideBeacon();
+  const rect = target.getBoundingClientRect();
+  const pad = 8;
+  beacon.style.left = `${Math.max(4, rect.left - pad)}px`;
+  beacon.style.top = `${Math.max(4, rect.top - pad)}px`;
+  beacon.style.width = `${Math.max(16, rect.width + pad * 2)}px`;
+  beacon.style.height = `${Math.max(16, rect.height + pad * 2)}px`;
+  beacon.style.display = "block";
+}
+
+function focusGuideTarget(targetId) {
+  clearGuideFocus();
+  if (!targetId) return;
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  target.classList.add("guide-focus");
+  guideFocusedElement = target;
+  target.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+  window.setTimeout(() => {
+    if (guideFocusedElement === target) {
+      positionGuideBeacon(target);
+    }
+  }, 120);
+}
+
 function openDocsModal() {
   if (!docsModal) return;
   docsModal.hidden = false;
@@ -796,6 +874,9 @@ function renderGraph(graph, changed = { nodes: [], edges: [] }) {
     .attr("pointer-events", "none")
     .text((d) => shortLabel(String(d.display_label || "node"), 30));
 
+  let lastLabelVisibilityAt = 0;
+  const LABEL_VISIBILITY_INTERVAL_MS = 140;
+
   const updateLabelVisibility = () => {
     const placed = [];
     const visibleNodeIds = new Set();
@@ -885,6 +966,14 @@ function renderGraph(graph, changed = { nodes: [], edges: [] }) {
 
     nodeGroup.attr("cx", (d) => d.x).attr("cy", (d) => d.y);
 
+    const now = performance.now();
+    if (now - lastLabelVisibilityAt >= LABEL_VISIBILITY_INTERVAL_MS) {
+      updateLabelVisibility();
+      lastLabelVisibilityAt = now;
+    }
+  });
+
+  simulation.on("end", () => {
     updateLabelVisibility();
   });
 
@@ -1066,6 +1155,7 @@ function setupChatResizer() {
 
 runDemoBtn.addEventListener("click", async () => {
   try {
+    setGuideStep(2);
     setBusy(true);
     showInlineLoading("Running scripted demo flow...");
     addMessage("user", "Running scripted demo flow...");
@@ -1145,6 +1235,7 @@ runDemoBtn.addEventListener("click", async () => {
 
 runMemifyBtn.addEventListener("click", async () => {
   try {
+    setGuideStep(3);
     setBusy(true);
     showInlineLoading("Applying memify...");
     const result = await api("/demo/run_memify_pipeline", "POST", {
@@ -1178,6 +1269,7 @@ sendForm.addEventListener("submit", async (event) => {
   if (!question) return;
 
   try {
+    setGuideStep(4);
     setBusy(true);
     showInlineLoading("Searching...");
     addMessage("user", question);
@@ -1229,6 +1321,7 @@ sendForm.addEventListener("submit", async (event) => {
 });
 
 resetLayoutBtn?.addEventListener("click", () => {
+  setGuideStep(5);
   document.documentElement.style.setProperty("--left-pane-width", DEFAULT_LEFT_PANE_WIDTH);
   document.documentElement.style.setProperty("--graph-body-rows", DEFAULT_GRAPH_ROWS);
   document.documentElement.style.setProperty("--chat-rows", DEFAULT_CHAT_ROWS);
@@ -1240,6 +1333,40 @@ resetLayoutBtn?.addEventListener("click", () => {
   if (state.simulation) {
     state.simulation.alpha(0.22).restart();
   }
+});
+
+guideBtn?.addEventListener("click", () => {
+  setGuideStep(guideCurrentStep);
+  openGuidePanel();
+  const activeBtn = guideStepButtons.find((btn) => Number(btn.dataset.step || "0") === guideCurrentStep);
+  focusGuideTarget(activeBtn?.dataset.target || "runDemoBtn");
+});
+
+closeGuideBtn?.addEventListener("click", closeGuidePanel);
+guideBackdrop?.addEventListener("click", closeGuidePanel);
+
+window.addEventListener("resize", () => {
+  if (guideFocusedElement) {
+    positionGuideBeacon(guideFocusedElement);
+  }
+});
+
+window.addEventListener(
+  "scroll",
+  () => {
+    if (guideFocusedElement) {
+      positionGuideBeacon(guideFocusedElement);
+    }
+  },
+  true
+);
+
+guideStepButtons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const step = Number(btn.dataset.step || "1");
+    setGuideStep(step);
+    focusGuideTarget(btn.dataset.target || "");
+  });
 });
 
 showDocsBtn?.addEventListener("click", async () => {
@@ -1262,11 +1389,18 @@ docsBackdrop?.addEventListener("click", closeDocsModal);
   if (docsModal) {
     docsModal.hidden = true;
   }
+  if (guidePanel) {
+    guidePanel.hidden = true;
+  }
+  setGuideStep(1);
   setupMainResizer();
   setupGraphDetailsResizer();
   setupChatResizer();
   try {
     await initializeDemo();
+    openGuidePanel();
+    const firstStepBtn = guideStepButtons.find((btn) => Number(btn.dataset.step || "0") === 1);
+    focusGuideTarget(firstStepBtn?.dataset.target || "runDemoBtn");
   } catch (error) {
     if (loadingSteps) {
       loadingSteps.innerHTML = `<li>Initialization failed: ${error.message}</li>`;
