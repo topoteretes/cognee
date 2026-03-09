@@ -1,7 +1,7 @@
 from uuid import UUID
 from typing import Optional, Union, List, Any
 from datetime import datetime
-from pydantic import Field
+from pydantic import Field, field_validator
 from fastapi import Depends, APIRouter
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
@@ -25,14 +25,28 @@ class SearchPayloadDTO(InDTO):
     search_type: SearchType = Field(default=SearchType.GRAPH_COMPLETION)
     datasets: Optional[list[str]] = Field(default=None)
     dataset_ids: Optional[list[UUID]] = Field(default=None, examples=[[]])
-    query: str = Field(default="What is in the document?")
+    query: str = Field(
+        default="What is in the document?",
+        min_length=1,
+        max_length=10000,
+        description="Search query string (whitespace-only is not allowed).",
+    )
     system_prompt: Optional[str] = Field(
         default="Answer the question using the provided context. Be as brief as possible."
     )
     node_name: Optional[list[str]] = Field(default=None, example=[])
-    top_k: Optional[int] = Field(default=10)
+    top_k: Optional[int] = Field(
+        default=10, ge=1, le=1000, description="Maximum number of results to return."
+    )
     only_context: bool = Field(default=False)
     verbose: bool = Field(default=False)
+
+    @field_validator("query", mode="before")
+    @classmethod
+    def strip_query(cls, v: str) -> str:
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 def get_search_router() -> APIRouter:

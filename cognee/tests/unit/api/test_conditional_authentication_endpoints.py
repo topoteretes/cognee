@@ -105,6 +105,26 @@ class TestConditionalAuthenticationEndpoints:
         # Core test: authentication is not required (should not get 401)
         assert response.status_code != 401
 
+    def test_add_endpoint_returns_400_when_neither_dataset_id_nor_name_provided(
+        self, client, mock_default_user
+    ):
+        """Test add endpoint returns 400 with clear detail when datasetId and datasetName are missing."""
+        from cognee.api.client import app
+        from cognee.api.v1.add.routers.get_add_router import get_authenticated_user
+
+        async def override_get_authenticated_user():
+            return mock_default_user
+
+        app.dependency_overrides[get_authenticated_user] = override_get_authenticated_user
+        files = {"data": ("test.txt", b"test content", "text/plain")}
+        form_data = {}  # No datasetName, no datasetId
+
+        response = client.post("/api/v1/add", files=files, data=form_data)
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Either datasetId or datasetName must be provided."
+        app.dependency_overrides.pop(get_authenticated_user, None)
+
     @patch.object(gau_mod, "get_default_user", new_callable=AsyncMock)
     @patch(
         "cognee.api.client.REQUIRE_AUTHENTICATION",
