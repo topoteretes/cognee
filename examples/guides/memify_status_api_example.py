@@ -34,7 +34,14 @@ def main():
     print("Queued memify run:")
     print(json.dumps(queued_run, indent=2))
 
-    pipeline_run_id = queued_run["pipeline_run_id"]
+    if not queued_run:
+        raise RuntimeError("Cognee returned an empty response for background memify")
+
+    run_info = next(iter(queued_run.values()), None)
+    if not isinstance(run_info, dict) or "pipeline_run_id" not in run_info:
+        raise RuntimeError("Cognee background memify response did not include pipeline_run_id")
+
+    pipeline_run_id = run_info["pipeline_run_id"]
 
     run_status = get_json(f"/api/v1/memify/status/{pipeline_run_id}")
     print("Status for exact run:")
