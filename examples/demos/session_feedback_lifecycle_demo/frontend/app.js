@@ -476,7 +476,7 @@ function hideInlineLoading() {
 
 function startInitLoadingPhases() {
   if (!loadingPhase) return;
-  loadingPhase.textContent = "We are preparing the demo for you...";
+  loadingPhase.textContent = "Preparing your demo...";
   if (loadingPhaseTimer) {
     clearInterval(loadingPhaseTimer);
     loadingPhaseTimer = null;
