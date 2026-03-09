@@ -34,10 +34,6 @@ const runDemoBtn = document.getElementById("runDemoBtn");
 const runMemifyBtn = document.getElementById("runMemifyBtn");
 const sendForm = document.getElementById("sendForm");
 const questionInput = document.getElementById("questionInput");
-const feedbackQaId = document.getElementById("feedbackQaId");
-const feedbackScore = document.getElementById("feedbackScore");
-const feedbackText = document.getElementById("feedbackText");
-const submitFeedbackBtn = document.getElementById("submitFeedbackBtn");
 let activeNodeSelection = null;
 let activeEdgeSelection = null;
 let loadingPhaseTimer = null;
@@ -47,9 +43,11 @@ const DEFAULT_GRAPH_ROWS = "minmax(260px, 58vh) 8px minmax(120px, 1fr)";
 const DEFAULT_CHAT_ROWS = "minmax(300px, 58vh) 8px minmax(220px, 1fr)";
 
 function setBusy(isBusy) {
-  [runDemoBtn, runMemifyBtn, submitFeedbackBtn, questionInput].forEach((el) => {
-    el.disabled = isBusy;
-  });
+  [runDemoBtn, runMemifyBtn, questionInput]
+    .filter(Boolean)
+    .forEach((el) => {
+      el.disabled = isBusy;
+    });
 }
 
 function renderLoadingSteps(steps) {
@@ -75,6 +73,14 @@ function addMessage(type, text, qaId = null) {
 
   messages.appendChild(node);
   messages.scrollTop = messages.scrollHeight;
+}
+
+async function addFeedbackChatTurn({ score, text, qaId }) {
+  const feedbackText = (text || "").trim();
+  const line = feedbackText
+    ? `Feedback (score ${score}/5): ${feedbackText}`
+    : `Feedback (score ${score}/5)`;
+  await addMessageTyped("user", line, qaId || null, 11);
 }
 
 function sleep(ms) {
@@ -1043,6 +1049,12 @@ runDemoBtn.addEventListener("click", async () => {
       await addMessageTyped("system", sendResult.answer, sendResult.qa_id || null, 12);
 
       if (sendResult.qa_id) {
+        await addFeedbackChatTurn({
+          score: Number(turn.feedback_score ?? 3),
+          text: String(turn.feedback_text || "Scripted demo feedback"),
+          qaId: sendResult.qa_id,
+        });
+
         showInlineLoading(`Applying feedback ${index + 1}/${turns.length}...`);
         await api("/demo/feedback", "POST", {
           session_id: state.sessionId,
@@ -1063,6 +1075,10 @@ runDemoBtn.addEventListener("click", async () => {
           nodes: perTurnMemify.deltas.changed_nodes,
           edges: perTurnMemify.deltas.changed_edges,
         });
+        addMessage(
+          "system",
+          `Feedback applied for ${sendResult.qa_id}. Memify updated nodes=${perTurnMemify.deltas.summary.changed_node_count}, edges=${perTurnMemify.deltas.summary.changed_edge_count}`
+        );
       } else {
         await refreshStateAndGraph();
       }
@@ -1131,16 +1147,16 @@ sendForm.addEventListener("submit", async (event) => {
 
     if (result.qa_id) {
       state.latestQaId = result.qa_id;
-      feedbackQaId.value = result.qa_id;
     }
 
     addMessage("system", result.answer, result.qa_id || null);
 
     if (result.auto_feedback && (result.auto_feedback.feedback_score !== null || result.auto_feedback.feedback_text)) {
-      addMessage(
-        "system",
-        `Auto feedback detected: score=${result.auto_feedback.feedback_score ?? "n/a"}, text=${result.auto_feedback.feedback_text ?? ""}`
-      );
+      await addFeedbackChatTurn({
+        score: result.auto_feedback.feedback_score ?? "n/a",
+        text: result.auto_feedback.feedback_text ?? "",
+        qaId: result.qa_id || null,
+      });
       const memifyResult = await api("/demo/run_memify_pipeline", "POST", {
         session_id: state.sessionId,
       });
@@ -1151,7 +1167,7 @@ sendForm.addEventListener("submit", async (event) => {
       await refreshStateAndGraph(changed);
       addMessage(
         "system",
-        `Auto memify applied. Nodes changed=${memifyResult.deltas.summary.changed_node_count}, edges changed=${memifyResult.deltas.summary.changed_edge_count}`
+        `Feedback processed. Memify updated nodes=${memifyResult.deltas.summary.changed_node_count}, edges=${memifyResult.deltas.summary.changed_edge_count}`
       );
     } else {
       await refreshStateAndGraph();
@@ -1160,55 +1176,6 @@ sendForm.addEventListener("submit", async (event) => {
     questionInput.value = "";
   } catch (error) {
     addMessage("system", `Send failed: ${error.message}`);
-  } finally {
-    setBusy(false);
-    hideInlineLoading();
-  }
-});
-
-submitFeedbackBtn.addEventListener("click", async () => {
-  const qaId = feedbackQaId.value.trim();
-  const score = Number(feedbackScore.value);
-  const text = feedbackText.value.trim();
-
-  if (!qaId) {
-    addMessage("system", "Feedback failed: missing QA ID");
-    return;
-  }
-
-  try {
-    setBusy(true);
-    showInlineLoading("Saving feedback...");
-    await api("/demo/feedback", "POST", {
-      session_id: state.sessionId,
-      qa_id: qaId,
-      feedback_score: score,
-      feedback_text: text || null,
-    });
-
-    const memifyResult = await api("/demo/run_memify_pipeline", "POST", {
-      session_id: state.sessionId,
-    });
-    if (memifyResult.session_id) {
-      state.sessionId = memifyResult.session_id;
-      sessionIdBadge.textContent = state.sessionId;
-    }
-
-    const changed = {
-      nodes: memifyResult.deltas.changed_nodes,
-      edges: memifyResult.deltas.changed_edges,
-    };
-
-    renderGraph(memifyResult.after, changed);
-    renderActivity(memifyResult.activity_log || []);
-    await refreshSessionEntries();
-    addMessage(
-      "system",
-      `Feedback saved and applied. Nodes changed=${memifyResult.deltas.summary.changed_node_count}, edges changed=${memifyResult.deltas.summary.changed_edge_count}`
-    );
-    feedbackText.value = "";
-  } catch (error) {
-    addMessage("system", `Feedback failed: ${error.message}`);
   } finally {
     setBusy(false);
     hideInlineLoading();
@@ -1236,7 +1203,9 @@ resetLayoutBtn?.addEventListener("click", () => {
   try {
     await initializeDemo();
   } catch (error) {
-    loadingSteps.innerHTML = `<li>Initialization failed: ${error.message}</li>`;
+    if (loadingSteps) {
+      loadingSteps.innerHTML = `<li>Initialization failed: ${error.message}</li>`;
+    }
     addMessage("system", `Initialization failed: ${error.message}`);
   }
 })();

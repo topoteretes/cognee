@@ -32,7 +32,7 @@ DEMO_SYSTEM_DIR = BASE_DIR / ".cognee_system"
 
 DATASET_NAME = "session_feedback_lifecycle_demo"
 DEFAULT_SESSION_ID = "demo_session"
-MEMIFY_ALPHA = 0.5
+MEMIFY_ALPHA = 0.849
 
 
 class SendPayload(BaseModel):

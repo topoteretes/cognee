@@ -1,35 +1,40 @@
 {
-  "session_id": "lumenrail_demo_session",
+  "session_id": "car_purchase_demo_session",
   "questions": [
     {
-      "question": "What does LumenRail provide on its autonomous night trains?",
+      "question": "Tell me only about the Renault Megane E-Tech Electric and why it is good for city commuting.",
       "feedback_score": 5,
-      "feedback_text": "Great answer, it covered the core onboard experience clearly."
+      "feedback_text": "Great. This clearly described the Renault EV strengths for city use."
     },
     {
-      "question": "How do Cabin, Studio, and Suite differ for passengers?",
+      "question": "Tell me only about the Volvo XC60 Recharge and whether it works for family trips and towing.",
       "feedback_score": 5,
-      "feedback_text": "Excellent detail about class differences and premium benefits."
+      "feedback_text": "Excellent Volvo summary with relevant towing and family details."
     },
     {
-      "question": "Can passengers get a full refund one week after booking with no conditions?",
-      "feedback_score": 1,
-      "feedback_text": "Incorrect. Full refunds are only within the first 24 hours."
-    },
-    {
-      "question": "Does LumenRail ignore damaged luggage reports from travelers?",
-      "feedback_score": 1,
-      "feedback_text": "Wrong. Damaged luggage is compensated within 72 hours with app photos."
-    },
-    {
-      "question": "Which operational metrics are reviewed by leadership and how often?",
+      "question": "Tell me only about the BMW M340i xDrive and its performance-oriented characteristics.",
       "feedback_score": 4,
-      "feedback_text": "Mostly correct and useful, but could be slightly more concise."
+      "feedback_text": "Good BMW answer, but trade-offs could be emphasized more."
     },
     {
-      "question": "Are route schedules adjusted daily or monthly according to the document?",
+      "question": "Tell me only about the Skoda Octavia and why buyers choose it as a practical option.",
+      "feedback_score": 5,
+      "feedback_text": "Very good Skoda-focused explanation with practical ownership context."
+    },
+    {
+      "question": "For dense city traffic, the Volvo XC60 Recharge is more efficient than the Renault Megane E-Tech Electric, right?",
+      "feedback_score": 1,
+      "feedback_text": "Incorrect. The Renault EV should be favored for city efficiency in this dataset."
+    },
+    {
+      "question": "Which single model in this set best matches a buyer who prioritizes sporty acceleration over fuel economy?",
+      "feedback_score": 4,
+      "feedback_text": "Mostly correct. BMW should be the primary recommendation for this preference."
+    },
+    {
+      "question": "What are the dealership policy terms in this scenario for returns, warranty, and first-year service?",
       "feedback_score": 2,
-      "feedback_text": "Partially incorrect. The document states monthly schedule adjustments."
+      "feedback_text": "Partially wrong. The answer must explicitly include 14-day return, 5-year warranty, and first-year service."
     }
   ]
 }
