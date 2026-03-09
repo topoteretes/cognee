@@ -69,8 +69,8 @@ function setBusy(isBusy) {
 }
 
 function getTopK() {
-  const raw = Number(topKSlider?.value ?? 5);
-  const value = Number.isFinite(raw) ? Math.round(raw) : 5;
+  const raw = Number(topKSlider?.value ?? 3);
+  const value = Number.isFinite(raw) ? Math.round(raw) : 3;
   return Math.max(1, Math.min(10, value));
 }
 
