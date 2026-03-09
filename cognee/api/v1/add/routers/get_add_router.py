@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi import Form, File, UploadFile as UF, Depends
 from typing import List, Optional, Union, Literal, Annotated
@@ -81,7 +81,10 @@ def get_add_router() -> APIRouter:
         from cognee.api.v1.add import add as cognee_add
 
         if not datasetId and not datasetName:
-            raise ValueError("Either datasetId or datasetName must be provided.")
+            raise HTTPException(
+                status_code=400,
+                detail="Either datasetId or datasetName must be provided.",
+            )
 
         try:
             add_run = await cognee_add(
