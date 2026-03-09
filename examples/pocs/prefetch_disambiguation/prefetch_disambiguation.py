@@ -1,4 +1,7 @@
 import asyncio
+import os
+import time
+import cognee
 import numpy as np
 import pandas as pd
 
@@ -6,7 +9,9 @@ from pandas import DataFrame
 from typing import Optional, List, Type
 
 from pydantic import BaseModel
+from nltk.tokenize import sent_tokenize
 
+from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.infrastructure.llm.extraction import extract_content_graph
 from cognee.modules.chunking.models import DocumentChunk
@@ -32,8 +37,19 @@ def _count_reused_node_names_in_prompt_tail(
         if not name:
             continue
         if name.casefold() in tail_blob:
+            print(name)
             count += 1
     return count
+
+
+def _check_disambiguated_entities(graph_entity_names, disambiguated_entities_names):
+    missed_entities = 0
+    for name in graph_entity_names:
+        if name in disambiguated_entities_names:
+            missed_entities += 1
+    print(
+        f"Disambiguated entities: {(len(disambiguated_entities_names) - missed_entities) / len(disambiguated_entities_names) * 100}%"
+    )
 
 
 def _top_k_names_by_cosine(df: DataFrame, query_vector, k: int = 5) -> List[str]:
@@ -66,12 +82,10 @@ def _top_k_names_by_cosine(df: DataFrame, query_vector, k: int = 5) -> List[str]
     return [names[i] for i in idx]
 
 
-async def _build_disambiguation_prompt(
-    chunk, df, vector_search_limit, custom_prompt
+def _build_disambiguation_prompt(
+    chunk_embedding, df, vector_search_limit, custom_prompt
 ) -> Optional[str]:
-    vector_engine = get_vector_engine()
-    query_vector = (await vector_engine.embedding_engine.embed_text([chunk.text]))[0]
-    closest_matches = _top_k_names_by_cosine(df, query_vector, vector_search_limit)
+    closest_matches = _top_k_names_by_cosine(df, chunk_embedding, vector_search_limit)
 
     prompt = custom_prompt
     for match in closest_matches:
@@ -113,12 +127,13 @@ async def _build_chunk_graphs_and_prompts(
         }
     }
 
-    chunk_prompts = await asyncio.gather(
-        *[
-            _build_disambiguation_prompt(chunk, df, vector_search_limit, custom_prompt)
-            for chunk in data_chunks
-        ]
-    )
+    chunk_texts = [chunk.text for chunk in data_chunks]
+    vector_engine = get_vector_engine()
+    chunk_embeddings = await vector_engine.embedding_engine.embed_text(chunk_texts)
+    chunk_prompts = [
+        _build_disambiguation_prompt(chunk_embedding, df, vector_search_limit, custom_prompt)
+        for chunk_embedding in chunk_embeddings
+    ]
 
     chunk_graphs = await asyncio.gather(
         *[
@@ -129,6 +144,59 @@ async def _build_chunk_graphs_and_prompts(
     return chunk_graphs, chunk_prompts
 
 
+async def _get_entity_names_from_graph() -> set[str]:
+    graph_engine = await get_graph_engine()
+    nodes, _ = await graph_engine.get_graph_data()
+    names = set()
+    for _node_id, props in nodes:
+        props = props or {}
+        if props.get("type") in {"Entity", "GraphEntity"}:
+            name = props.get("name")
+            if isinstance(name, str) and name.strip():
+                names.add(name.strip())
+    return names
+
+
+async def prefetch_disambiguation(
+    parts_dir,
+    vector_search_limit,
+    split_by_sentence,
+    custom_prompt,
+    disambiguated_entities_names_file="expected_disambiguation_entities.txt",
+):
+    df = pd.DataFrame()
+    kwargs = {
+        "vector_search_limit": vector_search_limit,
+        "calculate_chunk_graphs": calculate_chunk_graphs_prefetch_disambiguation,
+        "cache_entity_embeddings": cache_entity_embeddings,
+        "df": df,
+        "stats": {"reused_entities": 0},
+    }
+
+    parent_folder = os.path.dirname(os.path.abspath(__file__))
+    disambiguated_entities_names_file_path = os.path.join(
+        parent_folder, "data", "example2", disambiguated_entities_names_file
+    )
+    with open(disambiguated_entities_names_file_path, "r", encoding="utf-8") as f:
+        disambiguated_entities_names = f.read().split("\n")
+
+    start = time.perf_counter()
+    for part in sorted(parts_dir.glob("part_*.txt")):
+        print(part)
+        text = part.read_text(encoding="utf-8").replace("\n", " ")
+        if split_by_sentence:
+            text = list(dict.fromkeys(sent_tokenize(text)))
+        await cognee.add(text)
+        await cognee.cognify(chunk_size=1024, custom_prompt=custom_prompt, **kwargs)
+        elapsed = time.perf_counter() - start
+        print(f"Elapsed: {elapsed:.6f} seconds")
+
+        graph_entity_names = await _get_entity_names_from_graph()
+        _check_disambiguated_entities(graph_entity_names, disambiguated_entities_names)
+
+    print(f"Reused instances: {kwargs.get('stats').get('reused_entities')}")
+
+
 async def cache_entity_embeddings(nodes, **kwargs) -> None:
     df = kwargs.get("df", None)
     if df is None:
@@ -136,17 +204,23 @@ async def cache_entity_embeddings(nodes, **kwargs) -> None:
     vector_engine = get_vector_engine()
     df_new = pd.DataFrame()
     for chunk in nodes:
+        entity_names = []
         for contained in getattr(chunk, "contains", None) or []:
             if isinstance(contained, tuple) and len(contained) == 2:
                 _, node = contained
             else:
                 node = contained
+
             if node and (isinstance(node, Entity) or isinstance(node, EntityType)):
-                vector = await vector_engine.embed_data(node.name)
-                if node.name in df_new.columns:
-                    continue
-                # Store as numeric column (not list-in-cell) for fast vectorized ops.
-                df_new[node.name] = pd.Series(vector[0], dtype=float)
+                entity_names.append(node.name)
+        if not entity_names:
+            continue
+        entity_vectors = await vector_engine.embed_data(entity_names)
+        for name, vector in zip(entity_names, entity_vectors):
+            if name in df_new.columns or name in df.columns:
+                continue
+            # Store as numeric column (not list-in-cell) for fast vectorized ops.
+            df_new[name] = pd.Series(vector, dtype=float)
 
     if not df_new.empty:
         # Drop only overlapping columns in one shot to avoid in-place mutation
@@ -158,7 +232,7 @@ async def cache_entity_embeddings(nodes, **kwargs) -> None:
     df[df_new.columns] = df_new
 
 
-async def calculate_chunk_graphs_chunk_prefetch_disambiguation(
+async def calculate_chunk_graphs_prefetch_disambiguation(
     data_chunks: List[DocumentChunk],
     graph_model: Type[BaseModel],
     custom_prompt: str,
