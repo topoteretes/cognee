@@ -4,7 +4,7 @@ End-to-end integration test for conversation history feature.
 Covers retrievers that save conversation history (via SessionManager / cache):
   GRAPH_COMPLETION, RAG_COMPLETION, GRAPH_COMPLETION_COT,
   GRAPH_COMPLETION_CONTEXT_EXTENSION, GRAPH_SUMMARY_COMPLETION, TEMPORAL, TRIPLET_COMPLETION.
-Uses cache_engine.get_latest_qa for legacy assertions and cognee.session.get_session for
+Uses cache_engine.get_latest_qa_entries for assertions and cognee.session.get_session for
 session history; e2e for session SDK (get_session, add_feedback, delete_feedback) at end.
 """
 
@@ -76,7 +76,7 @@ async def main():
         session_id=session_id_1,
     )
 
-    history1 = await cache_engine.get_latest_qa(str(user.id), session_id_1, last_n=10)
+    history1 = await cache_engine.get_latest_qa_entries(str(user.id), session_id_1, last_n=10)
     assert len(history1) == 1, f"Expected at least 1 Q&A in history, got {len(history1)}"
     our_qa = [h for h in history1 if h["question"] == "What is TechCorp?"]
     assert len(our_qa) >= 1, "Expected to find 'What is TechCorp?' in history"
@@ -94,7 +94,7 @@ async def main():
         f"Second query should return non-empty list, got: {result2!r}"
     )
 
-    history2 = await cache_engine.get_latest_qa(str(user.id), session_id_1, last_n=10)
+    history2 = await cache_engine.get_latest_qa_entries(str(user.id), session_id_1, last_n=10)
     our_questions = [
         h for h in history2 if h["question"] in ["What is TechCorp?", "Tell me more about it"]
     ]
@@ -114,7 +114,7 @@ async def main():
         f"Different session should return non-empty list, got: {result3!r}"
     )
 
-    history3 = await cache_engine.get_latest_qa(str(user.id), session_id_2, last_n=10)
+    history3 = await cache_engine.get_latest_qa_entries(str(user.id), session_id_2, last_n=10)
     our_qa_session2 = [h for h in history3 if h["question"] == "What is DataCo?"]
     assert len(our_qa_session2) == 1, "Session 2 should have 'What is DataCo?' question"
 
@@ -128,7 +128,9 @@ async def main():
         f"Default session should return non-empty list, got: {result4!r}"
     )
 
-    history_default = await cache_engine.get_latest_qa(str(user.id), "default_session", last_n=10)
+    history_default = await cache_engine.get_latest_qa_entries(
+        str(user.id), "default_session", last_n=10
+    )
     our_qa_default = [h for h in history_default if h["question"] == "Test default session"]
     assert len(our_qa_default) == 1, "Should find 'Test default session' in default_session"
 
@@ -144,7 +146,7 @@ async def main():
         f"RAG_COMPLETION should return non-empty list, got: {result_rag!r}"
     )
 
-    history_rag = await cache_engine.get_latest_qa(str(user.id), session_id_rag, last_n=10)
+    history_rag = await cache_engine.get_latest_qa_entries(str(user.id), session_id_rag, last_n=10)
     our_qa_rag = [h for h in history_rag if h["question"] == "What companies are mentioned?"]
     assert len(our_qa_rag) == 1, "Should find RAG question in history"
 
@@ -160,7 +162,7 @@ async def main():
         f"GRAPH_COMPLETION_COT should return non-empty list, got: {result_cot!r}"
     )
 
-    history_cot = await cache_engine.get_latest_qa(str(user.id), session_id_cot, last_n=10)
+    history_cot = await cache_engine.get_latest_qa_entries(str(user.id), session_id_cot, last_n=10)
     our_qa_cot = [h for h in history_cot if h["question"] == "What do you know about TechCorp?"]
     assert len(our_qa_cot) == 1, "Should find CoT question in history"
 
@@ -176,7 +178,7 @@ async def main():
         f"GRAPH_COMPLETION_CONTEXT_EXTENSION should return non-empty list, got: {result_ext!r}"
     )
 
-    history_ext = await cache_engine.get_latest_qa(str(user.id), session_id_ext, last_n=10)
+    history_ext = await cache_engine.get_latest_qa_entries(str(user.id), session_id_ext, last_n=10)
     our_qa_ext = [h for h in history_ext if h["question"] == "Tell me about DataCo"]
     assert len(our_qa_ext) == 1, "Should find Context Extension question in history"
 
@@ -192,7 +194,9 @@ async def main():
         f"GRAPH_SUMMARY_COMPLETION should return non-empty list, got: {result_summary!r}"
     )
 
-    history_summary = await cache_engine.get_latest_qa(str(user.id), session_id_summary, last_n=10)
+    history_summary = await cache_engine.get_latest_qa_entries(
+        str(user.id), session_id_summary, last_n=10
+    )
     our_qa_summary = [
         h for h in history_summary if h["question"] == "What are the key points about TechCorp?"
     ]
@@ -210,7 +214,7 @@ async def main():
         f"TEMPORAL should return non-empty list, got: {result_temporal!r}"
     )
 
-    history_temporal = await cache_engine.get_latest_qa(
+    history_temporal = await cache_engine.get_latest_qa_entries(
         str(user.id), session_id_temporal, last_n=10
     )
     our_qa_temporal = [
@@ -230,7 +234,9 @@ async def main():
         f"TRIPLET_COMPLETION should return non-empty list, got: {result_triplet!r}"
     )
 
-    history_triplet = await cache_engine.get_latest_qa(str(user.id), session_id_triplet, last_n=10)
+    history_triplet = await cache_engine.get_latest_qa_entries(
+        str(user.id), session_id_triplet, last_n=10
+    )
     our_qa_triplet = [
         h for h in history_triplet if h["question"] == "What companies are mentioned?"
     ]
