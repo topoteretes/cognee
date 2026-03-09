@@ -74,6 +74,18 @@ body.is-resizing * {
   margin-bottom: 8px;
 }
 
+.panel-header-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel-header-right .btn {
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
 .meta {
   color: var(--muted);
   font-size: 12px;

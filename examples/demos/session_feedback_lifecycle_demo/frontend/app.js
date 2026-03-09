@@ -2,10 +2,12 @@ const state = {
   sessionId: "demo_session",
   datasetName: "session_feedback_lifecycle_demo",
   graph: { nodes: [], edges: [] },
+  graphTopologyKey: null,
   changedNodeIds: new Set(),
   changedEdgeIds: new Set(),
   latestQaId: null,
   simulation: null,
+  graphViz: null,
 };
 
 const loadingOverlay = document.getElementById("loadingOverlay");
@@ -26,6 +28,7 @@ const graphDetailsResizer = document.getElementById("graphDetailsResizer");
 const chatPanel = document.querySelector(".chat-panel");
 const chatResizer = document.getElementById("chatResizer");
 const inlineLoading = document.getElementById("inlineLoading");
+const resetLayoutBtn = document.getElementById("resetLayoutBtn");
 
 const runDemoBtn = document.getElementById("runDemoBtn");
 const runMemifyBtn = document.getElementById("runMemifyBtn");
@@ -39,6 +42,9 @@ let activeNodeSelection = null;
 let activeEdgeSelection = null;
 let loadingPhaseTimer = null;
 let loadingPhaseIndex = 0;
+const DEFAULT_LEFT_PANE_WIDTH = "62%";
+const DEFAULT_GRAPH_ROWS = "minmax(260px, 58vh) 8px minmax(120px, 1fr)";
+const DEFAULT_CHAT_ROWS = "minmax(300px, 58vh) 8px minmax(220px, 1fr)";
 
 function setBusy(isBusy) {
   [runDemoBtn, runMemifyBtn, submitFeedbackBtn, questionInput].forEach((el) => {
@@ -68,6 +74,43 @@ function addMessage(type, text, qaId = null) {
   }
 
   messages.appendChild(node);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function addMessageTyped(type, text, qaId = null, charDelayMs = 14) {
+  const node = document.createElement("div");
+  node.className = `message ${type}`;
+  node.textContent = "";
+  messages.appendChild(node);
+
+  const content = String(text || "");
+  for (let i = 0; i < content.length; i += 1) {
+    node.textContent += content[i];
+    if (i % 2 === 0) {
+      messages.scrollTop = messages.scrollHeight;
+    }
+    // Slower cadence for punctuation to feel more natural.
+    const char = content[i];
+    if (char === "." || char === "," || char === ":" || char === ";" || char === "!") {
+      await sleep(charDelayMs + 18);
+    } else if (char === "\n") {
+      await sleep(charDelayMs + 10);
+    } else {
+      await sleep(charDelayMs);
+    }
+  }
+
+  if (qaId) {
+    const meta = document.createElement("div");
+    meta.className = "qa-meta";
+    meta.textContent = `qa_id: ${qaId}`;
+    node.appendChild(meta);
+  }
+
   messages.scrollTop = messages.scrollHeight;
 }
 
@@ -173,7 +216,7 @@ function shortLabel(value, maxLen = 34) {
   return `${text.slice(0, maxLen - 3)}...`;
 }
 
-function fitTransformForNodes(width, height, nodes, padding = 56) {
+function fitTransformForNodes(width, height, nodes, padding = 120) {
   if (!nodes.length) return d3.zoomIdentity;
 
   let minX = Infinity;
@@ -245,6 +288,154 @@ function edgeDisplayLabel(edge) {
   const label = String(edge?.label || "").trim();
   if (label && !looksLikeId(label)) return label;
   return "relation";
+}
+
+function topologyKey(graph) {
+  const nodeIds = (graph?.nodes || []).map((n) => String(n.id)).sort().join("|");
+  const edgeIds = (graph?.edges || []).map((e) => String(e.id)).sort().join("|");
+  return `${nodeIds}::${edgeIds}`;
+}
+
+function updateGraphVisualsInPlace(graph, changed = { nodes: [], edges: [] }) {
+  const viz = state.graphViz;
+  if (!viz) return;
+
+  state.graph = graph;
+  graphStats.textContent = `${graph.stats.node_count} nodes | ${graph.stats.edge_count} edges`;
+  sessionMeta.textContent = `session: ${state.sessionId} | dataset: ${state.datasetName}`;
+  sessionIdBadge.textContent = state.sessionId;
+
+  const changedNodeIds = new Set((changed?.nodes || []).map((item) => String(item.id)));
+  const changedEdgeIds = new Set((changed?.edges || []).map((item) => String(item.id)));
+
+  const nodeById = new Map(
+    (graph.nodes || []).map((node) => [
+      node.id,
+      {
+        ...node,
+        display_label: nodeDisplayLabel(node),
+      },
+    ])
+  );
+  const edgeById = new Map(
+    (graph.edges || []).map((edge) => [
+      edge.id,
+      {
+        ...edge,
+        display_label: edgeDisplayLabel(edge),
+      },
+    ])
+  );
+
+  viz.nodes.forEach((node) => {
+    const latest = nodeById.get(node.id);
+    if (!latest) return;
+    node.feedback_weight = latest.feedback_weight;
+    node.properties = latest.properties || {};
+    node.display_label = latest.display_label;
+    node.label = latest.label;
+    node.type = latest.type;
+    viz.radiusById.set(node.id, nodeRadius(node.feedback_weight));
+  });
+
+  viz.links.forEach((edge) => {
+    const latest = edgeById.get(edge.id);
+    if (!latest) return;
+    edge.feedback_weight = latest.feedback_weight;
+    edge.properties = latest.properties || {};
+    edge.display_label = latest.display_label;
+    edge.relation = latest.relation;
+  });
+
+  viz.nodeGroup
+    .interrupt("weights")
+    .attr("r", (d) => nodeRadius(d.feedback_weight))
+    .transition("weights")
+    .duration(620)
+    .ease(d3.easeCubicOut)
+    .attr("r", (d) => nodeRadius(d.feedback_weight))
+    .attr("fill", (d) => colorByWeight(d.feedback_weight));
+
+  viz.edgeGroup
+    .interrupt("weights")
+    .attr("stroke", (d) => colorByWeight(d.feedback_weight))
+    .attr(
+      "stroke-opacity",
+      (d) => 0.62 + Math.max(0, Math.min(1, Number(d.feedback_weight ?? 0.5))) * 0.28
+    )
+    .transition("weights")
+    .duration(620)
+    .ease(d3.easeCubicOut)
+    .attr("stroke", (d) => colorByWeight(d.feedback_weight))
+    .attr(
+      "stroke-opacity",
+      (d) => 0.62 + Math.max(0, Math.min(1, Number(d.feedback_weight ?? 0.5))) * 0.28
+    )
+    .attr("stroke-width", (d) => edgeWidth(d.feedback_weight));
+
+  // Emphasize changed elements with a short bump animation.
+  if (changedNodeIds.size) {
+    viz.nodeGroup
+      .filter((d) => changedNodeIds.has(String(d.id)))
+      .interrupt("bump")
+      .transition("bump")
+      .duration(220)
+      .ease(d3.easeBackOut.overshoot(2.6))
+      .attr("r", (d) => nodeRadius(d.feedback_weight) + 12)
+      .attr("stroke-width", 4.6)
+      .attr("stroke", "#ffffff")
+      .attr("fill", (d) => d3.interpolateRgb(colorByWeight(d.feedback_weight), "#ffffff")(0.38))
+      .attr("filter", "drop-shadow(0 0 14px rgba(255,255,255,0.88))")
+      .transition("bump")
+      .duration(620)
+      .ease(d3.easeCubicOut)
+      .attr("r", (d) => nodeRadius(d.feedback_weight))
+      .attr("stroke-width", 1.35)
+      .attr("stroke", "rgba(165, 80, 255, 0.48)")
+      .attr("fill", (d) => colorByWeight(d.feedback_weight))
+      .attr("filter", null);
+  }
+
+  if (changedEdgeIds.size) {
+    viz.edgeGroup
+      .filter((d) => changedEdgeIds.has(String(d.id)))
+      .interrupt("bump")
+      .transition("bump")
+      .duration(220)
+      .ease(d3.easeBackOut.overshoot(2.2))
+      .attr("stroke-width", (d) => edgeWidth(d.feedback_weight) + 4.4)
+      .attr("stroke-opacity", 1)
+      .attr("stroke", "#ffffff")
+      .attr("filter", "drop-shadow(0 0 10px rgba(255,255,255,0.9))")
+      .transition("bump")
+      .duration(620)
+      .ease(d3.easeCubicOut)
+      .attr("stroke-width", (d) => edgeWidth(d.feedback_weight))
+      .attr(
+        "stroke-opacity",
+        (d) => 0.62 + Math.max(0, Math.min(1, Number(d.feedback_weight ?? 0.5))) * 0.28
+      );
+    viz.edgeGroup
+      .filter((d) => changedEdgeIds.has(String(d.id)))
+      .transition("bump")
+      .duration(620)
+      .ease(d3.easeCubicOut)
+      .attr("stroke", (d) => colorByWeight(d.feedback_weight))
+      .attr("filter", null);
+  }
+
+  viz.nodeGroup.select("title").text((d) => `${d.display_label}\nweight=${d.feedback_weight}`);
+  viz.nodeLabel.text((d) => shortLabel(String(d.display_label || "node"), 30));
+  viz.edgeLabel.text((d) => shortLabel(d.display_label, 26));
+  viz.updateLabelVisibility();
+
+  if (activeNodeSelection) {
+    const selected = viz.nodes.find((node) => node.id === activeNodeSelection);
+    if (selected) renderSelection("node", selected);
+  } else if (activeEdgeSelection) {
+    const selected = viz.links.find((edge) => edge.id === activeEdgeSelection);
+    if (selected) renderSelection("edge", selected);
+  }
 }
 
 function showOverlay(title, subtitle, steps = []) {
@@ -332,11 +523,22 @@ async function refreshSessionEntries() {
 }
 
 function renderGraph(graph, changed = { nodes: [], edges: [] }) {
+  const nextTopologyKey = topologyKey(graph);
+  if (state.graphViz && state.graphTopologyKey === nextTopologyKey) {
+    updateGraphVisualsInPlace(graph, changed);
+    return;
+  }
+
   state.graph = graph;
+  state.graphTopologyKey = nextTopologyKey;
 
   graphStats.textContent = `${graph.stats.node_count} nodes | ${graph.stats.edge_count} edges`;
   sessionMeta.textContent = `session: ${state.sessionId} | dataset: ${state.datasetName}`;
   sessionIdBadge.textContent = state.sessionId;
+
+  if (state.simulation) {
+    state.simulation.stop();
+  }
 
   const svg = d3.select("#graphSvg");
   svg.selectAll("*").remove();
@@ -391,8 +593,8 @@ function renderGraph(graph, changed = { nodes: [], edges: [] }) {
   // Deterministic spiral anchors to avoid dense central lines/clusters.
   const centerX = width / 2;
   const centerY = height / 2;
-  const spreadRadiusX = Math.min(width, height) * 0.43;
-  const spreadRadiusY = Math.min(width, height) * 0.34;
+  const spreadRadiusX = Math.min(width, height) * 0.46;
+  const spreadRadiusY = Math.min(width, height) * 0.38;
   const targetById = new Map();
   const orderedNodes = [...nodes].sort((a, b) => stableHash(a.id) - stableHash(b.id));
   orderedNodes.forEach((node, index) => {
@@ -417,19 +619,19 @@ function renderGraph(graph, changed = { nodes: [], edges: [] }) {
         .distance((d) => {
           const sourceR = getRadius(d.source);
           const targetR = getRadius(d.target);
-          const basePadding = 96;
-          const weightPadding = edgeWidth(d.feedback_weight) * 3.1;
+          const basePadding = 108;
+          const weightPadding = edgeWidth(d.feedback_weight) * 3.5;
           return sourceR + targetR + basePadding + weightPadding;
         })
     )
-    .force("charge", d3.forceManyBody().strength((node) => -(380 + getRadius(node) * 28)))
-    .force("collide", d3.forceCollide().radius((node) => getRadius(node) + 34).iterations(4))
-    .force("x", d3.forceX((d) => targetById.get(d.id)?.x ?? centerX).strength(0.044))
-    .force("y", d3.forceY((d) => targetById.get(d.id)?.y ?? centerY).strength(0.052))
+    .force("charge", d3.forceManyBody().strength((node) => -(460 + getRadius(node) * 30)))
+    .force("collide", d3.forceCollide().radius((node) => getRadius(node) + 36).iterations(4))
+    .force("x", d3.forceX((d) => targetById.get(d.id)?.x ?? centerX).strength(0.04))
+    .force("y", d3.forceY((d) => targetById.get(d.id)?.y ?? centerY).strength(0.046))
     .force("center", d3.forceCenter(centerX, centerY))
     .alpha(1.0)
-    .alphaDecay(0.017)
-    .velocityDecay(0.34);
+    .alphaDecay(0.016)
+    .velocityDecay(0.33);
 
   state.simulation = simulation;
 
@@ -617,20 +819,6 @@ function renderGraph(graph, changed = { nodes: [], edges: [] }) {
   };
 
   simulation.on("tick", () => {
-    nodes.forEach((node) => {
-      const radius = nodeRadius(node.feedback_weight);
-      // Soft boundary: nudge back toward the center instead of hard clipping to walls.
-      const minX = radius + 18;
-      const maxX = width - radius - 18;
-      const minY = radius + 18;
-      const maxY = height - radius - 18;
-
-      if (node.x < minX) node.x += (minX - node.x) * 0.12;
-      if (node.x > maxX) node.x -= (node.x - maxX) * 0.12;
-      if (node.y < minY) node.y += (minY - node.y) * 0.12;
-      if (node.y > maxY) node.y -= (node.y - maxY) * 0.12;
-    });
-
     edgeGroup
       .attr("x1", (d) => d.source.x)
       .attr("y1", (d) => d.source.y)
@@ -659,11 +847,29 @@ function renderGraph(graph, changed = { nodes: [], edges: [] }) {
 
   // Auto-fit once layout stabilizes so all elements remain visible and centered.
   const fitOnce = () => {
-    const transform = fitTransformForNodes(width, height, nodes, 56);
+    const transform = fitTransformForNodes(width, height, nodes, 128);
     svg.transition().duration(380).call(zoom.transform, transform);
     updateLabelVisibility();
   };
   setTimeout(fitOnce, 650);
+
+  state.graphViz = {
+    svg,
+    zoom,
+    nodes,
+    links,
+    radiusById,
+    nodeGroup,
+    edgeGroup,
+    edgeLabel,
+    nodeLabel,
+    updateLabelVisibility,
+    fitGraphView: () => {
+      const transform = fitTransformForNodes(width, height, nodes, 128);
+      svg.transition().duration(420).call(zoom.transform, transform);
+      updateLabelVisibility();
+    },
+  };
 }
 
 async function api(path, method = "GET", body = null) {
@@ -809,26 +1015,64 @@ function setupChatResizer() {
 runDemoBtn.addEventListener("click", async () => {
   try {
     setBusy(true);
-    showInlineLoading("Running demo flow...");
+    showInlineLoading("Running scripted demo flow...");
     addMessage("user", "Running scripted demo flow...");
-    const result = await api("/demo/run_demo", "POST");
-    if (result.session_id) {
-      state.sessionId = result.session_id;
+
+    const flow = await api("/demo/scripted_flow");
+    if (flow.session_id) {
+      state.sessionId = flow.session_id;
       sessionIdBadge.textContent = state.sessionId;
     }
 
-    (result.turns || []).forEach((turn, index) => {
-      addMessage("user", `Q${index + 1}: ${turn.question}`);
-      addMessage("system", turn.answer, turn.qa_id || null);
-    });
+    const turns = flow.questions || [];
+    for (const [index, turn] of turns.entries()) {
+      const question = String(turn.question || "");
+      if (!question) continue;
 
-    const changed = {
-      nodes: result.deltas.changed_nodes,
-      edges: result.deltas.changed_edges,
-    };
-    renderGraph(result.after, changed);
-    renderActivity(result.activity_log || []);
-    await refreshSessionEntries();
+      await addMessageTyped("user", `Q${index + 1}: ${question}`, null, 13);
+      showInlineLoading(`Searching answer ${index + 1}/${turns.length}...`);
+      const sendResult = await api("/demo/send", "POST", {
+        question,
+        session_id: state.sessionId,
+      });
+      if (sendResult.session_id) {
+        state.sessionId = sendResult.session_id;
+        sessionIdBadge.textContent = state.sessionId;
+      }
+
+      await addMessageTyped("system", sendResult.answer, sendResult.qa_id || null, 12);
+
+      if (sendResult.qa_id) {
+        showInlineLoading(`Applying feedback ${index + 1}/${turns.length}...`);
+        await api("/demo/feedback", "POST", {
+          session_id: state.sessionId,
+          qa_id: sendResult.qa_id,
+          feedback_score: Number(turn.feedback_score ?? 3),
+          feedback_text: String(turn.feedback_text || "Scripted demo feedback"),
+        });
+
+        showInlineLoading(`Memify ${index + 1}/${turns.length}...`);
+        const perTurnMemify = await api("/demo/run_memify_pipeline", "POST", {
+          session_id: state.sessionId,
+        });
+        if (perTurnMemify.session_id) {
+          state.sessionId = perTurnMemify.session_id;
+          sessionIdBadge.textContent = state.sessionId;
+        }
+        await refreshStateAndGraph({
+          nodes: perTurnMemify.deltas.changed_nodes,
+          edges: perTurnMemify.deltas.changed_edges,
+        });
+      } else {
+        await refreshStateAndGraph();
+      }
+      await sleep(180);
+    }
+
+    addMessage(
+      "system",
+      "Scripted demo complete. Feedback and memify were applied after each QA turn."
+    );
   } catch (error) {
     addMessage("system", `Run_demo failed: ${error.message}`);
   } finally {
@@ -968,6 +1212,20 @@ submitFeedbackBtn.addEventListener("click", async () => {
   } finally {
     setBusy(false);
     hideInlineLoading();
+  }
+});
+
+resetLayoutBtn?.addEventListener("click", () => {
+  document.documentElement.style.setProperty("--left-pane-width", DEFAULT_LEFT_PANE_WIDTH);
+  document.documentElement.style.setProperty("--graph-body-rows", DEFAULT_GRAPH_ROWS);
+  document.documentElement.style.setProperty("--chat-rows", DEFAULT_CHAT_ROWS);
+
+  if (state.graphViz?.fitGraphView) {
+    state.graphViz.fitGraphView();
+  }
+
+  if (state.simulation) {
+    state.simulation.alpha(0.22).restart();
   }
 });
 

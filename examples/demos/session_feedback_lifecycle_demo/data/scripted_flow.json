@@ -1,25 +1,35 @@
 {
-  "session_id": "coffee_support_demo_session",
+  "session_id": "lumenrail_demo_session",
   "questions": [
     {
-      "question": "Where is Blue Harbor Coffee Roasters based and how do they source beans?",
+      "question": "What does LumenRail provide on its autonomous night trains?",
       "feedback_score": 5,
-      "feedback_text": "Excellent summary with the right sourcing details."
+      "feedback_text": "Great answer, it covered the core onboard experience clearly."
     },
     {
-      "question": "What are the subscription tiers and what do higher tiers include?",
+      "question": "How do Cabin, Studio, and Suite differ for passengers?",
       "feedback_score": 5,
-      "feedback_text": "Very helpful, this answer was specific and complete."
+      "feedback_text": "Excellent detail about class differences and premium benefits."
     },
     {
-      "question": "Can customers pause subscriptions every week without limits?",
+      "question": "Can passengers get a full refund one week after booking with no conditions?",
       "feedback_score": 1,
-      "feedback_text": "Incorrect. The policy allows a monthly pause, not unlimited weekly pauses."
+      "feedback_text": "Incorrect. Full refunds are only within the first 24 hours."
     },
     {
-      "question": "Does the support team refuse replacements for damaged deliveries?",
+      "question": "Does LumenRail ignore damaged luggage reports from travelers?",
       "feedback_score": 1,
-      "feedback_text": "Wrong. Damaged shipments are replaced within forty-eight hours."
+      "feedback_text": "Wrong. Damaged luggage is compensated within 72 hours with app photos."
+    },
+    {
+      "question": "Which operational metrics are reviewed by leadership and how often?",
+      "feedback_score": 4,
+      "feedback_text": "Mostly correct and useful, but could be slightly more concise."
+    },
+    {
+      "question": "Are route schedules adjusted daily or monthly according to the document?",
+      "feedback_score": 2,
+      "feedback_text": "Partially incorrect. The document states monthly schedule adjustments."
     }
   ]
 }

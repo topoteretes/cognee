@@ -682,5 +682,34 @@ async def run_demo():
     }
 
 
+@app.get("/demo/scripted_flow")
+async def get_scripted_flow():
+    if not state.initialized:
+        raise HTTPException(status_code=409, detail="Demo not initialized. Run /demo/init first.")
+
+    flow = _get_scripted_flow()
+    session_id = str(flow.get("session_id") or DEFAULT_SESSION_ID)
+    questions = flow.get("questions") or []
+    if not isinstance(questions, list):
+        raise HTTPException(status_code=500, detail="Invalid scripted_flow.json: questions must be a list")
+
+    sanitized_questions: list[dict[str, Any]] = []
+    for item in questions:
+        if not isinstance(item, dict):
+            continue
+        question = str(item.get("question", "")).strip()
+        if not question:
+            continue
+        sanitized_questions.append(
+            {
+                "question": question,
+                "feedback_score": int(item.get("feedback_score", 3)),
+                "feedback_text": str(item.get("feedback_text", "Scripted demo feedback")),
+            }
+        )
+
+    return {"ok": True, "session_id": session_id, "questions": sanitized_questions}
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8765, reload=False)
