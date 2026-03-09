@@ -1,3 +1,5 @@
+import importlib
+
 import pytest
 
 from cognee.modules.search.exceptions import UnsupportedSearchTypeError
@@ -69,10 +71,14 @@ async def test_registered_community_retriever_is_used(monkeypatch):
     override the default mapping when present.
     """
     import cognee.modules.search.methods.get_search_type_retriever_instance as mod
-    from cognee.modules.retrieval import registered_community_retrievers as registry
+
+    # Use import_module to get the module object (package __init__ re-exports the dict)
+    registry_module = importlib.import_module(
+        "cognee.modules.retrieval.registered_community_retrievers"
+    )
 
     monkeypatch.setattr(
-        registry,
+        registry_module,
         "registered_community_retrievers",
         {SearchType.SUMMARIES: _DummyCommunityRetriever},
     )
