@@ -165,26 +165,25 @@ def _collect_text_candidates(value: Any, out: list[str]) -> None:
 
 async def _safe_search(question: str, session_id: str) -> str:
     """
-    Prefer GRAPH_COMPLETION (session-aware + auto-feedback path), fall back to CHUNKS
-    for environments without LLM access.
+    Graph mode only: use GRAPH_COMPLETION.
     """
     await _ensure_dataset_context()
-    try:
-        results = await cognee.search(
-            query_text=question,
-            query_type=SearchType.GRAPH_COMPLETION,
-            datasets=[DATASET_NAME],
-            session_id=session_id,
-            top_k=5,
-        )
-    except Exception:
-        results = await cognee.search(
-            query_text=question,
-            query_type=SearchType.CHUNKS,
-            datasets=[DATASET_NAME],
-            session_id=session_id,
-            top_k=3,
-        )
+    search_order = [SearchType.GRAPH_COMPLETION]
+
+    results = None
+    for search_type in search_order:
+        try:
+            results = await cognee.search(
+                query_text=question,
+                query_type=search_type,
+                datasets=[DATASET_NAME],
+                session_id=session_id,
+                top_k=5,
+            )
+            if results:
+                break
+        except Exception:
+            continue
 
     if not results:
         return "No answer found for this question."
@@ -506,15 +505,40 @@ async def send_question(payload: SendPayload):
     state.session_id = session_id
 
     await _ensure_dataset_context()
-    state.log("Question", payload.question)
-    answer = await _safe_search(payload.question, session_id)
-    latest_qa = await _latest_qa_for_session(session_id)
+    latest_before = await _latest_qa_for_session(session_id)
+    qa_id_before = getattr(latest_before, "qa_id", None) if latest_before else None
+    feedback_score_before = getattr(latest_before, "feedback_score", None) if latest_before else None
+    feedback_text_before = getattr(latest_before, "feedback_text", None) if latest_before else None
 
-    qa_id = getattr(latest_qa, "qa_id", None) if latest_qa else None
-    feedback_score = getattr(latest_qa, "feedback_score", None) if latest_qa else None
-    feedback_text = getattr(latest_qa, "feedback_text", None) if latest_qa else None
-    if latest_qa is not None:
-        latest_answer = _extract_answer_text(getattr(latest_qa, "answer", ""))
+    state.log("Question", f"{payload.question} [Graph-based retrieval]")
+    answer = await _safe_search(payload.question, session_id)
+    latest_after = await _latest_qa_for_session(session_id)
+
+    qa_id_after = getattr(latest_after, "qa_id", None) if latest_after else None
+    created_new_entry = bool(qa_id_after and qa_id_after != qa_id_before)
+    updated_feedback_on_same_entry = bool(
+        latest_after
+        and qa_id_after
+        and qa_id_after == qa_id_before
+        and (
+            getattr(latest_after, "feedback_score", None) != feedback_score_before
+            or getattr(latest_after, "feedback_text", None) != feedback_text_before
+        )
+    )
+
+    qa_id = qa_id_after if (created_new_entry or updated_feedback_on_same_entry) else None
+    feedback_score = (
+        getattr(latest_after, "feedback_score", None)
+        if (created_new_entry or updated_feedback_on_same_entry)
+        else None
+    )
+    feedback_text = (
+        getattr(latest_after, "feedback_text", None)
+        if (created_new_entry or updated_feedback_on_same_entry)
+        else None
+    )
+    if created_new_entry and latest_after is not None:
+        latest_answer = _extract_answer_text(getattr(latest_after, "answer", ""))
         if latest_answer:
             answer = latest_answer
     if not answer:
@@ -533,6 +557,8 @@ async def send_question(payload: SendPayload):
         "session_id": session_id,
         "answer": answer,
         "qa_id": qa_id,
+        "retrieval_mode": "graph_based",
+        "retrieval_label": "Graph-based retrieval",
         "auto_feedback": {
             "feedback_score": feedback_score,
             "feedback_text": feedback_text,

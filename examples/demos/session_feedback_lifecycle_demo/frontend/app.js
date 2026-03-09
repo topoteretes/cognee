@@ -56,6 +56,7 @@ const DEFAULT_CHAT_ROWS = "minmax(300px, 58vh) 8px minmax(220px, 1fr)";
 let guideCurrentStep = 1;
 let guideFocusedElement = null;
 let guideBeacon = null;
+let messageQueue = Promise.resolve();
 
 function setBusy(isBusy) {
   [runDemoBtn, runMemifyBtn, showDocsBtn, questionInput]
@@ -75,19 +76,8 @@ function renderLoadingSteps(steps) {
 }
 
 function addMessage(type, text, qaId = null) {
-  const node = document.createElement("div");
-  node.className = `message ${type}`;
-  node.textContent = text;
-
-  if (qaId) {
-    const meta = document.createElement("div");
-    meta.className = "qa-meta";
-    meta.textContent = `qa_id: ${qaId}`;
-    node.appendChild(meta);
-  }
-
-  messages.appendChild(node);
-  messages.scrollTop = messages.scrollHeight;
+  messageQueue = messageQueue.then(() => addMessageTyped(type, text, qaId, 12));
+  return messageQueue;
 }
 
 async function addFeedbackChatTurn({ score, text, qaId }) {
@@ -95,14 +85,14 @@ async function addFeedbackChatTurn({ score, text, qaId }) {
   const line = feedbackText
     ? `Feedback (score ${score}/5): ${feedbackText}`
     : `Feedback (score ${score}/5)`;
-  await addMessageTyped("user", line, qaId || null, 11);
+  await addMessage("user", line, qaId || null);
 }
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function addMessageTyped(type, text, qaId = null, charDelayMs = 14) {
+async function addMessageTyped(type, text, qaId = null, charDelayMs = 12) {
   const node = document.createElement("div");
   node.className = `message ${type}`;
   node.textContent = "";
@@ -1119,7 +1109,7 @@ runDemoBtn.addEventListener("click", async () => {
       const question = String(turn.question || "");
       if (!question) continue;
 
-      await addMessageTyped("user", `Q${index + 1}: ${question}`, null, 13);
+      await addMessage("user", `Q${index + 1}: ${question}`);
       showInlineLoading(`Searching answer ${index + 1}/${turns.length}...`);
       const sendResult = await api("/demo/send", "POST", {
         question,
@@ -1130,7 +1120,7 @@ runDemoBtn.addEventListener("click", async () => {
         sessionIdBadge.textContent = state.sessionId;
       }
 
-      await addMessageTyped("system", sendResult.answer, sendResult.qa_id || null, 12);
+      await addMessage("system", sendResult.answer, sendResult.qa_id || null);
 
       if (sendResult.qa_id) {
         await addFeedbackChatTurn({
@@ -1245,20 +1235,24 @@ sendForm.addEventListener("submit", async (event) => {
         text: result.auto_feedback.feedback_text ?? "",
         qaId: result.qa_id || null,
       });
-      const memifyResult = await api("/demo/run_memify_pipeline", "POST", {
-        session_id: state.sessionId,
-      });
-      const changed = {
-        nodes: memifyResult.deltas.changed_nodes,
-        edges: memifyResult.deltas.changed_edges,
-      };
-      await refreshStateAndGraph(changed);
+    }
+
+    const memifyResult = await api("/demo/run_memify_pipeline", "POST", {
+      session_id: state.sessionId,
+    });
+    const changed = {
+      nodes: memifyResult.deltas.changed_nodes,
+      edges: memifyResult.deltas.changed_edges,
+    };
+    await refreshStateAndGraph(changed);
+    if (
+      memifyResult?.deltas?.summary?.changed_node_count > 0 ||
+      memifyResult?.deltas?.summary?.changed_edge_count > 0
+    ) {
       addMessage(
         "system",
-        `Feedback processed. Memify updated nodes=${memifyResult.deltas.summary.changed_node_count}, edges=${memifyResult.deltas.summary.changed_edge_count}`
+        `Memify updated nodes=${memifyResult.deltas.summary.changed_node_count}, edges=${memifyResult.deltas.summary.changed_edge_count}`
       );
-    } else {
-      await refreshStateAndGraph();
     }
 
     questionInput.value = "";
