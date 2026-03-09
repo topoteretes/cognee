@@ -53,7 +53,7 @@ class CacheDBInterface(ABC):
         context: str,
         answer: str,
     ):
-        """Backward-compatibility: delegates to create_qa_entry with generated qa_id. :TODO: delete when retrievers are updated"""
+        """Backward-compatibility: delegates to create_qa_entry with generated qa_id."""
         return await self.create_qa_entry(
             user_id,
             session_id,
@@ -82,7 +82,7 @@ class CacheDBInterface(ABC):
         pass
 
     async def get_latest_qa(self, user_id: str, session_id: str, last_n: int = 5):
-        """Backward-compat: delegates to get_latest_qa_entries. :TODO: delete when retrievers are updated"""
+        """Backward-compat: delegates to get_latest_qa_entries."""
         return await self.get_latest_qa_entries(user_id, session_id, last_n)
 
     @abstractmethod
@@ -93,7 +93,7 @@ class CacheDBInterface(ABC):
         pass
 
     async def get_all_qas(self, user_id: str, session_id: str):
-        """Backward-compat: delegates to get_all_qa_entries. :TODO: delete when retrievers are updated"""
+        """Backward-compat: delegates to get_all_qa_entries."""
         return await self.get_all_qa_entries(user_id, session_id)
 
     @abstractmethod
