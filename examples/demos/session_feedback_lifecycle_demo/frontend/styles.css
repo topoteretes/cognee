@@ -336,6 +336,15 @@ body.guide-open .app-shell {
   font-weight: 720;
 }
 
+#guideBtn {
+  background: linear-gradient(135deg, #8fe7bf 0%, #59c993 52%, #39ad7a 100%);
+  color: #062719;
+  border-color: rgba(208, 255, 232, 0.44);
+  box-shadow:
+    0 10px 22px rgba(60, 178, 126, 0.34),
+    inset 0 1px 0 rgba(234, 255, 246, 0.5);
+}
+
 #runDemoBtn {
   background: linear-gradient(135deg, #ffb48d 0%, #ff7a45 52%, #ff6438 100%);
   color: #261108;

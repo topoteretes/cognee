@@ -490,9 +490,10 @@ function hideInlineLoading() {
 }
 
 function setGuideStep(step) {
-  guideCurrentStep = Math.max(1, Math.min(5, Number(step) || 1));
+  const maxSteps = Math.max(1, guideStepButtons.length);
+  guideCurrentStep = Math.max(1, Math.min(maxSteps, Number(step) || 1));
   if (guideStepStatus) {
-    guideStepStatus.textContent = `Current step: ${guideCurrentStep}/5`;
+    guideStepStatus.textContent = `Current step: ${guideCurrentStep}/${maxSteps}`;
   }
   guideStepButtons.forEach((btn) => {
     const btnStep = Number(btn.dataset.step || "0");
@@ -1155,7 +1156,7 @@ function setupChatResizer() {
 
 runDemoBtn.addEventListener("click", async () => {
   try {
-    setGuideStep(2);
+    setGuideStep(6);
     setBusy(true);
     showInlineLoading("Running scripted demo flow...");
     addMessage("user", "Running scripted demo flow...");
@@ -1235,7 +1236,7 @@ runDemoBtn.addEventListener("click", async () => {
 
 runMemifyBtn.addEventListener("click", async () => {
   try {
-    setGuideStep(3);
+    setGuideStep(5);
     setBusy(true);
     showInlineLoading("Applying memify...");
     const result = await api("/demo/run_memify_pipeline", "POST", {
@@ -1269,7 +1270,9 @@ sendForm.addEventListener("submit", async (event) => {
   if (!question) return;
 
   try {
-    setGuideStep(4);
+    if (guideCurrentStep < 2) {
+      setGuideStep(2);
+    }
     setBusy(true);
     showInlineLoading("Searching...");
     addMessage("user", question);
@@ -1321,7 +1324,7 @@ sendForm.addEventListener("submit", async (event) => {
 });
 
 resetLayoutBtn?.addEventListener("click", () => {
-  setGuideStep(5);
+  setGuideStep(6);
   document.documentElement.style.setProperty("--left-pane-width", DEFAULT_LEFT_PANE_WIDTH);
   document.documentElement.style.setProperty("--graph-body-rows", DEFAULT_GRAPH_ROWS);
   document.documentElement.style.setProperty("--chat-rows", DEFAULT_CHAT_ROWS);
@@ -1339,7 +1342,7 @@ guideBtn?.addEventListener("click", () => {
   setGuideStep(guideCurrentStep);
   openGuidePanel();
   const activeBtn = guideStepButtons.find((btn) => Number(btn.dataset.step || "0") === guideCurrentStep);
-  focusGuideTarget(activeBtn?.dataset.target || "runDemoBtn");
+  focusGuideTarget(activeBtn?.dataset.target || "showDocsBtn");
 });
 
 closeGuideBtn?.addEventListener("click", closeGuidePanel);
@@ -1400,7 +1403,7 @@ docsBackdrop?.addEventListener("click", closeDocsModal);
     await initializeDemo();
     openGuidePanel();
     const firstStepBtn = guideStepButtons.find((btn) => Number(btn.dataset.step || "0") === 1);
-    focusGuideTarget(firstStepBtn?.dataset.target || "runDemoBtn");
+    focusGuideTarget(firstStepBtn?.dataset.target || "showDocsBtn");
   } catch (error) {
     if (loadingSteps) {
       loadingSteps.innerHTML = `<li>Initialization failed: ${error.message}</li>`;

@@ -108,7 +108,7 @@
         <div id="chatResizer" class="chat-resizer" title="Drag to resize chat/content"></div>
         <div id="chatBottom" class="chat-bottom">
           <form id="sendForm" class="send-form">
-            <input id="questionInput" type="text" placeholder="Ask a question in this session" required />
+            <input id="questionInput" type="text" placeholder="Ask a question or add feedback" required />
             <button type="submit" class="btn primary">Send</button>
           </form>
 
@@ -139,26 +139,29 @@
           <h3>How This Demo Works</h3>
           <button id="closeGuideBtn" class="btn secondary">Close</button>
         </header>
-        <div id="guideStepStatus" class="guide-status">Current step: 1/5</div>
+        <div id="guideStepStatus" class="guide-status">Current step: 1/6</div>
         <div class="guide-steps">
-          <button class="guide-step-btn" data-step="1" data-target="runDemoBtn">
-            <strong>Step 1:</strong> Start with <code>Run_demo</code>.
+          <button class="guide-step-btn" data-step="1" data-target="showDocsBtn">
+            <strong>Step 1:</strong> Inspect <code>View Ingested Docs</code> first.
           </button>
-          <button class="guide-step-btn" data-step="2" data-target="messages">
-            <strong>Step 2:</strong> Watch Q/A + feedback in chat.
+          <button class="guide-step-btn" data-step="2" data-target="questionInput">
+            <strong>Step 2:</strong> Ask your first question manually.
           </button>
-          <button class="guide-step-btn" data-step="3" data-target="graphBody">
-            <strong>Step 3:</strong> Observe graph changes after memify.
+          <button class="guide-step-btn" data-step="3" data-target="questionInput">
+            <strong>Step 3:</strong> Add positive feedback in the same input (e.g. 5/5).
           </button>
           <button class="guide-step-btn" data-step="4" data-target="questionInput">
-            <strong>Step 4:</strong> Ask your own question in the same session.
+            <strong>Step 4:</strong> Ask a second question, then add negative feedback in the same input.
           </button>
-          <button class="guide-step-btn" data-step="5" data-target="resetLayoutBtn">
-            <strong>Step 5:</strong> Reset view and compare state.
+          <button class="guide-step-btn" data-step="5" data-target="graphBody">
+            <strong>Step 5:</strong> Observe graph changes (memify runs automatically).
+          </button>
+          <button class="guide-step-btn" data-step="6" data-target="runDemoBtn">
+            <strong>Step 6:</strong> Run <code>Run_demo</code> for scripted replay.
           </button>
         </div>
         <div id="guideHint" class="guide-hint">
-          Click any step above to highlight that part of the UI.
+          Manual flow first, scripted flow second. Click any step to highlight the relevant UI area.
         </div>
       </section>
     </div>
