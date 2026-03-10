@@ -198,22 +198,14 @@ async def prefetch_disambiguation(
     print(f"Reused instances: {kwargs.get('stats').get('reused_entities')}")
 
 
-async def cache_entity_embeddings(nodes, **kwargs) -> None:
+async def cache_entity_embeddings(graphs, **kwargs) -> None:
     df = kwargs.get("df", None)
     if df is None:
         return
     vector_engine = get_vector_engine()
     df_new = pd.DataFrame()
-    for chunk in nodes:
-        entity_names = []
-        for contained in getattr(chunk, "contains", None) or []:
-            if isinstance(contained, tuple) and len(contained) == 2:
-                _, node = contained
-            else:
-                node = contained
-
-            if node and (isinstance(node, Entity) or isinstance(node, EntityType)):
-                entity_names.append(node.name)
+    for graph in graphs:
+        entity_names = [node.name for node in graph.nodes]
         if not entity_names:
             continue
         entity_vectors = await vector_engine.embed_data(entity_names)
