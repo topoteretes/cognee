@@ -1,4 +1,26 @@
 # ruff: noqa: E402
+"""
+Cognee - Knowledge Engine for AI Agent Memory
+
+Cognee transforms raw data into structured knowledge graphs using LLMs.
+It provides a simple API for ingesting, processing, and querying data.
+
+Main Functions:
+    - add(): Ingest data into datasets
+    - cognify(): Transform data into knowledge graphs
+    - search(): Query the knowledge graph
+    - memify(): Enrich existing graphs
+    - delete(): Remove data from datasets
+    - config(): Configure Cognee settings
+    - datasets(): Manage datasets
+
+Example Usage:
+    >>> import cognee
+    >>> await cognee.add("Cognee builds AI memory.", dataset_name="demo")
+    >>> await cognee.cognify(dataset_name="demo")
+    >>> results = await cognee.search("What does Cognee do?")
+"""
+
 from cognee.version import get_cognee_version
 
 # NOTE: __version__ extraction must be at the top of the __init__.py otherwise
