@@ -17,12 +17,23 @@
   box-sizing: border-box;
 }
 
-html,
+html {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  /* Mobile: allow scroll so all content is reachable; desktop uses overflow: hidden in .app-shell */
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   width: 100%;
   height: 100%;
   margin: 0;
   overflow: hidden;
+  /* Prefer dvh on supported browsers for correct mobile viewport */
+  min-height: 100dvh;
+  min-height: 100vh;
 }
 
 body {
@@ -50,7 +61,11 @@ body.guide-open .app-shell {
   grid-template-columns: var(--left-pane-width) 8px minmax(340px, 1fr);
   gap: 12px;
   padding: 12px;
+  padding-left: max(12px, env(safe-area-inset-left));
+  padding-right: max(12px, env(safe-area-inset-right));
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
   height: 100vh;
+  max-height: 100dvh;
   max-height: 100vh;
   min-height: 0;
   overflow: hidden;
@@ -88,6 +103,7 @@ body.guide-open .app-shell {
 
 .panel-header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
@@ -126,6 +142,7 @@ body.guide-open .app-shell {
   border-radius: 18px;
   padding: 12px;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
   box-shadow:
     0 18px 40px rgba(4, 9, 16, 0.5),
@@ -211,6 +228,8 @@ body.guide-open .app-shell {
   font-size: 12px;
   color: var(--muted);
   white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
   max-height: 100%;
   overflow: auto;
   border: 1px solid rgba(158, 185, 211, 0.22);
@@ -417,11 +436,16 @@ body.guide-open .app-shell {
   padding: 9px 11px;
   color: var(--muted);
   font-size: 13px;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 .session-box code {
   color: var(--text);
   font-size: 12px;
+  overflow-wrap: break-word;
+  word-break: break-all;
 }
 
 .btn {
@@ -472,6 +496,8 @@ body.guide-open .app-shell {
   padding: 9px 10px;
   border-radius: 10px;
   font-size: 14px;
+  overflow-wrap: break-word;
+  word-break: break-word;
   animation: fadeInUp 180ms ease-out;
   border: 1px solid rgba(166, 193, 220, 0.14);
 }
@@ -492,6 +518,7 @@ body.guide-open .app-shell {
 
 .send-form {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: stretch;
 }
@@ -525,7 +552,8 @@ body.guide-open .app-shell {
 
 #topKSlider {
   width: min(420px, 100%);
-  min-width: 220px;
+  min-width: 0;
+  flex: 1;
   appearance: none;
   -webkit-appearance: none;
   height: 6px;
@@ -619,7 +647,8 @@ body.guide-open .app-shell {
 
 .send-form .btn.primary {
   min-height: 46px;
-  min-width: 102px;
+  min-width: 0;
+  flex-shrink: 0;
   padding: 10px 16px;
   border-radius: 12px;
   font-size: 14px;
@@ -909,6 +938,7 @@ body.guide-open .app-shell {
   position: fixed;
   inset: 0;
   z-index: 20;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   background:
     radial-gradient(900px 520px at 18% 22%, rgba(120, 88, 255, 0.2) 0%, rgba(5, 9, 16, 0) 58%),
     radial-gradient(760px 460px at 84% 18%, rgba(85, 205, 168, 0.18) 0%, rgba(5, 9, 16, 0) 62%),
@@ -1123,17 +1153,34 @@ body.guide-open .app-shell {
   }
 }
 
+/* Tablet and below: single column, full page scroll so everything is visible */
 @media (max-width: 1050px) {
   html,
   body {
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
   }
 
   .app-shell {
     grid-template-columns: 1fr;
     height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
     max-height: none;
     overflow: visible;
+    padding: 12px;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    gap: 16px;
+  }
+
+  .app-shell > .graph-panel,
+  .app-shell > .chat-panel {
+    min-height: 0;
   }
 
   .main-resizer,
@@ -1142,17 +1189,184 @@ body.guide-open .app-shell {
     display: none;
   }
 
+  /* Graph section: fixed layout so graph + details are both visible when stacked */
+  .graph-panel {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .graph-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+  }
+
   #graphSvg {
-    min-height: 300px;
+    min-height: min(320px, 45vh);
+    height: min(400px, 50vh);
+    flex-shrink: 0;
+  }
+
+  .details-panel {
+    min-height: 120px;
+    flex-shrink: 0;
+  }
+
+  /* Chat section: stack top (messages) and bottom (input + session) so all visible by scrolling */
+  .chat-panel {
+    display: flex;
+    flex-direction: column;
+    grid-template-rows: unset;
+    gap: 12px;
+  }
+
+  .chat-top {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
   }
 
   .messages {
-    height: 24vh;
-    max-height: 34vh;
+    min-height: 200px;
+    max-height: min(360px, 45vh);
+    flex: 0 1 auto;
+  }
+
+  .chat-bottom {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+    flex: 0 0 auto;
+  }
+
+  .session-content-section {
+    min-height: 180px;
+    max-height: min(320px, 40vh);
+    display: flex;
+    flex-direction: column;
   }
 
   .session-entries {
-    height: 18vh;
-    max-height: 22vh;
+    min-height: 140px;
+    flex: 1;
+  }
+
+  /* Modals: stay within viewport on small screens */
+  .docs-panel {
+    width: min(980px, calc(100vw - 24px));
+    max-height: calc(100dvh - 24px);
+    max-height: calc(100vh - 24px);
+    margin: 12px;
+    margin-left: max(12px, env(safe-area-inset-left));
+    margin-right: max(12px, env(safe-area-inset-right));
+  }
+
+  .guide-card {
+    width: min(560px, calc(100vw - 24px));
+    max-height: calc(100dvh - 24px);
+    max-height: calc(100vh - 24px);
+    margin: 12px;
+  }
+}
+
+/* Small phones: compact padding, touch-friendly targets, no horizontal overflow */
+@media (max-width: 600px) {
+  .app-shell {
+    padding: 8px;
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    gap: 12px;
+  }
+
+  .graph-panel,
+  .chat-panel {
+    padding: 10px;
+  }
+
+  .panel-header h2 {
+    font-size: 14px;
+  }
+
+  .panel-header-right {
+    flex-wrap: wrap;
+  }
+
+  .controls-row {
+    gap: 8px;
+  }
+
+  .controls-row .btn {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+
+  #graphSvg {
+    min-height: min(260px, 40vh);
+    height: min(320px, 45vh);
+  }
+
+  .details-panel {
+    min-height: 100px;
+  }
+
+  .messages {
+    min-height: 160px;
+    max-height: min(280px, 38vh);
+  }
+
+  .session-content-section {
+    min-height: 140px;
+    max-height: min(260px, 35vh);
+  }
+
+  .topk-row {
+    flex-wrap: wrap;
+  }
+
+  .topk-control {
+    width: 100%;
+  }
+
+  #topKSlider {
+    width: 100%;
+  }
+
+  .send-form {
+    flex-direction: column;
+  }
+
+  .send-form input {
+    width: 100%;
+  }
+
+  .send-form .btn.primary {
+    width: 100%;
+  }
+
+  .feedback-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .docs-panel,
+  .guide-card {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    margin: 8px;
+    margin-left: max(8px, env(safe-area-inset-left));
+    margin-right: max(8px, env(safe-area-inset-right));
+    padding: 10px;
+  }
+
+  .graph-legend {
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
   }
 }
