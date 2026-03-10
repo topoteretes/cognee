@@ -1,16 +1,14 @@
 import json
-import importlib
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-def _force_demo_env() -> None:
-    os.environ["CACHING"] = "true"
-    os.environ["CACHE_BACKEND"] = "fs"
-    os.environ["AUTO_FEEDBACK"] = "true"
-
-_force_demo_env()
+# Configure cache/session behavior before importing cognee internals.
+os.environ.setdefault("CACHING", "true")
+os.environ.setdefault("CACHE_BACKEND", "fs")
+os.environ.setdefault("AUTO_FEEDBACK", "true")
+os.environ.setdefault("ENV", "dev")
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
@@ -21,25 +19,10 @@ from pydantic import BaseModel, Field
 import cognee
 from cognee.api.v1.search import SearchType
 from cognee.context_global_variables import set_database_global_context_variables
-from cognee.infrastructure.databases.cache.config import get_cache_config
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.memify_pipelines.apply_feedback_weights import apply_feedback_weights_pipeline
 from cognee.modules.data.methods import get_authorized_existing_datasets
 from cognee.modules.users.methods import get_default_user
-
-def _refresh_runtime_cache_config() -> None:
-    get_cache_config.cache_clear()
-    refreshed_config = get_cache_config()
-    cache_engine_module = importlib.import_module(
-        "cognee.infrastructure.databases.cache.get_cache_engine"
-    )
-    cache_engine_module.config = refreshed_config
-    if hasattr(cache_engine_module.create_cache_engine, "cache_clear"):
-        cache_engine_module.create_cache_engine.cache_clear()
-
-
-_force_demo_env()
-_refresh_runtime_cache_config()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
@@ -382,13 +365,6 @@ state = DemoState()
 
 app = FastAPI(title="Session Feedback Weights Demo API")
 app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIR)), name="assets")
-
-
-@app.middleware("http")
-async def _enforce_demo_env_middleware(request, call_next):
-    _force_demo_env()
-    _refresh_runtime_cache_config()
-    return await call_next(request)
 
 
 @app.get("/")
