@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
-from uuid import uuid5, UUID
 
 from cognee.low_level import setup
 from cognee.pipelines import Task, run_tasks
@@ -17,56 +15,15 @@ from cognee.modules.data.methods import load_or_create_datasets
 from cognee.infrastructure.databases.graph import get_graph_engine
 from cognee.infrastructure.databases.vector import get_vector_engine
 from cognee.modules.engine.models.node_set import NodeSet
-from cognee.modules.engine.utils.generate_timestamp_datapoint import generate_timestamp_datapoint
-from cognee.modules.engine.models.Timestamp import Timestamp
 
 from cognee.skills.tasks.parse_skills import parse_skills_task
 from cognee.skills.tasks.enrich_skills import enrich_skills
 from cognee.skills.tasks.materialize_task_patterns import materialize_task_patterns
 from cognee.skills.tasks.apply_node_set import apply_node_set
 from cognee.skills.models.skill_change_event import SkillChangeEvent
+from cognee.skills.utils import _make_change_event
 
 logger = logging.getLogger(__name__)
-
-EVENT_NAMESPACE = UUID("d4e5f6a7-b8c9-0123-def0-123456789abc")
-
-
-def _now_timestamp() -> Timestamp:
-    """Create a Cognee Timestamp DataPoint for the current UTC time."""
-    now = datetime.now(timezone.utc)
-    raw = Timestamp(
-        id=UUID(int=0),
-        time_at=0,
-        year=now.year,
-        month=now.month,
-        day=now.day,
-        hour=now.hour,
-        minute=now.minute,
-        second=now.second,
-        timestamp_str="",
-    )
-    return generate_timestamp_datapoint(raw)
-
-
-def _make_change_event(
-    skill_id: str,
-    skill_name: str,
-    change_type: str,
-    old_hash: str = "",
-    new_hash: str = "",
-) -> SkillChangeEvent:
-    ts = _now_timestamp()
-    return SkillChangeEvent(
-        id=uuid5(EVENT_NAMESPACE, f"{skill_id}:{change_type}:{ts.time_at}"),
-        name=f"skill_{change_type}: {skill_name}",
-        description=f"Skill '{skill_name}' ({skill_id}) was {change_type}.",
-        skill_id=skill_id,
-        change_type=change_type,
-        old_content_hash=old_hash,
-        new_content_hash=new_hash,
-        skill_name=skill_name,
-        at=ts,
-    )
 
 
 async def ingest_skills(

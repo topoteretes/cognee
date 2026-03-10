@@ -1,4 +1,4 @@
-"""Skills client — nine methods for the full skill routing loop."""
+"""Skills client — full skill routing loop with self-amendifying."""
 
 from __future__ import annotations
 
@@ -168,6 +168,9 @@ class Skills:
         task_text: str,
         context: Optional[str] = None,
         auto_observe: bool = True,
+        auto_amendify: bool = False,
+        amendify_min_runs: int = 3,
+        amendify_score_threshold: float = 0.5,
         session_id: str = "default",
         node_set: str = "skills",
     ) -> Dict[str, Any]:
@@ -178,11 +181,18 @@ class Skills:
             task_text: The user's task description.
             context: Optional additional context for the LLM.
             auto_observe: If True, automatically record the run to the observe cache.
+            auto_amendify: If True and the execution fails, automatically run the
+                full inspect → preview → amendify pipeline. The amended
+                skill is NOT re-executed in the same call to avoid loops.
+            amendify_min_runs: Minimum failed runs before auto_amendify triggers.
+            amendify_score_threshold: Score threshold for counting failures.
             session_id: Session ID for the observation record.
             node_set: Graph node set to load the skill from.
 
         Returns:
             Dict with keys: output, skill_id, model, latency_ms, success, error.
+            When auto_amendify triggers, also includes an "amended" key with the
+            amendment result.
         """
         skill = await self.load(skill_id, node_set=node_set)
         if skill is None:
@@ -198,16 +208,31 @@ class Skills:
         result = await execute_skill(skill=skill, task_text=task_text, context=context)
 
         if auto_observe:
-            await self.observe({
-                "session_id": session_id,
-                "task_text": task_text,
-                "selected_skill_id": skill_id,
-                "success_score": 1.0 if result["success"] else 0.0,
-                "result_summary": result["output"][:500] if result["output"] else "",
-                "latency_ms": result["latency_ms"],
-                "error_type": "llm_error" if result["error"] else "",
-                "error_message": result.get("error", "") or "",
-            })
+            await self.observe(
+                {
+                    "session_id": session_id,
+                    "task_text": task_text,
+                    "selected_skill_id": skill_id,
+                    "success_score": 1.0 if result["success"] else 0.0,
+                    "result_summary": result["output"][:500] if result["output"] else "",
+                    "latency_ms": result["latency_ms"],
+                    "error_type": "llm_error" if result["error"] else "",
+                    "error_message": result.get("error", "") or "",
+                }
+            )
+
+        if auto_amendify and not result["success"]:
+            try:
+                amendify_result = await self.auto_amendify(
+                    skill_id=skill_id,
+                    min_runs=amendify_min_runs,
+                    score_threshold=amendify_score_threshold,
+                    node_set=node_set,
+                )
+                result["amended"] = amendify_result
+            except Exception as exc:
+                logger.warning("Auto-amendify failed for skill '%s': %s", skill_id, exc)
+                result["amended"] = None
 
         return result
 
@@ -263,6 +288,252 @@ class Skills:
     async def promote(self, session_id: Optional[str] = None) -> Dict[str, Any]:
         """Promote cached runs to the long-term graph and update prefers edges."""
         return await promote_skill_runs(session_id=session_id)
+
+    # ------------------------------------------------------------------
+    # Self-amendifying: inspect → preview_amendify → amendify / rollback
+    # ------------------------------------------------------------------
+
+    async def inspect(
+        self,
+        skill_id: str,
+        min_runs: int = 1,
+        score_threshold: float = 0.5,
+        node_set: str = "skills",
+    ) -> Optional[Dict[str, Any]]:
+        """Inspect why a skill fails based on its failed runs.
+
+        Returns a dict with inspection fields, or None if insufficient failures.
+        """
+        from cognee.skills.inspect import inspect_skill
+
+        inspection = await inspect_skill(
+            skill_id=skill_id,
+            min_runs=min_runs,
+            score_threshold=score_threshold,
+            node_set=node_set,
+        )
+        if inspection is None:
+            return None
+
+        return {
+            "inspection_id": inspection.inspection_id,
+            "skill_id": inspection.skill_id,
+            "skill_name": inspection.skill_name,
+            "failure_category": inspection.failure_category,
+            "root_cause": inspection.root_cause,
+            "severity": inspection.severity,
+            "improvement_hypothesis": inspection.improvement_hypothesis,
+            "analyzed_run_count": inspection.analyzed_run_count,
+            "avg_success_score": inspection.avg_success_score,
+            "inspection_confidence": inspection.inspection_confidence,
+        }
+
+    async def preview_amendify(
+        self,
+        skill_id: str,
+        inspection_id: Optional[str] = None,
+        min_runs: int = 1,
+        score_threshold: float = 0.5,
+        node_set: str = "skills",
+    ) -> Optional[Dict[str, Any]]:
+        """Preview a proposed amendment for a skill. Runs inspect first if no inspection_id given.
+
+        Args:
+            skill_id: The skill to amend.
+            inspection_id: Reuse an existing inspection. If None, runs inspect first.
+            min_runs: Passed to inspect if no inspection_id (min failed runs).
+            score_threshold: Passed to inspect if no inspection_id.
+            node_set: Graph node set.
+
+        Returns a dict with amendment fields, or None if inspection found no issues.
+        """
+        from cognee.skills.inspect import inspect_skill
+        from cognee.skills.preview_amendify import preview_skill_amendify
+
+        inspection = None
+        if inspection_id:
+            # Load existing inspection from graph
+            engine = await get_graph_engine()
+
+            raw_nodes, _ = await engine.get_nodeset_subgraph(
+                node_type=NodeSet, node_name=[node_set]
+            )
+            for _, props in raw_nodes:
+                if (
+                    props.get("type") == "SkillInspection"
+                    and props.get("inspection_id") == inspection_id
+                ):
+                    from cognee.skills.models.skill_inspection import SkillInspection
+
+                    inspection = SkillInspection(
+                        id=props.get("id", inspection_id),
+                        name=props.get("name", ""),
+                        description=props.get("description", ""),
+                        inspection_id=inspection_id,
+                        skill_id=props.get("skill_id", skill_id),
+                        skill_name=props.get("skill_name", ""),
+                        failure_category=props.get("failure_category", "other"),
+                        root_cause=props.get("root_cause", ""),
+                        severity=props.get("severity", "medium"),
+                        improvement_hypothesis=props.get("improvement_hypothesis", ""),
+                        analyzed_run_ids=props.get("analyzed_run_ids", []),
+                        analyzed_run_count=props.get("analyzed_run_count", 0),
+                        avg_success_score=props.get("avg_success_score", 0.0),
+                        inspection_model=props.get("inspection_model", ""),
+                        inspection_confidence=props.get("inspection_confidence", 0.0),
+                    )
+                    break
+        else:
+            inspection = await inspect_skill(
+                skill_id=skill_id,
+                min_runs=min_runs,
+                score_threshold=score_threshold,
+                node_set=node_set,
+            )
+
+        if inspection is None:
+            return None
+
+        skill = await self.load(skill_id, node_set=node_set)
+        if skill is None:
+            return None
+
+        amendment = await preview_skill_amendify(inspection=inspection, skill=skill)
+        if amendment is None:
+            return None
+
+        return {
+            "amendment_id": amendment.amendment_id,
+            "skill_id": amendment.skill_id,
+            "skill_name": amendment.skill_name,
+            "inspection_id": amendment.inspection_id,
+            "change_explanation": amendment.change_explanation,
+            "expected_improvement": amendment.expected_improvement,
+            "status": amendment.status,
+            "amendment_confidence": amendment.amendment_confidence,
+            "pre_amendment_avg_score": amendment.pre_amendment_avg_score,
+        }
+
+    async def amendify(
+        self,
+        amendment_id: str,
+        write_to_disk: bool = False,
+        validate: bool = False,
+        validation_task_text: str = "",
+        node_set: str = "skills",
+    ) -> Dict[str, Any]:
+        """Apply a proposed amendment to a skill.
+
+        Args:
+            amendment_id: The amendment to apply.
+            write_to_disk: Also write amended instructions to SKILL.md on disk.
+            validate: Run the skill after amending to validate.
+            validation_task_text: Task text for validation.
+            node_set: Graph node set.
+        """
+        from cognee.skills.amendify import amendify as _amendify
+
+        return await _amendify(
+            amendment_id=amendment_id,
+            write_to_disk=write_to_disk,
+            validate=validate,
+            validation_task_text=validation_task_text,
+            node_set=node_set,
+        )
+
+    async def rollback_amendify(
+        self,
+        amendment_id: str,
+        write_to_disk: bool = False,
+        node_set: str = "skills",
+    ) -> bool:
+        """Rollback an applied amendment, restoring original instructions.
+
+        Args:
+            amendment_id: The amendment to rollback.
+            write_to_disk: If True, also restore the original SKILL.md on disk.
+            node_set: Graph node set.
+        """
+        from cognee.skills.amendify import rollback_amendify as _rollback_amendify
+
+        return await _rollback_amendify(
+            amendment_id=amendment_id, write_to_disk=write_to_disk, node_set=node_set
+        )
+
+    async def evaluate_amendify(
+        self,
+        amendment_id: str,
+        node_set: str = "skills",
+    ) -> Dict[str, Any]:
+        """Evaluate an amendment by comparing pre/post success scores.
+
+        Returns dict with pre_avg, post_avg, improvement, run_count, recommendation.
+        """
+        from cognee.skills.amendify import evaluate_amendify as _evaluate_amendify
+
+        return await _evaluate_amendify(amendment_id=amendment_id, node_set=node_set)
+
+    async def auto_amendify(
+        self,
+        skill_id: str,
+        min_runs: int = 1,
+        score_threshold: float = 0.5,
+        write_to_disk: bool = False,
+        validate: bool = False,
+        validation_task_text: str = "",
+        node_set: str = "skills",
+    ) -> Optional[Dict[str, Any]]:
+        """Fully automatic self-amendifying: inspect → preview → apply in one call.
+
+        Runs the entire amendify pipeline without manual review. The LLM
+        inspects the failure, generates an amendment, and applies it immediately.
+
+        Args:
+            skill_id: The skill to amendify.
+            min_runs: Minimum failed runs required before amendifying triggers.
+            score_threshold: Runs below this score count as failures.
+            write_to_disk: Also update the SKILL.md file on disk.
+            validate: Execute the skill after amending to verify the fix.
+            validation_task_text: Task text for validation (required if validate=True).
+            node_set: Graph node set.
+
+        Returns:
+            Summary dict with inspection, amendment, and apply results, or None if
+            the skill has insufficient failures to trigger amendifying.
+        """
+        # Promote cached runs to graph first so inspect can see them
+        await self.promote()
+
+        inspection = await self.inspect(
+            skill_id=skill_id,
+            min_runs=min_runs,
+            score_threshold=score_threshold,
+            node_set=node_set,
+        )
+        if inspection is None:
+            return None
+
+        amendment_result = await self.preview_amendify(
+            skill_id=skill_id,
+            inspection_id=inspection["inspection_id"],
+            node_set=node_set,
+        )
+        if amendment_result is None:
+            return {"inspection": inspection, "amendment": None, "applied": None}
+
+        apply_result = await self.amendify(
+            amendment_id=amendment_result["amendment_id"],
+            write_to_disk=write_to_disk,
+            validate=validate,
+            validation_task_text=validation_task_text,
+            node_set=node_set,
+        )
+
+        return {
+            "inspection": inspection,
+            "amendment": amendment_result,
+            "applied": apply_result,
+        }
 
     # ------------------------------------------------------------------
 

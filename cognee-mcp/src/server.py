@@ -991,6 +991,160 @@ try:
         return [types.TextContent(type="text", text=json.dumps(results, indent=2, cls=JSONEncoder))]
 
     # -------------------------------------------------------------------
+    # Skills self-amendifying tools
+    # -------------------------------------------------------------------
+
+    @mcp.tool(
+        name="inspect_skill",
+        description="Analyze failed runs for a skill and inspect the root cause. Returns a structured inspection with failure category, root cause, severity, and improvement hypothesis.",
+    )
+    async def inspect_skill_tool(
+        skill_id: str,
+        min_runs: int = 1,
+        score_threshold: float = 0.5,
+        node_set: str = "skills",
+    ) -> list:
+        """Inspect why a skill is failing based on its run history."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.inspect(
+                skill_id=skill_id,
+                min_runs=min_runs,
+                score_threshold=score_threshold,
+                node_set=node_set,
+            )
+        if result is None:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"No inspection produced for skill '{skill_id}' (insufficient failed runs or skill not found).",
+                )
+            ]
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="preview_amendify_skill",
+        description="Preview a proposed amendment for a skill's instructions based on an inspection. If no inspection_id is given, runs inspection first.",
+    )
+    async def preview_amendify_skill_tool(
+        skill_id: str,
+        inspection_id: str = "",
+        min_runs: int = 1,
+        score_threshold: float = 0.5,
+        node_set: str = "skills",
+    ) -> list:
+        """Preview a proposed amendment to fix a failing skill."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.preview_amendify(
+                skill_id=skill_id,
+                inspection_id=inspection_id or None,
+                min_runs=min_runs,
+                score_threshold=score_threshold,
+                node_set=node_set,
+            )
+        if result is None:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"No amendment proposed for skill '{skill_id}' (inspection or amendment generation failed).",
+                )
+            ]
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="amendify_skill",
+        description="Apply a proposed amendment to a skill. Updates instructions in the graph, re-enriches the skill, and optionally writes to disk and validates.",
+    )
+    async def amendify_skill_tool(
+        amendment_id: str,
+        write_to_disk: bool = False,
+        validate: bool = False,
+        validation_task_text: str = "",
+        node_set: str = "skills",
+    ) -> list:
+        """Apply a proposed amendment by its amendment_id."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.amendify(
+                amendment_id=amendment_id,
+                write_to_disk=write_to_disk,
+                validate=validate,
+                validation_task_text=validation_task_text,
+                node_set=node_set,
+            )
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="rollback_amendify_skill",
+        description="Rollback an applied amendment, restoring the skill's original instructions.",
+    )
+    async def rollback_amendify_skill_tool(
+        amendment_id: str,
+        write_to_disk: bool = False,
+        node_set: str = "skills",
+    ) -> list:
+        """Rollback an applied amendment by its amendment_id."""
+        with redirect_stdout(sys.stderr):
+            success = await _skills_client.rollback_amendify(
+                amendment_id=amendment_id,
+                write_to_disk=write_to_disk,
+                node_set=node_set,
+            )
+        msg = (
+            f"Amendment '{amendment_id}' rolled back."
+            if success
+            else f"Rollback failed for amendment '{amendment_id}'."
+        )
+        return [types.TextContent(type="text", text=msg)]
+
+    @mcp.tool(
+        name="evaluate_amendify_skill",
+        description="Evaluate an amendment by comparing pre- and post-amendment success scores. Returns improvement stats and a keep/rollback recommendation.",
+    )
+    async def evaluate_amendify_skill_tool(
+        amendment_id: str,
+        node_set: str = "skills",
+    ) -> list:
+        """Evaluate an amendment's effectiveness from post-apply run data."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.evaluate_amendify(
+                amendment_id=amendment_id,
+                node_set=node_set,
+            )
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    @mcp.tool(
+        name="auto_amendify_skill",
+        description="One-call self-amendifying: inspect a failing skill, propose an amendment, and apply it automatically. Promotes cached runs first.",
+    )
+    async def auto_amendify_skill_tool(
+        skill_id: str,
+        min_runs: int = 3,
+        score_threshold: float = 0.5,
+        write_to_disk: bool = False,
+        validate: bool = False,
+        validation_task_text: str = "",
+        node_set: str = "skills",
+    ) -> list:
+        """Automatically inspect, amend, and apply a fix for a failing skill."""
+        with redirect_stdout(sys.stderr):
+            result = await _skills_client.auto_amendify(
+                skill_id=skill_id,
+                min_runs=min_runs,
+                score_threshold=score_threshold,
+                write_to_disk=write_to_disk,
+                validate=validate,
+                validation_task_text=validation_task_text,
+                node_set=node_set,
+            )
+        if result is None:
+            return [
+                types.TextContent(
+                    type="text",
+                    text=f"Auto-amendify produced no result for skill '{skill_id}' (no failures or amendifying failed).",
+                )
+            ]
+        return [types.TextContent(type="text", text=json.dumps(result, indent=2, cls=JSONEncoder))]
+
+    # -------------------------------------------------------------------
     # Skills resources
     # -------------------------------------------------------------------
 
@@ -999,7 +1153,10 @@ try:
         """Return the agent_instructions.md content as markdown."""
         # Try relative path first, then importlib.resources for installed packages
         candidates = [
-            Path(__file__).resolve().parent.parent.parent / "cognee" / "skills" / "agent_instructions.md",
+            Path(__file__).resolve().parent.parent.parent
+            / "cognee"
+            / "skills"
+            / "agent_instructions.md",
             Path(__file__).resolve().parent.parent.parent / "skills" / "agent_instructions.md",
         ]
         for p in candidates:
@@ -1023,7 +1180,10 @@ try:
             results = await _skills_client.list()
         if not results:
             return json.dumps(
-                {"skills": [], "hint": "No skills ingested yet. Use ingest_skills to add skills from a folder."},
+                {
+                    "skills": [],
+                    "hint": "No skills ingested yet. Use ingest_skills to add skills from a folder.",
+                },
                 indent=2,
             )
         return json.dumps({"skills": results}, indent=2, cls=JSONEncoder)
@@ -1062,7 +1222,14 @@ try:
                         "   - selected_skill_id: which skill was used\n"
                         "   - success_score: 0.0 (failed) to 1.0 (perfect)\n"
                         "   - result_summary: brief description of what happened\n"
-                        "6. Call `promote_skill_runs` to update preference weights"
+                        "6. Call `promote_skill_runs` to update preference weights\n\n"
+                        "If a skill keeps failing, you can use the self-amendifying tools:\n"
+                        "- `inspect_skill` to analyze why it fails\n"
+                        "- `preview_amendify_skill` to generate an improved version\n"
+                        "- `amendify_skill` to apply the fix\n"
+                        "- `evaluate_amendify_skill` to check if the fix helped\n"
+                        "- `rollback_amendify_skill` to revert if it didn't\n"
+                        "- `auto_amendify_skill` to do all of the above in one call"
                     ),
                 ),
             )
@@ -1078,13 +1245,13 @@ try:
             guidance = (
                 f"Skills are already ingested ({len(existing)} found). "
                 f"To sync changes from `{skills_folder}`, call:\n\n"
-                f"```\nupsert_skills(skills_folder=\"{skills_folder}\")\n```\n\n"
+                f'```\nupsert_skills(skills_folder="{skills_folder}")\n```\n\n'
                 "This will skip unchanged skills, update modified ones, and remove deleted ones."
             )
         else:
             guidance = (
                 f"No skills are ingested yet. To get started, call:\n\n"
-                f"```\ningest_skills(skills_folder=\"{skills_folder}\")\n```\n\n"
+                f'```\ningest_skills(skills_folder="{skills_folder}")\n```\n\n'
                 "This will parse all SKILL.md files in the folder, enrich them via LLM, "
                 "and store them in the knowledge graph for routing."
             )
