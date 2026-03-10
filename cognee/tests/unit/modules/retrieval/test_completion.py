@@ -5,10 +5,8 @@ from typing import Type
 
 class TestGenerateCompletion:
     @pytest.mark.asyncio
-    async def test_generate_completion_with_system_prompt(self):
+    async def test_generate_completion_with_system_prompt(self, mock_llm_client):
         """Test generate_completion with provided system_prompt."""
-        mock_llm_response = "Generated answer"
-
         with (
             patch(
                 "cognee.modules.retrieval.utils.completion.render_prompt",
@@ -16,9 +14,8 @@ class TestGenerateCompletion:
             ),
             patch(
                 "cognee.modules.retrieval.utils.completion.LLMGateway.acreate_structured_output",
-                new_callable=AsyncMock,
-                return_value=mock_llm_response,
-            ) as mock_llm,
+                mock_llm_client.acreate_structured_output,
+            ),
         ):
             from cognee.modules.retrieval.utils.completion import generate_completion
 
@@ -30,8 +27,8 @@ class TestGenerateCompletion:
                 system_prompt="Custom system prompt",
             )
 
-            assert result == mock_llm_response
-            mock_llm.assert_awaited_once_with(
+            assert result == "Generated answer"
+            mock_llm_client.acreate_structured_output.assert_awaited_once_with(
                 text_input="User prompt text",
                 system_prompt="Custom system prompt",
                 response_model=str,
