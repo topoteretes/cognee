@@ -44,7 +44,7 @@ jobs:
           tag_name: ${{ steps.create_tag.outputs.tag }}
           generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
 
   release-pypi-package:
     needs: release-github
