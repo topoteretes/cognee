@@ -1043,20 +1043,15 @@ jobs:
           python-version: '3.11.x'
           extra-dependencies: "redis"
 
-      # This will install all dependencies along with Cognee version deployed on PIP
-      - name: Install dependencies
+      - name: Install cognee-mcp and override with local cognee
         shell: bash
-        working-directory: cognee-mcp
-        run: uv sync
-
-      # NEW: swap in current local cognee branch version
-      - name: Override with cognee branch checkout
-        working-directory: cognee-mcp
         run: |
-          # Remove Cognee wheel that came from PyPI
-          uv pip uninstall cognee
-          # Install of the freshly-checked-out Cognee branch
-          uv pip install --force-reinstall -e ../
+          # 1. Install MCP (this will pull cognee from PyPI as a dependency)
+          uv pip install -e ./cognee-mcp
+
+          # 2. Force-install the local root to overwrite the PyPI version
+          # This replaces the PyPI 'cognee' with your current branch code
+          uv pip install --force-reinstall -e .
 
       - name: Run api/tool usage logger
         env:
