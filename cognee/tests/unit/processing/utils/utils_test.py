@@ -11,15 +11,10 @@ from cognee.infrastructure.files.utils.get_file_content_hash import get_file_con
 from cognee.shared.utils import get_anonymous_id
 
 
-@pytest.fixture
-def temp_dir(tmp_path):
-    return tmp_path
-
-
 @patch("os.makedirs")
 @patch("builtins.open", new_callable=mock_open, read_data=str(uuid4()))
-def test_get_anonymous_id(mock_open_file, mock_makedirs, temp_dir):
-    os.environ["HOME"] = str(temp_dir)
+def test_get_anonymous_id(mock_open_file, mock_makedirs, temp_data_dir):
+    os.environ["HOME"] = str(temp_data_dir)
     anon_id = get_anonymous_id()
     assert isinstance(anon_id, str)
     assert len(anon_id) > 0
