@@ -245,7 +245,7 @@ async def cognify(
     )
 
 
-async def get_default_tasks(  # TODO: Find out a better way to do this (Boris's comment)
+async def get_default_tasks(  # TODO(#2349): Find out a better way to do this
     user: User = None,
     graph_model: BaseModel = KnowledgeGraph,
     chunker=TextChunker,

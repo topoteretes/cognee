@@ -285,7 +285,7 @@ async def test_rag_completion_context_multiple_chunks(setup_test_environment_wit
 @pytest.mark.asyncio
 async def test_rag_completion_context_complex(setup_test_environment_with_chunks_complex):
     """Integration test: verify CompletionRetriever can retrieve context (complex)."""
-    # TODO: top_k doesn't affect the output, it should be fixed.
+    # TODO(#2351): top_k doesn't affect the output, it should be fixed.
     retriever = CompletionRetriever(top_k=20)
     query = "Christina"
 

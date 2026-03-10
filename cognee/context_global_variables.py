@@ -138,8 +138,8 @@ async def set_database_global_context_variables(dataset: Union[str, UUID], user_
     )
 
     # Set vector and graph database configuration based on dataset database information
-    # TODO: Add better handling of vector and graph config across Cognee.
-    #  LRU_CACHE takes into account order of inputs, if order of inputs is changed it will be registered as a new DB adapter
+    # TODO(#2357): Add better handling of vector and graph config across Cognee.
+    #              LRU_CACHE takes into account order of inputs, if order of inputs is changed it will be registered as a new DB adapter
     vector_config = {
         "vector_db_provider": dataset_database.vector_database_provider,
         "vector_db_url": dataset_database.vector_database_url,

@@ -83,7 +83,7 @@ async def test_extract_times(regex_extractor):
 @pytest.mark.asyncio
 async def test_extract_money(regex_extractor):
     """Test extraction of monetary amounts."""
-    # TODO: Lazar to fix regex for test, it's failing currently
+    # TODO(#2356): Lazar to fix regex for test, it's failing currently
     pass
     # text = "The product costs $1,299.99 or €1.045,00 depending on your region."
     # entities = await regex_extractor.extract_entities(text)
