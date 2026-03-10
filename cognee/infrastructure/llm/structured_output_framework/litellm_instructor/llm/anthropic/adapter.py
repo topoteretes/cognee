@@ -1,5 +1,5 @@
 import logging
-from typing import Type
+from typing import Any, Dict, Type, Optional
 from pydantic import BaseModel
 import litellm
 import instructor
@@ -33,14 +33,21 @@ class AnthropicAdapter(GenericAPIAdapter):
     default_instructor_mode = "anthropic_tools"
 
     def __init__(
-        self, api_key: str, model: str, max_completion_tokens: int, instructor_mode: str = None
+        self,
+        api_key: str,
+        model: str,
+        max_completion_tokens: int,
+        instructor_mode: str = None,
+        llm_args: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(
             api_key=api_key,
             model=model,
             max_completion_tokens=max_completion_tokens,
             name="Anthropic",
+            llm_args=llm_args,
         )
+        self.llm_args = llm_args or {}
         self.instructor_mode = instructor_mode if instructor_mode else self.default_instructor_mode
 
         self.aclient = instructor.patch(
@@ -77,10 +84,10 @@ class AnthropicAdapter(GenericAPIAdapter):
 
             - BaseModel: An instance of BaseModel containing the structured response.
         """
+        merged_kwargs = {**self.llm_args, **kwargs}
         async with llm_rate_limiter_context_manager():
             return await self.aclient(
                 model=self.model,
-                max_tokens=4096,
                 max_retries=2,
                 messages=[
                     {
@@ -90,4 +97,5 @@ class AnthropicAdapter(GenericAPIAdapter):
                     }
                 ],
                 response_model=response_model,
+                **merged_kwargs,
             )
